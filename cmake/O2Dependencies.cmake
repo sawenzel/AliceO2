@@ -257,6 +257,7 @@ o2_define_bucket(
     ParBase
 
     INCLUDE_DIRECTORIES
+    ${CMAKE_SOURCE_DIR}/Common/include
 )
 
 o2_define_bucket(
@@ -401,6 +402,9 @@ o2_define_bucket(
     root_base_bucket
     fairroot_base_bucket
     ParBase
+
+    INCLUDE_DIRECTORIES
+    ${CMAKE_SOURCE_DIR}/Common/include
 )
 
 o2_define_bucket(
@@ -420,6 +424,7 @@ o2_define_bucket(
     INCLUDE_DIRECTORIES
     ${FAIRROOT_INCLUDE_DIR}
     ${CMAKE_SOURCE_DIR}/Detectors/Base/include
+    ${CMAKE_SOURCE_DIR}/Common/include
 )
 
 o2_define_bucket(

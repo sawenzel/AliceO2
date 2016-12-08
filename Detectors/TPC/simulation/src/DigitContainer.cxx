@@ -5,8 +5,6 @@
 
 #include "FairLogger.h"
 
-#include "TClonesArray.h"
-
 using namespace AliceO2::TPC;
 
 DigitContainer::DigitContainer():
@@ -39,7 +37,7 @@ void DigitContainer::addDigit(Int_t cru, Int_t row, Int_t pad, Int_t time, Float
 }
 
 
-void DigitContainer::fillOutputContainer(TClonesArray *output){
+void DigitContainer::fillOutputContainer(TypedTClonesArray<Digit *> output){
   for(std::vector<DigitCRU*>::iterator iterCRU = mCRU.begin(); iterCRU != mCRU.end(); ++iterCRU) {
     if((*iterCRU) == nullptr) continue;
     (*iterCRU)->fillOutputContainer(output, (*iterCRU)->getCRUID());

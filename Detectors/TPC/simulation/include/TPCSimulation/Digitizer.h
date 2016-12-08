@@ -7,6 +7,7 @@
 #include "TPCSimulation/HitContainer.h"
 #include "TPCSimulation/PadHit.h"
 #include "TPCSimulation/PadResponse.h"
+#include "TypedTClonesArray.h"
 
 #include "Rtypes.h"
 #include "TObject.h"
@@ -14,12 +15,11 @@
 
 using std::vector;
 
-class TClonesArray;
-
 namespace AliceO2{
   namespace TPC{
 
     class DigitContainer;
+    class Point;
 
     /// \class Digitizer
     /// \brief Digitizer class for the TPC
@@ -39,7 +39,7 @@ namespace AliceO2{
       /// Steer conversion of points to digits
       /// @param points Container with TPC points
       /// @return digits container
-      DigitContainer *Process(TClonesArray *points);
+      DigitContainer *Process(TypedTClonesArray<Point *> points);
       
       /// Drift of electrons in electric field taking into account diffusion
       /// @param *xyz Array with 3d position of the electrons

@@ -6,7 +6,9 @@
 #include <stdio.h>
 #include "FairTask.h"
 #include "Rtypes.h"
-class TClonesArray;
+#include "TypedTClonesArray.h"
+#include "TPCSimulation/Digit.h"
+#include "TPCSimulation/Point.h"
 namespace AliceO2 { namespace TPC { class Digitizer; } }
 
 namespace AliceO2 {
@@ -36,8 +38,8 @@ namespace AliceO2 {
         private:
             Digitizer           *mDigitizer;
 
-            TClonesArray        *mPointsArray;
-            TClonesArray        *mDigitsArray;
+            TypedTClonesArray<Point *>  mPointsArray;
+            TypedTClonesArray<Digit *>  mDigitsArray;
 
             ClassDef(DigitizerTask, 1)
         };

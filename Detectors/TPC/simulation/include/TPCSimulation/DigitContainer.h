@@ -5,10 +5,10 @@
 
 #include "TPCSimulation/Digit.h"
 #include "TPCSimulation/DigitCRU.h"
+#include "TypedTClonesArray.h"
 #include "Rtypes.h"
 #include <map>
 
-class TClonesArray;
 
 namespace AliceO2 {
     namespace TPC{
@@ -41,7 +41,7 @@ namespace AliceO2 {
 
             /// Fill output TClonesArray
             /// @param outputcont Output container
-            void fillOutputContainer(TClonesArray *outputcont);
+            void fillOutputContainer(TypedTClonesArray<Digit *> outputcont);
 
         private:
           Int_t mNCRU;

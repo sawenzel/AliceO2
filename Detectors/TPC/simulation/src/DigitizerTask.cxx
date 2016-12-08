@@ -48,7 +48,8 @@ InitStatus DigitizerTask::Init(){
     }
 
     // Register output container
-    mDigitsArray = new TClonesArray("AliceO2::TPC::Digit");
+    // mDigitsArray = new TClonesArray("AliceO2::TPC::Digit");
+    mDigitsArray = TypedTClonesArray<AliceO2::TPC::Digit *>(1000);
     mgr->Register("TPCDigit", "TPC", mDigitsArray, kTRUE);
 
     mDigitizer->init();
@@ -56,7 +57,7 @@ InitStatus DigitizerTask::Init(){
 }
 
 void DigitizerTask::Exec(Option_t *option){
-    mDigitsArray->Delete();
+    mDigitsArray.Delete();
     LOG(DEBUG) << "Running digitization on new event" << FairLogger::endl;
 
     DigitContainer *digits = mDigitizer->Process(mPointsArray);

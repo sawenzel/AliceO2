@@ -8,7 +8,6 @@
 
 #include "TRandom.h"
 #include "TF1.h"
-#include "TClonesArray.h"
 #include "TCollection.h"
 #include "TMath.h"
 
@@ -45,7 +44,7 @@ void Digitizer::init(){
   //mPolya = new TF1("polya", "1/x", 0, 1000);
 }
 
-DigitContainer *Digitizer::Process(TClonesArray *points){
+DigitContainer *Digitizer::Process(TypedTClonesArray<Point *> points){
   // TODO should be parametrized
   Float_t wIon = 37.3e-6;
   Float_t attCoef = 250.;
@@ -60,9 +59,7 @@ DigitContainer *Digitizer::Process(TClonesArray *points){
 
   const Mapper& mapper = Mapper::instance();
   
-  for (TIter pointiter = TIter(points).Begin(); pointiter != TIter::End(); ++pointiter){
-    Point *inputpoint = dynamic_cast<Point *>(*pointiter);
-    
+  for (auto &&inputpoint : points) {
     posEle[0] = inputpoint->GetX();
     posEle[1] = inputpoint->GetY();
     posEle[2] = inputpoint->GetZ();
