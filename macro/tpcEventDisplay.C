@@ -34,10 +34,10 @@ void tpcEventDisplay(TString InputFile, TString ParFile)
 
   //----------------------Traks and points -------------------------------------
   FairMCTracks    *Track     = new FairMCTracks("Monte-Carlo Tracks");
-  FairPointSetDraw *pointSet = new HitDraw("TPCPoint", kRed, kFullSquare);
+  FairPointSetDraw *pointSetTask = new HitDraw("TPCPoint", kBlue, kFullSquare);
 
   fMan->AddTask(Track);
-  fMan->AddTask(pointSet);
+  fMan->AddTask(pointSetTask);
 
 
   fMan->Init();

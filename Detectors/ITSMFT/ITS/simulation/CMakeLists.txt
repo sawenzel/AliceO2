@@ -14,7 +14,8 @@ set(SRCS
     src/DigitContainer.cxx
     src/DigitLayer.cxx
     src/DigitStave.cxx
-    )
+    src/ITSHitDrawTask.cxx
+)
 set(HEADERS
     include/${MODULE_NAME}/Detector.h
     include/${MODULE_NAME}/DigitChip.h
@@ -27,7 +28,8 @@ set(HEADERS
     include/${MODULE_NAME}/GeometryHandler.h
     include/${MODULE_NAME}/V1Layer.h
     include/${MODULE_NAME}/V11Geometry.h
-    )
+    include/${MODULE_NAME}/ITSHitDrawTask.h
+)
 
 Set(LINKDEF src/ITSSimulationLinkDef.h)
 Set(LIBRARY_NAME ${MODULE_NAME})

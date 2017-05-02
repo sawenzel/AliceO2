@@ -413,7 +413,8 @@ o2_define_bucket(
     ITSBase
     DetectorsBase
     SimulationDataFormat
-
+    EventDisplay
+   
     INCLUDE_DIRECTORIES
     ${CMAKE_SOURCE_DIR}/Detectors/Base/include
     ${CMAKE_SOURCE_DIR}/Detectors/ITSMFT/common/base/include

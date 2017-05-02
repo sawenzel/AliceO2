@@ -12,5 +12,6 @@
 #pragma link C++ class o2::ITS::DigitWriteoutBuffer+;
 #pragma link C++ class o2::ITS::Digitizer+;
 #pragma link C++ class o2::ITS::DigitizerTask+;
+#pragma link C++ class o2::ITS::ITSHitDrawTask+;
 
 #endif
