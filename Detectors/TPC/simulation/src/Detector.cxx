@@ -341,8 +341,21 @@ Bool_t  Detector::ProcessHits(FairVolume* vol)
   
 void Detector::EndOfEvent()
 {
+  static auto mgr = FairRootManager::Instance();
   mHitGroupCollection->Clear();
   for(int i=0;i<Sector::MAXSECTOR;++i) {
+    TString name;
+    name.Form("TPCHitsSector%d", i);
+
+    // let us write out the data now; bit by bit
+    mgr->FillBranch(name.Data());
+
+    // reset the branch just filled (to release their cache)
+    auto outtree=mgr->GetOutTree();
+    auto br=outtree->GetBranch(name.Data());
+    br->FlushBaskets();
+    br->DropBaskets("all");
+
     // passing "C" since objects contain other pointer data
     // which needs to be cleaned up
     mHitsPerSectorCollection[i]->Clear("C");

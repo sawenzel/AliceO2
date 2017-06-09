@@ -61,7 +61,7 @@ void run_digi_tpc(Int_t nEvents = 10, TString mcEngine = "TGeant3", Int_t isCont
         run->SetField(magField);
 
         // Setup digitizer
-        o2::TPC::DigitizerTask *digiTPC = new o2::TPC::DigitizerTask;
+        o2::TPC::DigitizerTask *digiTPC = new o2::TPC::DigitizerTask(0);
         digiTPC->setContinuousReadout(isContinuous);
 
         run->AddTask(digiTPC);
@@ -69,7 +69,7 @@ void run_digi_tpc(Int_t nEvents = 10, TString mcEngine = "TGeant3", Int_t isCont
         run->Init();
 
         timer.Start();
-        run->Run();
+        run->RunOnBranches();
 
         std::cout << std::endl << std::endl;
 

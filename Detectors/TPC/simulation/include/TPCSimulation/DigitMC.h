@@ -84,6 +84,8 @@ class DigitMC : public DigitBase, public Digit {
     /// \param time Time at which the DigitMC was created
     /// \param commonMode Common mode signal on that ROC in the time bin of the DigitMC. If not assigned, it is set to zero.
     DigitMC(std::vector<long> const &MClabel, int cru, float charge, int row, int pad, int time, float commonMode = 0.f);
+
+    std::vector<long> const & getMClabels() const { return mMClabel; }
 #endif
 
     /// Destructor
