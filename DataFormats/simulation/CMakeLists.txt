@@ -21,6 +21,7 @@ O2_GENERATE_LIBRARY()
 
 set(TEST_SRCS
   test/testBasicHits.cxx
+  test/testMCTruthContainer.cxx
 )
 
 O2_GENERATE_TESTS(

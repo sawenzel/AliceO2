@@ -104,6 +104,9 @@ InitStatus DigitizerTask::Init()
   mDigitsArray = new TClonesArray("o2::TPC::DigitMC");
   mDigitsArray->BypassStreamer(true);
   mgr->Register("TPCDigitMC", "TPC", mDigitsArray, kTRUE);
+
+  // Register MC truth output container
+  mgr->Register("TPCDigitMCTruth", "TPC", &mTruthContainer, kTRUE);
   
   mDigitizer->init();
   mDigitContainer = mDigitizer->getDigitContainer();
@@ -140,6 +143,18 @@ void DigitizerTask::Exec(Option_t *option)
   mDigitContainer = mDigitizer->Process(mPointsArray);
 #endif
   mDigitContainer->fillOutputContainer(mDigitsArray, eventTime, mIsContinuousReadout);
+
+  for(int i=0; i<mDigitsArray->GetEntriesFast(); ++i)
+  {   
+    // getMCDigit
+    auto *digit = static_cast<DigitMC *> ((*mDigitsArray)[i]);
+    auto &mclabels = digit->getMCLabels();
+    for(int j=0; j<mclabels.size(); ++j) {
+      // fill MCtruth output
+      mTruthContainer.addElement(i, j);
+    }
+  }
+
 }
 
 void DigitizerTask::FinishTask()

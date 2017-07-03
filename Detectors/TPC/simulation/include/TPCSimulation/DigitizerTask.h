@@ -21,6 +21,7 @@
 #include "FairLogger.h"
 #include "TPCSimulation/Digitizer.h"
 #include "TPCBase/Sector.h"
+#include "SimulationDataFormat/MCTruthContainer.h"
 
 #include <TClonesArray.h>
 
@@ -74,6 +75,7 @@ class DigitizerTask : public FairTask{
       
     TClonesArray        *mPointsArray;  ///< Array of detector hits, passed to the digitization
     TClonesArray        *mDigitsArray;  ///< Array of the Digits, passed from the digitization
+    o2::dataformats::MCTruthContainer<long> mTruthContainer;   ///< Array for MCTruth information associated to digits in mDigitsArrray
     
     std::string         mHitFileName;  ///< External hit file exported from AliRoot
 

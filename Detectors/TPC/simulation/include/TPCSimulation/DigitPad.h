@@ -18,7 +18,7 @@
 
 #include <map>
 
-#define TPC_DIGIT_USEFAIRLINKS 1
+//#define TPC_DIGIT_USEFAIRLINKS 1
 
 #include "FairRootManager.h"
 #ifdef TPC_DIGIT_USEFAIRLINKS
