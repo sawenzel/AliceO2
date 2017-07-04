@@ -144,7 +144,6 @@ void DigitizerTask::Exec(Option_t *option)
   mDigitContainer = mDigitizer->Process(mPointsArray);
 #endif
   mDigitContainer->fillOutputContainer(mDigitsArray, eventTime, mIsContinuousReadout);
-
   for(int i=0; i<mDigitsArray->GetEntriesFast(); ++i)
   {   
     // getMCDigit
@@ -155,7 +154,6 @@ void DigitizerTask::Exec(Option_t *option)
       mTruthContainer.addElement(i, mclabels[j]);
     }
   }
-
 }
 
 void DigitizerTask::FinishTask()

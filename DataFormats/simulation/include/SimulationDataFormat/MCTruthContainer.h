@@ -43,8 +43,8 @@ struct MCTruthHeaderElement {
 template <typename TruthElement>
 class MCTruthContainer : public TNamed {
  private:
-   std::vector<MCTruthHeaderElement> mHeaderArray; ///! the header structure array serves as an index into the actual storage
-   std::vector<TruthElement> mTruthArray; ///! the buffer containing the actual truth information
+   std::vector<MCTruthHeaderElement> mHeaderArray; // the header structure array serves as an index into the actual storage
+   std::vector<TruthElement> mTruthArray; // the buffer containing the actual truth information
 
  public:
    // constructor
