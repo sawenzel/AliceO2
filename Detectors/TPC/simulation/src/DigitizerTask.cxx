@@ -124,6 +124,7 @@ void DigitizerTask::Exec(Option_t *option)
 
   LOG(DEBUG) << "Running digitization on new event at time bin " << eventTime << FairLogger::endl;
   mDigitsArray->Delete();
+  mTruthContainer.clear();
 
 #ifdef TPC_GROUPED_HITS
 
@@ -151,7 +152,7 @@ void DigitizerTask::Exec(Option_t *option)
     auto &mclabels = digit->getMCLabels();
     for(int j=0; j<mclabels.size(); ++j) {
       // fill MCtruth output
-      mTruthContainer.addElement(i, j);
+      mTruthContainer.addElement(i, mclabels[j]);
     }
   }
 
@@ -163,6 +164,7 @@ void DigitizerTask::FinishTask()
   FairRootManager *mgr = FairRootManager::Instance();
   mgr->SetLastFill(kTRUE); /// necessary, otherwise the data is not written out
   mDigitsArray->Delete();
+  mTruthContainer.clear();
   mDigitContainer->fillOutputContainer(mDigitsArray, mTimeBinMax, mIsContinuousReadout);
 }
 

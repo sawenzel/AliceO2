@@ -16,6 +16,7 @@
 #define ALICEO2_DATAFORMATS_MCTRUTH_H_
 
 #include <TNamed.h>
+#include <iostream>
 #include <cassert>
 
 namespace o2 {
@@ -64,13 +65,21 @@ class MCTruthContainer : public TNamed {
    // return the number of elements managed in this container
    size_t getNElements() const { return mTruthArray.size(); }
 
+   void clear() {
+     mHeaderArray.clear();
+     mTruthArray.clear();
+   }
+
    // add element for a particular dataindex
    // at the moment only strictly consecutive modes are supported
    void addElement(uint dataindex, TruthElement const &element) {
      if (dataindex < mHeaderArray.size()) {
        // look if we have something for this dataindex already  
        // must be the last one
-       assert(dataindex == mHeaderArray.size() - 1);
+//       assert(dataindex == mHeaderArray.size() - 1);
+       if( dataindex != (mHeaderArray.size() - 1) ){
+         std::cerr << dataindex << " " << mHeaderArray.size() << "\n";
+       }
      }
      else {
        assert(dataindex == mHeaderArray.size());
