@@ -24,9 +24,12 @@ namespace dataformats {
 // a simple struct having information about truth elements for particular indices:
 // how many associations we have and where they start in the storage
 struct MCTruthHeaderElement {
+  MCTruthHeaderElement() = default; // for ROOT IO
+
   MCTruthHeaderElement(ushort s, uint i) : size(s), index(i) {}
   ushort size = 0; // the number of entries    
   uint index = 0; // the index into the actual MC track storage
+  ClassDefNV(MCTruthHeaderElement, 1);
 };
 
 // a container to hold and manage MC truth information
@@ -45,6 +48,8 @@ class MCTruthContainer : public TNamed {
  public:
    // constructor
    MCTruthContainer() = default; 
+  
+   ~MCTruthContainer() final = default;
 
    // access
    MCTruthHeaderElement getMCTruthHeader(uint dataindex) const { return mHeaderArray[dataindex]; }
@@ -72,10 +77,12 @@ class MCTruthContainer : public TNamed {
        // add a new one
        mHeaderArray.emplace_back(0,mTruthArray.size());
      }
-     auto& header = mHeaderArray[dataindex]; 
+     auto& header = mHeaderArray[dataindex];
      header.size++;
      mTruthArray.emplace_back(element);
   }
+
+  ClassDefOverride(MCTruthContainer, 1);
 }; // end class
   
 }
