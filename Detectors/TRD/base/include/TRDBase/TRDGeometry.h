@@ -1,8 +1,9 @@
 #ifndef O2_TRDGEOMETRY_H
 #define O2_TRDGEOMETRY_H
 
-class TGeoHMatrix;
+#include <vector>
 
+class TGeoHMatrix;
 
 namespace o2 {
 namespace trd {
@@ -22,7 +23,7 @@ class TRDGeometry {
   TRDGeometry();
   ~TRDGeometry();
 
-  void             CreateGeometry(Int_t *idtmed);
+  void             CreateGeometry(std::vector<int> const & idtmed);
   Int_t            IsVersion()                                            { return 1;               }
   Bool_t           IsHole(Int_t la, Int_t st, Int_t se) const;
   Bool_t           IsOnBoundary(Int_t det, Float_t y, Float_t z, Float_t eps = 0.5) const;
@@ -31,8 +32,8 @@ class TRDGeometry {
   // Bool_t           ChamberInGeometry(Int_t det);
 
           void             AssembleChamber(Int_t ilayer, Int_t istack);
-          void             CreateFrame(Int_t *idtmed);
-          void             CreateServices(Int_t *idtmed);
+          void             CreateFrame(std::vector<int> const & idtmed /*Int_t *idtmed*/);
+          void             CreateServices(std::vector<int> const & idtmed /*Int_t *idtmed*/);
 
 	  //  static  Bool_t           CreateClusterMatrixArray();  
 	  //static  TGeoHMatrix     *GetClusterMatrix(Int_t det);

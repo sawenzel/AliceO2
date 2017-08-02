@@ -37,12 +37,17 @@ namespace o2 {
       
       void   Reset() override;
 
+      void  createMaterials();
       void  ConstructGeometry() override;
       
     private:
     
-      TClonesArray        *mHitCollection;            ///< Collection of TRD hits
-      
+     TClonesArray        *mHitCollection;            ///< Collection of TRD hits
+
+     float fFoilDensity;
+     float fGasNobleFraction;
+     float fGasDensity;
+
       ClassDefOverride(Detector, 1)
     };
   } // end namespace trd
