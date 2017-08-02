@@ -35,7 +35,7 @@ void PutFrameInTop() {
   run->AddModule(frame);
 
   auto *trd = new o2::trd::Detector("TRD",true);
-  run->AddModule(frame);
+  run->AddModule(trd);
 
   run->Init();
 

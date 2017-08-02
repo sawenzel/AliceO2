@@ -844,6 +844,7 @@ o2_define_bucket(
 )
 
 o2_define_bucket(
+    NAME
     trd_simulation_bucket
 
     DEPENDENCIES

@@ -512,10 +512,10 @@ void TRDGeometry::CreateGeometry(std::vector<int> const &idtmed)
   parTrd[1] = fgkSwidth2/2.0;
   parTrd[2] = fgkSlength/2.0;
   parTrd[3] = fgkSheight/2.0;
-  TVirtualMC::GetMC()->Gsvolu("UTS1","TRD1",idtmed[01],parTrd,kNparTrd);
-  TVirtualMC::GetMC()->Gsvolu("UTS2","TRD1",idtmed[01],parTrd,kNparTrd);
-  TVirtualMC::GetMC()->Gsvolu("UTS3","TRD1",idtmed[01],parTrd,kNparTrd);
-  TVirtualMC::GetMC()->Gsvolu("UTS4","TRD1",idtmed[01],parTrd,kNparTrd);
+  TVirtualMC::GetMC()->Gsvolu("UTS1","TRD1",idtmed[1],parTrd,kNparTrd);
+  TVirtualMC::GetMC()->Gsvolu("UTS2","TRD1",idtmed[1],parTrd,kNparTrd);
+  TVirtualMC::GetMC()->Gsvolu("UTS3","TRD1",idtmed[1],parTrd,kNparTrd);
+  TVirtualMC::GetMC()->Gsvolu("UTS4","TRD1",idtmed[1],parTrd,kNparTrd);
   // The inner part of the TRD mother volume for one sector (Air), 
   // full length in z-direction
   parTrd[0] = fgkSwidth1/2.0 - fgkSMpltT;
@@ -706,13 +706,13 @@ void TRDGeometry::CreateGeometry(std::vector<int> const &idtmed)
       parCha[1] = -1.0;
       parCha[2] = fgkPRbThick/2.0;
       snprintf(cTagV,kTag,"UPRB%02d",iDet);
-      TVirtualMC::GetMC()->Gsvolu(cTagV,"BOX ",idtmed[06],parCha,kNparCha);
+      TVirtualMC::GetMC()->Gsvolu(cTagV,"BOX ",idtmed[6],parCha,kNparCha);
       // Cu layer (other material on in readout board, incl. screws)
       parCha[0] = -1.0;
       parCha[1] = -1.0;
       parCha[2] = fgkPElThick/2.0;
       snprintf(cTagV,kTag,"UPEL%02d",iDet);
-      TVirtualMC::GetMC()->Gsvolu(cTagV,"BOX ",idtmed[04],parCha,kNparCha);
+      TVirtualMC::GetMC()->Gsvolu(cTagV,"BOX ",idtmed[4],parCha,kNparCha);
 
       //
       // Position the layers in the chambers
@@ -1091,7 +1091,7 @@ void TRDGeometry::CreateFrame(std::vector<int> const & idtmed)
   parSRL[ 8] = kSRLwidB /2.0;
   parSRL[ 9] = kSRLwidA /2.0;
   parSRL[10] = 5.0;
-  TVirtualMC::GetMC()->Gsvolu("USRL","TRAP",idtmed[01],parSRL,kNparSRL);
+  TVirtualMC::GetMC()->Gsvolu("USRL","TRAP",idtmed[1],parSRL,kNparSRL);
 
   xpos  = 0.0;
   ypos  = 0.0;
@@ -1137,7 +1137,7 @@ void TRDGeometry::CreateFrame(std::vector<int> const & idtmed)
     // The aluminum of the cross bars
     parSCB[0] = fgkCwidth[ilayer]/2.0 + kSRLdst/2.0;
     snprintf(cTagV,kTag,"USF%01d",ilayer);
-    TVirtualMC::GetMC()->Gsvolu(cTagV,"BOX ",idtmed[01],parSCB,kNparSCB);
+    TVirtualMC::GetMC()->Gsvolu(cTagV,"BOX ",idtmed[1],parSCB,kNparSCB);
 
     // The empty regions in the cross bars
     Float_t thkSCB = kSCBthk;
@@ -1196,7 +1196,7 @@ void TRDGeometry::CreateFrame(std::vector<int> const & idtmed)
     parSCH[2] = kSCHhgt/2.0;
 
     snprintf(cTagV,kTag,"USH%01d",ilayer);
-    TVirtualMC::GetMC()->Gsvolu(cTagV,"BOX ",idtmed[01],parSCH,kNparSCH);
+    TVirtualMC::GetMC()->Gsvolu(cTagV,"BOX ",idtmed[1],parSCH,kNparSCH);
     xpos  = 0.0;
     ypos  = fgkClength[ilayer][2]/2.0 + fgkClength[ilayer][1] + parSCH[1];
     zpos  = fgkVrocsm + fgkSMpltT - kSCHhgt/2.0 - fgkSheight/2.0 
@@ -1222,7 +1222,7 @@ void TRDGeometry::CreateFrame(std::vector<int> const & idtmed)
   parTRD[1]  = 114.00/2.0;
   parTRD[2]  =   1.20/2.0;
   parTRD[3]  =  71.30/2.0;
-  TVirtualMC::GetMC()->Gsvolu("USDB","TRD1",idtmed[01],parTRD,kNparTRD);
+  TVirtualMC::GetMC()->Gsvolu("USDB","TRD1",idtmed[1],parTRD,kNparTRD);
   // Empty spaces (air)
   parTRP[ 0] =   1.20/2.0;
   parTRP[ 1] =   0.0;
@@ -1332,7 +1332,7 @@ void TRDGeometry::CreateFrame(std::vector<int> const & idtmed)
   parBOX[0] = 95.00/2.0;
   parBOX[1] =  1.20/2.0;
   parBOX[2] =  3.00/2.0;
-  TVirtualMC::GetMC()->Gsvolu("USD7","BOX ",idtmed[01],parBOX,kNparBOX);
+  TVirtualMC::GetMC()->Gsvolu("USD7","BOX ",idtmed[1],parBOX,kNparBOX);
   xpos       =   0.0;
   ypos       =   fgkClength[5][2]/2.0;
   zpos       =   fgkSheight/2.0 - fgkSMpltT  - 3.00/2.0;
@@ -1348,7 +1348,7 @@ void TRDGeometry::CreateFrame(std::vector<int> const & idtmed)
   parBOX[0] = 90.22/2.0;
   parBOX[1] =  1.20/2.0;
   parBOX[2] =  1.74/2.0;
-  TVirtualMC::GetMC()->Gsvolu("USD8","BOX ",idtmed[01],parBOX,kNparBOX);
+  TVirtualMC::GetMC()->Gsvolu("USD8","BOX ",idtmed[1],parBOX,kNparBOX);
   xpos       =   0.0;
   ypos       =   fgkClength[5][2]/2.0 - 0.1;
   zpos       =  -fgkSheight/2.0 + fgkSMpltT + 2.27;
@@ -1364,7 +1364,7 @@ void TRDGeometry::CreateFrame(std::vector<int> const & idtmed)
   parBOX[0] = 82.60/2.0;
   parBOX[1] =  1.20/2.0;
   parBOX[2] =  1.40/2.0;
-  TVirtualMC::GetMC()->Gsvolu("USD9","BOX ",idtmed[01],parBOX,kNparBOX);
+  TVirtualMC::GetMC()->Gsvolu("USD9","BOX ",idtmed[1],parBOX,kNparBOX);
   xpos       =   0.0;
   ypos       =   fgkClength[5][2]/2.0;
   zpos       =  -fgkSheight/2.0 + fgkSMpltT + 1.40/2.0;
@@ -1410,7 +1410,7 @@ void TRDGeometry::CreateFrame(std::vector<int> const & idtmed)
   parTRD[1]  = 114.00/2.0 - 0.1;
   parTRD[2]  =   1.50/2.0;
   parTRD[3]  =  70.30/2.0;
-  TVirtualMC::GetMC()->Gsvolu("USCB","TRD1",idtmed[01],parTRD,kNparTRD);
+  TVirtualMC::GetMC()->Gsvolu("USCB","TRD1",idtmed[1],parTRD,kNparTRD);
   // Empty spaces (air)
   parTRD[0]  =  87.00/2.0;
   parTRD[1]  =  10.00/2.0;
@@ -1464,7 +1464,7 @@ void TRDGeometry::CreateFrame(std::vector<int> const & idtmed)
   parBOX[0] = 95.00/2.0;
   parBOX[1] =  1.50/2.0;
   parBOX[2] =  3.00/2.0;
-  TVirtualMC::GetMC()->Gsvolu("USC4","BOX ",idtmed[01],parBOX,kNparBOX);
+  TVirtualMC::GetMC()->Gsvolu("USC4","BOX ",idtmed[1],parBOX,kNparBOX);
   xpos       =   0.0;
   ypos       =   fgkClength[5][2]/2.0 + fgkClength[5][1] + fgkClength[5][0];
   zpos       =   fgkSheight/2.0 - fgkSMpltT - 3.00/2.0;
@@ -1480,7 +1480,7 @@ void TRDGeometry::CreateFrame(std::vector<int> const & idtmed)
   parBOX[0] = 90.22/2.0;
   parBOX[1] =  1.50/2.0;
   parBOX[2] =  2.00/2.0;
-  TVirtualMC::GetMC()->Gsvolu("USC5","BOX ",idtmed[01],parBOX,kNparBOX);
+  TVirtualMC::GetMC()->Gsvolu("USC5","BOX ",idtmed[1],parBOX,kNparBOX);
   xpos       =   0.0;
   ypos       =   fgkClength[5][2]/2.0 + fgkClength[5][1] + fgkClength[5][0];
   zpos       =  -fgkSheight/2.0 + fgkSMpltT + 2.60;
@@ -1496,7 +1496,7 @@ void TRDGeometry::CreateFrame(std::vector<int> const & idtmed)
   parBOX[0] = 82.60/2.0;
   parBOX[1] =  1.50/2.0;
   parBOX[2] =  1.60/2.0;
-  TVirtualMC::GetMC()->Gsvolu("USC6","BOX ",idtmed[01],parBOX,kNparBOX);
+  TVirtualMC::GetMC()->Gsvolu("USC6","BOX ",idtmed[1],parBOX,kNparBOX);
   xpos       =   0.0;
   ypos       =   fgkClength[5][2]/2.0 + fgkClength[5][1] + fgkClength[5][0];
   zpos       =  -fgkSheight/2.0 + fgkSMpltT + 1.60/2.0;
@@ -1534,7 +1534,7 @@ void TRDGeometry::CreateFrame(std::vector<int> const & idtmed)
   parSCL[0]  = kSCLthkUa /2.0;
   parSCL[1]  = fgkSlength/2.0;
   parSCL[2]  = kSCLwidUa /2.0;
-  TVirtualMC::GetMC()->Gsvolu("USL1","BOX ",idtmed[01],parSCL,kNparSCL);
+  TVirtualMC::GetMC()->Gsvolu("USL1","BOX ",idtmed[1],parSCL,kNparSCL);
   xpos  =   fgkSwidth2/2.0 - fgkSMpltT - kSCLposxUa;
   ypos  =   0.0;
   zpos  =   fgkSheight/2.0 - fgkSMpltT - kSCLposzUa;
@@ -1547,7 +1547,7 @@ void TRDGeometry::CreateFrame(std::vector<int> const & idtmed)
   parSCL[0]  = kSCLwidUb /2.0;
   parSCL[1]  = fgkSlength/2.0;
   parSCL[2]  = kSCLthkUb /2.0;
-  TVirtualMC::GetMC()->Gsvolu("USL2","BOX ",idtmed[01],parSCL,kNparSCL);
+  TVirtualMC::GetMC()->Gsvolu("USL2","BOX ",idtmed[1],parSCL,kNparSCL);
   xpos  =   fgkSwidth2/2.0 - fgkSMpltT - kSCLposxUb;
   ypos  =   0.0;
   zpos  =   fgkSheight/2.0 - fgkSMpltT - kSCLposzUb; 
@@ -1586,7 +1586,7 @@ void TRDGeometry::CreateFrame(std::vector<int> const & idtmed)
   parSCLb[ 8] = kSCLthkLb /2.0;
   parSCLb[ 9] = kSCLthkLa /2.0;
   parSCLb[10] = 5.0;
-  TVirtualMC::GetMC()->Gsvolu("USL3","TRAP",idtmed[01],parSCLb,kNparSCLb);
+  TVirtualMC::GetMC()->Gsvolu("USL3","TRAP",idtmed[1],parSCLb,kNparSCLb);
   xpos  =   fgkSwidth1/2.0 - fgkSMpltT - kSCLposxLa;
   ypos  =   0.0;
   zpos  = - fgkSheight/2.0 + fgkSMpltT + kSCLposzLa;
@@ -1603,7 +1603,7 @@ void TRDGeometry::CreateFrame(std::vector<int> const & idtmed)
   parSCL[0]  = kSCLwidLb /2.0;
   parSCL[1]  = fgkSlength/2.0;
   parSCL[2]  = kSCLthkLb /2.0;
-  TVirtualMC::GetMC()->Gsvolu("USL4","BOX ",idtmed[01],parSCL,kNparSCL);
+  TVirtualMC::GetMC()->Gsvolu("USL4","BOX ",idtmed[1],parSCL,kNparSCL);
   xpos  =   fgkSwidth1/2.0 - fgkSMpltT - kSCLposxLb;
   ypos  =   0.0;
   zpos  = - fgkSheight/2.0 + fgkSMpltT + kSCLposzLb;
@@ -1627,7 +1627,7 @@ void TRDGeometry::CreateFrame(std::vector<int> const & idtmed)
   parTrd[1] = fgkSwidth2/2.0 - 2.5;
   parTrd[2] = fgkSMpltT /2.0;
   parTrd[3] = fgkSheight/2.0 - 1.0;
-  TVirtualMC::GetMC()->Gsvolu("UTA1","TRD1",idtmed[01],parTrd,kNparTrd);
+  TVirtualMC::GetMC()->Gsvolu("UTA1","TRD1",idtmed[1],parTrd,kNparTrd);
   xpos      =  0.0;
   ypos      =  fgkSMpltT/2.0 - fgkFlength/2.0;
   zpos      = -0.5;
@@ -1639,7 +1639,7 @@ void TRDGeometry::CreateFrame(std::vector<int> const & idtmed)
   parPlt[0] =  0.0;
   parPlt[1] =  0.0;
   parPlt[2] =  0.0;
-  TVirtualMC::GetMC()->Gsvolu("UTA2","BOX ",idtmed[01],parPlt,0);
+  TVirtualMC::GetMC()->Gsvolu("UTA2","BOX ",idtmed[1],parPlt,0);
   xpos      =  0.0;
   ypos      =  0.0;
   zpos      =  fgkSheight/2.0 - fgkSMpltT/2.0;
@@ -1663,7 +1663,7 @@ void TRDGeometry::CreateFrame(std::vector<int> const & idtmed)
   parBOX[0] = 80.0/2.0;
   parBOX[1] =  1.0/2.0;
   parBOX[2] = 10.0/2.0;
-  TVirtualMC::GetMC()->Gsvolu("UTA3","BOX ",idtmed[01],parBOX,kNparBOX);
+  TVirtualMC::GetMC()->Gsvolu("UTA3","BOX ",idtmed[1],parBOX,kNparBOX);
   xpos      =  0.0;
   ypos      =  1.0/2.0 + fgkSMpltT - fgkFlength/2.0;
   zpos      =  fgkSheight/2.0 - 1.5 - 10.0/2.0;
@@ -2191,7 +2191,7 @@ void TRDGeometry::CreateServices(std::vector<int> const & idtmed)
   parTube[0] = 0.0;
   parTube[1] = 0.0;
   parTube[2] = 0.0;
-  TVirtualMC::GetMC()->Gsvolu("UTPL","TUBE",idtmed[05],parTube,0);
+  TVirtualMC::GetMC()->Gsvolu("UTPL","TUBE",idtmed[5],parTube,0);
 
   // Position the power lines in the mother volume
   for (istack = 0; istack < kNstack; istack++) {
@@ -2609,7 +2609,7 @@ void TRDGeometry::CreateServices(std::vector<int> const & idtmed)
   parBox[0] = 60.0/2.0;
   parBox[1] = 10.0/2.0;
   parBox[2] =  3.0/2.0;
-  TVirtualMC::GetMC()->Gsvolu("UTPP","BOX ",idtmed[01],parBox,kNparBox);
+  TVirtualMC::GetMC()->Gsvolu("UTPP","BOX ",idtmed[1],parBox,kNparBox);
   xpos      =  0.0;
   ypos      =  0.0;
   zpos      = 18.0;
