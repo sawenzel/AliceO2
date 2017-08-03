@@ -14,6 +14,7 @@
 #include "TRDSimulation/Detector.h"
 #include "TRDBase/TRDGeometry.h"
 #include "TRDBase/TRDCommonParam.h"
+#include <vector>
 
 using namespace o2::trd;
 
@@ -274,11 +275,15 @@ void Detector::createMaterials()
 
 // setting up the geometry
 void Detector::ConstructGeometry() {
-  std::cerr << "TRD geom called\n";
   createMaterials();
-  
+
+  std::vector<int> medmapping;
+  // now query the medium mapping and fill a vector to be passed along
+  // to the geometry creation
+  getMediumIDMappingAsVector(medmapping);
+
   TRDGeometry geom;
-  geom.CreateGeometry(getMapMedium());
+  geom.CreateGeometry(medmapping);
 }
 
 
