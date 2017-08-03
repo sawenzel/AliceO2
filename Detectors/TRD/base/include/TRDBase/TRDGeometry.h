@@ -1,7 +1,9 @@
 #ifndef O2_TRDGEOMETRY_H
 #define O2_TRDGEOMETRY_H
 
-#include <vector>
+#include "DetectorsBase/DetID.h"
+#include "DetectorsBase/GeometryManager.h"
+
 
 class TGeoHMatrix;
 
@@ -24,28 +26,36 @@ class TRDGeometry {
   ~TRDGeometry();
 
   void             CreateGeometry(std::vector<int> const & idtmed);
-  Int_t            IsVersion()                                            { return 1;               }
+  Int_t            IsVersion() const                                      { return 1; }
   Bool_t           IsHole(Int_t la, Int_t st, Int_t se) const;
   Bool_t           IsOnBoundary(Int_t det, Float_t y, Float_t z, Float_t eps = 0.5) const;
   Bool_t           RotateBack(Int_t det, const Double_t * const loc, Double_t *glb) const;
 
-  // Bool_t           ChamberInGeometry(Int_t det);
+  Bool_t           ChamberInGeometry(Int_t det) {
+    return sClusterMatrixArray[det] ? true : false;
+  }
 
-          void             AssembleChamber(Int_t ilayer, Int_t istack);
-          void             CreateFrame(std::vector<int> const & idtmed /*Int_t *idtmed*/);
-          void             CreateServices(std::vector<int> const & idtmed /*Int_t *idtmed*/);
+  void             AssembleChamber(Int_t ilayer, Int_t istack);
+  void             CreateFrame(std::vector<int> const & idtmed /*Int_t *idtmed*/);
+  void             CreateServices(std::vector<int> const & idtmed /*Int_t *idtmed*/);
 
-	  //  static  Bool_t           CreateClusterMatrixArray();  
-	  //static  TGeoHMatrix     *GetClusterMatrix(Int_t det);
+  static  Bool_t           CreateClusterMatrixArray();  
+  static  TGeoHMatrix     *GetClusterMatrix(Int_t det);
 
-          void             SetSMstatus(Int_t sm, Char_t status)                  { fgSMstatus[sm] = status; }
+  void             SetSMstatus(Int_t sm, Char_t status)                  { fgSMstatus[sm] = status; }
 
   static  Int_t            GetDetectorSec(Int_t layer, Int_t stack);
   static  Int_t            GetDetector(Int_t layer, Int_t stack, Int_t sector);
-  static  Int_t            GetLayer(Int_t det);
-  static  Int_t            GetStack(Int_t det);
-          Int_t            GetStack(Double_t z, Int_t layer);
-  static  Int_t            GetSector(Int_t det);
+
+  /// get the layer number from the detector number
+  static  Int_t            GetLayer(Int_t det) {return det % kNlayer;}
+
+  /// get the stack number from the detector number
+  static  Int_t            GetStack(Int_t det) {return (det % (kNlayer*kNstack))/kNlayer;}
+  static  Int_t            GetStack(Double_t z, Int_t layer);
+	  
+  /// get the sector number from the detector number
+  static  Int_t            GetSector(Int_t det)  {return det / (kNlayer * kNstack);}
 
   static  void             CreatePadPlaneArray();
   static  TRDPadPlane  *CreatePadPlane(Int_t layer, Int_t stack);
@@ -205,12 +215,15 @@ class TRDGeometry {
   static const Double_t    fgkXtrdBeg;                          //  X-coordinate in tracking system of begin of TRD mother volume
   static const Double_t    fgkXtrdEnd;                          //  X-coordinate in tracking system of end of TRD mother volume
 
-  static       TObjArray  *fgClusterMatrixArray;                //! Transformation matrices loc. cluster to tracking cs
-  // static       TObjArray  *fgPadPlaneArray;                     //! Array of pad plane objects
+  static bool sMatricesCreated;                                 // flag that matrices are created
+  static std::array<std::unique_ptr<TGeoHMatrix>,kNdet>  sClusterMatrixArray;   // Transformation matrices loc. cluster to tracking cs
+  // static       TObjArray  *fgPadPlaneArray;                  // Array of pad plane objects
   static  std::vector<TRDPadPlane*>* fgPadPlaneArray; 
   
   static       Char_t      fgSMstatus[kNsector];                //  Super module status byte
 
+  static const o2::Base::DetID sDetID; ///< det ID for comminication with GeometryManager
+  
  private:
   ClassDefNV(TRDGeometry,1)                                   //  TRD geometry class
 
