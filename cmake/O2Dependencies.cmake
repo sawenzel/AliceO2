@@ -370,6 +370,7 @@ o2_define_bucket(
     dl
     root_base_bucket
     VMC
+    Tree
 
     INCLUDE_DIRECTORIES
 )

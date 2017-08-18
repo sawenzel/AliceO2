@@ -29,7 +29,11 @@
 #include <TVirtualMC.h>
 #include <TVirtualMCApplication.h>
 #include <TVirtualMagField.h>
+#include <TClonesArray.h>
 #include <sstream>
+#include <StepInfo.h>
+#include <TFile.h>
+#include <TTree.h>
 
 #include <dlfcn.h>
 #include <iostream>
@@ -48,6 +52,7 @@ class FieldLogger
   int counter = 0;
   std::map<int, int> volumetosteps;
   std::map<int, std::string> idtovolname;
+
 
  public:
   void addStep(TVirtualMC* mc)
@@ -96,18 +101,36 @@ class StepLogger
   std::map<int, int> volumetoNSecondaries;            // number of secondaries created in this volume
   std::map<std::pair<int, int>, int> volumetoProcess; // mapping of volumeid x processID to secondaries produced
 
+  std::vector<StepInfo> container;
+
+
   // TODO: consider writing to a TTree/TFile
  public:
   void addStep(TVirtualMC* mc)
   {
+    container.emplace_back(mc);
+ 
     assert(mc);
     stepcounter++;
+
+
+
     auto stack = mc->GetStack();
     assert(stack);
     trackset.insert(stack->GetCurrentTrackNumber());
     pdgset.insert(mc->TrackPid());
     int copyNo;
     auto id = mc->CurrentVolID(copyNo);
+
+    //    std::cerr << "id " << id << " MaxStep " << mc->MaxStep() << " " << mc->TrackStep() << "\n"; 
+    TArrayI procs;
+    mc->StepProcesses(procs);
+   // std::cerr << "##id " << id << " ";
+    for (int i=0; i<procs.GetSize(); ++i){
+//      std::cerr << TMCProcessName[procs.At(i)] << "\t";
+    }
+ //   std::cerr << "\n";
+    
     if (volumetosteps.find(id) == volumetosteps.end()) {
       volumetosteps.insert(std::pair<int, int>(id, 0));
     } else {
@@ -172,6 +195,14 @@ class StepLogger
     }
     clear();
     std::cerr << "[STEPLOGGER]: ----- END OF EVENT ------\n";
+    std::cerr << container.size() << "\n";
+    
+    // open ROOT file a flush info
+    TFile f("Steps.root", "RECREATE");
+    auto *t = new TTree("StepTree", "Tree containing information about MC steps");
+    t->Branch("Steps", &container);
+    t->Fill();
+    f.Write();
   }
 };
 

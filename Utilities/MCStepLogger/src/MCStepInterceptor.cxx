@@ -45,7 +45,7 @@ DECLARE_INTERCEPT_SYMBOLS(AliMC)
   class FIELD                                                  \
   {                                                            \
    public:                                                     \
-    void GetFieldValue(const double point[3], double* bField); \
+    void Field(const double* point, double* bField);           \
   };
 
 namespace o2
@@ -55,6 +55,7 @@ namespace field
 DECLARE_INTERCEPT_FIELD_SYMBOLS(MagneticField);
 }
 }
+DECLARE_INTERCEPT_FIELD_SYMBOLS(AliMagF);
 
 extern "C" void performLogging(TVirtualMCApplication*);
 extern "C" void logField();
@@ -87,7 +88,7 @@ INTERCEPT_FINISHEVENT(FairMCApplication, "libBase", "_ZN17FairMCApplication11Fin
 INTERCEPT_FINISHEVENT(AliMC, "libSTEER", "_ZN5AliMC11FinishEventEv")
 
 #define INTERCEPT_FIELD(FIELD, LIB, SYMBOL)                        \
-  void FIELD::GetFieldValue(const double point[3], double* bField) \
+  void FIELD::Field(const double* point, double* bField)           \
   {                                                                \
     auto baseptr = reinterpret_cast<TVirtualMagField*>(this);      \
     logField();                                                    \
@@ -98,6 +99,8 @@ namespace o2
 {
 namespace field
 {
-INTERCEPT_FIELD(MagneticField, "libField", "_ZN2o25field13MagneticField13GetFieldValueEPKdPd");
+INTERCEPT_FIELD(MagneticField, "libField", "_ZN2o25field13MagneticField5FieldEPKdPd");
 }
 }
+// for AliRoot
+INTERCEPT_FIELD(AliMagF, "libSTEERBase", "_ZN7AliMagF5FieldEPKdPd")
