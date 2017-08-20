@@ -15,5 +15,7 @@
 #pragma link off all functions;
 
 #pragma link C++ class o2::StepInfo+;
+#pragma link C++ class o2::MagCallInfo+;
 #pragma link C++ class std::vector<o2::StepInfo>+;
+#pragma link C++ class std::vector<o2::MagCallInfo>+;
 #endif

@@ -58,7 +58,7 @@ DECLARE_INTERCEPT_FIELD_SYMBOLS(MagneticField);
 DECLARE_INTERCEPT_FIELD_SYMBOLS(AliMagF);
 
 extern "C" void performLogging(TVirtualMCApplication*);
-extern "C" void logField();
+extern "C" void logField(const double*, const double*);
 extern "C" void dispatchOriginal(TVirtualMCApplication*, char const* libname, char const*);
 extern "C" void dispatchOriginalField(TVirtualMagField*, char const* libname, char const*, const double x[3],
                                       double* B);
@@ -91,8 +91,8 @@ INTERCEPT_FINISHEVENT(AliMC, "libSTEER", "_ZN5AliMC11FinishEventEv")
   void FIELD::Field(const double* point, double* bField)           \
   {                                                                \
     auto baseptr = reinterpret_cast<TVirtualMagField*>(this);      \
-    logField();                                                    \
     dispatchOriginalField(baseptr, LIB, SYMBOL, point, bField);    \
+    logField(point, bField);           				   \
   }
 
 namespace o2

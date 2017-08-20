@@ -27,37 +27,68 @@
 #include <chrono>
  
 class TVirtualMC;
+class TGeoVolume;
 
 namespace o2
 {
 // class collecting info about one MC step done
-class StepInfo {
- public:
-
+struct StepInfo {
   StepInfo() = default;
   // construct directly using virtual mc
   StepInfo(TVirtualMC *mc);  
-//  ~StepInfo() { if(secondaryprocesses) { delete[] secondaryprocesses; } }
 
+  long  cputimestamp;
   int   stepid;
-  int   volId;
-  int   trackID; // reduntant
-  int   pdg; // reduntant
+  int   volId; // keep another branch somewhere mapping this to name, medium, etc.
+  int   copyNo;
+  int   trackID;
+  int   pdg;
   float x;
   float y;
   float z;
   float E;
   float step;
   float maxstep;
-  float cputimestamp;
   int   nsecondaries;
   int*  secondaryprocesses; //[nsecondaries]
-
+  int   nprocessesactive; // number of active processes
+  bool  stopped; //
+  
   static int stepcounter;
-
+  static std::chrono::time_point<std::chrono::high_resolution_clock> starttime;
+  
   ClassDefNV(StepInfo, 1);
 };
 
-}
+struct VolInfo {
+  int id; // the id from the VMC
+  int copyID; // copyID
+  TGeoVolume *geovolume; // the associated tgeo volume (has all other information such as name, shape, medium, etc)
 
+  ClassDefNV(VolInfo, 1);
+};
+
+struct VolInfoContainer {
+  std::vector<VolInfo>; // keeps
+  ClassDefNV(VolInfoContainer, 1); 
+};
+
+struct MagCallInfo {
+  MagCallInfo() = default;
+  MagCallInfo(TVirtualMC *mc, float x, float y, float z, float Bx, float By, float Bz);
+  
+  long id;
+  long stepid; // cross-reference to current MC stepid (if any??)
+  float x;
+  float y;
+  float z;
+  float Bx;
+  float By;
+  float Bz;
+
+  static int stepcounter;
+  ClassDefNV(MagCallInfo, 1);
+};
+ 
+}
 #endif
