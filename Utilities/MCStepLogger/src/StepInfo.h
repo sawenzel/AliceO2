@@ -28,10 +28,37 @@
  
 class TVirtualMC;
 class TGeoVolume;
+class TGeoMedium;
 
 namespace o2
 {
 // class collecting info about one MC step done
+
+struct VolInfoContainer {
+  VolInfoContainer() = default;
+
+  // keeps info about volumes (might exist somewhere else already)
+  // essentially a mapping from volumeID x copyNo to TGeoVolumes
+  std::vector<std::vector<TGeoVolume const *> *> volumes; // sparse container
+
+  void insert(int id, int copyNo, TGeoVolume const *vol) {
+    if(volumes.size() <= id) {
+      volumes.resize(id + 1, nullptr);
+    }
+    if (volumes[id]==nullptr) {
+      volumes[id] = new std::vector<TGeoVolume const *>;
+    }
+    if (volumes[id]->size() <= copyNo) {
+      volumes[id]->resize(copyNo + 1, nullptr);
+    }
+    (*volumes[id])[copyNo] = vol;
+  }
+
+  TGeoVolume const * get(int id, int copy) const {return (*volumes[id])[copy];}
+
+  ClassDefNV(VolInfoContainer, 1);
+};
+
 struct StepInfo {
   StepInfo() = default;
   // construct directly using virtual mc
@@ -53,24 +80,24 @@ struct StepInfo {
   int*  secondaryprocesses; //[nsecondaries]
   int   nprocessesactive; // number of active processes
   bool  stopped; //
-  
+
+  // somehow I can't serialize this:
+  // TGeoVolume* geovolume; //->
+  std::string volname;
+//  TGeoMedium* medium; //->
+  std::string mediumname;
+
+  char const* getVolName();
+  char const* getMediumName();
+
+  // for cuts?
+  bool isVolume(const char *);
+
   static int stepcounter;
   static std::chrono::time_point<std::chrono::high_resolution_clock> starttime;
-  
-  ClassDefNV(StepInfo, 1);
-};
+//  static VolInfoContainer volinfos;
 
-struct VolInfo {
-  int id; // the id from the VMC
-  int copyID; // copyID
-  TGeoVolume *geovolume; // the associated tgeo volume (has all other information such as name, shape, medium, etc)
-
-  ClassDefNV(VolInfo, 1);
-};
-
-struct VolInfoContainer {
-  std::vector<VolInfo>; // keeps
-  ClassDefNV(VolInfoContainer, 1); 
+  ClassDefNV(StepInfo, 2);
 };
 
 struct MagCallInfo {

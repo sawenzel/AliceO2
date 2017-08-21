@@ -18,4 +18,9 @@
 #pragma link C++ class o2::MagCallInfo+;
 #pragma link C++ class std::vector<o2::StepInfo>+;
 #pragma link C++ class std::vector<o2::MagCallInfo>+;
+#pragma link C++ class std::vector<TGeoVolume const *>+;
+#pragma link C++ class std::vector<std::vector<TGeoVolume const *> *>+;
+#pragma link C++ class o2::VolInfoContainer+;
+
+
 #endif
