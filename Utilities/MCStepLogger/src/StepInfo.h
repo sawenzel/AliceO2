@@ -72,6 +72,9 @@ struct StepInfo {
   int   copyNo = -1;
   int   trackID = -1;
   int   pdg = 0;
+  std::string pname; // particle name
+  int   moduleid = -1;
+  std::string modulename;
   float x = 0.;
   float y = 0.;
   float z = 0.;
@@ -82,7 +85,8 @@ struct StepInfo {
   int*  secondaryprocesses = nullptr; //[nsecondaries]
   int   nprocessesactive = 0; // number of active processes
   bool  stopped = false; //
-
+  bool  primary = false;
+  
   // somehow I can't serialize this:
   // TGeoVolume* geovolume; //->
   std::string volname;

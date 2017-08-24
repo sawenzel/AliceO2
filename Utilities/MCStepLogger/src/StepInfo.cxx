@@ -7,6 +7,9 @@
 #include <TGeoManager.h>
 #include <TGeoVolume.h>
 #include <TGeoMedium.h>
+#include <TDatabasePDG.h>
+#include <FairRunSim.h>
+#include <FairModule.h>
 #include <iostream>
 
 ClassImp(o2::StepInfo);
@@ -28,23 +31,38 @@ StepInfo::StepInfo(TVirtualMC *mc) {
   auto stack = mc->GetStack();
   trackID = stack->GetCurrentTrackNumber();
   pdg = mc->TrackPid();
+  pname = TDatabasePDG::Instance()->GetParticle(pdg)->GetName();
   auto id = mc->CurrentVolID(copyNo);
   volId=id;
-
+  primary = stack->GetCurrentTrack()->IsPrimary();
+  
 //  volinfos.insert(id, copyNo, gGeoManager->GetCurrentVolume());
   auto geovolume = gGeoManager->GetCurrentVolume();
   volname = geovolume ? geovolume->GetName() : "null";
 //  medium = geovolume? geovolume->GetMedium() : nullptr;
   mediumname = geovolume ? geovolume->GetMedium()->GetName() : nullptr;
 
+  auto* run = FairRunSim::Instance();
+  moduleid = run->GetVolToModulesMap().at(volId);
+  //for (auto &p : run->GetVolToModulesMap()) {
+  //  std::cerr << p.first << " " << p.second << "\n";
+  //}
+  auto modulelist = run->GetListOfModules();
+  //for (int i=0;i<modulelist->GetEntries();++i){
+     // auto module = (FairModule*)modulelist->At(i);
+     // std::cerr << i << " " << module->GetName() << " " << module->GetModId() << "\n";
+  //}
+  auto module=(FairModule*)modulelist->At(moduleid);
+  modulename = module->GetName();
+    
   //auto v1 = gGeoManager->GetVolume(mc->CurrentVolName());
   //if (copyNo != 1) {
     //  std::cerr << "SCHEISSE " << copyNo << "\n";
   //}
-  auto v2 = gGeoManager->GetCurrentNavigator()->GetCurrentVolume();
-  if (strcmp(mc->CurrentVolName(), v2->GetName())!=0){
-    std::cerr << "inconsistent state\n";
-  }
+  //auto v2 = gGeoManager->GetCurrentNavigator()->GetCurrentVolume();
+  //if (strcmp(mc->CurrentVolName(), v2->GetName())!=0){
+  //  std::cerr << "inconsistent state\n";
+  //}
   
 //  std::cerr << "id " << id << " MaxStep " << mc->MaxStep() << " " << mc->TrackStep() << "\n"; 
 //  TArrayI procs;

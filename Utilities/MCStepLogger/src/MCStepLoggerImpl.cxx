@@ -234,7 +234,7 @@ TArrayI procs;
     if (mTTreeIO){
       container.clear();
     }
-    StepInfo::resetCounter;
+    StepInfo::resetCounter();
   }
 
   // prints list of processes for volumeID
@@ -350,7 +350,8 @@ extern "C" void logField(double const *p, double const *b)
 
 extern "C" void flushLog()
 {
+  std::cerr << "--- START FLUSHING ----\n";
   o2::logger.flush();
   o2::fieldlogger.flush();
-  std::cerr << "--- FLUSHING ----\n";
+  std::cerr << "--- END FLUSHING ----\n";
 }

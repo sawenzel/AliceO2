@@ -369,6 +369,7 @@ o2_define_bucket(
     DEPENDENCIES
     dl
     root_base_bucket
+    fairroot_base_bucket
     VMC
     Tree
     Geom
@@ -572,6 +573,7 @@ o2_define_bucket(
     ParBase
     MathUtils
     Core Hist Gpad
+    Configuration
 
     INCLUDE_DIRECTORIES
     ${CMAKE_SOURCE_DIR}/Common/MathUtils/include

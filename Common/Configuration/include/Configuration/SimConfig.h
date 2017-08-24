@@ -55,6 +55,7 @@ class SimConfig
   unsigned int getStartEvent() const { return mStartEvent; }
 
   bool isWithMagField() const { return mWithMagField; }
+  bool isWithPhysicsProcs() const { return mWithPhysicsProcs; }
   
  private:
   std::vector<std::string> mActiveDetectors; //!< list active detectord
@@ -65,6 +66,7 @@ class SimConfig
   unsigned int mStartEvent;                  //!< index of first event to be taken
 
   bool mWithMagField = true; //!< switch on/off mag field (default on)
+  bool mWithPhysicsProcs = true; //!< switch on/off physics processes (default on)
   
   ClassDefNV(SimConfig, 1);
 };
