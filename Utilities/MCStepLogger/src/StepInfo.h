@@ -63,23 +63,25 @@ struct StepInfo {
   StepInfo() = default;
   // construct directly using virtual mc
   StepInfo(TVirtualMC *mc);  
-
+  //  StepInfo(StepInfo const &);
+  
   long  cputimestamp;
-  int   stepid;
-  int   volId; // keep another branch somewhere mapping this to name, medium, etc.
-  int   copyNo;
-  int   trackID;
-  int   pdg;
-  float x;
-  float y;
-  float z;
-  float E;
-  float step;
-  float maxstep;
-  int   nsecondaries;
-  int*  secondaryprocesses; //[nsecondaries]
-  int   nprocessesactive; // number of active processes
-  bool  stopped; //
+  int   stepid = -1; // serves as primary key 
+  int   eventid = -1;
+  int   volId = -1; // keep another branch somewhere mapping this to name, medium, etc.
+  int   copyNo = -1;
+  int   trackID = -1;
+  int   pdg = 0;
+  float x = 0.;
+  float y = 0.;
+  float z = 0.;
+  float E = 0.;
+  float step = 0.;
+  float maxstep =  0.;
+  int   nsecondaries = 0;
+  int*  secondaryprocesses = nullptr; //[nsecondaries]
+  int   nprocessesactive = 0; // number of active processes
+  bool  stopped = false; //
 
   // somehow I can't serialize this:
   // TGeoVolume* geovolume; //->
@@ -93,10 +95,13 @@ struct StepInfo {
   // for cuts?
   bool isVolume(const char *);
 
-  static int stepcounter;
+  static int stepcounter; //!
+  static StepInfo* currentinstance; //!
   static std::chrono::time_point<std::chrono::high_resolution_clock> starttime;
 //  static VolInfoContainer volinfos;
 
+  static void resetCounter() { stepcounter = -1; }
+  
   ClassDefNV(StepInfo, 2);
 };
 
@@ -104,14 +109,15 @@ struct MagCallInfo {
   MagCallInfo() = default;
   MagCallInfo(TVirtualMC *mc, float x, float y, float z, float Bx, float By, float Bz);
   
-  long id;
-  long stepid; // cross-reference to current MC stepid (if any??)
-  float x;
-  float y;
-  float z;
-  float Bx;
-  float By;
-  float Bz;
+  long id = -1;
+  long stepid = -1; // cross-reference to current MC stepid (if any??)
+  //  StepInfo stepinfo; // cross-reference to step info via pointer
+  float x = 0.;
+  float y = 0.;
+  float z = 0.;
+  float Bx = 0.;
+  float By = 0.;
+  float Bz = 0.;
 
   static int stepcounter;
   ClassDefNV(MagCallInfo, 1);

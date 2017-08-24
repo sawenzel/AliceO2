@@ -40,7 +40,7 @@ class SimConfig
   }
 
   // initializes the configuration from command line arguments
-  // returns true of correctly initialized and not --help called
+  // returns true if correctly initialized and not --help called
   bool resetFromArguments(int argc, char* argv[]);
 
   // get MC engine
@@ -54,6 +54,8 @@ class SimConfig
   std::string getExtKinematicsFileName() const { return mExtKinFileName; }
   unsigned int getStartEvent() const { return mStartEvent; }
 
+  bool isWithMagField() const { return mWithMagField; }
+  
  private:
   std::vector<std::string> mActiveDetectors; //!< list active detectord
   std::string mMCEngine;                     //!< chosen VMC engine
@@ -62,6 +64,8 @@ class SimConfig
   std::string mExtKinFileName;               //!< file name of external kinematics file (needed for ext kinematics generator)
   unsigned int mStartEvent;                  //!< index of first event to be taken
 
+  bool mWithMagField = true; //!< switch on/off mag field (default on)
+  
   ClassDefNV(SimConfig, 1);
 };
 }

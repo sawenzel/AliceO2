@@ -27,21 +27,24 @@ void SetCuts()
   // The default settings refer to a complete simulation which generates and follows also the secondary particles.
   
 
-  TVirtualMC::GetMC()->SetProcess("PAIR",1); /** pair production*/
-  TVirtualMC::GetMC()->SetProcess("COMP",1); /**Compton scattering*/
-  TVirtualMC::GetMC()->SetProcess("PHOT",1); /** photo electric effect */
+  TVirtualMC::GetMC()->SetProcess("PAIR",0); /** pair production*/
+  TVirtualMC::GetMC()->SetProcess("COMP",0); /**Compton scattering*/
+  TVirtualMC::GetMC()->SetProcess("PHOT",0); /** photo electric effect */
   TVirtualMC::GetMC()->SetProcess("PFIS",0); /**photofission*/
   TVirtualMC::GetMC()->SetProcess("DRAY",0); /**delta-ray*/
-  TVirtualMC::GetMC()->SetProcess("ANNI",1); /**annihilation*/
-  TVirtualMC::GetMC()->SetProcess("BREM",1); /**bremsstrahlung*/
-  TVirtualMC::GetMC()->SetProcess("HADR",1); /**hadronic process*/
-  TVirtualMC::GetMC()->SetProcess("MUNU",1); /**muon nuclear interaction*/
-  TVirtualMC::GetMC()->SetProcess("DCAY",1); /**decay*/
-  TVirtualMC::GetMC()->SetProcess("LOSS",2); /**energy loss*/
-  TVirtualMC::GetMC()->SetProcess("MULS",1); /**multiple scattering*/
-
+  TVirtualMC::GetMC()->SetProcess("ANNI",0); /**annihilation*/
+  TVirtualMC::GetMC()->SetProcess("BREM",0); /**bremsstrahlung*/
+  TVirtualMC::GetMC()->SetProcess("HADR",0); /**hadronic process*/
+  TVirtualMC::GetMC()->SetProcess("MUNU",0); /**muon nuclear interaction*/
+  TVirtualMC::GetMC()->SetProcess("DCAY",0); /**decay*/
+  TVirtualMC::GetMC()->SetProcess("LOSS",0); /**energy loss*/
+  TVirtualMC::GetMC()->SetProcess("MULS",0); /**multiple scattering*/
+  TVirtualMC::GetMC()->SetProcess("RAYL",0); /**??**/
+  TVirtualMC::GetMC()->SetProcess("STRA",0); /**??**/
+  TVirtualMC::GetMC()->SetProcess("SYNC",0); /**??**/
+  TVirtualMC::GetMC()->SetProcess("CKOV",0); /**??**/
   
-    
+     
   
   Double_t cut1 = 1.0E-3;         // GeV --> 1 MeV
   Double_t cutb = 1.0E4;          // GeV --> 10 TeV

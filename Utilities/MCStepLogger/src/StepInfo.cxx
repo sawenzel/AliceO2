@@ -9,6 +9,9 @@
 #include <TGeoMedium.h>
 #include <iostream>
 
+ClassImp(o2::StepInfo);
+ClassImp(o2::MagCallInfo);
+
 namespace o2 {
 
 // construct directly using virtual mc
@@ -19,7 +22,9 @@ StepInfo::StepInfo(TVirtualMC *mc) {
   }
   stepcounter++;
   stepid = stepcounter;
+  currentinstance=this;
 
+  eventid = mc->CurrentEvent();
   auto stack = mc->GetStack();
   trackID = stack->GetCurrentTrackNumber();
   pdg = mc->TrackPid();
@@ -77,6 +82,8 @@ StepInfo::StepInfo(TVirtualMC *mc) {
   stopped = mc->IsTrackStop();
 }
 
+  //  StepInfo::StepInfo(StepInfo const &) {}
+  
 char const * StepInfo::getVolName() {
 //  if (geovolume){
 //    return geovolume->GetName();
@@ -106,12 +113,13 @@ bool StepInfo::isVolume(const char* name) {
 
 std::chrono::time_point<std::chrono::high_resolution_clock> StepInfo::starttime;
 int StepInfo::stepcounter = -1;
-//ClassImp(StepInfo);
+StepInfo* StepInfo::currentinstance = nullptr; 
+
 //VolInfoContainer StepInfo::volinfos;
 
 
 MagCallInfo::MagCallInfo(TVirtualMC *mc, float ax, float ay, float az, float aBx, float aBy, float aBz) :
- x{ax}
+  x{ax}
  ,y{ay}
  ,z{az}
  ,Bx{aBx}
@@ -121,7 +129,11 @@ MagCallInfo::MagCallInfo(TVirtualMC *mc, float ax, float ay, float az, float aBx
    stepcounter++;
    id = stepcounter;
    stepid = StepInfo::stepcounter;
-  }
+   // copy the stepinfo
+   if (StepInfo::currentinstance) {
+     // stepinfo = *StepInfo::currentinstance;
+   }
+ }
 
 int MagCallInfo::stepcounter = -1;
 

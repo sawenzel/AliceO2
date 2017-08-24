@@ -47,22 +47,37 @@
 
 namespace o2
 {
-namespace {
-  struct LogOutFile {
-    TFile *outfile;
-    TTree *outtree;
-  
-    static LogOutFile & Instance() {
-      static LogOutFile instance;
-      return instance;
-    }
 
-    private:
-      LogOutFile() {
-        outfile=new TFile("MCStepLogResult.root", "RECREATE");
-        outtree=new TTree("StepLogTree", "Tree produced from MC Step Logger");
-      }
-  };
+const char* getLogFileName() 
+{
+  if(const char* f = std::getenv("MCSTEPLOG_OUTFILE")) 
+  {
+    return f;
+  }
+  else {
+    return "MCStepLoggerOutput.root";
+  }
+}
+
+template <typename T>
+void flushToTTree(const char* branchname, T* address) {
+  TFile *f = new TFile(getLogFileName(), "UPDATE");
+  const char* treename = "StepLoggerTree";
+  auto tree = (TTree*)f->Get(treename);
+  if (!tree) {
+    // create tree
+    tree = new TTree(treename, "Tree container information from MC step logger");
+  }
+  auto branch = tree->GetBranch(branchname);
+  if (!branch) {
+   branch = tree->Branch(branchname, &address);
+  }
+  branch->SetAddress(&address);
+  branch->Fill();
+  tree->SetEntries(branch->GetEntries());
+  f->Write();
+  f->Close();
+  delete f;
 }
 
 
@@ -72,11 +87,8 @@ class FieldLogger
   int counter = 0;
   std::map<int, int> volumetosteps;
   std::map<int, std::string> idtovolname;
-
   bool mTTreeIO = false;
-
   std::vector<MagCallInfo> callcontainer;
-  TBranch* outbranch = nullptr;
  public:
 
   FieldLogger() {
@@ -84,13 +96,16 @@ class FieldLogger
     // configuration done via env variable
     if (std::getenv("MCSTEPLOG_TTREE")) {
       mTTreeIO = true;
+      //      callcontainer = new std::vector<MagCallInfo*>;
     }
   }
   
   void addStep(TVirtualMC* mc, const double *x, const double *b)
   {
-    callcontainer.emplace_back(mc, x[0], x[1], x[2] ,b[0], b[1], b[2]);
-    return;
+    if (mTTreeIO){
+      callcontainer.emplace_back(mc, x[0], x[1], x[2] ,b[0], b[1], b[2]);
+      return;
+    }
     
     std::cerr << "field called at " << x[0] << " " << x[1] << " " << x[2] << " with " << b[0] << " " << b[1] << " " << b[2] << "\n";
     counter++;
@@ -111,17 +126,15 @@ class FieldLogger
     counter = 0;
     volumetosteps.clear();
     idtovolname.clear();
-    callcontainer.clear();
+    if (mTTreeIO) {
+      callcontainer.clear();
+    }
   }
 
   void flush()
   {
     if (mTTreeIO) {
-      auto logfile = LogOutFile::Instance();  
-      if (logfile.outtree->GetBranch("Calls") == nullptr)
-      {
-        LogOutFile::Instance().outtree->Branch("Calls", &callcontainer);    
-      }
+     flushToTTree("Calls", &callcontainer);
     }
     // std::cerr << "[FIELDLOGGER]: did " << counter << " steps \n";
     // summarize steps per volume
@@ -131,6 +144,7 @@ class FieldLogger
     //}
     //clear();
     //std::cerr << "[FIELDLOGGER]: ----- END OF EVENT ------\n";
+    clear();
   }
 };
 
@@ -217,7 +231,10 @@ TArrayI procs;
     idtovolname.clear();
     volumetoNSecondaries.clear();
     volumetoProcess.clear();
-    container.clear();
+    if (mTTreeIO){
+      container.clear();
+    }
+    StepInfo::resetCounter;
   }
 
   // prints list of processes for volumeID
@@ -244,16 +261,12 @@ TArrayI procs;
        printProcesses(p.first);
        std::cerr << "\n";
      }
-     clear();
      std::cerr << "[STEPLOGGER]: ----- END OF EVENT ------\n";
     }
     else {
-      auto logfile = LogOutFile::Instance();  
-      if (logfile.outtree->GetBranch("Steps") == nullptr)
-      {
-         LogOutFile::Instance().outtree->Branch("Steps", &container);    
-      }
+      flushToTTree("Steps", &container);
     }
+    clear();
   }
 };
 
@@ -339,6 +352,5 @@ extern "C" void flushLog()
 {
   o2::logger.flush();
   o2::fieldlogger.flush();
-  o2::LogOutFile::Instance().outtree->Fill();
-  o2::LogOutFile::Instance().outtree->Write();
+  std::cerr << "--- FLUSHING ----\n";
 }

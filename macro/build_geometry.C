@@ -62,10 +62,16 @@ void build_geometry(FairRunSim* run = nullptr)
   // Create media
   run->SetMaterials("media.geo"); // Materials
 
-  // we need a field to properly init the media
-  auto field = new o2::field::MagneticField("Maps", "Maps", -1., -1., o2::field::MagFieldParam::k5kG);
+  double currentleft{-1.};
+  double currentright{-1.};
+  // setting field to zero if wanted
+  if(! o2::conf::SimConfig::Instance().isWithMagField() ) {
+    currentleft=0.;
+    currentright=0.;
+  }
+  auto field = new o2::field::MagneticField("Maps", "Maps", currentleft, currentright, o2::field::MagFieldParam::k5kG);
   run->SetField(field);
-
+  
   // Create geometry
   // we always need the gave
   o2::Passive::Cave* cave = new o2::Passive::Cave("CAVE");

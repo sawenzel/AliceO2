@@ -29,7 +29,8 @@ bool SimConfig::resetFromArguments(int argc, char* argv[])
     "list of detectors")
     ("nEvents,n", bpo::value<unsigned int>()->default_value(1), "number of events")
     ("startEvent", bpo::value<unsigned int>()->default_value(0), "index of first event to be used (when applicable)")
-    ("extKinFile", bpo::value<std::string>()->default_value("Kinematics.root"), "name of kinematics file for event generator from file (when applicable)");
+    ("extKinFile", bpo::value<std::string>()->default_value("Kinematics.root"), "name of kinematics file for event generator from file (when applicable)")
+    ("noMagField", "switch off magnetic field");
 
   try {
     bpo::store(parse_command_line(argc, argv, desc), vm);
@@ -52,6 +53,10 @@ bool SimConfig::resetFromArguments(int argc, char* argv[])
   mExtKinFileName = vm["extKinFile"].as<std::string>();
   mStartEvent = vm["startEvent"].as<unsigned int>();
 
+  if (vm.count("noMagField")){
+    mWithMagField = false;
+  }
+  
   return true;
 }
 

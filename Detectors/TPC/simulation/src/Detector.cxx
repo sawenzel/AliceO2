@@ -166,18 +166,34 @@ void Detector::SetSpecialPhysicsCuts()
     //gMC->Gstpar(matIdVMC,"DCUTE",fCut_el);  /** delta-rays by electrons (GeV)*/
     //gMC->Gstpar(matIdVMC,"DCUTM",fCut_el);  /** delta-rays by muons (GeV)*/
     //gMC->Gstpar(matIdVMC,"PPCUTM",fCut_el); /** direct pair production by muons (GeV)*/
-     gMC->Gstpar(matIdVMC,"PAIR",1); 
-     gMC->Gstpar(matIdVMC,"COMP",1); 
-     gMC->Gstpar(matIdVMC,"PHOT",1); 
+
+    //gMC->Gstpar(matIdVMC,"PAIR",1); 
+    //     gMC->Gstpar(matIdVMC,"COMP",1); 
+    //     gMC->Gstpar(matIdVMC,"PHOT",1); 
+    //     gMC->Gstpar(matIdVMC,"PFIS",0); 
+    //     gMC->Gstpar(matIdVMC,"DRAY",1); 
+    //     gMC->Gstpar(matIdVMC,"ANNI",1); 
+    //     gMC->Gstpar(matIdVMC,"BREM",1); 
+    //     gMC->Gstpar(matIdVMC,"HADR",1); 
+    //     gMC->Gstpar(matIdVMC,"MUNU",1); 
+    //     gMC->Gstpar(matIdVMC,"DCAY",1); 
+    //     gMC->Gstpar(matIdVMC,"LOSS",1); 
+    //     gMC->Gstpar(matIdVMC,"MULS",1); 
+
+     gMC->Gstpar(matIdVMC,"PAIR",0); 
+     gMC->Gstpar(matIdVMC,"COMP",0); 
+     gMC->Gstpar(matIdVMC,"PHOT",0); 
      gMC->Gstpar(matIdVMC,"PFIS",0); 
-     gMC->Gstpar(matIdVMC,"DRAY",1); 
-     gMC->Gstpar(matIdVMC,"ANNI",1); 
-     gMC->Gstpar(matIdVMC,"BREM",1); 
-     gMC->Gstpar(matIdVMC,"HADR",1); 
-     gMC->Gstpar(matIdVMC,"MUNU",1); 
-     gMC->Gstpar(matIdVMC,"DCAY",1); 
-     gMC->Gstpar(matIdVMC,"LOSS",1); 
-     gMC->Gstpar(matIdVMC,"MULS",1); 
+     gMC->Gstpar(matIdVMC,"DRAY",0); 
+     gMC->Gstpar(matIdVMC,"ANNI",0); 
+     gMC->Gstpar(matIdVMC,"BREM",0); 
+     gMC->Gstpar(matIdVMC,"HADR",0); 
+     gMC->Gstpar(matIdVMC,"MUNU",0); 
+     gMC->Gstpar(matIdVMC,"DCAY",0); 
+     gMC->Gstpar(matIdVMC,"LOSS",0); 
+     gMC->Gstpar(matIdVMC,"MULS",0); 
+
+
      Double_t cut1 = 1.0E-5;         // GeV --> 1 MeV
      Double_t cutel = 1.0E-5;
      
