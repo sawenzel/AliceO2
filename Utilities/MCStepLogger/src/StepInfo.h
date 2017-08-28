@@ -63,8 +63,7 @@ struct StepInfo {
   StepInfo() = default;
   // construct directly using virtual mc
   StepInfo(TVirtualMC *mc);  
-  //  StepInfo(StepInfo const &);
-  
+   
   long  cputimestamp;
   int   stepid = -1; // serves as primary key 
   int   eventid = -1;
@@ -87,23 +86,12 @@ struct StepInfo {
   bool  stopped = false; //
   bool  primary = false;
   
-  // somehow I can't serialize this:
-  // TGeoVolume* geovolume; //->
   std::string volname;
-//  TGeoMedium* medium; //->
   std::string mediumname;
-
-  char const* getVolName();
-  char const* getMediumName();
-
-  // for cuts?
-  bool isVolume(const char *);
 
   static int stepcounter; //!
   static StepInfo* currentinstance; //!
   static std::chrono::time_point<std::chrono::high_resolution_clock> starttime;
-//  static VolInfoContainer volinfos;
-
   static void resetCounter() { stepcounter = -1; }
   
   ClassDefNV(StepInfo, 2);

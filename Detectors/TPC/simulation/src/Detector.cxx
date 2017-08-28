@@ -11,7 +11,6 @@
 #include "TPCSimulation/Detector.h"
 #include "TPCSimulation/Point.h"
 #include "TPCBase/ParameterGas.h"
-#include "TPCSimulation/Constants.h"
 #include <Configuration/SimConfig.h>
 
 #include "SimulationDataFormat/DetectorList.h"

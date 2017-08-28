@@ -29,11 +29,14 @@
 #include <TVirtualMC.h>
 #include <TVirtualMCApplication.h>
 #include <TVirtualMagField.h>
+#include <TGeoManager.h>
 #include <TClonesArray.h>
 #include <sstream>
 #include <StepInfo.h>
 #include <TFile.h>
 #include <TBranch.h>
+#include <FairModule.h>
+#include <TGeoVolume.h>
 
 #include <dlfcn.h>
 #include <iostream>
@@ -44,6 +47,51 @@
 #undef NDEBUG
 #endif
 #include <cassert>
+
+#include <execinfo.h> // for backtrace
+#include <dlfcn.h>    // for dladdr
+#include <cxxabi.h>   // for __cxa_demangle
+
+#include <cstdio>
+#include <cstdlib>
+#include <string>
+#include <sstream>
+// This function produces a stack backtrace with demangled function & method names.
+std::string Backtrace(int skip = 1)
+{
+    void *callstack[128];
+    const int nMaxFrames = sizeof(callstack) / sizeof(callstack[0]);
+    char buf[1024];
+    int nFrames = backtrace(callstack, nMaxFrames);
+    char **symbols = backtrace_symbols(callstack, nFrames);
+
+    std::ostringstream trace_buf;
+    for (int i = skip; i < nFrames; i++) {
+        printf("%s\n", symbols[i]);
+
+        Dl_info info;
+        if (dladdr(callstack[i], &info) && info.dli_sname) {
+            char *demangled = NULL;
+            int status = -1;
+            if (info.dli_sname[0] == '_')
+                demangled = abi::__cxa_demangle(info.dli_sname, NULL, 0, &status);
+            snprintf(buf, sizeof(buf), "%-3d %*p %s + %zd\n",
+                     i, int(2 + sizeof(void*) * 2), callstack[i],
+                     status == 0 ? demangled :
+                     info.dli_sname == 0 ? symbols[i] : info.dli_sname,
+                     (char *)callstack[i] - (char *)info.dli_saddr);
+            free(demangled);
+        } else {
+            snprintf(buf, sizeof(buf), "%-3d %*p %s\n",
+                     i, int(2 + sizeof(void*) * 2), callstack[i], symbols[i]);
+        }
+        trace_buf << buf;
+    }
+    free(symbols);
+    if (nFrames == nMaxFrames)
+        trace_buf << "[truncated]\n";
+    return trace_buf.str();
+}
 
 namespace o2
 {
@@ -96,7 +144,6 @@ class FieldLogger
     // configuration done via env variable
     if (std::getenv("MCSTEPLOG_TTREE")) {
       mTTreeIO = true;
-      //      callcontainer = new std::vector<MagCallInfo*>;
     }
   }
   
@@ -106,8 +153,6 @@ class FieldLogger
       callcontainer.emplace_back(mc, x[0], x[1], x[2] ,b[0], b[1], b[2]);
       return;
     }
-    
-    std::cerr << "field called at " << x[0] << " " << x[1] << " " << x[2] << " with " << b[0] << " " << b[1] << " " << b[2] << "\n";
     counter++;
     int copyNo;
     auto id = mc->CurrentVolID(copyNo);
@@ -136,14 +181,13 @@ class FieldLogger
     if (mTTreeIO) {
      flushToTTree("Calls", &callcontainer);
     }
-    // std::cerr << "[FIELDLOGGER]: did " << counter << " steps \n";
+    std::cerr << "[FIELDLOGGER]: did " << counter << " steps \n";
     // summarize steps per volume
-    //for (auto& p : volumetosteps) {
-    //  std::cerr << "[FIELDLOGGER]: VolName " << idtovolname[p.first] << " COUNT " << p.second;
-    // std::cerr << "\n";
-    //}
-    //clear();
-    //std::cerr << "[FIELDLOGGER]: ----- END OF EVENT ------\n";
+    for (auto& p : volumetosteps) {
+      std::cerr << "[FIELDLOGGER]: VolName " << idtovolname[p.first] << " COUNT " << p.second;
+      std::cerr << "\n";
+    }
+    std::cerr << "[FIELDLOGGER]: ----- END OF EVENT ------\n";
     clear();
   }
 };
@@ -335,6 +379,52 @@ extern "C" void dispatchOriginalField(TVirtualMagField* field, char const* libna
   typedef void (TVirtualMagField::*MethodType)(const double[3], double*);
   dispatchOriginalKernel<TVirtualMagField, MethodType>(field, libname, origFunctionName, x, B);
 }
+
+extern "C" void dispatchConstructGeom(FairModule* module, char const* libname, char const* origFunctionName) {
+  auto list = (TObjArray*)gGeoManager->GetListOfVolumes();
+  auto sizebefore = list->GetEntries();
+    
+  typedef void (FairModule::*MethodType)();
+  dispatchOriginalKernel<FairModule, MethodType>(module, libname, origFunctionName);
+  // record changes
+
+  auto sizeafter = list->GetEntries();
+  std::cerr << module->GetName() << " added " << sizeafter-sizebefore << " volumes \n";
+}
+
+extern "C" void dispatchAddVolume(TGeoManager* geom, char const* libname, char const* origFunctionName, TGeoVolume *v) {
+  typedef int (TGeoManager::*MethodType)(TGeoVolume*);
+  Backtrace();
+  dispatchOriginalKernel<TGeoManager, MethodType>(geom, libname, origFunctionName, v);
+}
+
+extern "C" void dispatchVolume(TGeoVolume* v, char const* libname, char const* origFunctionName,
+			       const char *name, const TGeoShape* s, const TGeoMedium* m)
+{
+  std::cerr << "Adding volume " << name << "\n";  
+  typedef void (TGeoVolume::*MethodType)(const char *, const TGeoShape*, const TGeoMedium*);
+  Backtrace();
+  dispatchOriginalKernel<TGeoVolume, MethodType>(v, libname, origFunctionName, name, s, m);
+}
+
+extern "C" void dispatchBuilder(TGeoManager* m, char const* libname, char const* origFunctionName,
+				const char *name, const char *shape, int nmed, double *p, int npar)
+{
+  std::cerr << "Adding volume " << name << "\n";  
+  typedef void (TGeoManager::*MethodType)(const char *, const char *, int, double *, int);
+  Backtrace();
+  dispatchOriginalKernel<TGeoManager, MethodType>(m, libname, origFunctionName, name, shape, nmed, p, npar);
+}
+
+extern "C" void dispatchBuilderF(TGeoManager* m, char const* libname, char const* origFunctionName,
+				const char *name, const char *shape, int nmed, float *p, int npar)
+{
+  std::cerr << "Adding volume COOL " << name << "\n";  
+  typedef void (TGeoManager::*MethodType)(const char *, const char *, int, float *, int);
+  Backtrace();
+  dispatchOriginalKernel<TGeoManager, MethodType>(m, libname, origFunctionName, name, shape, nmed, p, npar);
+}
+
 
 extern "C" void performLogging(TVirtualMCApplication* app)
 {

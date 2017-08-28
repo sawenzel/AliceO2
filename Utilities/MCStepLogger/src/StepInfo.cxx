@@ -36,42 +36,21 @@ StepInfo::StepInfo(TVirtualMC *mc) {
   volId=id;
   primary = stack->GetCurrentTrack()->IsPrimary();
   
-//  volinfos.insert(id, copyNo, gGeoManager->GetCurrentVolume());
   auto geovolume = gGeoManager->GetCurrentVolume();
   volname = geovolume ? geovolume->GetName() : "null";
-//  medium = geovolume? geovolume->GetMedium() : nullptr;
   mediumname = geovolume ? geovolume->GetMedium()->GetName() : nullptr;
 
   auto* run = FairRunSim::Instance();
   moduleid = run->GetVolToModulesMap().at(volId);
-  //for (auto &p : run->GetVolToModulesMap()) {
-  //  std::cerr << p.first << " " << p.second << "\n";
-  //}
   auto modulelist = run->GetListOfModules();
-  //for (int i=0;i<modulelist->GetEntries();++i){
-     // auto module = (FairModule*)modulelist->At(i);
-     // std::cerr << i << " " << module->GetName() << " " << module->GetModId() << "\n";
-  //}
   auto module=(FairModule*)modulelist->At(moduleid);
   modulename = module->GetName();
     
-  //auto v1 = gGeoManager->GetVolume(mc->CurrentVolName());
-  //if (copyNo != 1) {
-    //  std::cerr << "SCHEISSE " << copyNo << "\n";
-  //}
   //auto v2 = gGeoManager->GetCurrentNavigator()->GetCurrentVolume();
   //if (strcmp(mc->CurrentVolName(), v2->GetName())!=0){
   //  std::cerr << "inconsistent state\n";
   //}
   
-//  std::cerr << "id " << id << " MaxStep " << mc->MaxStep() << " " << mc->TrackStep() << "\n"; 
-//  TArrayI procs;
-//  mc->StepProcesses(procs);
-//  std::cerr << "##id " << id << " ";
-//  for (int i=0; i<procs.GetSize(); ++i){
-//    std::cerr << TMCProcessName[procs.At(i)] << "\t";
-//  }
-//  std::cerr << "\n";
   double xd,yd,zd;
   mc->TrackPosition(xd,yd,zd);
   x=xd;
@@ -100,41 +79,9 @@ StepInfo::StepInfo(TVirtualMC *mc) {
   stopped = mc->IsTrackStop();
 }
 
-  //  StepInfo::StepInfo(StepInfo const &) {}
-  
-char const * StepInfo::getVolName() {
-//  if (geovolume){
-//    return geovolume->GetName();
-//  }
-
-//  std::cerr << "string is null\n";
-  return volname.c_str();
-}
-
-char const * StepInfo::getMediumName() {
-//  if (medium) {
-//    return medium->GetName(); 
-//  }
-//  return nullptr;
-    return mediumname.c_str();
-//  else {
-//    return "NULLMEDIUM";
-//  }
-}
-
-bool StepInfo::isVolume(const char* name) {
-//  if (!geovolume) return false;
-//  if (!geovolume->GetName()) return false;
-//  return strcmp(geovolume->GetName(),name)==0;
-} 
- 
-
 std::chrono::time_point<std::chrono::high_resolution_clock> StepInfo::starttime;
 int StepInfo::stepcounter = -1;
 StepInfo* StepInfo::currentinstance = nullptr; 
-
-//VolInfoContainer StepInfo::volinfos;
-
 
 MagCallInfo::MagCallInfo(TVirtualMC *mc, float ax, float ay, float az, float aBx, float aBy, float aBz) :
   x{ax}

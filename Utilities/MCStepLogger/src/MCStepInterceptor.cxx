@@ -27,6 +27,7 @@
 
 class TVirtualMCApplication;
 class TVirtualMagField;
+#include <iostream>
 
 // (re)declare symbols to be able to hook into them
 #define DECLARE_INTERCEPT_SYMBOLS(APP) \
@@ -63,6 +64,7 @@ extern "C" void dispatchOriginal(TVirtualMCApplication*, char const* libname, ch
 extern "C" void dispatchOriginalField(TVirtualMagField*, char const* libname, char const*, const double x[3],
                                       double* B);
 extern "C" void flushLog();
+
 
 #define INTERCEPT_STEPPING(APP, LIB, SYMBOL)                       \
   void APP::Stepping()                                             \
@@ -104,3 +106,61 @@ INTERCEPT_FIELD(MagneticField, "libField", "_ZN2o25field13MagneticField5FieldEPK
 }
 // for AliRoot
 INTERCEPT_FIELD(AliMagF, "libSTEERBase", "_ZN7AliMagF5FieldEPKdPd")
+
+
+
+// intercept geometry construction since
+// we can then create a mapping of volumename -> module useful for histogramming
+//class FairModule {
+//  void ConstructGeometry();
+//};
+//extern "C" void dispatchConstructGeom(FairModule*, char const* libname, char const*);
+//void FairModule::ConstructGeometry(){
+//  auto baseptr = reinterpret_cast<FairModule*>(this);
+//  dispatchConstructGeom(baseptr, "libBase", "_ZN10FairModule17ConstructGeometryEv");
+//};
+
+
+// intercept geometry construction since
+// we can then create a mapping of volumename -> module useful for histogramming
+class TGeoShape;
+class TGeoMedium;
+class TGeoVolume {
+  TGeoVolume(const char *name, const TGeoShape*, const TGeoMedium*);
+};
+
+class TGeoManager {
+  int AddVolume(TGeoVolume *);
+  TGeoVolume* Volume(const char *, const char *, int,
+		     double *, int);
+  TGeoVolume* Volume(const char *, const char *, int,
+		     float *, int);
+};
+
+//Int_t TGeoManager::AddVolume(TGeoVolume *volume)
+extern "C" void dispatchAddVolume(TGeoManager*, char const* libname, char const*, TGeoVolume *);
+
+int TGeoManager::AddVolume(TGeoVolume *v){
+  std::cerr << "HUHU\n";
+  //auto baseptr = reinterpret_cast<TGeoManager*>(this);
+  dispatchAddVolume(this, "libGeom", "_ZN11TGeoManager9AddVolumeEP10TGeoVolume", v);
+};
+
+extern "C" void dispatchBuilder(TGeoManager*, char const* libname, char const*, char const *, const char *, int, double *, int);
+TGeoVolume* TGeoManager::Volume(const char *name, const char *shape, int nmed,
+				double *par, int npar){
+  dispatchBuilder(this,  "libGeom", "_ZN11TGeoManager6VolumeEPKcS1_iPdi", name, shape, nmed, par, npar);
+}
+
+extern "C" void dispatchBuilderF(TGeoManager*, char const* libname, char const*, char const *, const char *, int, float *, int);
+TGeoVolume* TGeoManager::Volume(const char *name, const char *shape, int nmed,
+				float *par, int npar){
+  dispatchBuilderF(this,  "libGeom", "_ZN11TGeoManager6VolumeEPKcS1_iPfi", name, shape, nmed, par, npar);
+}
+
+
+
+extern "C" void dispatchVolume(TGeoVolume*, char const* libname, char const*, char const *, const TGeoShape *sp, const TGeoMedium *m);
+TGeoVolume::TGeoVolume(const char *name, const TGeoShape* shape, const TGeoMedium* medium) {
+  dispatchVolume(this, "libGeom", "_ZN10TGeoVolumeC1EPKcPK9TGeoShapePK10TGeoMedium", name, shape, medium);
+};
