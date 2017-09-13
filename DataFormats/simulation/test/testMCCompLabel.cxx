@@ -15,6 +15,8 @@
 #include <iomanip>
 #include <ios>
 #include <iostream>
+#include <vector>
+#include <algorithm>
 #include "SimulationDataFormat/MCCompLabel.h"
 
 using namespace o2;
@@ -37,4 +39,16 @@ BOOST_AUTO_TEST_CASE(MCCompLabel_test)
 
     BOOST_CHECK(tr == trE && ev == evE && src == srcE);
   }
+
+  // test comparision
+  BOOST_CHECK(MCCompLabel(1,0,1) == MCCompLabel(1,0,1));
+
+  // test that sorting MCLabels works
+  using P = std::pair<MCCompLabel, int>;
+  std::vector<P> myvec;
+  myvec.emplace_back(MCCompLabel(1, 0, 0), 2);
+  myvec.emplace_back(MCCompLabel(1, 1, 0), 1);
+  // sort labels according to weight
+  std::sort(myvec.begin(), myvec.end(), [](const P& a, const P& b) { return a.second > b.second;});
+
 }

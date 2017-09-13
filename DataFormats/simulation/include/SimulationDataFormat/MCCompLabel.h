@@ -49,6 +49,12 @@ class MCCompLabel
   MCCompLabel() = default;
   ~MCCompLabel() = default;
 
+  MCCompLabel(MCCompLabel const &other) : mLabel(other.mLabel) {};
+  MCCompLabel& operator=(MCCompLabel const &other) {
+    mLabel = other.mLabel;
+    return *this;
+  }
+
   // check if label was assigned
   bool isSet() const { return mLabel != NotSet; }
 
@@ -86,9 +92,17 @@ class MCCompLabel
   static constexpr int maxSourceID()  { return maskSrcID; }
   static constexpr int maxEventID()   { return maskEvID; }
   static constexpr int maxTrackID()   { return maskTrackID; }
+
+  friend bool operator==(o2::MCCompLabel const &a, o2::MCCompLabel const &b);
   
   ClassDefNV(MCCompLabel, 1);
 };
+
+inline
+bool operator==(o2::MCCompLabel const &a, o2::MCCompLabel const &b) {
+  return a.mLabel == b.mLabel;
+}
+
 }
 
 std::ostream& operator<<(std::ostream& os, const o2::MCCompLabel& c);
