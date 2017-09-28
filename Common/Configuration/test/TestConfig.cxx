@@ -12,7 +12,7 @@
 #include <iostream>
 
 int main(int argc, char* argv[]) {
-  auto& conf = o2::conf::SimConfig::Instance();
+  auto& conf = o2::conf::SimConfig::instance();
   conf.resetFromArguments(argc, argv);
 
   std::cout << "Selected VMC engine " << conf.getMCEngine() << "\n";

@@ -49,7 +49,7 @@ class Detector: public o2::Base::Detector {
     ~Detector() override;
 
     /**      Initialization of the detector is done here    */
-    void   Initialize() override;
+    void   initialize() override;
 
     /**       this method is called for each step during simulation
      *       (see FairMCApplication::Stepping())
@@ -58,16 +58,16 @@ class Detector: public o2::Base::Detector {
     Bool_t ProcessHits( FairVolume* v=nullptr) override;
 
     /**       Registers the produced collections in FAIRRootManager.     */
-    void   Register() override;
+    void   register() override;
 
     /** Gets the produced collections */
-    TClonesArray* GetCollection(Int_t iColl) const override ;
+    TClonesArray* getCollection(Int_t iColl) const override ;
 
     /**      has to be called after each event to reset the containers      */
-    void   Reset() override;
+    void   reset() override;
 
     /**      Create the detector geometry        */
-    void ConstructGeometry() override;
+    void constructGeometry() override;
 
     /**      This method is an example of how to add your own point
      *       of type DetectorPoint to the clones array
@@ -82,7 +82,7 @@ class Detector: public o2::Base::Detector {
     /// @param kp* Parameters for the ALICE TPC
     /// @return Bethe-Bloch value in MIP units
     template <typename T>
-    T BetheBlochAleph(T bg, T kp1, T kp2, T kp3, T kp4, T kp5);
+    T betheBlochAleph(T bg, T kp1, T kp2, T kp3, T kp4, T kp5);
 
     /// Copied from AliRoot - should go to someplace else
     /// Function to generate random numbers according to Gamma function 
@@ -90,26 +90,26 @@ class Detector: public o2::Base::Detector {
     /// http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.158.3866&rep=rep1&type=pdf
     /// Implemented by A. Morsch 14/01/2014    
     /// @k is the mean and variance
-    Double_t Gamma(Double_t k);
+    Double_t gamma(Double_t k);
 
     
     /** The following methods can be implemented if you need to make
      *  any optional action in your detector during the transport.
     */
 
-    void   CopyClones( TClonesArray* cl1,  TClonesArray* cl2 ,
+    void   copyClones( TClonesArray* cl1,  TClonesArray* cl2 ,
                                Int_t offset) override {;}
-    void   SetSpecialPhysicsCuts() override;// {;}
-    void   EndOfEvent() override;
-    void   FinishPrimary() override {;}
-    void   FinishRun() override {;}
-    void   BeginPrimary() override {;}
-    void   PostTrack() override {;}
-    void   PreTrack() override {;}
-    void   BeginEvent() override {;}
+    void   setSpecialPhysicsCuts() override;// {;}
+    void   endOfEvent() override;
+    void   finishPrimary() override {;}
+    void   finishRun() override {;}
+    void   beginPrimary() override {;}
+    void   postTrack() override {;}
+    void   preTrack() override {;}
+    void   beginEvent() override {;}
 
-    void SetGeoFileName(const TString file) { mGeoFileName=file;   }
-    const TString& GetGeoFileName() const   { return mGeoFileName; }
+    void setGeoFileName(const TString file) { mGeoFileName=file;   }
+    const TString& getGeoFileName() const   { return mGeoFileName; }
 
   private:
     int mHitCounter = 0;
@@ -119,17 +119,17 @@ class Detector: public o2::Base::Detector {
     SimulationType mSimulationType;       ///< Type of simulation
 
     /// Create the detector materials
-    virtual void CreateMaterials();
+    virtual void createMaterials();
     /// Geant settings hack
-    void GeantHack();
+    void geantHack();
 
     /// Construct the detector geometry
-    void LoadGeometryFromFile();
+    void loadGeometryFromFile();
     /// Construct the detector geometry
-    void ConstructTPCGeometry();
+    void constructTPCGeometry();
 
     /** Define the sensitive volumes of the geometry */
-    void DefineSensitiveVolumes();
+    void defineSensitiveVolumes();
 
     /** container for data points */
     TClonesArray*  mPointCollection;
@@ -159,7 +159,7 @@ Point* Detector::addHit(float x, float y, float z, float time, float nElectrons,
 
 template<typename T>
 inline
-T Detector::BetheBlochAleph(T bg, T kp1, T kp2, T kp3, T kp4, T kp5){
+T Detector::betheBlochAleph(T bg, T kp1, T kp2, T kp3, T kp4, T kp5){
   T beta = bg/std::sqrt(static_cast<T>(1.)+ bg*bg);
 
   T aa = std::pow(beta,kp4);

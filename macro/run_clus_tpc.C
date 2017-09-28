@@ -16,7 +16,7 @@
   #include "TPCSimulation/ClustererTask.h"
 #endif
 
-void run_clus_tpc(Int_t nEvents = 10, TString mcEngine = "TGeant3", bool isContinuous=true)
+void runClusTpc(Int_t nEvents = 10, TString mcEngine = "TGeant3", bool isContinuous=true)
 {
   // Initialize logger
   FairLogger *logger = FairLogger::GetLogger();

@@ -59,7 +59,7 @@ class SimpleEventDisplay : public CalibRawBase
 
     void setPedstals(CalPad* pedestals) { mPedestals = pedestals; }
   //   TH1D* MakePadSignals(Int_t roc, Int_t channel);
-    TH1D* MakePadSignals(Int_t roc, Int_t row, Int_t pad);
+    TH1D* makePadSignals(Int_t roc, Int_t row, Int_t pad);
 
     /// Dummy end event
     void endEvent() final {};

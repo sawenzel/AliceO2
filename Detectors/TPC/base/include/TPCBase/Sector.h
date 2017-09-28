@@ -83,7 +83,7 @@ class Sector
 
     // helper function to retrieve a TPC sector given cartesian coordinates
     template <typename T>
-    static int ToSector(T x, T y, T z) {
+    static int toSector(T x, T y, T z) {
       static const T invangle(static_cast<T>(180)/static_cast<T>(M_PI*20.)); // the angle describing one sector
       // force positive angle for conversion
       auto s = (std::atan2(-y,-x) + static_cast<T>(M_PI))*invangle;

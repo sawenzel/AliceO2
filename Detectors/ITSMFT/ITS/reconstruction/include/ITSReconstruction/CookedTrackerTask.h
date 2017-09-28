@@ -32,8 +32,8 @@ class CookedTrackerTask : public FairTask
   CookedTrackerTask(Int_t nThreads=1);
   ~CookedTrackerTask() override;
 
-  InitStatus Init() override;
-  void Exec(Option_t* option) override;
+  InitStatus init() override;
+  void exec(Option_t* option) override;
   void setBz(Double_t bz) { mTracker.setBz(bz); }
 
  private:

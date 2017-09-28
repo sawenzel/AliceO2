@@ -23,7 +23,7 @@ ObjectHandler::ObjectHandler() = default;
 
 ObjectHandler::~ObjectHandler() = default;
 
-void ObjectHandler::GetObject(const std::string& path, std::string& object)
+void ObjectHandler::getObject(const std::string& path, std::string& object)
 {
   TFile* file = new TFile(path.c_str());
 

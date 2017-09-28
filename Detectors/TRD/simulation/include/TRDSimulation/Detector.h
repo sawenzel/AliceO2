@@ -36,19 +36,19 @@ class Detector : public o2::Base::Detector
 
   ~Detector() override = default;
 
-  void Initialize() override;
+  void initialize() override;
 
   bool ProcessHits(FairVolume* v = nullptr) override;
 
-  void Register() override;
+  void register() override;
 
-  TClonesArray* GetCollection(int iColl) const final;
+  TClonesArray* getCollection(int iColl) const final;
 
-  void Reset() override;
-  void EndOfEvent() override;
+  void reset() override;
+  void endOfEvent() override;
 
   void createMaterials();
-  void ConstructGeometry() override;
+  void constructGeometry() override;
 
  private:
   // defines/sets-up the sensitive volumes

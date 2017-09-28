@@ -88,14 +88,14 @@ void Digitizer::process(TClonesArray* hits, TClonesArray* digits)
     // RS: ATTENTION: this is just a trick until we clarify how the hits from different source are
     // provided and identified. At the moment we just create a combined identifier from eventID
     // and sourceID and store it TEMPORARILY in the cached Point's TObject UniqueID  
-    hit->SetSrcEvID(mCurrSrcID,mCurrEvID); 
-    mSimulations[hit->GetDetectorID()].InsertHit(hit);
+    hit->setSrcEvID(mCurrSrcID,mCurrEvID); 
+    mSimulations[hit->getDetectorID()].insertHit(hit);
   }
     
   // Convert hits to digits  
   for (auto &simulation : mSimulations) {
-    simulation.Hits2Digits(seg, mEventTime, mROFrameMin, mROFrameMax);
-    simulation.ClearHits();
+    simulation.hits2Digits(seg, mEventTime, mROFrameMin, mROFrameMax);
+    simulation.clearHits();
   }
 
   // in the triggered mode store digits after every MC event

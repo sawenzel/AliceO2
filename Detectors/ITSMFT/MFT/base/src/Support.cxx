@@ -79,15 +79,15 @@ TGeoVolumeAssembly* Support::createPCBs(Int_t half, Int_t disk)
   
   // Create PCBs
   switch (disk) {
-  case 0: pcbVolume =  createPCB_00_01(half, disk);
+  case 0: pcbVolume =  createPCB0001(half, disk);
     break;
-  case 1: pcbVolume =  createPCB_00_01(half, disk);
+  case 1: pcbVolume =  createPCB0001(half, disk);
     break;
-  case 2: pcbVolume =  createPCB_02(half, disk);
+  case 2: pcbVolume =  createPCB02(half, disk);
     break;
-  case 3: pcbVolume =  createPCB_03(half, disk);
+  case 3: pcbVolume =  createPCB03(half, disk);
     break;
-  case 4: pcbVolume =  createPCB_04(half, disk);
+  case 4: pcbVolume =  createPCB04(half, disk);
     break;
   }
 
@@ -96,7 +96,7 @@ TGeoVolumeAssembly* Support::createPCBs(Int_t half, Int_t disk)
 }
 
 //_____________________________________________________________________________
-TGeoVolumeAssembly* Support::createPCB_00_01(Int_t half, Int_t disk){
+TGeoVolumeAssembly* Support::createPCB0001(Int_t half, Int_t disk){
 
   auto * pcbVolume = new TGeoVolumeAssembly(Form("PCB_%d_%d", half, disk));
 
@@ -253,7 +253,7 @@ TGeoVolumeAssembly* Support::createPCB_00_01(Int_t half, Int_t disk){
 //******************************* PCB_00 end *****************************************************
 
 //_____________________________________________________________________________
-TGeoVolumeAssembly* Support::createPCB_02(Int_t half, Int_t disk){
+TGeoVolumeAssembly* Support::createPCB02(Int_t half, Int_t disk){
 
   auto * pcbVolume = new TGeoVolumeAssembly(Form("PCB_%d_%d", half, disk));
 
@@ -437,7 +437,7 @@ TGeoVolumeAssembly* Support::createPCB_02(Int_t half, Int_t disk){
 //******************************* PCB_01 end *****************************************************
 
 //_____________________________________________________________________________
-TGeoVolumeAssembly* Support::createPCB_03(Int_t half, Int_t disk){
+TGeoVolumeAssembly* Support::createPCB03(Int_t half, Int_t disk){
 
   auto * pcbVolume = new TGeoVolumeAssembly(Form("PCB_%d_%d", half, disk));
 
@@ -670,7 +670,7 @@ auto *holes_02 = new TGeoCompositeShape  ("holes_02", "Tubeh0A_PCB_02:PCB0tr_Tub
 //************************************* final PCB_02 ******************
 
 //_____________________________________________________________________________
-TGeoVolumeAssembly* Support::createPCB_04(Int_t half, Int_t disk){
+TGeoVolumeAssembly* Support::createPCB04(Int_t half, Int_t disk){
 
   auto * pcbVolume = new TGeoVolumeAssembly(Form("PCB_%d_%d", half, disk));
 
@@ -919,7 +919,7 @@ auto *boxesi03 = new TGeoCompositeShape  ("boxesi03", "Box3_PCB_03kk:PCB0tr_boxk
 // ========================== PCB_Psu ===========================================
 
 //_____________________________________________________________________________
-TGeoVolumeAssembly* Support::createPCB_PSU(Int_t half, Int_t disk){
+TGeoVolumeAssembly* Support::createPCBPSU(Int_t half, Int_t disk){
 
   auto * pcbVolume = new TGeoVolumeAssembly(Form("PCB_%d_%d", half, disk));
   // Create Shapes
@@ -1177,15 +1177,15 @@ TGeoVolume* Support::createSupport(Int_t half, Int_t disk)
   //TGeoVolume *supportVol = new TGeoVolume();
   TGeoVolume *supportVol;
   switch (disk) {
-    case 0: supportVol =  createDisk_Support_00();
+    case 0: supportVol =  createDiskSupport00();
       break;
-    case 1: supportVol =  createDisk_Support_01();
+    case 1: supportVol =  createDiskSupport01();
       break;
-    case 2: supportVol =  createDisk_Support_02();
+    case 2: supportVol =  createDiskSupport02();
       break;
-    case 3: supportVol =  createDisk_Support_03();
+    case 3: supportVol =  createDiskSupport03();
       break;
-    case 4: supportVol =  createDisk_Support_04();
+    case 4: supportVol =  createDiskSupport04();
       break;
   }
 
@@ -1204,7 +1204,7 @@ TGeoVolume* Support::createSupport(Int_t half, Int_t disk)
 }
 
 //_____________________________________________________________________________
-TGeoVolume* Support::createDisk_Support_00 (){
+TGeoVolume* Support::createDiskSupport00 (){
 
   double rMin = 0,
     rMax = 17.5,
@@ -1289,28 +1289,28 @@ TGeoVolume* Support::createDisk_Support_00 (){
   auto *tr_holes1= new TGeoTranslation ("D0tr_holes1",AX,AY, 2*sup_box_dZ+thickness);
   tr_holes1-> RegisterYourself();
   auto * holes1 = new TGeoCompositeShape();
-  holes1 = screw_array(N_holes); holes1->SetName("D0holes1");
+  holes1 = screwArray(N_holes); holes1->SetName("D0holes1");
 
   //Screwholes Area #2
   AX=-8.25; AY=7.41; N_holes = 2;
   auto *tr_holes2= new TGeoTranslation ("D0tr_holes2",AX,AY, 2*sup_box_dZ+thickness);
   tr_holes2-> RegisterYourself();
   auto * holes2 = new TGeoCompositeShape();
-  holes2 = screw_array(N_holes,-1.7); holes2->SetName("D0holes2");
+  holes2 = screwArray(N_holes,-1.7); holes2->SetName("D0holes2");
 
   //Screwholes Area #3
   AX=3.65; AY=10.42; N_holes = 3;
   auto *tr_holes3= new TGeoTranslation ("D0tr_holes3",AX,AY, 2*sup_box_dZ+thickness);
   tr_holes3-> RegisterYourself();
   auto * holes3 = new TGeoCompositeShape();
-  holes3 = screw_array(N_holes,1.7); holes3->SetName("D0holes3");
+  holes3 = screwArray(N_holes,1.7); holes3->SetName("D0holes3");
 
   //Screwholes Area #4
   AX=-3.15; AY=10.42; N_holes = 3;
   auto *tr_holes4= new TGeoTranslation ("D0tr_holes4",AX,AY, 2*sup_box_dZ+thickness);
   tr_holes4-> RegisterYourself();
   auto * holes4 = new TGeoCompositeShape();
-  holes4 = screw_array(N_holes,-1.7); holes4->SetName("D0holes4");
+  holes4 = screwArray(N_holes,-1.7); holes4->SetName("D0holes4");
 
   //Screwholes Area #5 (not aligned!!!)
   //A
@@ -1318,19 +1318,19 @@ TGeoVolume* Support::createDisk_Support_00 (){
   auto *tr_holes5a= new TGeoTranslation ("D0tr_holes5a",AX,AY, 2*sup_box_dZ+thickness);
   tr_holes5a-> RegisterYourself();
   auto * holes5a = new TGeoCompositeShape();
-  holes5a = screw_array(1); holes5a->SetName("D0holes5a");
+  holes5a = screwArray(1); holes5a->SetName("D0holes5a");
   //B
   AX=0.25; AY=12.52;
   auto *tr_holes5b= new TGeoTranslation ("D0tr_holes5b",AX,AY, 2*sup_box_dZ+thickness);
   tr_holes5b-> RegisterYourself();
   auto * holes5b = new TGeoCompositeShape();
-  holes5b = screw_array(1); holes5b->SetName("D0holes5b");
+  holes5b = screwArray(1); holes5b->SetName("D0holes5b");
   //C
   AX=-1.45; AY=12.43;
   auto *tr_holes5c= new TGeoTranslation ("D0tr_holes5c",AX,AY, 2*sup_box_dZ+thickness);
   tr_holes5c-> RegisterYourself();
   auto * holes5c = new TGeoCompositeShape();
-  holes5c = screw_array(1); holes5c->SetName("D0holes5c");
+  holes5c = screwArray(1); holes5c->SetName("D0holes5c");
   auto *holes5 = new TGeoCompositeShape ("D0holes5", "(D0holes5a:D0tr_holes5a+D0holes5b:D0tr_holes5b+D0holes5c:D0tr_holes5c)");
 
   //ScrewHoles C, D; and E
@@ -1344,28 +1344,28 @@ TGeoVolume* Support::createDisk_Support_00 (){
   //Screwholes C
   AX=15.5, AY=6.5;
   auto * holesC = new TGeoCompositeShape();
-  holesC = screw_C(); holesC->SetName("D0holesC");
+  holesC = screwC(); holesC->SetName("D0holesC");
   auto * rot_tr_screwC = new TGeoCombiTrans("D0rot_tr_screwC",AX,AY, 0.,rotscrewC);
   rot_tr_screwC->RegisterYourself();
 
   //Screwholes D
   AX=11.7, AY=1.7;
   auto * holesD = new TGeoCompositeShape();
-  holesD = screw_D(); holesD->SetName("D0holesD");
+  holesD = screwD(); holesD->SetName("D0holesD");
   auto * rot_tr_screwD = new TGeoCombiTrans("D0rot_tr_screwD",AX,AY, 0.,rotscrewDE);
   rot_tr_screwD->RegisterYourself();
 
   //Screwholes E
   AX=12.1, AY=1.7;
   auto * holesE = new TGeoCompositeShape();
-  holesE = screw_E(); holesE->SetName("D0holesE");
+  holesE = screwE(); holesE->SetName("D0holesE");
   auto * rot_tr_screwE = new TGeoCombiTrans("D0rot_tr_screwE",AX,AY, 0.,rotscrewDE);
   rot_tr_screwE->RegisterYourself();
 
   //Through Hole A
   AX=16.6, AY=2;
   auto * ThRA = new TGeoCompositeShape();
-  ThRA = through_hole_a(); ThRA->SetName("D0ThRA");
+  ThRA = throughHoleA(); ThRA->SetName("D0ThRA");
   auto * tr_ThRA = new TGeoTranslation("D0tr_ThRA",AX,AY, 0.);
   tr_ThRA->RegisterYourself();
   //through_hole_a
@@ -1373,28 +1373,28 @@ TGeoVolume* Support::createDisk_Support_00 (){
   //Through Hole B
   AX=16.6, AY=3;
   auto * ThRB = new TGeoCompositeShape();
-  ThRB = through_hole_b(); ThRB->SetName("D0ThRB");
+  ThRB = throughHoleB(); ThRB->SetName("D0ThRB");
   auto * tr_ThRB = new TGeoTranslation("D0tr_ThRB",AX,AY, 0.);
   tr_ThRB->RegisterYourself();
 
   //Through Hole C
   AX=15.5, AY=4.7;
   auto * ThRC = new TGeoCompositeShape();
-  ThRC = through_hole_c(); ThRC->SetName("D0ThRC");
+  ThRC = throughHoleC(); ThRC->SetName("D0ThRC");
   auto * tr_ThRC = new TGeoTranslation("D0tr_ThRC",AX,AY, 0.);
   tr_ThRC->RegisterYourself();
 
   //Through Hole D
   AX=14., AY=9.5;
   auto * ThRD = new TGeoCompositeShape();
-  ThRD = through_hole_d(); ThRD->SetName("D0ThRD");
+  ThRD = throughHoleD(); ThRD->SetName("D0ThRD");
   auto * tr_ThRD = new TGeoTranslation("D0tr_ThRD",AX,AY, 0.);
   tr_ThRD->RegisterYourself();
 
   //Through Hole E
   AX=11.2, AY=9.5;
   auto * ThRE = new TGeoCompositeShape();
-  ThRE = through_hole_e(); ThRE->SetName("D0ThRE");
+  ThRE = throughHoleE(); ThRE->SetName("D0ThRE");
   auto * tr_ThRE = new TGeoTranslation("D0tr_ThRE",AX,AY, 0.);
   tr_ThRE->RegisterYourself();
 
@@ -1532,7 +1532,7 @@ TGeoVolume* Support::createDisk_Support_00 (){
 }
 
 //_____________________________________________________________________________
-TGeoVolume* Support::createDisk_Support_01 (){  // a copy of the Disc support 0
+TGeoVolume* Support::createDiskSupport01 (){  // a copy of the Disc support 0
 
   double rMin = 0,
     rMax = 17.5,
@@ -1618,28 +1618,28 @@ TGeoVolume* Support::createDisk_Support_01 (){  // a copy of the Disc support 0
   auto *tr_holes1= new TGeoTranslation ("D1tr_holes1",AX,AY, 2*sup_box_dZ+thickness);
   tr_holes1-> RegisterYourself();
   auto * holes1 = new TGeoCompositeShape();
-  holes1 = screw_array(N_holes); holes1->SetName("D1holes1");
+  holes1 = screwArray(N_holes); holes1->SetName("D1holes1");
 
   //Screwholes Area #2
   AX=-8.25; AY=7.41; N_holes = 2;
   auto *tr_holes2= new TGeoTranslation ("D1tr_holes2",AX,AY, 2*sup_box_dZ+thickness);
   tr_holes2-> RegisterYourself();
   auto * holes2 = new TGeoCompositeShape();
-  holes2 = screw_array(N_holes,-1.7); holes2->SetName("D1holes2");
+  holes2 = screwArray(N_holes,-1.7); holes2->SetName("D1holes2");
 
   //Screwholes Area #3
   AX=3.65; AY=10.42; N_holes = 3;
   auto *tr_holes3= new TGeoTranslation ("D1tr_holes3",AX,AY, 2*sup_box_dZ+thickness);
   tr_holes3-> RegisterYourself();
   auto * holes3 = new TGeoCompositeShape();
-  holes3 = screw_array(N_holes,1.7); holes3->SetName("D1holes3");
+  holes3 = screwArray(N_holes,1.7); holes3->SetName("D1holes3");
 
   //Screwholes Area #4
   AX=-3.15; AY=10.42; N_holes = 3;
   auto *tr_holes4= new TGeoTranslation ("D1tr_holes4",AX,AY, 2*sup_box_dZ+thickness);
   tr_holes4-> RegisterYourself();
   auto * holes4 = new TGeoCompositeShape();
-  holes4 = screw_array(N_holes,-1.7); holes4->SetName("D1holes4");
+  holes4 = screwArray(N_holes,-1.7); holes4->SetName("D1holes4");
 
   //Screwholes Area #5 (not aligned!!!)
   //A
@@ -1647,19 +1647,19 @@ TGeoVolume* Support::createDisk_Support_01 (){  // a copy of the Disc support 0
   auto *tr_holes5a= new TGeoTranslation ("D1tr_holes5a",AX,AY, 2*sup_box_dZ+thickness);
   tr_holes5a-> RegisterYourself();
   auto *holes5a = new TGeoCompositeShape();
-  holes5a = screw_array(1); holes5a->SetName("D1holes5a");
+  holes5a = screwArray(1); holes5a->SetName("D1holes5a");
   //B
   AX=0.25; AY=12.52;
   auto *tr_holes5b= new TGeoTranslation ("D1tr_holes5b",AX,AY, 2*sup_box_dZ+thickness);
   tr_holes5b-> RegisterYourself();
   auto * holes5b = new TGeoCompositeShape();
-  holes5b = screw_array(1); holes5b->SetName("D1holes5b");
+  holes5b = screwArray(1); holes5b->SetName("D1holes5b");
   //C
   AX=-1.45; AY=12.43;
   auto *tr_holes5c= new TGeoTranslation ("D1tr_holes5c",AX,AY, 2*sup_box_dZ+thickness);
   tr_holes5c-> RegisterYourself();
   auto * holes5c = new TGeoCompositeShape();
-  holes5c = screw_array(1); holes5c->SetName("D1holes5c");
+  holes5c = screwArray(1); holes5c->SetName("D1holes5c");
   auto *holes5 = new TGeoCompositeShape ("D1holes5", "(D1holes5a:D1tr_holes5a+D1holes5b:D1tr_holes5b+D1holes5c:D1tr_holes5c)");
 
   //ScrewHoles C, D; and E
@@ -1673,28 +1673,28 @@ TGeoVolume* Support::createDisk_Support_01 (){  // a copy of the Disc support 0
   //Screwholes C
   AX=15.5, AY=6.5;
   auto *holesC = new TGeoCompositeShape();
-  holesC = screw_C(); holesC->SetName("D1holesC");
+  holesC = screwC(); holesC->SetName("D1holesC");
   auto *rot_tr_screwC = new TGeoCombiTrans("D1rot_tr_screwC",AX,AY, 0.,rotscrewC);
   rot_tr_screwC->RegisterYourself();
 
   //Screwholes D
   AX=11.7, AY=1.7;
   auto * holesD = new TGeoCompositeShape();
-  holesD = screw_D(); holesD->SetName("D1holesD");
+  holesD = screwD(); holesD->SetName("D1holesD");
   auto * rot_tr_screwD = new TGeoCombiTrans("D1rot_tr_screwD",AX,AY, 0.,rotscrewDE);
   rot_tr_screwD->RegisterYourself();
 
   //Screwholes E
   AX=12.1, AY=1.7;
   auto * holesE = new TGeoCompositeShape();
-  holesE = screw_E(); holesE->SetName("D1holesE");
+  holesE = screwE(); holesE->SetName("D1holesE");
   auto * rot_tr_screwE = new TGeoCombiTrans("D1rot_tr_screwE",AX,AY, 0.,rotscrewDE);
   rot_tr_screwE->RegisterYourself();
 
   //Through Hole A
   AX=16.6, AY=2;
   auto * ThRA = new TGeoCompositeShape();
-  ThRA = through_hole_a(); ThRA->SetName("D1ThRA");
+  ThRA = throughHoleA(); ThRA->SetName("D1ThRA");
   auto * tr_ThRA = new TGeoTranslation("D1tr_ThRA",AX,AY, 0.);
   tr_ThRA->RegisterYourself();
   //through_hole_a
@@ -1702,14 +1702,14 @@ TGeoVolume* Support::createDisk_Support_01 (){  // a copy of the Disc support 0
   //Through Hole B
   AX=16.6, AY=3;
   auto * ThRB = new TGeoCompositeShape();
-  ThRB = through_hole_b(); ThRB->SetName("D1ThRB");
+  ThRB = throughHoleB(); ThRB->SetName("D1ThRB");
   auto * tr_ThRB = new TGeoTranslation("D1tr_ThRB",AX,AY, 0.);
   tr_ThRB->RegisterYourself();
 
   //Through Hole C
   AX=15.5, AY=4.7;
   auto * ThRC = new TGeoCompositeShape();
-  ThRC = through_hole_c(); ThRC->SetName("D1ThRC");
+  ThRC = throughHoleC(); ThRC->SetName("D1ThRC");
   auto * tr_ThRC = new TGeoTranslation("D1tr_ThRC",AX,AY, 0.);
   tr_ThRC->RegisterYourself();
 
@@ -1717,14 +1717,14 @@ TGeoVolume* Support::createDisk_Support_01 (){  // a copy of the Disc support 0
   //Through Hole D
   AX=14., AY=9.5;
   auto * ThRD = new TGeoCompositeShape();
-  ThRD = through_hole_d(); ThRD->SetName("D1ThRD");
+  ThRD = throughHoleD(); ThRD->SetName("D1ThRD");
   auto * tr_ThRD = new TGeoTranslation("D1tr_ThRD",AX,AY, 0.);
   tr_ThRD->RegisterYourself();
 
   //Through Hole E
   AX=11.2, AY=9.5;
   auto * ThRE = new TGeoCompositeShape();
-  ThRE = through_hole_e(); ThRE->SetName("D1ThRE");
+  ThRE = throughHoleE(); ThRE->SetName("D1ThRE");
   auto * tr_ThRE = new TGeoTranslation("D1tr_ThRE",AX,AY, 0.);
   tr_ThRE->RegisterYourself();
 
@@ -1864,7 +1864,7 @@ TGeoVolume* Support::createDisk_Support_01 (){  // a copy of the Disc support 0
 }
 
 //_____________________________________________________________________________
-TGeoVolume* Support::createDisk_Support_02 (){  // a copy of the Disc support 0
+TGeoVolume* Support::createDiskSupport02 (){  // a copy of the Disc support 0
 
   double rMin = 0,
          rMax = 17.5,
@@ -1948,28 +1948,28 @@ TGeoVolume* Support::createDisk_Support_02 (){  // a copy of the Disc support 0
   auto *tr_holes1= new TGeoTranslation ("D2tr_holes1",AX,AY, 2*sup_box_dZ+thickness);
   tr_holes1-> RegisterYourself();
   auto * holes1 = new TGeoCompositeShape();
-  holes1 = screw_array(N_holes); holes1->SetName("D2holes1");
+  holes1 = screwArray(N_holes); holes1->SetName("D2holes1");
 
   //Screwholes Area #2
   AX=-8.25; AY=7.41; N_holes = 2;
   auto *tr_holes2= new TGeoTranslation ("D2tr_holes2",AX,AY, 2*sup_box_dZ+thickness);
   tr_holes2-> RegisterYourself();
   auto * holes2 = new TGeoCompositeShape();
-  holes2 = screw_array(N_holes,-1.7); holes2->SetName("D2holes2");
+  holes2 = screwArray(N_holes,-1.7); holes2->SetName("D2holes2");
 
   //Screwholes Area #3
   AX=3.65; AY=10.42; N_holes = 3;
   auto *tr_holes3= new TGeoTranslation ("D2tr_holes3",AX,AY, 2*sup_box_dZ+thickness);
   tr_holes3-> RegisterYourself();
   auto * holes3 = new TGeoCompositeShape();
-  holes3 = screw_array(N_holes,1.7); holes3->SetName("D2holes3");
+  holes3 = screwArray(N_holes,1.7); holes3->SetName("D2holes3");
 
   //Screwholes Area #4
   AX=-3.15; AY=10.42; N_holes = 3;
   auto *tr_holes4= new TGeoTranslation ("D2tr_holes4",AX,AY, 2*sup_box_dZ+thickness);
   tr_holes4-> RegisterYourself();
   auto * holes4 = new TGeoCompositeShape();
-  holes4 = screw_array(N_holes,-1.7); holes4->SetName("D2holes4");
+  holes4 = screwArray(N_holes,-1.7); holes4->SetName("D2holes4");
 
   //Screwholes Area #5 (not aligned!!!)
   //A
@@ -1977,19 +1977,19 @@ TGeoVolume* Support::createDisk_Support_02 (){  // a copy of the Disc support 0
   auto *tr_holes5a= new TGeoTranslation ("D2tr_holes5a",AX,AY, 2*sup_box_dZ+thickness);
   tr_holes5a-> RegisterYourself();
   auto * holes5a = new TGeoCompositeShape();
-  holes5a = screw_array(1); holes5a->SetName("D2holes5a");
+  holes5a = screwArray(1); holes5a->SetName("D2holes5a");
   //B
   AX=0.25; AY=12.52;
   auto *tr_holes5b= new TGeoTranslation ("D2tr_holes5b",AX,AY, 2*sup_box_dZ+thickness);
   tr_holes5b-> RegisterYourself();
   auto * holes5b = new TGeoCompositeShape();
-  holes5b = screw_array(1); holes5b->SetName("D2holes5b");
+  holes5b = screwArray(1); holes5b->SetName("D2holes5b");
   //C
   AX=-1.45; AY=12.43;
   auto *tr_holes5c= new TGeoTranslation ("D2tr_holes5c",AX,AY, 2*sup_box_dZ+thickness);
   tr_holes5c-> RegisterYourself();
   auto * holes5c = new TGeoCompositeShape();
-  holes5c = screw_array(1); holes5c->SetName("D2holes5c");
+  holes5c = screwArray(1); holes5c->SetName("D2holes5c");
   auto *holes5 = new TGeoCompositeShape ("D2holes5", "(D2holes5a:D2tr_holes5a+D2holes5b:D2tr_holes5b+D2holes5c:D2tr_holes5c)");
 
   //ScrewHoles C, D; and E
@@ -2003,28 +2003,28 @@ TGeoVolume* Support::createDisk_Support_02 (){  // a copy of the Disc support 0
   //Screwholes C
   AX=15.5, AY=6.5;
   auto * holesC = new TGeoCompositeShape();
-  holesC = screw_C(); holesC->SetName("D2holesC");
+  holesC = screwC(); holesC->SetName("D2holesC");
   auto * rot_tr_screwC = new TGeoCombiTrans("D2rot_tr_screwC",AX,AY, 0.,rotscrewC);
   rot_tr_screwC->RegisterYourself();
 
   //Screwholes D
   AX=11.7, AY=1.7;
   auto * holesD = new TGeoCompositeShape();
-  holesD = screw_D(); holesD->SetName("D2holesD");
+  holesD = screwD(); holesD->SetName("D2holesD");
   auto * rot_tr_screwD = new TGeoCombiTrans("D2rot_tr_screwD",AX,AY, 0.,rotscrewDE);
   rot_tr_screwD->RegisterYourself();
 
   //Screwholes E
   AX=12.1, AY=1.7;
   auto * holesE = new TGeoCompositeShape();
-  holesE = screw_E(); holesE->SetName("D2holesE");
+  holesE = screwE(); holesE->SetName("D2holesE");
   auto * rot_tr_screwE = new TGeoCombiTrans("D2rot_tr_screwE",AX,AY, 0.,rotscrewDE);
   rot_tr_screwE->RegisterYourself();
 
   //Through Hole A
   AX=16.6, AY=2;
   auto * ThRA = new TGeoCompositeShape();
-  ThRA = through_hole_a(); ThRA->SetName("D2ThRA");
+  ThRA = throughHoleA(); ThRA->SetName("D2ThRA");
   auto * tr_ThRA = new TGeoTranslation("D2tr_ThRA",AX,AY, 0.);
   tr_ThRA->RegisterYourself();
   //through_hole_a
@@ -2032,28 +2032,28 @@ TGeoVolume* Support::createDisk_Support_02 (){  // a copy of the Disc support 0
   //Through Hole B
   AX=16.6, AY=3;
   auto * ThRB = new TGeoCompositeShape();
-  ThRB = through_hole_b(); ThRB->SetName("D2ThRB");
+  ThRB = throughHoleB(); ThRB->SetName("D2ThRB");
   auto * tr_ThRB = new TGeoTranslation("D2tr_ThRB",AX,AY, 0.);
   tr_ThRB->RegisterYourself();
 
   //Through Hole C
   AX=15.5, AY=4.7;
   auto * ThRC = new TGeoCompositeShape();
-  ThRC = through_hole_c(); ThRC->SetName("D2ThRC");
+  ThRC = throughHoleC(); ThRC->SetName("D2ThRC");
   auto * tr_ThRC = new TGeoTranslation("D2tr_ThRC",AX,AY, 0.);
   tr_ThRC->RegisterYourself();
 
   //Through Hole D
   AX=14., AY=9.5;
   auto * ThRD = new TGeoCompositeShape();
-  ThRD = through_hole_d(); ThRD->SetName("D2ThRD");
+  ThRD = throughHoleD(); ThRD->SetName("D2ThRD");
   auto * tr_ThRD = new TGeoTranslation("D2tr_ThRD",AX,AY, 0.);
   tr_ThRD->RegisterYourself();
 
   //Through Hole E
   AX=11.2, AY=9.5;
   auto * ThRE = new TGeoCompositeShape();
-  ThRE = through_hole_e(); ThRE->SetName("D2ThRE");
+  ThRE = throughHoleE(); ThRE->SetName("D2ThRE");
   auto * tr_ThRE = new TGeoTranslation("D2tr_ThRE",AX,AY, 0.);
   tr_ThRE->RegisterYourself();
 
@@ -2190,7 +2190,7 @@ TGeoVolume* Support::createDisk_Support_02 (){  // a copy of the Disc support 0
 }
 
 //_____________________________________________________________________________
-TGeoVolume* Support::createDisk_Support_03 (){
+TGeoVolume* Support::createDiskSupport03 (){
   // define shape components with names + positions
 
   // ================= constants ===========================
@@ -2335,75 +2335,75 @@ TGeoVolume* Support::createDisk_Support_03 (){
   auto *tr_d3holes1= new TGeoTranslation ("d3tr_holes1",AX,AY, 2*sup_box_dZ+thickness);
   tr_d3holes1-> RegisterYourself();
   auto * d3holes1 = new TGeoCompositeShape();
-  d3holes1 = screw_array(N_holes); d3holes1->SetName("d3holes1");
+  d3holes1 = screwArray(N_holes); d3holes1->SetName("d3holes1");
 
   //Screwholes Area #2
   AX=10.45; AY=10.42; N_holes = 1;
   auto *tr_d3holes2= new TGeoTranslation ("d3tr_holes2",AX,AY, 2*sup_box_dZ+thickness);
   tr_d3holes2-> RegisterYourself();
   auto * d3holes2 = new TGeoCompositeShape();
-  d3holes2 = screw_array(N_holes,-1.7); d3holes2->SetName("d3holes2");
+  d3holes2 = screwArray(N_holes,-1.7); d3holes2->SetName("d3holes2");
 
   //Screwholes Area #3
   AX=8.75; AY=13.43; N_holes = 3;
   auto *tr_d3holes3= new TGeoTranslation ("d3tr_holes3",AX,AY, 2*sup_box_dZ+thickness);
   tr_d3holes3-> RegisterYourself();
   auto * d3holes3 = new TGeoCompositeShape();
-  d3holes3 = screw_array(N_holes,-1.7); d3holes3->SetName("d3holes3");
+  d3holes3 = screwArray(N_holes,-1.7); d3holes3->SetName("d3holes3");
 
   //Screwholes Area #4 (3 pairs out of alligment)
   AX=1.95; AY=16.46; N_holes = 1;
   auto *tr_d3holes4a = new TGeoTranslation ("d3tr_holes4a",AX,AY, 2*sup_box_dZ+thickness);
   tr_d3holes4a-> RegisterYourself();
   auto * d3holes4a = new TGeoCompositeShape();
-  d3holes4a = screw_array(N_holes,-1.7); d3holes4a->SetName("d3holes4a");
+  d3holes4a = screwArray(N_holes,-1.7); d3holes4a->SetName("d3holes4a");
 
   AX=0.25; AY=16.63; N_holes = 1;
   auto *tr_d3holes4b = new TGeoTranslation ("d3tr_holes4b",AX,AY, 2*sup_box_dZ+thickness);
   tr_d3holes4b-> RegisterYourself();
   auto * d3holes4b = new TGeoCompositeShape();
-  d3holes4b = screw_array(N_holes,-1.7); d3holes4b->SetName("d3holes4b");
+  d3holes4b = screwArray(N_holes,-1.7); d3holes4b->SetName("d3holes4b");
 
   AX=-1.45; AY=16.57; N_holes = 1;
   auto *tr_d3holes4c = new TGeoTranslation ("d3tr_holes4c",AX,AY, 2*sup_box_dZ+thickness);
   tr_d3holes4c-> RegisterYourself();
   auto * d3holes4c = new TGeoCompositeShape();
-  d3holes4c = screw_array(N_holes,-1.7); d3holes4c->SetName("d3holes4c");
+  d3holes4c = screwArray(N_holes,-1.7); d3holes4c->SetName("d3holes4c");
 
   //Screwholes Area #5
   AX=3.65; AY=15.23; N_holes = 1;
   auto *tr_d3holes5= new TGeoTranslation ("d3tr_holes5",AX,AY, 2*sup_box_dZ+thickness);
   tr_d3holes5-> RegisterYourself();
   auto * d3holes5 = new TGeoCompositeShape();
-  d3holes5 = screw_array(N_holes,-1.7); d3holes5->SetName("d3holes5");
+  d3holes5 = screwArray(N_holes,-1.7); d3holes5->SetName("d3holes5");
 
   //Screwholes Area #6
   AX=-3.15; AY=15.69; N_holes = 1;
   auto *tr_d3holes6= new TGeoTranslation ("d3tr_holes6",AX,AY, 2*sup_box_dZ+thickness);
   tr_d3holes6-> RegisterYourself();
   auto * d3holes6 = new TGeoCompositeShape();
-  d3holes6 = screw_array(N_holes,-1.7); d3holes6->SetName("d3holes6");
+  d3holes6 = screwArray(N_holes,-1.7); d3holes6->SetName("d3holes6");
 
   //Screwholes Area #7
   AX=-4.85, AY=13.43; N_holes = 3;
   auto *tr_d3holes7= new TGeoTranslation ("d3tr_holes7",AX,AY, 2*sup_box_dZ+thickness);
   tr_d3holes7-> RegisterYourself();
   auto * d3holes7 = new TGeoCompositeShape();
-  d3holes7 = screw_array(N_holes,-1.7); d3holes7->SetName("d3holes7");
+  d3holes7 = screwArray(N_holes,-1.7); d3holes7->SetName("d3holes7");
 
   //Screwholes Area #8
   AX=-9.95, AY=10.42; N_holes = 2;
   auto *tr_d3holes8= new TGeoTranslation ("d3tr_holes8",AX,AY, 2*sup_box_dZ+thickness);
   tr_d3holes8-> RegisterYourself();
   auto * d3holes8 = new TGeoCompositeShape();
-  d3holes8 = screw_array(N_holes,-1.7); d3holes8->SetName("d3holes8");
+  d3holes8 = screwArray(N_holes,-1.7); d3holes8->SetName("d3holes8");
 
   //Screwholes Area #9
   AX=-13.35, AY=7.41; N_holes = 1;
   auto *tr_d3holes9= new TGeoTranslation ("d3tr_holes9",AX,AY, 2*sup_box_dZ+thickness);
   tr_d3holes9-> RegisterYourself();
   auto * d3holes9 = new TGeoCompositeShape();
-  d3holes9 = screw_array(N_holes); d3holes9->SetName("d3holes9");
+  d3holes9 = screwArray(N_holes); d3holes9->SetName("d3holes9");
 
   //Through Hole001 disk3 - Radius 3.25 mm
   AX=16.6, AY=2.0;
@@ -2463,7 +2463,7 @@ TGeoVolume* Support::createDisk_Support_03 (){
 }
 
 //_____________________________________________________________________________
-TGeoVolume* Support::createDisk_Support_04 (){
+TGeoVolume* Support::createDiskSupport04 (){
   // define shape components with names + positions
 
   // ================= constants ===========================
@@ -2628,7 +2628,7 @@ TGeoVolume* Support::createDisk_Support_04 (){
   auto *tr_d4holes1= new TGeoTranslation ("d4tr_holes1",AX,AY, 2*sup_box_dZ+thickness);
   tr_d4holes1-> RegisterYourself();
   auto * d4holes1 = new TGeoCompositeShape();
-  d4holes1 = screw_array(N_holes); d4holes1->SetName("d4holes1");
+  d4holes1 = screwArray(N_holes); d4holes1->SetName("d4holes1");
 
   //Screwholes Area #2
   //AX=10.45; AY=10.42; N_holes = 1;
@@ -2636,7 +2636,7 @@ TGeoVolume* Support::createDisk_Support_04 (){
   auto *tr_d4holes2= new TGeoTranslation ("d4tr_holes2",AX,AY, 2*sup_box_dZ+thickness);
   tr_d4holes2-> RegisterYourself();
   auto * d4holes2 = new TGeoCompositeShape();
-  d4holes2 = screw_array(N_holes,-1.7); d4holes2->SetName("d4holes2");
+  d4holes2 = screwArray(N_holes,-1.7); d4holes2->SetName("d4holes2");
 
   //Screwholes Area #3
   //AX=8.75; AY=13.43; N_holes = 3;
@@ -2644,26 +2644,26 @@ TGeoVolume* Support::createDisk_Support_04 (){
   auto *tr_d4holes3= new TGeoTranslation ("d4tr_holes3",AX,AY, 2*sup_box_dZ+thickness);
   tr_d4holes3-> RegisterYourself();
   auto * d4holes3 = new TGeoCompositeShape();
-  d4holes3 = screw_array(N_holes,-1.7); d4holes3->SetName("d4holes3");
+  d4holes3 = screwArray(N_holes,-1.7); d4holes3->SetName("d4holes3");
 
   //Screwholes Area #4 (3 pairs out of alligment)
   AX=1.95; AY=16.46; N_holes = 1;
   auto *tr_d4holes4a = new TGeoTranslation ("d4tr_holes4a",AX,AY, 2*sup_box_dZ+thickness);
   tr_d4holes4a-> RegisterYourself();
   auto * d4holes4a = new TGeoCompositeShape();
-  d4holes4a = screw_array(N_holes,-1.7); d4holes4a->SetName("d4holes4a");
+  d4holes4a = screwArray(N_holes,-1.7); d4holes4a->SetName("d4holes4a");
 
   AX=0.25; AY=16.63; N_holes = 1;
   auto *tr_d4holes4b = new TGeoTranslation ("d4tr_holes4b",AX,AY, 2*sup_box_dZ+thickness);
   tr_d4holes4b-> RegisterYourself();
   auto * d4holes4b = new TGeoCompositeShape();
-  d4holes4b = screw_array(N_holes,-1.7); d4holes4b->SetName("d4holes4b");
+  d4holes4b = screwArray(N_holes,-1.7); d4holes4b->SetName("d4holes4b");
 
   AX=-1.45; AY=16.57; N_holes = 1;
   auto *tr_d4holes4c = new TGeoTranslation ("d4tr_holes4c",AX,AY, 2*sup_box_dZ+thickness);
   tr_d4holes4c-> RegisterYourself();
   auto * d4holes4c = new TGeoCompositeShape();
-  d4holes4c = screw_array(N_holes,-1.7); d4holes4c->SetName("d4holes4c");
+  d4holes4c = screwArray(N_holes,-1.7); d4holes4c->SetName("d4holes4c");
 
   //Screwholes Area #5
   //AX=3.65; AY=15.23; N_holes = 1;
@@ -2671,7 +2671,7 @@ TGeoVolume* Support::createDisk_Support_04 (){
   auto *tr_d4holes5= new TGeoTranslation ("d4tr_holes5",AX,AY, 2*sup_box_dZ+thickness);
   tr_d4holes5-> RegisterYourself();
   auto * d4holes5 = new TGeoCompositeShape();
-  d4holes5 = screw_array(N_holes,-1.7); d4holes5->SetName("d4holes5");
+  d4holes5 = screwArray(N_holes,-1.7); d4holes5->SetName("d4holes5");
 
   //Screwholes Area #6
   //AX=-3.15; AY=15.69; N_holes = 1;
@@ -2679,7 +2679,7 @@ TGeoVolume* Support::createDisk_Support_04 (){
   auto *tr_d4holes6= new TGeoTranslation ("d4tr_holes6",AX,AY, 2*sup_box_dZ+thickness);
   tr_d4holes6-> RegisterYourself();
   auto * d4holes6 = new TGeoCompositeShape();
-  d4holes6 = screw_array(N_holes,-1.7); d4holes6->SetName("d4holes6");
+  d4holes6 = screwArray(N_holes,-1.7); d4holes6->SetName("d4holes6");
 
   //Screwholes Area #7
   //AX=-4.85, AY=13.43; N_holes = 3;
@@ -2687,7 +2687,7 @@ TGeoVolume* Support::createDisk_Support_04 (){
   auto *tr_d4holes7= new TGeoTranslation ("d4tr_holes7",AX,AY, 2*sup_box_dZ+thickness);
   tr_d4holes7-> RegisterYourself();
   auto * d4holes7 = new TGeoCompositeShape();
-  d4holes7 = screw_array(N_holes,-1.7); d4holes7->SetName("d4holes7");
+  d4holes7 = screwArray(N_holes,-1.7); d4holes7->SetName("d4holes7");
 
   //Screwholes Area #8
   //AX=-9.95, AY=10.42; N_holes = 2;
@@ -2695,14 +2695,14 @@ TGeoVolume* Support::createDisk_Support_04 (){
   auto *tr_d4holes8= new TGeoTranslation ("d4tr_holes8",AX,AY, 2*sup_box_dZ+thickness);
   tr_d4holes8-> RegisterYourself();
   auto * d4holes8 = new TGeoCompositeShape();
-  d4holes8 = screw_array(N_holes,-1.7); d4holes8->SetName("d4holes8");
+  d4holes8 = screwArray(N_holes,-1.7); d4holes8->SetName("d4holes8");
 
   //Screwholes Area #9
   AX=-13.35, AY=7.41; N_holes = 1;
   auto *tr_d4holes9= new TGeoTranslation ("d4tr_holes9",AX,AY, 2*sup_box_dZ+thickness);
   tr_d4holes9-> RegisterYourself();
   auto * d4holes9 = new TGeoCompositeShape();
-  d4holes9 = screw_array(N_holes); d4holes9->SetName("d4holes9");
+  d4holes9 = screwArray(N_holes); d4holes9->SetName("d4holes9");
 
   //Through Hole001 disk3 - Radius 3.25 mm
   AX=16.6, AY=2.0;
@@ -2757,7 +2757,7 @@ TGeoVolume* Support::createDisk_Support_04 (){
 }
 
 //_____________________________________________________________________________
-TGeoCompositeShape * Support::screw_array (Int_t N, Double_t gap){
+TGeoCompositeShape * Support::screwArray (Int_t N, Double_t gap){
   //Function that creates the holes for the MFT PCB Support
   // Return an array of pairs corresponding to screws A and B.
 
@@ -2869,7 +2869,7 @@ Double_t t_excess = 0.1,
 }
 
 //_____________________________________________________________________________
-TGeoCompositeShape * Support::screw_C (){
+TGeoCompositeShape * Support::screwC (){
 
   Double_t cone1_dz= .05/2,
    cone1_r_top = .7/2,
@@ -2910,7 +2910,7 @@ TGeoCompositeShape * Support::screw_C (){
 }
 
 //_____________________________________________________________________________
-TGeoCompositeShape * Support::screw_D (){
+TGeoCompositeShape * Support::screwD (){
   Double_t h_radius = .15,
   tube1_dz = .6/2,
   cone2_dz = .0866024/2;
@@ -2944,7 +2944,7 @@ TGeoCompositeShape * Support::screw_D (){
 }
 
 //_____________________________________________________________________________
-TGeoCompositeShape * Support::screw_E (){
+TGeoCompositeShape * Support::screwE (){
 
   Double_t h_radius = .1621,
    tube1_dz = 1.0/2,
@@ -2979,7 +2979,7 @@ TGeoCompositeShape * Support::screw_E (){
 }
 
 //_____________________________________________________________________________
-TGeoCompositeShape * Support::through_hole_a (Double_t thickness){
+TGeoCompositeShape * Support::throughHoleA (Double_t thickness){
   Double_t cone1_dz= .05/2,
    cone1_r_top = .375,
    h_radius = .325,
@@ -3016,7 +3016,7 @@ TGeoCompositeShape * Support::through_hole_a (Double_t thickness){
 }
 
 //_____________________________________________________________________________
-TGeoCompositeShape * Support::through_hole_b (Double_t thickness){
+TGeoCompositeShape * Support::throughHoleB (Double_t thickness){
   Double_t cone1_dz= .05/2,
    cone1_r_top = .35,
    h_radius = .30,
@@ -3055,7 +3055,7 @@ TGeoCompositeShape * Support::through_hole_b (Double_t thickness){
 }
 
 //_____________________________________________________________________________
-TGeoCompositeShape * Support::through_hole_c (Double_t thickness){
+TGeoCompositeShape * Support::throughHoleC (Double_t thickness){
   Double_t cone1_dz= .05/2,
   cone1_r_top = .29585,
   h_radius = .24585,
@@ -3094,7 +3094,7 @@ TGeoCompositeShape * Support::through_hole_c (Double_t thickness){
 }
 
 //_____________________________________________________________________________
-TGeoCompositeShape * Support::through_hole_d (Double_t thickness){
+TGeoCompositeShape * Support::throughHoleD (Double_t thickness){
   Double_t cone1_dz= .05/2,
   cone1_r_top = .2,
   h_radius = .15,
@@ -3133,7 +3133,7 @@ TGeoCompositeShape * Support::through_hole_d (Double_t thickness){
 }
 
 //_____________________________________________________________________________
-TGeoCompositeShape * Support::through_hole_e (Double_t thickness){
+TGeoCompositeShape * Support::throughHoleE (Double_t thickness){
   Double_t cone1_dz= .05/2,
    cone1_r_top = .17295,
    h_radius = .12295,

@@ -36,7 +36,7 @@ public:
   
   ~HalfDiskSegmentation() override;
 
-  void Clear(const Option_t* /*opt*/) override;
+  void clear(const Option_t* /*opt*/) override;
   
   virtual void print(Option_t* opt="");
   

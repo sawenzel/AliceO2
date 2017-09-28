@@ -68,7 +68,7 @@ class GeometryTGeo : public o2::ITSMFT::GeometryTGeo
   using DetMatrixCache::getMatrixT2G;
 
   
-  static GeometryTGeo* Instance() {
+  static GeometryTGeo* instance() {
     // get (create if needed) a unique instance of the object
     if (!sInstance) sInstance = std::unique_ptr<GeometryTGeo>(new GeometryTGeo(true, true, 0));
     return sInstance.get();
@@ -104,7 +104,7 @@ class GeometryTGeo : public o2::ITSMFT::GeometryTGeo
   void fillTrackingFramesCache();
   
   /// Exract ITS parameters from TGeo
-  void Build(bool loadSegmentations, int loadTrans=0) override;
+  void build(bool loadSegmentations, int loadTrans=0) override;
 
   int getNumberOfChipRowsPerModule(int lay) const { return mNumberOfChipRowsPerModule[lay]; }
   int getNumberOfChipColsPerModule(int lay) const
@@ -254,7 +254,7 @@ class GeometryTGeo : public o2::ITSMFT::GeometryTGeo
 
   const o2::ITSMFT::Segmentation* getSegmentation(int lr) const;
 
-  void Print(Option_t* opt = "") const;
+  void print(Option_t* opt = "") const;
 
   static const char* getITSVolPattern()       { return sVolumeName.c_str(); }
   static const char* getITSLayerPattern()     { return sLayerName.c_str(); }

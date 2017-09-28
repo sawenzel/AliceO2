@@ -61,13 +61,13 @@ BOOST_AUTO_TEST_CASE(MessageSizePair_test)
 // some (modified) convenience functions to be able to create messages
 // copied from FairRoot
 template<typename T>
-inline static void SimpleMsgCleanup(void* /*data*/, void* obj)
+inline static void simpleMsgCleanup(void* /*data*/, void* obj)
 {
   delete static_cast<T*>(obj);
 }
 
 template<typename Factory, typename T>
-inline static FairMQMessagePtr NewSimpleMessage(Factory const &f, const T& data)
+inline static FairMQMessagePtr newSimpleMessage(Factory const &f, const T& data)
 {
   auto* dataCopy = new T(data);
   return f.CreateMessage(dataCopy, sizeof(T), SimpleMsgCleanup<T>, dataCopy);
@@ -83,7 +83,7 @@ BOOST_AUTO_TEST_CASE(TimeFrame_test)
   messages.AddPart(zmq->CreateMessage(1000));
 
   o2::Header::DataHeader dh;
-  messages.AddPart(NewSimpleMessage(*zmq, dh));
+  messages.AddPart(NewSimpleMessagenewSimpleMessage*zmq, dh));
 
   TimeFrame frame(messages);
   BOOST_CHECK(frame.GetNumParts() == 2);
@@ -105,7 +105,7 @@ BOOST_AUTO_TEST_CASE(TimeFrame_test)
 
   // test access to data
   BOOST_CHECK(ptr->GetNumParts() == 2);
-  for (int i = 0; i < ptr->GetNumParts(); ++i) {
+  for (int i = 0; i < ptr->getNumParts(); ++i) {
     BOOST_CHECK(ptr->GetPart(i).size == messages[i].GetSize());
   }
 }

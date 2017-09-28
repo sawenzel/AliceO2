@@ -24,7 +24,7 @@
 
 #define BOX_GENERATOR 1
 
-void run_sim_tpc(Int_t nEvents = 10, TString mcEngine = "TGeant3")
+void runSimTpc(Int_t nEvents = 10, TString mcEngine = "TGeant3")
 {
   TString dir = getenv("VMCWORKDIR");
   TString geom_dir = dir + "/Detectors/Geometry/";
@@ -76,7 +76,7 @@ void run_sim_tpc(Int_t nEvents = 10, TString mcEngine = "TGeant3")
 
   // ===| Add TPC |============================================================
   o2::TPC::Detector* tpc = new o2::TPC::Detector("TPC", kTRUE);
-  tpc->SetGeoFileName("TPCGeometry.root");
+  tpc->setGeoFileName("TPCGeometry.root");
   run->AddModule(tpc);
 
   // Create PrimaryGenerator

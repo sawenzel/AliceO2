@@ -148,7 +148,7 @@ Int_t SimpleEventDisplay::updateROC(const Int_t roc,
 }
 
 //_____________________________________________________________________
-TH1D* SimpleEventDisplay::MakePadSignals(Int_t roc, Int_t row, Int_t pad)
+TH1D* SimpleEventDisplay::makePadSignals(Int_t roc, Int_t row, Int_t pad)
 {
   // TODO: check
   //if (roc<0||roc>=(Int_t)mROC->GetNSectors()) return nullptr;

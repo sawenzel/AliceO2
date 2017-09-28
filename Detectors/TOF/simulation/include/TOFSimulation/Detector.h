@@ -55,25 +55,25 @@ class Detector : public o2::Base::Detector
 
   ~Detector() override = default;
 
-  void Initialize() final;
+  void initialize() final;
 
   Bool_t ProcessHits(FairVolume* v = nullptr) final;
 
-  void Register() override;
+  void register() override;
 
-  TClonesArray* GetCollection(Int_t iColl) const final;
+  TClonesArray* getCollection(Int_t iColl) const final;
 
-  void Reset() final;
-  void EndOfEvent() final;
+  void reset() final;
+  void endOfEvent() final;
 
-  void CreateMaterials();
-  void ConstructGeometry() final;
+  void createMaterials();
+  void constructGeometry() final;
 
   void setTOFholes(Bool_t flag = kTRUE) { mTOFHoles = flag; }
  protected:
   HitType* addHit(Float_t x, Float_t y, Float_t z, Float_t time, Float_t energy, Int_t trackId, Int_t detId);
-  virtual void DefineGeometry(Float_t xtof, Float_t ytof, Float_t zlenA) final;
-  virtual void MaterialMixer(Float_t* p, const Float_t* const a, const Float_t* const m, Int_t n) const final;
+  virtual void defineGeometry(Float_t xtof, Float_t ytof, Float_t zlenA) final;
+  virtual void materialMixer(Float_t* p, const Float_t* const a, const Float_t* const m, Int_t n) const final;
 
  private:
   void createModules(Float_t xtof, Float_t ytof, Float_t zlenA, Float_t xFLT, Float_t yFLT, Float_t zFLTA) const;

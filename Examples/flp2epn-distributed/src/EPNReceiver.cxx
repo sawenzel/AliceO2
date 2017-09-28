@@ -47,7 +47,7 @@ EPNReceiver::EPNReceiver()
 EPNReceiver::~EPNReceiver()
 = default;
 
-void EPNReceiver::InitTask()
+void EPNReceiver::initTask()
 {
   mNumFLPs = GetConfig()->GetValue<int>("num-flps");
   mBufferTimeoutInMs = GetConfig()->GetValue<int>("buffer-timeout");
@@ -57,7 +57,7 @@ void EPNReceiver::InitTask()
   mAckChannelName = GetConfig()->GetValue<string>("ack-chan-name");
 }
 
-void EPNReceiver::PrintBuffer(const unordered_map<uint16_t, TFBuffer>& buffer) const
+void EPNReceiver::printBuffer(const unordered_map<uint16_t, TFBuffer>& buffer) const
 {
   string header = "===== ";
 
@@ -78,7 +78,7 @@ void EPNReceiver::PrintBuffer(const unordered_map<uint16_t, TFBuffer>& buffer) c
   }
 }
 
-void EPNReceiver::DiscardIncompleteTimeframes()
+void EPNReceiver::discardIncompleteTimeframes()
 {
   auto it = mTimeframeBuffer.begin();
 
@@ -95,7 +95,7 @@ void EPNReceiver::DiscardIncompleteTimeframes()
   }
 }
 
-void EPNReceiver::Run()
+void EPNReceiver::run()
 {
   // DEBUG: store receive intervals per FLP
   // vector<vector<int>> rcvIntervals(fNumFLPs, vector<int>());
@@ -169,7 +169,7 @@ void EPNReceiver::Run()
     }
 
     // check if any incomplete timeframes in the buffer are older than timeout period, and discard them if they are
-    DiscardIncompleteTimeframes();
+    discardIncompleteTimeframes();
   }
 
   // DEBUG: save

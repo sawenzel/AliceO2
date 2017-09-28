@@ -45,7 +45,7 @@ FLPSyncSampler::FLPSyncSampler()
 FLPSyncSampler::~FLPSyncSampler()
 = default;
 
-void FLPSyncSampler::InitTask()
+void FLPSyncSampler::initTask()
 {
   // LOG(INFO) << "Waiting 10 seconds...";
   // this_thread::sleep_for(seconds(10));
@@ -57,7 +57,7 @@ void FLPSyncSampler::InitTask()
   mOutChannelName = GetConfig()->GetValue<string>("out-chan-name");
 }
 
-void FLPSyncSampler::PreRun()
+void FLPSyncSampler::preRun()
 {
   mLeaving = false;
   mAckListener = thread(&FLPSyncSampler::ListenForAcks, this);
@@ -90,14 +90,14 @@ bool FLPSyncSampler::ConditionalRun()
   return true;
 }
 
-void FLPSyncSampler::PostRun()
+void FLPSyncSampler::postRun()
 {
     mLeaving = true;
     mResetEventCounter.join();
     mAckListener.join();
 }
 
-void FLPSyncSampler::ListenForAcks()
+void FLPSyncSampler::listenForAcks()
 {
   uint16_t id = 0;
 
@@ -141,7 +141,7 @@ void FLPSyncSampler::ListenForAcks()
   LOG(INFO) << "Exiting Ack listener";
 }
 
-void FLPSyncSampler::ResetEventCounter()
+void FLPSyncSampler::resetEventCounter()
 {
   while (!mLeaving) {
     mEventCounter = mEventRate / 100;

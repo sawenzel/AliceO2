@@ -65,16 +65,16 @@ class CookedTrack : public TObject
   Label getLabel() const { return mLabel; }
   Bool_t isBetter(const CookedTrack& best, Double_t maxChi2) const;
 
-  Double_t getCurvature(Double_t bz) const { return mTrack.GetCurvature(float(bz)); }
-  Double_t getAlpha() const { return mTrack.GetAlpha(); }
-  Double_t getX() const { return mTrack.GetX(); }
-  Double_t getY() const { return mTrack.GetY(); }
-  Double_t getZ() const { return mTrack.GetZ(); }
-  Double_t getSnp() const { return mTrack.GetSnp(); }
-  Double_t getTgl() const { return mTrack.GetTgl(); }
-  Double_t getPt() const { return mTrack.GetPt(); }
+  Double_t getCurvature(Double_t bz) const { return mTrack.getCurvature(float(bz)); }
+  Double_t getAlpha() const { return mTrack.getAlpha(); }
+  Double_t getX() const { return mTrack.getX(); }
+  Double_t getY() const { return mTrack.getY(); }
+  Double_t getZ() const { return mTrack.getZ(); }
+  Double_t getSnp() const { return mTrack.getSnp(); }
+  Double_t getTgl() const { return mTrack.getTgl(); }
+  Double_t getPt() const { return mTrack.getPt(); }
   Bool_t getPxPyPz(std::array<float,3> &pxyz) const { return mTrack.GetPxPyPz(pxyz); }
-  void resetCovariance(Double_t s2 = 0.) { mTrack.ResetCovariance(float(s2)); }
+  void resetCovariance(Double_t s2 = 0.) { mTrack.resetCovariance(float(s2)); }
 
   const o2::Base::Track::TrackParCov&  getBaseTrack() const {return mTrack;}
   

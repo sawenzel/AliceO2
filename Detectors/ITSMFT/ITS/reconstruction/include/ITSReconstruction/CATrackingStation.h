@@ -46,44 +46,44 @@ namespace o2 {
           virtual ~TrackingStation();
           const ClsInfo_t& operator[](int i)    const {return mSortedClInfo[i];}
           //
-          int     GetVIDOffset()                const {return mVIDOffset;}
-          int     GetNClusters()                const {return mNClusters;}
-          int     GetNZBins()                   const {return mNZBins;}
-          int     GetNPhiBins()                 const {return mNPhiBins;}
-          float   GetZMin()                     const {return mZMin;}
-          float   GetZMax()                     const {return mZMax;}
+          int     getVIDOffset()                const {return mVIDOffset;}
+          int     getNClusters()                const {return mNClusters;}
+          int     getNZBins()                   const {return mNZBins;}
+          int     getNPhiBins()                 const {return mNPhiBins;}
+          float   getZMin()                     const {return mZMin;}
+          float   getZMax()                     const {return mZMax;}
           //
-          void    SetNZBins(int v)                    {mNZBins = v;}
-          void    SetNPhiBins(int v)                  {mNPhiBins = v;}
-          void    SetZMin(float v)                    {mZMin = v;}
-          void    SetZMax(float v)                    {mZMax = v;}
+          void    setNZBins(int v)                    {mNZBins = v;}
+          void    setNPhiBins(int v)                  {mNPhiBins = v;}
+          void    setZMin(float v)                    {mZMin = v;}
+          void    setZMax(float v)                    {mZMax = v;}
           //
-          void Init(TClonesArray* points, o2::ITS::GeometryTGeo* geom);
+          void init(TClonesArray* points, o2::ITS::GeometryTGeo* geom);
           //
-          void SortClusters(const float vertex[3]);
-          int  GetPhiBin(float phi)             const {return phi * mDPhiInv;}
-          int  GetZBin  (float z)               const {return (z - mZMin) * mDZInv;}
-          int  GetBinIndex(int iz, int iphi)    const {return iphi * mNZBins + iz;}
-          int  GetBinZ(int ipz)                 const {return ipz % mNZBins;}
-          int  GetBinPhi(int ipz)               const {return ipz / mNZBins;}
-          void GetBinZPhi(int ipz,int &iz,int &iphi) const {iz = GetBinZ(ipz); iphi=GetBinPhi(ipz);}
+          void sortClusters(const float vertex[3]);
+          int  getPhiBin(float phi)             const {return phi * mDPhiInv;}
+          int  getZBin  (float z)               const {return (z - mZMin) * mDZInv;}
+          int  getBinIndex(int iz, int iphi)    const {return iphi * mNZBins + iz;}
+          int  getBinZ(int ipz)                 const {return ipz % mNZBins;}
+          int  getBinPhi(int ipz)               const {return ipz / mNZBins;}
+          void getBinZPhi(int ipz,int &iz,int &iphi) const {iz = getBinZ(ipz); iphi=getBinPhi(ipz);}
           //
-          int  SelectClusters(float zmin,float zmax,float phimin,float phimax);
-          int  GetNFoundBins()                  const {return mFoundBins.size();}
-          int  GetFoundBin(int i)               const {return mFoundBins[i];}
-          int  GetFoundBinClusters(int i, int &first)  const;
-          void ResetFoundIterator();
-          const ClsInfo_t& GetClusterInfo(int i) const {return mSortedClInfo[i];}
-          ClsInfo_t* GetNextClusterInfo();
-          int                     GetNextClusterInfoID();
+          int  selectClusters(float zmin,float zmax,float phimin,float phimax);
+          int  getNFoundBins()                  const {return mFoundBins.size();}
+          int  getFoundBin(int i)               const {return mFoundBins[i];}
+          int  getFoundBinClusters(int i, int &first)  const;
+          void resetFoundIterator();
+          const ClsInfo_t& getClusterInfo(int i) const {return mSortedClInfo[i];}
+          ClsInfo_t* getNextClusterInfo();
+          int                     getNextClusterInfoID();
           //
-          ITSDetInfo_t& GetDetInfo(int id)     const
+          ITSDetInfo_t& getDetInfo(int id)     const
           {assert(mIndex[id] > -1 && "Empty sensor");return (ITSDetInfo_t&)mDetectors[mIndex[id]];}
-          int                   GetNDetectors()           const
+          int                   getNDetectors()           const
           {return mDetectors.size();}
           //
-          void         ClearSortedInfo();
-          void Clear();
+          void         clearSortedInfo();
+          void clear();
           //virtual void Print(Option_t *opt="")  const;
 
         protected:
@@ -117,17 +117,17 @@ namespace o2 {
           //
       };
 
-      inline int TrackingStation::GetFoundBinClusters(int i, int &first)  const {
+      inline int TrackingStation::getFoundBinClusters(int i, int &first)  const {
         // set the entry of the first cl.info in the mSortedClInfo
         // and return n clusters in the bin
-        ClBinInfo_t& bin = mBins[GetFoundBin(i)];
+        ClBinInfo_t& bin = mBins[getFoundBin(i)];
         first = bin.first;
         return bin.ncl;
       }
 
-      inline ClsInfo_t* TrackingStation::GetNextClusterInfo() {
+      inline ClsInfo_t* TrackingStation::getNextClusterInfo() {
         // return cluster info for next matching cluster
-        int id = GetNextClusterInfoID();
+        int id = getNextClusterInfoID();
         return id < 0 ? nullptr : (ClsInfo_t*)&mSortedClInfo[id];
       }
     } // namespace CA

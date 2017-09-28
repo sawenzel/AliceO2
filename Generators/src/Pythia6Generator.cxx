@@ -57,7 +57,7 @@ Pythia6Generator::Pythia6Generator(const char* fileName) {
 
 // -----   Destructor   ---------------------------------------------------
 Pythia6Generator::~Pythia6Generator() {
-  CloseInput();
+  closeInput();
 }
 // ------------------------------------------------------------------------
 
@@ -103,7 +103,7 @@ Bool_t Pythia6Generator::ReadEvent(FairPrimaryGenerator* primGen) {
   }
   else {
     cout << "-I Pythia6Generator: End of input file reached " << endl;
-    CloseInput();
+    closeInput();
     return kFALSE;
   }
 
@@ -111,7 +111,7 @@ Bool_t Pythia6Generator::ReadEvent(FairPrimaryGenerator* primGen) {
   // If end of input file is reached : close it and abort run
   if ( feof(fInputFile) ) {
     cout << "-I Pythia6Generator: End of input file reached " << endl;
-    CloseInput();
+    closeInput();
     return kFALSE;
   }
 
@@ -128,7 +128,7 @@ Bool_t Pythia6Generator::ReadEvent(FairPrimaryGenerator* primGen) {
 
 
 // -----   Private method CloseInput   ------------------------------------
-void Pythia6Generator::CloseInput() {
+void Pythia6Generator::closeInput() {
   if ( fInputFile ) {
     //if ( fInputFile->is_open() ) {
     {

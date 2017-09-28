@@ -60,7 +60,7 @@ Detector &Detector::operator=(const Detector &rhs)
   return *this;
 }
 
-void Detector::Material(Int_t imat, const char *name, Float_t a, Float_t z, Float_t dens,
+void Detector::material(Int_t imat, const char *name, Float_t a, Float_t z, Float_t dens,
                         Float_t radl, Float_t absl, Float_t *buf, Int_t nwbuf)
 {
   TString uniquename = GetName();
@@ -73,7 +73,7 @@ void Detector::Material(Int_t imat, const char *name, Float_t a, Float_t z, Floa
   mMapMaterial[imat] = kmat;
 }
 
-void Detector::Mixture(Int_t imat, const char *name, Float_t *a, Float_t *z, Float_t dens,
+void Detector::mixture(Int_t imat, const char *name, Float_t *a, Float_t *z, Float_t dens,
                        Int_t nlmat, Float_t *wmat)
 {
   TString uniquename = GetName();
@@ -86,7 +86,7 @@ void Detector::Mixture(Int_t imat, const char *name, Float_t *a, Float_t *z, Flo
   mMapMaterial[imat] = kmat;
 }
 
-void Detector::Medium(Int_t numed, const char *name, Int_t nmat, Int_t isvol, Int_t ifield,
+void Detector::medium(Int_t numed, const char *name, Int_t nmat, Int_t isvol, Int_t ifield,
                       Float_t fieldm, Float_t tmaxfd, Float_t stemax, Float_t deemax, Float_t epsil,
                       Float_t stmin, Float_t *ubuf, Int_t nbuf)
 {
@@ -102,7 +102,7 @@ void Detector::Medium(Int_t numed, const char *name, Int_t nmat, Int_t isvol, In
   mMapMedium[numed] = kmed;
 }
 
-void Detector::Matrix(Int_t &nmat, Float_t theta1, Float_t phi1, Float_t theta2, Float_t phi2,
+void Detector::matrix(Int_t &nmat, Float_t theta1, Float_t phi1, Float_t theta2, Float_t phi2,
                       Float_t theta3, Float_t phi3) const
 {
   TVirtualMC::GetMC()->Matrix(nmat, theta1, phi1, theta2, phi2, theta3, phi3);
@@ -138,8 +138,8 @@ void Detector::initFieldTrackingParams(int& integration, float& maxfield)
   maxfield = 10;
   // see if we can query the o2 field
   if (auto o2field = dynamic_cast<o2::field::MagneticField*>(field)) {
-    integration = o2field->Integral(); // default integration method?
-    maxfield = o2field->Max();
+    integration = o2field->integral(); // default integration method?
+    maxfield = o2field->max();
   }
   else {
     LOG(INFO) << "No magnetic field found; using default tracking values " << integration << " " << maxfield << " to initialize media\n";

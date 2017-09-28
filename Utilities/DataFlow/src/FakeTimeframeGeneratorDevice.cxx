@@ -39,7 +39,7 @@ FakeTimeframeGeneratorDevice::FakeTimeframeGeneratorDevice()
 {
 }
 
-void FakeTimeframeGeneratorDevice::InitTask()
+void FakeTimeframeGeneratorDevice::initTask()
 {
   mOutChannelName = GetConfig()->GetValue<std::string>(OptionKeyOutputChannelName);
   mMaxTimeframes = GetConfig()->GetValue<size_t>(OptionKeyMaxTimeframes);

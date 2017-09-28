@@ -145,7 +145,7 @@ Double_t CookedTrack::getPredictedChi2(const Cluster* c) const
   //-----------------------------------------------------------------
   // This function calculates a predicted chi2 increment.
   //-----------------------------------------------------------------
-  return mTrack.GetPredictedChi2(*c);
+  return mTrack.getPredictedChi2(*c);
 }
 
 Bool_t CookedTrack::propagate(Double_t alpha, Double_t x, Double_t bz)

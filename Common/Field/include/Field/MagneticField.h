@@ -71,42 +71,42 @@ class MagneticField : public FairField
     ~MagneticField() override = default;
 
     /// real field creation is here
-    void CreateField();
+    void createField();
 
     /// allow fast field param
-    void        AllowFastField(bool v=true);
+    void        allowFastField(bool v=true);
     
     /// Virtual methods from FairField
 
     /// X component, avoid using since slow
-    Double_t GetBx(Double_t x, Double_t y, Double_t z) override {
+    Double_t getBx(Double_t x, Double_t y, Double_t z) override {
       double xyz[3]={x,y,z},b[3];
-      MagneticField::Field(xyz,b);
+      MagneticField::field(xyz,b);
       return b[0];
     } 
 
     /// Y component, avoid using since slow
-    Double_t GetBy(Double_t x, Double_t y, Double_t z) override {
+    Double_t getBy(Double_t x, Double_t y, Double_t z) override {
       double xyz[3]={x,y,z},b[3];
-      MagneticField::Field(xyz,b);
+      MagneticField::field(xyz,b);
       return b[1];
     }
 
     /// Z component
-    Double_t GetBz(Double_t x, Double_t y, Double_t z) override {
+    Double_t getBz(Double_t x, Double_t y, Double_t z) override {
       double xyz[3]={x,y,z};
       return getBz(xyz); 
     } 
 
     /// Method to calculate the field at point xyz
     /// Main interface from TVirtualMagField used in simulation
-    void Field(const Double_t* __restrict__ point, Double_t* __restrict__ bField) override;
+    void field(const Double_t* __restrict__ point, Double_t* __restrict__ bField) override;
 
     /// 3d field query alias for Alias Method to calculate the field at point xyz
-    void GetBxyz(const Double_t p[3], Double_t* b) override { MagneticField::Field(p,b); }
+    void getBxyz(const Double_t p[3], Double_t* b) override { MagneticField::field(p,b); }
 
     /// Fill Paramater
-    void FillParContainer() override;
+    void fillParContainer() override;
     
     /// Method to calculate the integral_0^z of br,bt,bz
     void getTPCIntegral(const Double_t *xyz, Double_t *b) const;
@@ -143,7 +143,7 @@ class MagneticField : public FairField
     /// Return the sign*scale of the current in the Dipole according to sPolarityConventionthe
     Double_t getFactorDipole() const;
 
-    Double_t Factor() const
+    Double_t factor() const
     {
       return getFactorSolenoid();
     }
@@ -158,12 +158,12 @@ class MagneticField : public FairField
       return getFactorDipole() * 6000;
     }
 
-    Bool_t IsUniform() const
+    Bool_t isUniform() const
     {
       return mMapType == MagFieldParam::k5kGUniform;
     }
 
-    void MachineField(const Double_t * __restrict__ x, Double_t * __restrict__ b) const;
+    void machineField(const Double_t * __restrict__ x, Double_t * __restrict__ b) const;
 
     MagFieldParam::BMap_t getMapType() const
     {
@@ -183,12 +183,12 @@ class MagneticField : public FairField
       return mBeamEnergy;
     }
 
-    Double_t Max() const
+    Double_t max() const
     {
       return mMaxField;
     }
 
-    Int_t Integral() const
+    Int_t integral() const
     {
       return mDefaultIntegration;
     }
@@ -224,7 +224,7 @@ class MagneticField : public FairField
     }
 
     /// Prints short or long info
-    void Print(Option_t *opt) const override;
+    void print(Option_t *opt) const override;
 
     Bool_t loadParameterization();
 

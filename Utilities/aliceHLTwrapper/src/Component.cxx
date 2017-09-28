@@ -61,7 +61,7 @@ Component::~Component()
 
 constexpr const char* Component::OptionKeys[];
 
-bpo::options_description Component::GetOptionsDescription()
+bpo::options_description Component::getOptionsDescription()
 {
   bpo::options_description od("HLT Component options");
   od.add_options()
@@ -102,7 +102,7 @@ int Component::init(int argc, char** argv)
      "internal instance id");
   // now add all the visible options
   od.add(GetOptionsDescription());
-
+getOptionsDescription
   // HLT components are implemented in shared libraries, the library name
   // and component id are used to factorize a component
   // optionally, a list of configuration parameters can be specified as
@@ -267,7 +267,7 @@ int Component::process(vector<MessageFormat::BufferDesc_t>& dataArray,
   // add event type data block
   // this data block describes the type of the event, set it
   // to 'data' by using specification gkAliEventTypeData
-  const AliHLTComponentDataType kDataTypeEvent = AliHLTComponentDataTypeInitializer("EVENTTYP", "PRIV");
+  const AliHLTComponentDataType kDataTypeEvent = aliHLTComponentDataTypeInitializer("EVENTTYP", "PRIV");
   inputBlocks.emplace_back(nullptr, 0, kDataTypeEvent, gkAliEventTypeData);
 
   // process

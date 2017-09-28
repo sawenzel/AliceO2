@@ -35,7 +35,7 @@
 
 bool isActivated(std::string s) {
 // access user configuration for list of wanted modules
-  auto& modulelist = o2::conf::SimConfig::Instance().getActiveDetectors();
+  auto& modulelist = o2::conf::SimConfig::instance().getActiveDetectors();
   auto active = std::find(modulelist.begin(), modulelist.end(), s)!=modulelist.end();
   if (active) {
     std::cout << "Activating " << s << " module \n";
@@ -44,7 +44,7 @@ bool isActivated(std::string s) {
 }
 
 // a "factory" like macro to instantiate the O2 geometry
-void build_geometry(FairRunSim* run = nullptr)
+void buildGeometry(FairRunSim* run = nullptr)
 {
   bool geomonly = (run == nullptr);
 

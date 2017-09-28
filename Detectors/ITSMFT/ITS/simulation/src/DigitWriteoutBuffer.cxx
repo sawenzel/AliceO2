@@ -44,7 +44,7 @@ DigitWriteoutBuffer::DigitWriteoutBuffer(TString branchname, TString foldername,
 DigitWriteoutBuffer::~DigitWriteoutBuffer()
 = default;
 
-void DigitWriteoutBuffer::AddNewDataToTClonesArray(FairTimeStamp *timestamp)
+void DigitWriteoutBuffer::addNewDataToTClonesArray(FairTimeStamp *timestamp)
 {
   FairRootManager *iohandler = FairRootManager::Instance();
   TClonesArray *outputarray = iohandler->GetTClonesArray(fBranchName);
@@ -52,7 +52,7 @@ void DigitWriteoutBuffer::AddNewDataToTClonesArray(FairTimeStamp *timestamp)
   new((*outputarray)[outputarray->GetEntries()])Digit(*(static_cast<Digit *>(timestamp)));
 }
 
-double DigitWriteoutBuffer::FindTimeForData(FairTimeStamp *timestamp)
+double DigitWriteoutBuffer::findTimeForData(FairTimeStamp *timestamp)
 {
   Digit itsdigit = *(static_cast<Digit *>(timestamp));
   auto result = mData_map.find(itsdigit);
@@ -62,13 +62,13 @@ double DigitWriteoutBuffer::FindTimeForData(FairTimeStamp *timestamp)
   return -1;
 }
 
-void DigitWriteoutBuffer::FillDataMap(FairTimeStamp *data, double activeTime)
+void DigitWriteoutBuffer::fillDataMap(FairTimeStamp *data, double activeTime)
 {
   Digit itsdigit = *(static_cast<Digit *>(data));
   mData_map[itsdigit] = activeTime;
 }
 
-void DigitWriteoutBuffer::EraseDataFromDataMap(FairTimeStamp *data)
+void DigitWriteoutBuffer::eraseDataFromDataMap(FairTimeStamp *data)
 {
   Digit itsdigit = *(static_cast<Digit *>(data));
   if (mData_map.find(itsdigit) != mData_map.end()) {

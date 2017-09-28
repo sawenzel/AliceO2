@@ -31,11 +31,11 @@ class ElementalHit {
   float mTime = -1;    // time of flight
   float mELoss = -2;   // energy loss
 
-  float GetX() const { return mPos.X(); }
-  float GetY() const { return mPos.Y(); }
-  float GetZ() const { return mPos.Z(); }
-  float GetEnergyLoss() const { return mELoss; }
-  float GetTime() const { return mTime; }
+  float getX() const { return mPos.X(); }
+  float getY() const { return mPos.Y(); }
+  float getZ() const { return mPos.Z(); }
+  float getEnergyLoss() const { return mELoss; }
+  float getTime() const { return mTime; }
 
  public:
   ElementalHit() = default; // for ROOT IO
@@ -91,7 +91,7 @@ public:
   mSize(0)
 #endif
   {
-    SetTrackID(trackID);
+    setTrackID(trackID);
   }
 
   ~LinkableHitGroup() override = default;
@@ -133,7 +133,7 @@ public:
 
   // the Clear method of TObject
   // called for instance from TClonesArray->Clear("C")
-  void Clear(Option_t */*option*/) override {
+  void clear(Option_t */*option*/) override {
 #ifdef HIT_AOS
     mHits.clear();
 #else
@@ -212,7 +212,7 @@ class Point : public o2::BasicXYZEHit<float>
     ~Point() override = default;
 
     /// Output to screen
-    void Print(const Option_t* opt) const override;
+    void print(const Option_t* opt) const override;
 
   private:
     /// Copy constructor

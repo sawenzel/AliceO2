@@ -126,7 +126,7 @@ bool RawReader::addInputFile(int region, int link, std::string path, int run){
 
   while (pos < length) {
     file.read((char*)&h, sizeof(h));
-    if (h.reserved_01 != 0x0F || h.reserved_2() != 0x3fec2fec1fec0fec) {
+    if (h.reserved_01 != 0x0F || h.reserved2() != 0x3fec2fec1fec0fec) {
       LOG(ERROR) << "Header does not look consistent" << FairLogger::endl;
     }
     EventInfo eD;

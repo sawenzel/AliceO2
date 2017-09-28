@@ -38,67 +38,67 @@ namespace o2 {
       ~ClusterShape() override;
 
       // Set the number of rows
-      inline void SetNRows(UInt_t Nrows) {mNrows = Nrows;}
+      inline void setNRows(UInt_t Nrows) {mNrows = Nrows;}
 
       // Set the number of cols
-      inline void SetNCols(UInt_t Ncols) {mNcols = Ncols;}
+      inline void setNCols(UInt_t Ncols) {mNcols = Ncols;}
 
       // Add a pixel position to the shape [0, r*c[
-      inline void AddShapeValue(UInt_t pos) {mShape.push_back(pos);}
+      inline void addShapeValue(UInt_t pos) {mShape.push_back(pos);}
 
       // Check whether the shape has the
-      Bool_t IsValidShape();
+      Bool_t isValidShape();
 
       // Return an unique ID based on the cluster size and shape
-      Long64_t GetShapeID() const;
+      Long64_t getShapeID() const;
 
       // Get the number of rows of the cluster
-      inline UInt_t GetNRows() const {return mNrows;}
+      inline UInt_t getNRows() const {return mNrows;}
 
-      inline void SetCenter(UInt_t r, UInt_t c) {
+      inline void setCenter(UInt_t r, UInt_t c) {
         mCenterR = r;
         mCenterC = c;
       }
 
       // Get the center of rows of the cluster
-      inline UInt_t GetCenterR() const {return mCenterR;}
+      inline UInt_t getCenterR() const {return mCenterR;}
 
       // Get the center of cols of the cluster
-      inline UInt_t GetCenterC() const {return mCenterC;}
+      inline UInt_t getCenterC() const {return mCenterC;}
 
       // Get the index of the center (0-based)
-      inline UInt_t GetCenterIndex() const {
-        return RowColToIndex(mCenterR, mCenterC);
+      inline UInt_t getCenterIndex() const {
+        return rowColToIndex(mCenterR, mCenterC);
       }
 
       // Get the number of cols of the cluster
-      inline UInt_t GetNCols() const {return mNcols;}
+      inline UInt_t getNCols() const {return mNcols;}
 
       // Get the number of fired pixels of the cluster
-      inline UInt_t GetNFiredPixels() const {return mShape.size();}
+      inline UInt_t getNFiredPixels() const {return mShape.size();}
 
       // Get the position of the pixel with the specified index
-      inline UInt_t GetValue(UInt_t index) const {return mShape[index];}
+      inline UInt_t getValue(UInt_t index) const {return mShape[index];}
 
       // Get the shape of the cluster
-      inline void GetShape(std::vector<UInt_t>& v) const {v = mShape;}
+      inline void getShape(std::vector<UInt_t>& v) const {v = mShape;}
 
       // Check whether the cluster has the specified pixel on
-      Bool_t HasElement(UInt_t) const;
+      Bool_t hasElement(UInt_t) const;
 
       // Return a string with the positions of the fired pixels in the cluster
-      inline std::string ShapeSting() const {
+      inline std::string shapeSting() const {
         return ShapeSting(mShape);
       }
 
       // r and c are 0-based. The returned index is 0-based as well
-      inline UInt_t RowColToIndex(UInt_t r, UInt_t c) const {
+      inline UInt_t rowColToIndex(UInt_t r, UInt_t c) const {
         return r*mNcols + c;
       }
 
       // Static function to get a string with the positions of the fired pixels
       // in the passed shape vector
-      static std::string ShapeSting(const std::vector<UInt_t>& shape) {
+      static std::string shapeSting(const std::vector<UInt_t>& shape) {
         std::stringstream out;
         for (UInt_t i = 0; i < shape.size(); ++i) {
           out << shape[i];
@@ -129,7 +129,7 @@ namespace o2 {
       }
 
     private:
-      UInt_t ComputeCenter(UInt_t);
+      UInt_t computeCenter(UInt_t);
 
       UInt_t  mNrows;
       UInt_t  mNcols;

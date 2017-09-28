@@ -35,7 +35,7 @@ class MisalignmentParameter : public FairParGenericSet
 
   ~MisalignmentParameter() override;
 
-  void Clear();
+  void clear();
 
   void putParams(FairParamList*) override;
 

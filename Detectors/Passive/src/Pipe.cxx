@@ -61,7 +61,7 @@ Pipe& Pipe::operator=(const Pipe& rhs)
 namespace
 {
 // only here temporarily, I would like to harmonize Material treatment (outside of base detector)
-int Material(Int_t imat, const char* name, Float_t a, Float_t z, Float_t dens, Float_t radl, Float_t absl,
+int material(Int_t imat, const char* name, Float_t a, Float_t z, Float_t dens, Float_t radl, Float_t absl,
              Float_t* buf = nullptr, Int_t nwbuf = 0)
 {
   int kmat = -1;
@@ -69,7 +69,7 @@ int Material(Int_t imat, const char* name, Float_t a, Float_t z, Float_t dens, F
   return kmat;
 }
 
-int Mixture(Int_t imat, const char* name, Float_t* a, Float_t* z, Float_t dens, Int_t nlmat, Float_t* wmat = nullptr)
+int mixture(Int_t imat, const char* name, Float_t* a, Float_t* z, Float_t dens, Int_t nlmat, Float_t* wmat = nullptr)
 {
   // Check this!!!
   int kmat = -1;
@@ -77,7 +77,7 @@ int Mixture(Int_t imat, const char* name, Float_t* a, Float_t* z, Float_t dens, 
   return kmat;
 }
 
-int Medium(Int_t numed, const char* name, Int_t nmat, Int_t isvol, Int_t ifield, Float_t fieldm, Float_t tmaxfd,
+int medium(Int_t numed, const char* name, Int_t nmat, Int_t isvol, Int_t ifield, Float_t fieldm, Float_t tmaxfd,
            Float_t stemax, Float_t deemax, Float_t epsil, Float_t stmin, Float_t* ubuf = nullptr, Int_t nbuf = 0)
 {
   // Check this!!!
@@ -95,7 +95,7 @@ auto GetMedium = [](const char* x) {
 };
 }
 
-void Pipe::ConstructGeometry()
+void Pipe::constructGeometry()
 {
   createMaterials();
   //
@@ -282,7 +282,7 @@ void Pipe::ConstructGeometry()
   Float_t kBellowLength = kNBellowConvolutions * (4. * kBellowPlieRadius - 2. * kBellowPlieThickness);
   // ------------------ First Bellow  --------------------
   TGeoVolume* vobellows1 =
-    MakeBellowCside("bellows1", kNBellowConvolutions, kBellowSectionOuterRadius - kBeryliumSectionThickness,
+    makeBellowCside("bellows1", kNBellowConvolutions, kBellowSectionOuterRadius - kBeryliumSectionThickness,
                     kBellowOuterRadius, kBellowPlieRadius, kBellowPlieThickness);
   beamPipeCsideSection->AddNode(
     vobellows1, 1, new TGeoTranslation(0., 0., kFirstBellowZmax - kBellowLength / 2. - 2. * kBellowPlieRadius));
@@ -324,7 +324,7 @@ void Pipe::ConstructGeometry()
 
   // ------------------ Second Bellow --------------------
   TGeoVolume* vobellows2 =
-    MakeBellowCside("bellows2", kNBellowConvolutions, kBellowSectionOuterRadius - kBeryliumSectionThickness,
+    makeBellowCside("bellows2", kNBellowConvolutions, kBellowSectionOuterRadius - kBeryliumSectionThickness,
                     kBellowOuterRadius, kBellowPlieRadius, kBellowPlieThickness);
   beamPipeCsideSection->AddNode(
     vobellows2, 1, new TGeoTranslation(0., 0., kSecondBellowZmax - kBellowLength / 2. - 2. * kBellowPlieRadius));
@@ -756,7 +756,7 @@ void Pipe::ConstructGeometry()
   voRB24B1BellowM->SetVisibility(0);
   //
   // Bellow Section
-  TGeoVolume* voRB24B1Bellow = MakeBellow("RB24B1", kRB24B1NumberOfPlies, kRB24B1BellowRi, kRB24B1BellowRo,
+  TGeoVolume* voRB24B1Bellow = makeBellow("RB24B1", kRB24B1NumberOfPlies, kRB24B1BellowRi, kRB24B1BellowRo,
                                           kRB24B1BellowUndL, kRB24B1PlieRadius, kRB24B1PlieThickness);
   voRB24B1Bellow->SetVisibility(0);
 
@@ -1021,7 +1021,7 @@ void Pipe::ConstructGeometry()
   shRB24IpShell->DefineSection(6, z0, kRB24IpShellCARi, kRB24IpShellCCRo);
   TGeoVolume* voRB24IpShell = new TGeoVolume("RB24IpShell", shRB24IpShell, kMedSteel);
 
-  TGeoPcon* shRB24IpShellM = MakeMotherFromTemplate(shRB24IpShell, 0, 6, kRB24IpShellCTRi, 13);
+  TGeoPcon* shRB24IpShellM = makeMotherFromTemplate(shRB24IpShell, 0, 6, kRB24IpShellCTRi, 13);
 
   for (Int_t i = 0; i < 6; i++) {
     z = 2. * kRB24IpShellL - shRB24IpShellM->GetZ(5 - i);
@@ -1616,10 +1616,10 @@ void Pipe::ConstructGeometry()
   shRB26s12Tube->DefineSection(4, kRB26s12TubeL, 12.00 / 2., 12.30 / 2.);
   TGeoVolume* voRB26s12Tube = new TGeoVolume("RB26s12Tube", shRB26s12Tube, kMedSteel);
   // Add the insulation layer
-  TGeoVolume* voRB26s12TubeIns = new TGeoVolume("RB26s12TubeIns", MakeInsulationFromTemplate(shRB26s12Tube), kMedInsu);
+  TGeoVolume* voRB26s12TubeIns = new TGeoVolume("RB26s12TubeIns", makeInsulationFromTemplate(shRB26s12Tube), kMedInsu);
   voRB26s12Tube->AddNode(voRB26s12TubeIns, 1, gGeoIdentity);
 
-  TGeoVolume* voRB26s12TubeM = new TGeoVolume("RB26s12TubeM", MakeMotherFromTemplate(shRB26s12Tube), kMedVac);
+  TGeoVolume* voRB26s12TubeM = new TGeoVolume("RB26s12TubeM", makeMotherFromTemplate(shRB26s12Tube), kMedVac);
   voRB26s12TubeM->AddNode(voRB26s12Tube, 1, gGeoIdentity);
 
   ///////////////////////////////////
@@ -1852,7 +1852,7 @@ void Pipe::ConstructGeometry()
   TGeoVolume* voRB26s2FFlange = new TGeoVolume("RB26s2FFlange", shRB26s2FFlange, kMedSteel);
 
   TGeoVolume* voRB26s2FFlangeM =
-    new TGeoVolume("RB26s2FFlangeM", MakeMotherFromTemplate(shRB26s2FFlange, 2, 5), kMedVac);
+    new TGeoVolume("RB26s2FFlangeM", makeMotherFromTemplate(shRB26s2FFlange, 2, 5), kMedVac);
   voRB26s2FFlangeM->AddNode(voRB26s2FFlange, 1, gGeoIdentity);
 
   ////////////////////////////////////////
@@ -1894,10 +1894,10 @@ void Pipe::ConstructGeometry()
 
   TGeoVolume* voRB26s3Tube = new TGeoVolume("RB26s3Tube", shRB26s3Tube, kMedSteel);
   //    Add the insulation layer
-  TGeoVolume* voRB26s3TubeIns = new TGeoVolume("RB26s3TubeIns", MakeInsulationFromTemplate(shRB26s3Tube), kMedInsu);
+  TGeoVolume* voRB26s3TubeIns = new TGeoVolume("RB26s3TubeIns", makeInsulationFromTemplate(shRB26s3Tube), kMedInsu);
   voRB26s3Tube->AddNode(voRB26s3TubeIns, 1, gGeoIdentity);
 
-  TGeoVolume* voRB26s3TubeM = new TGeoVolume("RB26s3TubeM", MakeMotherFromTemplate(shRB26s3Tube), kMedVac);
+  TGeoVolume* voRB26s3TubeM = new TGeoVolume("RB26s3TubeM", makeMotherFromTemplate(shRB26s3Tube), kMedVac);
   voRB26s3TubeM->AddNode(voRB26s3Tube, 1, gGeoIdentity);
 
   ///////////////////////////////////
@@ -1932,7 +1932,7 @@ void Pipe::ConstructGeometry()
   TGeoVolume* voRB26s3FixedPoint = new TGeoVolume("RB26s3FixedPoint", shRB26s3FixedPoint, kMedSteel);
 
   TGeoVolume* voRB26s3FixedPointM =
-    new TGeoVolume("RB26s3FixedPointM", MakeMotherFromTemplate(shRB26s3FixedPoint), kMedVac);
+    new TGeoVolume("RB26s3FixedPointM", makeMotherFromTemplate(shRB26s3FixedPoint), kMedVac);
   voRB26s3FixedPointM->AddNode(voRB26s3FixedPoint, 1, gGeoIdentity);
 
   ///////////////////////////////////
@@ -1962,7 +1962,7 @@ void Pipe::ConstructGeometry()
   TGeoVolume* voRB26s3SFlange = new TGeoVolume("RB26s3SFlange", shRB26s3SFlange, kMedSteel);
 
   TGeoVolume* voRB26s3SFlangeM =
-    new TGeoVolume("RB26s3SFlangeM", MakeMotherFromTemplate(shRB26s3SFlange, 0, 3), kMedVac);
+    new TGeoVolume("RB26s3SFlangeM", makeMotherFromTemplate(shRB26s3SFlange, 0, 3), kMedVac);
   voRB26s3SFlangeM->AddNode(voRB26s3SFlange, 1, gGeoIdentity);
 
   ///////////////////////////////////
@@ -1992,7 +1992,7 @@ void Pipe::ConstructGeometry()
   TGeoVolume* voRB26s3FFlange = new TGeoVolume("RB26s3FFlange", shRB26s3FFlange, kMedSteel);
 
   TGeoVolume* voRB26s3FFlangeM =
-    new TGeoVolume("RB26s3FFlangeM", MakeMotherFromTemplate(shRB26s3FFlange, 2, 5), kMedVac);
+    new TGeoVolume("RB26s3FFlangeM", makeMotherFromTemplate(shRB26s3FFlange, 2, 5), kMedVac);
   voRB26s3FFlangeM->AddNode(voRB26s3FFlange, 1, gGeoIdentity);
 
   ///////////////////////////////////
@@ -2195,7 +2195,7 @@ void Pipe::ConstructGeometry()
   shRB26s45Tube->DefineSection(10, kRB26s45TubeL, 10.00 / 2., 10.30 / 2.);
   TGeoVolume* voRB26s45Tube = new TGeoVolume("RB26s45Tube", shRB26s45Tube, kMedSteel);
 
-  TGeoVolume* voRB26s45TubeM = new TGeoVolume("RB26s45TubeM", MakeMotherFromTemplate(shRB26s45Tube), kMedVac);
+  TGeoVolume* voRB26s45TubeM = new TGeoVolume("RB26s45TubeM", makeMotherFromTemplate(shRB26s45Tube), kMedVac);
   voRB26s45TubeM->AddNode(voRB26s45Tube, 1, gGeoIdentity);
 
   ///////////////////////////////////
@@ -2370,7 +2370,7 @@ void Pipe::ConstructGeometry()
   TGeoVolume* voRB26s4FixedPoint = new TGeoVolume("RB26s4FixedPoint", shRB26s4FixedPoint, kMedSteel);
 
   TGeoVolume* voRB26s4FixedPointM =
-    new TGeoVolume("RB26s4FixedPointM", MakeMotherFromTemplate(shRB26s4FixedPoint), kMedVac);
+    new TGeoVolume("RB26s4FixedPointM", makeMotherFromTemplate(shRB26s4FixedPoint), kMedVac);
   voRB26s4FixedPointM->AddNode(voRB26s4FixedPoint, 1, gGeoIdentity);
 
   ///////////////////////////////////////
@@ -2400,7 +2400,7 @@ void Pipe::ConstructGeometry()
   TGeoVolume* voRB26s4SFlange = new TGeoVolume("RB26s4SFlange", shRB26s4SFlange, kMedSteel);
 
   TGeoVolume* voRB26s4SFlangeM =
-    new TGeoVolume("RB26s4SFlangeM", MakeMotherFromTemplate(shRB26s4SFlange, 0, 3), kMedVac);
+    new TGeoVolume("RB26s4SFlangeM", makeMotherFromTemplate(shRB26s4SFlange, 0, 3), kMedVac);
   voRB26s4SFlangeM->AddNode(voRB26s4SFlange, 1, gGeoIdentity);
 
   ///////////////////////////////////////
@@ -2436,7 +2436,7 @@ void Pipe::ConstructGeometry()
   TGeoVolume* voRB26s5RFlange = new TGeoVolume("RB26s5RFlange", shRB26s5RFlange, kMedSteel);
 
   TGeoVolume* voRB26s5RFlangeM =
-    new TGeoVolume("RB26s5RFlangeM", MakeMotherFromTemplate(shRB26s5RFlange, 4, 7), kMedVac);
+    new TGeoVolume("RB26s5RFlangeM", makeMotherFromTemplate(shRB26s5RFlange, 4, 7), kMedVac);
   voRB26s5RFlangeM->AddNode(voRB26s5RFlange, 1, gGeoIdentity);
 
   //
@@ -2598,72 +2598,72 @@ void Pipe::createMaterials()
   //
   //    Beryllium
   {
-    auto matid = Material(5, "BERILLIUM$", 9.01, 4., 1.848, 35.3, 36.7);
-    Medium(5, "PIPE_BE", matid, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+    auto matid = Material(5, "BERILLIUM$material
+    Medium(5, "PIPE_BE", mamedium, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
   }
 
   //    Copper
   {
-    auto matid = Material(10, "COPPER", 63.55, 29, 8.96, 1.43, 85.6 / 8.96);
-    Medium(10, "PIPE_CU", matid, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+    auto matid = Material(10, "COPPER", material, 29, 8.96, 1.43, 85.6 / 8.96);
+    Medium(10, "PIPE_CU", mmedium, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
   }
 
   //    Air
   {
-    auto matid1 = Mixture(15, "AIR$      ", aAir, zAir, dAir, 4, wAir);
-    auto matid2 = Mixture(35, "AIR_HIGH$ ", aAir, zAir, dAir, 4, wAir);
-    Medium(15, "PIPE_AIR", matid1, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-    Medium(35, "PIPE_AIR_HIGH", matid2, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+    auto matid1 = Mixture(15, "AIR$      mixture
+    auto matid2 = Mixture(35, "AIR_HIGH$ mixture
+    Medium(15, "PIPE_AIR", medium, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+    Medium(35, "PIPE_AIR_HImedium", matid2, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
   }
 
   {
-    auto matid = Mixture(14, "INSULATION0$", ains, zins, 0.41, 4, wins);
-    Medium(14, "PIPE_INS_C0", matid, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+    auto matid = Mixture(14, "INSULATIONmixture$", ains, zins, 0.41, 4, wins);
+    Medium(14, "PIPE_INS_C0medium
   }
 
   //
   //    Vacuum
   {
-    auto matid = Mixture(16, "VACUUM$ ", aAir, zAir, dAir1, 4, wAir);
-    Medium(16, "PIPE_VACUUM", matid, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+    auto matid = Mixture(16, "VACUUM$ ",mixture aAir, zAir, dAir1, 4, wAir);
+    Medium(16, "PIPE_VACUUMmedium
   }
 
   //
   //    Steel
   {
-    auto matid = Mixture(19, "STAINLESS STEEL$", asteel, zsteel, 7.88, 4, wsteel);
-    Medium(19, "PIPE_INOX", matid, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+    auto matid = Mixture(19, "STAINLESS mixture", asteel, zsteel, 7.88, 4, wsteel);
+    Medium(19, "PIPE_INOX",medium matid, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
   }
   //
 
   //----------------- for the MFT ----------------------
   {
-    auto matid1 = Mixture(63, "ALUMINIUM5083$", aALU5083, zALU5083, 2.66, 4, wALU5083); // from aubertduval.fr
-    auto matid2 = Mixture(64, "ALUMINIUM2219$", aALU2219, zALU2219, 2.84, 6, wALU2219); // from aubertduval.fr
-    Medium(63, "PIPE_AA5083", matid1, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-    Medium(64, "PIPE_AA2219", matid2, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+    auto matid1 = Mixture(63, "ALUMINIUM5mixture$", aALU5083, zALU5083, 2.66, 4, wALU5083); // from aubertduval.fr
+    auto matid2 = Mixture(64, "ALUMINIUM2mixture$", aALU2219, zALU2219, 2.84, 6, wALU2219); // from aubertduval.fr
+    Medium(63, "PIPE_AA5083medium
+    Medium(64, "PIPE_AA2219medium
   }
 
   //----------------------------------------------------
   {
-    auto matid = Mixture(65, "PI$", aPI, zPI, 1.42, -4, wPI);
-    Medium(65, "PIPE_POLYIMIDE", matid, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+    auto matid = Mixture(65, "PI$", aPI,mixture zPI, 1.42, -4, wPI);
+    Medium(65, "PIPE_POLYIMmedium", matid, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
   }
 
   //---------------------------------
   //     Carbon Fiber M55J
   {
-    auto matid = Material(66, "M55J6K$", 12.0107, 6, 1.92, 999, 999);
-    Medium(66, "PIPE_M55J6K", matid, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+    auto matid = Material(66, "M55J6K$",material 12.0107, 6, 1.92, 999, 999);
+    Medium(66, "PIPE_M55J6Kmedium
   }
   // Rohacell
   {
-    auto matid = Mixture(67, "Rohacell$", aRohacell, zRohacell, 0.03, -4, wRohacell);
-    Medium(67, "PIPE_ROHACELL", matid, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+    auto matid = Mixture(67, "Rohacell$"mixture aRohacell, zRohacell, 0.03, -4, wRohacell);
+    Medium(67, "PIPE_ROHACEmedium", matid, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
   }
 }
 
-TGeoPcon* Pipe::MakeMotherFromTemplate(const TGeoPcon* shape, Int_t imin, Int_t imax, Float_t r0, Int_t nz)
+TGeoPcon* Pipe::makeMotherFromTemplate(const TGeoPcon* shape, Int_t imin, Int_t imax, Float_t r0, Int_t nz)
 {
   //
   //  Create a mother shape from a template setting some min radii to 0
@@ -2693,7 +2693,7 @@ TGeoPcon* Pipe::MakeMotherFromTemplate(const TGeoPcon* shape, Int_t imin, Int_t 
   return mother;
 }
 
-TGeoPcon* Pipe::MakeInsulationFromTemplate(TGeoPcon* shape)
+TGeoPcon* Pipe::makeInsulationFromTemplate(TGeoPcon* shape)
 {
   //
   //  Create an beam pipe insulation layer shape from a template
@@ -2713,7 +2713,7 @@ TGeoPcon* Pipe::MakeInsulationFromTemplate(TGeoPcon* shape)
   return insu;
 }
 
-TGeoVolume* Pipe::MakeBellow(const char* ext, Int_t nc, Float_t rMin, Float_t rMax, Float_t dU, Float_t rPlie,
+TGeoVolume* Pipe::makeBellow(const char* ext, Int_t nc, Float_t rMin, Float_t rMax, Float_t dU, Float_t rPlie,
                              Float_t dPlie)
 {
   // nc     Number of convolution
@@ -2785,7 +2785,7 @@ TGeoVolume* Pipe::MakeBellow(const char* ext, Int_t nc, Float_t rMin, Float_t rM
   return voBellow;
 }
 
-TGeoVolume* Pipe::MakeBellowCside(const char* ext, Int_t nc, Float_t rMin, Float_t rMax, Float_t rPlie, Float_t dPlie)
+TGeoVolume* Pipe::makeBellowCside(const char* ext, Int_t nc, Float_t rMin, Float_t rMax, Float_t rPlie, Float_t dPlie)
 {
   // nc     Number of convolution
   // rMin   Inner radius of the bellow
@@ -2923,5 +2923,5 @@ TGeoVolume* Pipe::MakeBellowCside(const char* ext, Int_t nc, Float_t rMin, Float
 }
 
 // ----------------------------------------------------------------------------
-FairModule* Pipe::CloneModule() const { return new Pipe(*this); }
+FairModule* Pipe::cloneModule() const { return new Pipe(*this); }
 ClassImp(o2::passive::Pipe)

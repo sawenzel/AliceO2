@@ -80,8 +80,8 @@ class HalfSAMPAData {
     /// Print function
     /// @param output stream to put the SAMPA data on
     /// @return The output stream 
-    std::ostream& Print(std::ostream& output) const;
-    friend std::ostream& operator<< (std::ostream& out, const HalfSAMPAData& s) { return s.Print(out); }
+    std::ostream& print(std::ostream& output) const;
+    friend std::ostream& operator<< (std::ostream& out, const HalfSAMPAData& s) { return s.print(out); }
 
     bool operator== (const HalfSAMPAData& rhs) const { return mID == rhs.mID && mLow == rhs.mLow && mData == rhs.mData; };
     bool operator!= (const HalfSAMPAData& rhs) const { return ! ((*this) == rhs); };

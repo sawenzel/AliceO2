@@ -40,16 +40,16 @@ class MagFieldParam : public FairParGenericSet
 
     MagFieldParam(const char* name="", const char* title="", const char* context="");
 
-    void SetParam(const MagneticField* field);
+    void setParam(const MagneticField* field);
     
-    BMap_t     GetMapType()                   const {return mMapType;}
-    BeamType_t GetBeamType()                  const {return mBeamType;}
-    Int_t                     GetDefInt()     const {return mDefaultIntegration;}
-    Double_t                  GetFactorSol()  const {return mFactorSol;}
-    Double_t                  GetFactorDip()  const {return mFactorDip;}
-    Double_t                  GetBeamEnergy() const {return mBeamEnergy;}
-    Double_t                  GetMaxField()   const {return mMaxField;}
-    const char*               GetMapPath()    const {return mMapPath.Data();}
+    BMap_t     getMapType()                   const {return mMapType;}
+    BeamType_t getBeamType()                  const {return mBeamType;}
+    Int_t                     getDefInt()     const {return mDefaultIntegration;}
+    Double_t                  getFactorSol()  const {return mFactorSol;}
+    Double_t                  getFactorDip()  const {return mFactorDip;}
+    Double_t                  getBeamEnergy() const {return mBeamEnergy;}
+    Double_t                  getMaxField()   const {return mMaxField;}
+    const char*               getMapPath()    const {return mMapPath.Data();}
 
     void   putParams(FairParamList* list) override;
     Bool_t getParams(FairParamList* list) override;

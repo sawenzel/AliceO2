@@ -119,23 +119,23 @@ MagneticField::MagneticField(const char *name, const char *title, Double_t facto
    */
 
   setDataFileName(path.c_str());
-  CreateField();
+  createField();
 }
 
 MagneticField::MagneticField(const MagFieldParam& param)
   : FairField(param.GetName(),param.GetTitle()),
     mMeasuredMap(nullptr),
     mFastField(nullptr),
-    mMapType(param.GetMapType()),
+    mMapType(param.getMapType()),
     mSolenoid(0),
-    mBeamType(param.GetBeamType()),
-    mBeamEnergy(param.GetBeamEnergy()),
-    mDefaultIntegration(param.GetDefInt()),
+    mBeamType(param.getBeamType()),
+    mBeamEnergy(param.getBeamEnergy()),
+    mDefaultIntegration(param.getDefInt()),
     mPrecisionInteg(1),
-    mMultipicativeFactorSolenoid(param.GetFactorSol()), // temporary
-    mMultipicativeFactorDipole(param.GetFactorDip()), // temporary
-    mMaxField(param.GetMaxField()),
-    mDipoleOnOffFlag(param.GetFactorDip() == 0.),
+    mMultipicativeFactorSolenoid(param.getFactorSol()), // temporary
+    mMultipicativeFactorDipole(param.getFactorDip()), // temporary
+    mMaxField(param.getMaxField()),
+    mDipoleOnOffFlag(param.getFactorDip() == 0.),
     mQuadrupoleGradient(0),
     mDipoleField(0),
     mCompensatorField2C(0),
@@ -148,11 +148,11 @@ MagneticField::MagneticField(const MagFieldParam& param)
    * Constructor for FairParam derived params
    */
 
-  setDataFileName(param.GetMapPath());
-  CreateField();
+  setDataFileName(param.getMapPath());
+  createField();
 }
 
-void MagneticField::CreateField()
+void MagneticField::createField()
 {
   /*
    * field initialization
@@ -197,7 +197,7 @@ void MagneticField::CreateField()
   setFactorDipole(mMultipicativeFactorDipole); 
   double xyz[3] = {0., 0., 0.};
   mSolenoid = getBz(xyz);
-  Print("a");
+  print("a");
   //
 }
 
@@ -227,7 +227,7 @@ Bool_t MagneticField::loadParameterization()
   return kTRUE;
 }
 
-void MagneticField::Field(const Double_t * __restrict__ xyz, Double_t * __restrict__ b)
+void MagneticField::field(const Double_t * __restrict__ xyz, Double_t * __restrict__ b)
 {
   /*
    * query field value at point
@@ -237,7 +237,7 @@ void MagneticField::Field(const Double_t * __restrict__ xyz, Double_t * __restri
   if (mFastField && mFastField->Field(xyz,b)) return;
   
   if (mMeasuredMap && xyz[2] > mMeasuredMap->getMinZ() && xyz[2] < mMeasuredMap->getMaxZ()) {
-    mMeasuredMap->Field(xyz, b);
+    mMeasuredMap->field(xyz, b);
     if (xyz[2] > sSolenoidToDipoleZ || mDipoleOnOffFlag) {
       for (int i = 3; i--;) {
         b[i] *= mMultipicativeFactorSolenoid;
@@ -248,7 +248,7 @@ void MagneticField::Field(const Double_t * __restrict__ xyz, Double_t * __restri
       }
     }
   } else {
-    MachineField(xyz, b);
+    machineField(xyz, b);
   }
 }
 
@@ -322,7 +322,7 @@ void MagneticField::initializeMachineField(MagFieldParam::BeamType_t btype, Doub
   mCompensatorField2A = 11.7905;
 }
 
-void MagneticField::MachineField(const Double_t * __restrict__ x, Double_t * __restrict__ b) const
+void MagneticField::machineField(const Double_t * __restrict__ x, Double_t * __restrict__ b) const
 {
   // ---- This is the ZDC part
   // Compansators for Alice Muon Arm Dipole
@@ -609,7 +609,7 @@ const char *MagneticField::getBeamTypeText() const
   }
 }
 
-void MagneticField::Print(Option_t *opt) const
+void MagneticField::print(Option_t *opt) const
 {
   TString opts = opt;
   opts.ToLower();
@@ -625,18 +625,18 @@ void MagneticField::Print(Option_t *opt) const
   }
 }
 
-void MagneticField::FillParContainer()
+void MagneticField::fillParContainer()
 {
   // fill field parameters
   FairRun* fRun = FairRun::Instance();
   FairRuntimeDb* rtdb = fRun->GetRuntimeDb();
   MagFieldParam* par = static_cast<MagFieldParam*>(rtdb->getContainer("MagFieldParam"));
-  par->SetParam(this);
+  par->setParam(this);
   par->setChanged();
 }
 
 //_____________________________________________________________________________
-void MagneticField::AllowFastField(bool v)
+void MagneticField::allowFastField(bool v)
 {
   if (v) {
     if (!mFastField) mFastField = std::make_unique<MagFieldFast>

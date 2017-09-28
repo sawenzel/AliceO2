@@ -48,7 +48,7 @@ DataProcessingDevice::DataProcessingDevice(const DeviceSpec &spec,
 /// In particular it needs to:
 /// * Allocate the channels as needed and attach HandleData to each one of them
 /// * Invoke the actual init
-void DataProcessingDevice::Init() {
+void DataProcessingDevice::init() {
   LOG(DEBUG) << "DataProcessingDevice::InitTask::START";
   auto optionsRetriever(std::make_unique<FairOptionsRetriever>(GetConfig()));
   mConfigRegistry = std::move(std::make_unique<ConfigParamRegistry>(std::move(optionsRetriever)));

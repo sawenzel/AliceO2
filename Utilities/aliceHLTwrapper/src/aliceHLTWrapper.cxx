@@ -33,7 +33,7 @@ namespace bpo = boost::program_options;
 
 void addCustomOptions(bpo::options_description& options)
 {
-  options.add(o2::alice_hlt::WrapperDevice::GetOptionsDescription());
+  options.add(o2::alice_hlt::WrapperDevice::getOptionsDescription());
 }
 
 FairMQDevicePtr getDevice(const FairMQProgOptions& /*config*/)

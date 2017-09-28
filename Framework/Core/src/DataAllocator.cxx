@@ -99,7 +99,7 @@ DataAllocator::newTClonesArray(const OutputSpec &spec, const char *className, si
   payload->SetOwner(kTRUE);
   auto &result = *payload.get();
   mRootContext->addObject(std::move(headerMessage), std::move(payload), channel, 0);
-  assert(payload.get() == 0);
+  assert(payload.get() == nullptr);
   return result;
 }
 

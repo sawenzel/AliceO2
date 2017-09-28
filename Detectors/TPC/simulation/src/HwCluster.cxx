@@ -151,7 +151,7 @@ std::ostream& HwCluster::print(std::ostream &output) const
 }
 
 //________________________________________________________________________
-std::ostream& HwCluster::PrintDetails(std::ostream &output) const
+std::ostream& HwCluster::printDetails(std::ostream &output) const
 {
   Cluster::print(output);
   output << " centered at (pad, time) = " << mPad << ", " << mTime

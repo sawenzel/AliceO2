@@ -20,7 +20,7 @@
 #include "Headers/HeartbeatFrame.h"
 #include <options/FairMQProgOptions.h>
 
-void o2::DataFlow::HeartbeatSampler::InitTask()
+void o2::DataFlow::HeartbeatSampler::initTask()
 {
   mPeriod = GetConfig()->GetValue<uint32_t>(OptionKeyPeriod);
   mOutputChannelName = GetConfig()->GetValue<std::string>(OptionKeyOutputChannelName);

@@ -82,12 +82,12 @@ class Chip
 
         /// Get the chip index stored in the chip
         /// @return Chip index stored in the chip
-        ULong_t GetChipIndexChip() const
+        ULong_t getChipIndexChip() const
         { return mDetIdChip; }
 
         /// Fet the chip index stored in the hit
         /// @return Chip index stored in the hit
-        ULong_t GetChipIndexHit() const
+        ULong_t getChipIndexHit() const
         { return mDetIdHit; }
 
       private:
@@ -135,32 +135,32 @@ class Chip
 
     /// Empties the point container
     /// @param option unused
-    void Clear();
+    void clear();
 
     /// Change the chip index
     /// @param index New chip index
-    void SetChipIndex(Int_t index)
+    void setChipIndex(Int_t index)
     { mChipIndex = index; }
 
-    void Init(Int_t index, const o2::Base::Transform3D *mat)
+    void init(Int_t index, const o2::Base::Transform3D *mat)
     { mChipIndex = index; mMat=mat; }
 
     /// Get the chip index
     /// @return Index of the chip
-    Int_t GetChipIndex() const
+    Int_t getChipIndex() const
     { return mChipIndex; }
 
     /// Insert new ITSMFT point into the Chip
     /// @param p Hit to be added
-    void InsertHit(const Hit *p);
+    void insertHit(const Hit *p);
 
     /// Get the number of point assigned to the chip
     /// @return Number of points assigned to the chip
-    Int_t GetNumberOfHits() const
+    Int_t getNumberOfHits() const
     { return mHits.size(); }
 
     /// reset points container
-    void ClearHits() {
+    void clearHits() {
       mHits.clear();
     }
 
@@ -169,7 +169,7 @@ class Chip
     /// Access Hit assigned to chip at a given index
     /// @param index Index of the point
     /// @return Hit at given index (nullptr if index is out of bounds)
-    const Hit *GetHitAt(Int_t index) const;
+    const Hit *getHitAt(Int_t index) const;
     
     /// Get the line segment of a given point (from start to current position)
     /// in local coordinates.
@@ -212,7 +212,7 @@ class Chip
     /// @param x Median x-position of the two hits in local coordinates
     /// @param y Median y-position of the two hits in local coordinates
     /// @param z Median z-position of the two hits in local coordinates
-    void MedianHitLocal(const Hit *p1, const Hit *p2, Double_t &x, Double_t &y, Double_t &z) const;
+    void medianHitLocal(const Hit *p1, const Hit *p2, Double_t &x, Double_t &y, Double_t &z) const;
 
     /// Calculate median positoin of two hits
     /// @param p1 First point in the median calculation
@@ -220,13 +220,13 @@ class Chip
     /// @param x Median xposition of the two hits in global coordinates
     /// @param y Median xposition of the two hits in global coordinates
     /// @param z Median xposition of the two hits in global coordinates
-    void MedianHitGlobal(const Hit *p1, const Hit *p2, Double_t &x, Double_t &y, Double_t &z) const;
+    void medianHitGlobal(const Hit *p1, const Hit *p2, Double_t &x, Double_t &y, Double_t &z) const;
 
     /// Calculate path length between two its points
     /// @param p1 First point for the path length calculation
     /// @param p2 Second point for the path length calculation
     /// @return path length between points
-    Double_t PathLength(const Hit *p1, const Hit *p2) const;
+    Double_t pathLength(const Hit *p1, const Hit *p2) const;
     
     o2::ITSMFT::Digit* addDigit(UInt_t roframe, UShort_t row, UShort_t col, float charge, Label lbl, double timestamp);
 

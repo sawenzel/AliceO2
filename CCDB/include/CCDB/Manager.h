@@ -219,7 +219,7 @@ class Manager : public TObject
       return &mConditionCache;
     }
 
-    static Manager *Instance(TMap *entryCache = nullptr, Int_t run = -1);
+    static Manager *instance(TMap *entryCache = nullptr, Int_t run = -1);
 
     void init();
 

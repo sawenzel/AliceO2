@@ -103,7 +103,7 @@ Detector::~Detector()
 }
 
 //_____________________________________________________________________________
-void Detector::Initialize()
+void Detector::initialize()
 {
 
   FairDetector::Initialize();
@@ -190,7 +190,7 @@ Bool_t Detector::ProcessHits(FairVolume* vol)
 		    status);
     
     o2::Data::Stack *stack = (o2::Data::Stack *) TVirtualMC::GetMC()->GetStack();
-    stack->AddPoint(kAliMft);
+    stack->addPoint(kAliMft);
     
   }
 
@@ -337,20 +337,20 @@ void Detector::createMaterials()
   
   LOG(INFO) << "Detector::CreateMaterials >>>>> fieldType " << fieldType << " maxField " << maxField << "\n"; 
 
-  o2::Base::Detector::Mixture(++matId, "Air$", aAir, zAir, dAir, nAir, wAir);
-  o2::Base::Detector::Medium(Air,     "Air$", matId, unsens, fieldType, maxField, tmaxfd, stemax, deemax, epsil, stmin);
+  o2::Base::Detector::mixture(++matId, "Air$", aAir, zAir, dAir, nAir, wAir);
+  o2::Base::Detector::medium(Air,     "Air$", matId, unsens, fieldType, maxField, tmaxfd, stemax, deemax, epsil, stmin);
 
-  o2::Base::Detector::Mixture(++matId, "Vacuum$", aAir, zAir, dAirVacuum, nAir, wAir);
-  o2::Base::Detector::Medium(Vacuum,  "Vacuum$", matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
+  o2::Base::Detector::mixture(++matId, "Vacuum$", aAir, zAir, dAirVacuum, nAir, wAir);
+  o2::Base::Detector::medium(Vacuum,  "Vacuum$", matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
 
-  o2::Base::Detector::Material(++matId, "Si$", aSi, zSi, dSi, radSi, absSi);
-  o2::Base::Detector::Medium(Si,       "Si$", matId, sens, fieldType, maxField, tmaxfdSi, stemaxSi, deemaxSi, epsilSi, stminSi);
+  o2::Base::Detector::material(++matId, "Si$", aSi, zSi, dSi, radSi, absSi);
+  o2::Base::Detector::medium(Si,       "Si$", matId, sens, fieldType, maxField, tmaxfdSi, stemaxSi, deemaxSi, epsilSi, stminSi);
   
-  o2::Base::Detector::Material(++matId, "Readout$", aSi, zSi, dSi, radSi, absSi);
-  o2::Base::Detector::Medium(Readout,  "Readout$", matId, unsens, fieldType, maxField, tmaxfdSi, stemaxSi, deemaxSi, epsilSi, stminSi);
+  o2::Base::Detector::material(++matId, "Readout$", aSi, zSi, dSi, radSi, absSi);
+  o2::Base::Detector::medium(Readout,  "Readout$", matId, unsens, fieldType, maxField, tmaxfdSi, stemaxSi, deemaxSi, epsilSi, stminSi);
   
-  o2::Base::Detector::Material(++matId, "Support$", aSi, zSi, dSi*mDensitySupportOverSi, radSi/mDensitySupportOverSi, absSi/mDensitySupportOverSi);
-  o2::Base::Detector::Medium(Support,  "Support$", matId, unsens, fieldType, maxField, tmaxfdSi, stemaxSi, deemaxSi, epsilSi, stminSi);
+  o2::Base::Detector::material(++matId, "Support$", aSi, zSi, dSi*mDensitySupportOverSi, radSi/mDensitySupportOverSi, absSi/mDensitySupportOverSi);
+  o2::Base::Detector::medium(Support,  "Support$", matId, unsens, fieldType, maxField, tmaxfdSi, stemaxSi, deemaxSi, epsilSi, stminSi);
   
   Double_t maxBending       = 0;     // Max Angle
   Double_t maxStepSize      = 0.001; // Max step size
@@ -368,60 +368,60 @@ void Detector::createMaterials()
   maxStepSize      = .01;
   precision        = .003;
   minStepSize      = .003;
-  o2::Base::Detector::Material(++matId, "Carbon$", aCarb, zCarb, dCarb, radCarb, absCarb);
-  o2::Base::Detector::Medium(Carbon, "Carbon$", matId,0,fieldType,maxField,maxBending,maxStepSize,maxEnergyLoss,precision,minStepSize);
+  o2::Base::Detector::material(++matId, "Carbon$", aCarb, zCarb, dCarb, radCarb, absCarb);
+  o2::Base::Detector::medium(Carbon, "Carbon$", matId,0,fieldType,maxField,maxBending,maxStepSize,maxEnergyLoss,precision,minStepSize);
 
-  o2::Base::Detector::Material(++matId, "Be$", aBe, zBe, dBe, radBe, absBe );
-  o2::Base::Detector::Medium(Be,   "Be$", matId, unsens, fieldType,  maxField, tmaxfd, stemax, deemax, epsil, stmin);
+  o2::Base::Detector::material(++matId, "Be$", aBe, zBe, dBe, radBe, absBe );
+  o2::Base::Detector::medium(Be,   "Be$", matId, unsens, fieldType,  maxField, tmaxfd, stemax, deemax, epsil, stmin);
   
-  o2::Base::Detector::Material(++matId, "Alu$", aAlu, zAlu, dAlu, radAlu, absAlu);
-  o2::Base::Detector::Medium(Alu,      "Alu$", matId, unsens, fieldType,  maxField, tmaxfd, stemax, deemax, epsil, stmin);
+  o2::Base::Detector::material(++matId, "Alu$", aAlu, zAlu, dAlu, radAlu, absAlu);
+  o2::Base::Detector::medium(Alu,      "Alu$", matId, unsens, fieldType,  maxField, tmaxfd, stemax, deemax, epsil, stmin);
     
-  o2::Base::Detector::Mixture(++matId, "Water$", aWater, zWater, dWater, nWater, wWater);
-  o2::Base::Detector::Medium(Water,   "Water$", matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
+  o2::Base::Detector::mixture(++matId, "Water$", aWater, zWater, dWater, nWater, wWater);
+  o2::Base::Detector::medium(Water,   "Water$", matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
   
-  o2::Base::Detector::Mixture(++matId, "SiO2$", aSiO2, zSiO2, dSiO2, nSiO2, wSiO2);
-  o2::Base::Detector::Medium(SiO2,    "SiO2$", matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
+  o2::Base::Detector::mixture(++matId, "SiO2$", aSiO2, zSiO2, dSiO2, nSiO2, wSiO2);
+  o2::Base::Detector::medium(SiO2,    "SiO2$", matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
   
-  o2::Base::Detector::Mixture(++matId, "Inox$", aInox, zInox, dInox, nInox, wInox);
-  o2::Base::Detector::Medium(Inox,    "Inox$", matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
+  o2::Base::Detector::mixture(++matId, "Inox$", aInox, zInox, dInox, nInox, wInox);
+  o2::Base::Detector::medium(Inox,    "Inox$", matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
   
-  o2::Base::Detector::Mixture(++matId, "Kapton$", aKapton, zKapton, dKapton, 4, wKapton);
-  o2::Base::Detector::Medium(Kapton,"Kapton$", matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
+  o2::Base::Detector::mixture(++matId, "Kapton$", aKapton, zKapton, dKapton, 4, wKapton);
+  o2::Base::Detector::medium(Kapton,"Kapton$", matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
   
-  o2::Base::Detector::Mixture(++matId, "Epoxy$", aEpoxy, zEpoxy, dEpoxy, -3, wEpoxy);
-  o2::Base::Detector::Medium(Epoxy,"Epoxy$", matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
+  o2::Base::Detector::mixture(++matId, "Epoxy$", aEpoxy, zEpoxy, dEpoxy, -3, wEpoxy);
+  o2::Base::Detector::medium(Epoxy,"Epoxy$", matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
   
-  o2::Base::Detector::Mixture(++matId, "SE4445$", aSE4445, zSE4445, dSE4445, -5, wSE4445);
-  o2::Base::Detector::Medium(SE4445,"SE4445$", matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
+  o2::Base::Detector::mixture(++matId, "SE4445$", aSE4445, zSE4445, dSE4445, -5, wSE4445);
+  o2::Base::Detector::medium(SE4445,"SE4445$", matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
   
-  o2::Base::Detector::Mixture(++matId,"CarbonFiber$",aCM55J,zCM55J,dCM55J,4,wCM55J);
-  o2::Base::Detector::Medium(CarbonEpoxy,"CarbonFiber$", matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
+  o2::Base::Detector::mixture(++matId,"CarbonFiber$",aCM55J,zCM55J,dCM55J,4,wCM55J);
+  o2::Base::Detector::medium(CarbonEpoxy,"CarbonFiber$", matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
   
-  o2::Base::Detector::Mixture(++matId,  "Rohacell", aRohacell, zRohacell, dRohacell, nRohacell, wRohacell);
-  o2::Base::Detector::Medium(Rohacell, "Rohacell", matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
+  o2::Base::Detector::mixture(++matId,  "Rohacell", aRohacell, zRohacell, dRohacell, nRohacell, wRohacell);
+  o2::Base::Detector::medium(Rohacell, "Rohacell", matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
   
-  o2::Base::Detector::Mixture(++matId,  "Polyimide", aPolyimide, zPolyimide, dPolyimide, nPolyimide, wPolyimide);
-  o2::Base::Detector::Medium(Polyimide, "Polyimide", matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
+  o2::Base::Detector::mixture(++matId,  "Polyimide", aPolyimide, zPolyimide, dPolyimide, nPolyimide, wPolyimide);
+  o2::Base::Detector::medium(Polyimide, "Polyimide", matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
 	
-  o2::Base::Detector::Mixture(++matId, "PEEK$", aPEEK, zPEEK, dPEEK, nPEEK, wPEEK);
-  o2::Base::Detector::Medium(PEEK,    "PEEK$", matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
+  o2::Base::Detector::mixture(++matId, "PEEK$", aPEEK, zPEEK, dPEEK, nPEEK, wPEEK);
+  o2::Base::Detector::medium(PEEK,    "PEEK$", matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
   
-  o2::Base::Detector::Mixture(++matId, "FR4$", aFR4, zFR4, dFR4, nFR4, wFR4);
-  o2::Base::Detector::Medium(FR4,    "FR4$", matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
+  o2::Base::Detector::mixture(++matId, "FR4$", aFR4, zFR4, dFR4, nFR4, wFR4);
+  o2::Base::Detector::medium(FR4,    "FR4$", matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
   
-  o2::Base::Detector::Material(++matId, "Cu$", aCu, zCu, dCu, radCu, absCu);
-  o2::Base::Detector::Medium(Cu,       "Cu$", matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
+  o2::Base::Detector::material(++matId, "Cu$", aCu, zCu, dCu, radCu, absCu);
+  o2::Base::Detector::medium(Cu,       "Cu$", matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
  
-  o2::Base::Detector::Mixture(++matId, "X7Rcapacitors$",aX7R,zX7R,dX7R,6,wX7R);
-  o2::Base::Detector::Medium(X7R,     "X7Rcapacitors$",matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
+  o2::Base::Detector::mixture(++matId, "X7Rcapacitors$",aX7R,zX7R,dX7R,6,wX7R);
+  o2::Base::Detector::medium(X7R,     "X7Rcapacitors$",matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
 
-  o2::Base::Detector::Mixture(++matId, "X7Rweld$",aX7Rweld,zX7Rweld,dX7Rweld,2,wX7Rweld);
-  o2::Base::Detector::Medium(X7Rw,    "X7Rweld$",matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
+  o2::Base::Detector::mixture(++matId, "X7Rweld$",aX7Rweld,zX7Rweld,dX7Rweld,2,wX7Rweld);
+  o2::Base::Detector::medium(X7Rw,    "X7Rweld$",matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
 
   // Carbon fleece from AliITSSUv2.cxx
-  o2::Base::Detector::Material(++matId,"CarbonFleece$",12.0107,6,0.4,radCarb,absCarb);          // 999,999);  why 999???
-  o2::Base::Detector::Medium(CarbonFleece,  "CarbonFleece$",matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
+  o2::Base::Detector::material(++matId,"CarbonFleece$",12.0107,6,0.4,radCarb,absCarb);          // 999,999);  why 999???
+  o2::Base::Detector::medium(CarbonFleece,  "CarbonFleece$",matId, unsens, itgfld, maxfld, tmaxfd, stemax, deemax, epsil, stmin);
 
   LOG(INFO) << "Detector::CreateMaterials -----> matId = " << matId << "\n";
 
@@ -440,7 +440,7 @@ void Detector::createGeometry()
 }
 
 //_____________________________________________________________________________
-void Detector::ConstructGeometry()
+void Detector::constructGeometry()
 {
 
   createMaterials();
@@ -460,7 +460,7 @@ void Detector::defineSensitiveVolumes()
 }
 
 //_____________________________________________________________________________
-void Detector::EndOfEvent()
+void Detector::endOfEvent()
 {
 
   if (mHits) { 
@@ -470,7 +470,7 @@ void Detector::EndOfEvent()
 }
 
 //_____________________________________________________________________________
-void Detector::Register()
+void Detector::register()
 {
   // This will create a branch in the output tree called Hit, setting the last
   // parameter to kFALSE means that this collection will not be written to the file,
@@ -482,7 +482,7 @@ void Detector::Register()
 
 }
 //_____________________________________________________________________________
-TClonesArray *Detector::GetCollection(Int_t iColl) const
+TClonesArray *Detector::getCollection(Int_t iColl) const
 {
 
   if (iColl == 0) {
@@ -494,7 +494,7 @@ TClonesArray *Detector::GetCollection(Int_t iColl) const
 }
 
 //_____________________________________________________________________________
-void Detector::Reset()
+void Detector::reset()
 {
 
   mHits->Clear();

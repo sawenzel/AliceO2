@@ -157,14 +157,14 @@ const int TRDGeometry::fgkRowmaxC0 = 12;
 const int TRDGeometry::fgkRowmaxC1 = 16;
 
 const double TRDGeometry::fgkTime0Base = 300.65;
-const float TRDGeometry::fgkTime0[6] = { static_cast<float>(fgkTime0Base + 0 * (Cheight() + Cspace())),
-                                         static_cast<float>(fgkTime0Base + 1 * (Cheight() + Cspace())),
-                                         static_cast<float>(fgkTime0Base + 2 * (Cheight() + Cspace())),
-                                         static_cast<float>(fgkTime0Base + 3 * (Cheight() + Cspace())),
-                                         static_cast<float>(fgkTime0Base + 4 * (Cheight() + Cspace())),
-                                         static_cast<float>(fgkTime0Base + 5 * (Cheight() + Cspace())) };
+const float TRDGeometry::fgkTime0[6] = { static_cast<float>(fgkTime0Base + 0 * (Cheight() + Cspace()))cheight
+          cspace                               static_cast<float>(fgkTime0Base + 1 * (Cheight() + Cspace()))cheight
+          cspace                               static_cast<float>(fgkTime0Base + 2 * (Cheight() + Cspace()))cheight
+          cspace                               static_cast<float>(fgkTime0Base + 3 * (Cheight() + Cspace()))cheight
+          cspace                               static_cast<float>(fgkTime0Base + 4 * (Cheight() + Cspace()))cheight
+          cspace                               static_cast<float>(fgkTime0Base + 5 * (Cheight() + Cspace()))cheight };
 
-const double TRDGeometry::fgkXtrdBeg = 288.43; // Values depend on position of TRD
+const dcspace TRDGeometry::fgkXtrdBeg = 288.43; // Values depend on position of TRD
 const double TRDGeometry::fgkXtrdEnd = 366.33; // mother volume inside space frame !!!
 
 // The outer width of the chambers
@@ -201,7 +201,7 @@ TRDGeometry::~TRDGeometry()
 }
 
 //_____________________________________________________________________________
-void TRDGeometry::CreatePadPlaneArray()
+void TRDGeometry::createPadPlaneArray()
 {
   //
   // Creates the array of TRDPadPlane objects
@@ -217,15 +217,15 @@ void TRDGeometry::CreatePadPlaneArray()
   fgPadPlaneArray->resize(fgkNlayer * fgkNstack);
   for (int ilayer = 0; ilayer < fgkNlayer; ilayer++) {
     for (int istack = 0; istack < fgkNstack; istack++) {
-      int ipp = GetDetectorSec(ilayer, istack);
+      int ipp = GetDetectorSec(ilayer,getDetectorSec istack);
       // fgPadPlaneArray->AddAt(CreatePadPlane(ilayer,istack),ipp);
-      (*fgPadPlaneArray)[ipp] = CreatePadPlane(ilayer, istack);
+      (*fgPadPlaneArray)[ipp] = CreatePadPlane(ilayer,createPadPlane istack);
     }
   }
 }
 
 //_____________________________________________________________________________
-TRDPadPlane* TRDGeometry::CreatePadPlane(int ilayer, int istack)
+TRDPadPlane* TRDGeometry::createPadPlane(int ilayer, int istack)
 {
   //
   // Creates an TRDPadPlane object
@@ -233,18 +233,18 @@ TRDPadPlane* TRDGeometry::CreatePadPlane(int ilayer, int istack)
 
   TRDPadPlane* padPlane = new TRDPadPlane();
 
-  padPlane->SetLayer(ilayer);
-  padPlane->SetStack(istack);
+  padPlane->setLayer(ilayer);
+  padPlane->setStack(istack);
 
-  padPlane->SetRowSpacing(0.0);
-  padPlane->SetColSpacing(0.0);
+  padPlane->setRowSpacing(0.0);
+  padPlane->setColSpacing(0.0);
 
-  padPlane->SetLengthRim(1.0);
-  padPlane->SetWidthRim(0.5);
+  padPlane->setLengthRim(1.0);
+  padPlane->setWidthRim(0.5);
 
-  padPlane->SetNcols(144);
+  padPlane->setNcols(144);
 
-  padPlane->SetAnodeWireOffset(0.25);
+  padPlane->setAnodeWireOffset(0.25);
 
   //
   // The pad plane parameter
@@ -254,114 +254,114 @@ TRDPadPlane* TRDGeometry::CreatePadPlane(int ilayer, int istack)
     case 0:
       if (istack == 2) {
         // L0C0 type
-        padPlane->SetNrows(12);
-        padPlane->SetLength(108.0);
-        padPlane->SetLengthOPad(8.0);
-        padPlane->SetLengthIPad(9.0);
+        padPlane->setNrows(12);
+        padPlane->setLength(108.0);
+        padPlane->setLengthOPad(8.0);
+        padPlane->setLengthIPad(9.0);
       } else {
         // L0C1 type
-        padPlane->SetNrows(16);
-        padPlane->SetLength(122.0);
-        padPlane->SetLengthOPad(7.5);
-        padPlane->SetLengthIPad(7.5);
+        padPlane->setNrows(16);
+        padPlane->setLength(122.0);
+        padPlane->setLengthOPad(7.5);
+        padPlane->setLengthIPad(7.5);
       }
-      padPlane->SetWidth(92.2);
-      padPlane->SetWidthOPad(0.515);
-      padPlane->SetWidthIPad(0.635);
-      padPlane->SetTiltingAngle(-kTiltAngle);
+      padPlane->setWidth(92.2);
+      padPlane->setWidthOPad(0.515);
+      padPlane->setWidthIPad(0.635);
+      padPlane->setTiltingAngle(-kTiltAngle);
       break;
     case 1:
       if (istack == 2) {
         // L1C0 type
-        padPlane->SetNrows(12);
-        padPlane->SetLength(108.0);
-        padPlane->SetLengthOPad(8.0);
-        padPlane->SetLengthIPad(9.0);
+        padPlane->setNrows(12);
+        padPlane->setLength(108.0);
+        padPlane->setLengthOPad(8.0);
+        padPlane->setLengthIPad(9.0);
       } else {
         // L1C1 type
-        padPlane->SetNrows(16);
-        padPlane->SetLength(122.0);
-        padPlane->SetLengthOPad(7.5);
-        padPlane->SetLengthIPad(7.5);
+        padPlane->setNrows(16);
+        padPlane->setLength(122.0);
+        padPlane->setLengthOPad(7.5);
+        padPlane->setLengthIPad(7.5);
       }
-      padPlane->SetWidth(96.6);
-      padPlane->SetWidthOPad(0.585);
-      padPlane->SetWidthIPad(0.665);
-      padPlane->SetTiltingAngle(kTiltAngle);
+      padPlane->setWidth(96.6);
+      padPlane->setWidthOPad(0.585);
+      padPlane->setWidthIPad(0.665);
+      padPlane->setTiltingAngle(kTiltAngle);
       break;
     case 2:
       if (istack == 2) {
         // L2C0 type
-        padPlane->SetNrows(12);
-        padPlane->SetLength(108.0);
-        padPlane->SetLengthOPad(8.0);
-        padPlane->SetLengthIPad(9.0);
+        padPlane->setNrows(12);
+        padPlane->setLength(108.0);
+        padPlane->setLengthOPad(8.0);
+        padPlane->setLengthIPad(9.0);
       } else {
         // L2C1 type
-        padPlane->SetNrows(16);
-        padPlane->SetLength(129.0);
-        padPlane->SetLengthOPad(7.5);
-        padPlane->SetLengthIPad(8.0);
+        padPlane->setNrows(16);
+        padPlane->setLength(129.0);
+        padPlane->setLengthOPad(7.5);
+        padPlane->setLengthIPad(8.0);
       }
-      padPlane->SetWidth(101.1);
-      padPlane->SetWidthOPad(0.705);
-      padPlane->SetWidthIPad(0.695);
-      padPlane->SetTiltingAngle(-kTiltAngle);
+      padPlane->setWidth(101.1);
+      padPlane->setWidthOPad(0.705);
+      padPlane->setWidthIPad(0.695);
+      padPlane->setTiltingAngle(-kTiltAngle);
       break;
     case 3:
       if (istack == 2) {
         // L3C0 type
-        padPlane->SetNrows(12);
-        padPlane->SetLength(108.0);
-        padPlane->SetLengthOPad(8.0);
-        padPlane->SetLengthIPad(9.0);
+        padPlane->setNrows(12);
+        padPlane->setLength(108.0);
+        padPlane->setLengthOPad(8.0);
+        padPlane->setLengthIPad(9.0);
       } else {
         // L3C1 type
-        padPlane->SetNrows(16);
-        padPlane->SetLength(136.0);
-        padPlane->SetLengthOPad(7.5);
-        padPlane->SetLengthIPad(8.5);
+        padPlane->setNrows(16);
+        padPlane->setLength(136.0);
+        padPlane->setLengthOPad(7.5);
+        padPlane->setLengthIPad(8.5);
       }
-      padPlane->SetWidth(105.5);
-      padPlane->SetWidthOPad(0.775);
-      padPlane->SetWidthIPad(0.725);
-      padPlane->SetTiltingAngle(kTiltAngle);
+      padPlane->setWidth(105.5);
+      padPlane->setWidthOPad(0.775);
+      padPlane->setWidthIPad(0.725);
+      padPlane->setTiltingAngle(kTiltAngle);
       break;
     case 4:
       if (istack == 2) {
         // L4C0 type
-        padPlane->SetNrows(12);
-        padPlane->SetLength(108.0);
-        padPlane->SetLengthOPad(8.0);
+        padPlane->setNrows(12);
+        padPlane->setLength(108.0);
+        padPlane->setLengthOPad(8.0);
       } else {
         // L4C1 type
-        padPlane->SetNrows(16);
-        padPlane->SetLength(143.0);
-        padPlane->SetLengthOPad(7.5);
+        padPlane->setNrows(16);
+        padPlane->setLength(143.0);
+        padPlane->setLengthOPad(7.5);
       }
-      padPlane->SetWidth(109.9);
-      padPlane->SetWidthOPad(0.845);
-      padPlane->SetLengthIPad(9.0);
-      padPlane->SetWidthIPad(0.755);
-      padPlane->SetTiltingAngle(-kTiltAngle);
+      padPlane->setWidth(109.9);
+      padPlane->setWidthOPad(0.845);
+      padPlane->setLengthIPad(9.0);
+      padPlane->setWidthIPad(0.755);
+      padPlane->setTiltingAngle(-kTiltAngle);
       break;
     case 5:
       if (istack == 2) {
         // L5C0 type
-        padPlane->SetNrows(12);
-        padPlane->SetLength(108.0);
-        padPlane->SetLengthOPad(8.0);
+        padPlane->setNrows(12);
+        padPlane->setLength(108.0);
+        padPlane->setLengthOPad(8.0);
       } else {
         // L5C1 type
-        padPlane->SetNrows(16);
-        padPlane->SetLength(145.0);
-        padPlane->SetLengthOPad(8.5);
+        padPlane->setNrows(16);
+        padPlane->setLength(145.0);
+        padPlane->setLengthOPad(8.5);
       }
-      padPlane->SetWidth(114.4);
-      padPlane->SetWidthOPad(0.965);
-      padPlane->SetLengthIPad(9.0);
-      padPlane->SetWidthIPad(0.785);
-      padPlane->SetTiltingAngle(kTiltAngle);
+      padPlane->setWidth(114.4);
+      padPlane->setWidthOPad(0.965);
+      padPlane->setLengthIPad(9.0);
+      padPlane->setWidthIPad(0.785);
+      padPlane->setTiltingAngle(kTiltAngle);
       break;
   };
 
@@ -370,27 +370,27 @@ TRDPadPlane* TRDGeometry::CreatePadPlane(int ilayer, int istack)
   //
   // Row direction
   //
-  double row = fgkClength[ilayer][istack] / 2.0 - fgkRpadW - padPlane->GetLengthRim();
-  for (int ir = 0; ir < padPlane->GetNrows(); ir++) {
-    padPlane->SetPadRow(ir, row);
-    row -= padPlane->GetRowSpacing();
+  double row = fgkClength[ilayer][istack] / 2.0 - fgkRpadW - padPlane->getLengthRim();
+  for (int ir = 0; ir < padPlane->getNrows(); ir++) {
+    padPlane->setPadRow(ir, row);
+    row -= padPlane->getRowSpacing();
     if (ir == 0) {
-      row -= padPlane->GetLengthOPad();
+      row -= padPlane->getLengthOPad();
     } else {
-      row -= padPlane->GetLengthIPad();
+      row -= padPlane->getLengthIPad();
     }
   }
   //
   // Column direction
   //
-  double col = -fgkCwidth[ilayer] / 2.0 - fgkCroW + padPlane->GetWidthRim();
-  for (int ic = 0; ic < padPlane->GetNcols(); ic++) {
-    padPlane->SetPadCol(ic, col);
-    col += padPlane->GetColSpacing();
+  double col = -fgkCwidth[ilayer] / 2.0 - fgkCroW + padPlane->getWidthRim();
+  for (int ic = 0; ic < padPlane->getNcols(); ic++) {
+    padPlane->setPadCol(ic, col);
+    col += padPlane->getColSpacing();
     if (ic == 0) {
-      col += padPlane->GetWidthOPad();
+      col += padPlane->getWidthOPad();
     } else {
-      col += padPlane->GetWidthIPad();
+      col += padPlane->getWidthIPad();
     }
   }
   // Calculate the offset to translate from the local ROC system into
@@ -399,7 +399,7 @@ TRDPadPlane* TRDGeometry::CreatePadPlane(int ilayer, int istack)
   for (int jstack = 0; jstack < istack; jstack++) {
     rowTmp -= fgkClength[ilayer][jstack];
   }
-  padPlane->SetPadRowSMOffset(rowTmp - fgkClength[ilayer][istack] / 2.0);
+  padPlane->setPadRowSMOffset(rowTmp - fgkClength[ilayer][istack] / 2.0);
 
   return padPlane;
 }
@@ -416,7 +416,7 @@ void TRDGeometry::createVolume(const char* name, const char* shape, int nmed, fl
 }
 
 //_____________________________________________________________________________
-void TRDGeometry::CreateGeometry(std::vector<int> const& idtmed)
+void TRDGeometry::createGeometry(std::vector<int> const& idtmed)
 {
   //
   // Create the TRD geometry
@@ -523,7 +523,7 @@ void TRDGeometry::CreateGeometry(std::vector<int> const& idtmed)
 
   for (int istack = 0; istack < kNstack; istack++) {
     for (int ilayer = 0; ilayer < kNlayer; ilayer++) {
-      int iDet = GetDetectorSec(ilayer, istack);
+      int iDet = GetDetectorSec(ilayer,getDetectorSec istack);
 
       // The lower part of the readout chambers (drift volume + radiator)
       // The aluminum frames
@@ -850,14 +850,14 @@ void TRDGeometry::CreateGeometry(std::vector<int> const& idtmed)
   }
 
   // Create the volumes of the super module frame
-  CreateFrame(idtmed);
+  createFrame(idtmed);
 
   // Create the volumes of the services
-  CreateServices(idtmed);
+  createServices(idtmed);
 
   for (int istack = 0; istack < kNstack; istack++) {
     for (int ilayer = 0; ilayer < kNlayer; ilayer++) {
-      AssembleChamber(ilayer, istack);
+      assembleChamber(ilayer, istack);
     }
   }
 
@@ -883,7 +883,7 @@ void TRDGeometry::CreateGeometry(std::vector<int> const& idtmed)
   ypos = 0.0;
   zpos = 0.0;
   for (int isector = 0; isector < kNsector; isector++) {
-    if (GetSMstatus(isector)) {
+    if (getSMstatus(isector)) {
       snprintf(cTagV, kTag, "BTRD%d", isector);
       switch (isector) {
         case 17:
@@ -914,7 +914,7 @@ void TRDGeometry::CreateGeometry(std::vector<int> const& idtmed)
   ypos = 0.5 * fgkSlength + 0.5 * fgkFlength;
   zpos = 0.0;
   for (int isector = 0; isector < kNsector; isector++) {
-    if (GetSMstatus(isector)) {
+    if (getSMstatus(isector)) {
       snprintf(cTagV, kTag, "BTRD%d", isector);
       TVirtualMC::GetMC()->Gspos("UTF1", 1, cTagV, xpos, ypos, zpos, 0, "ONLY");
       TVirtualMC::GetMC()->Gspos("UTF2", 1, cTagV, xpos, -ypos, zpos, 0, "ONLY");
@@ -932,7 +932,7 @@ void TRDGeometry::CreateGeometry(std::vector<int> const& idtmed)
 }
 
 //_____________________________________________________________________________
-void TRDGeometry::CreateFrame(std::vector<int> const& idtmed)
+void TRDGeometry::createFrame(std::vector<int> const& idtmed)
 {
   //
   // Create the geometry of the frame of the supermodule
@@ -1654,7 +1654,7 @@ void TRDGeometry::CreateFrame(std::vector<int> const& idtmed)
 }
 
 //_____________________________________________________________________________
-void TRDGeometry::CreateServices(std::vector<int> const& idtmed)
+void TRDGeometry::createServices(std::vector<int> const& idtmed)
 {
   //
   // Create the geometry of the services
@@ -2053,7 +2053,7 @@ void TRDGeometry::CreateServices(std::vector<int> const& idtmed)
 
   for (istack = 0; istack < kNstack; istack++) {
     for (ilayer = 0; ilayer < kNlayer; ilayer++) {
-      int iDet = GetDetectorSec(ilayer, istack);
+      int iDet = GetDetectorSec(ilayer,getDetectorSec istack);
 
       snprintf(cTagV, kTag, "UU%02d", iDet);
       parServ[0] = fgkCwidth[ilayer] / 2.0;
@@ -2086,10 +2086,10 @@ void TRDGeometry::CreateServices(std::vector<int> const& idtmed)
   // Position the cooling pipes in the mother volume
   for (istack = 0; istack < kNstack; istack++) {
     for (ilayer = 0; ilayer < kNlayer; ilayer++) {
-      int iDet = GetDetectorSec(ilayer, istack);
-      int iCopy = GetDetector(ilayer, istack, 0) * 100;
-      int nMCMrow = GetRowMax(ilayer, istack, 0);
-      float ySize = (GetChamberLength(ilayer, istack) - 2.0 * fgkRpadW) / ((float)nMCMrow);
+      int iDet = GetDetectorSec(ilayer,getDetectorSec istack);
+      int iCopy = GetDetector(ilayer, isgetDetector, 0) * 100;
+      int nMCMrow = GetRowMax(ilayer, istagetRowMax, 0);
+      float ySize = (GetChamberLength(ilayegetChamberLength, istack) - 2.0 * fgkRpadW) / ((float)nMCMrow);
       snprintf(cTagV, kTag, "UU%02d", iDet);
       for (int iMCMrow = 0; iMCMrow < nMCMrow; iMCMrow++) {
         xpos = 0.0;
@@ -2118,10 +2118,10 @@ void TRDGeometry::CreateServices(std::vector<int> const& idtmed)
   // Position the power lines in the mother volume
   for (istack = 0; istack < kNstack; istack++) {
     for (ilayer = 0; ilayer < kNlayer; ilayer++) {
-      int iDet = GetDetectorSec(ilayer, istack);
-      int iCopy = GetDetector(ilayer, istack, 0) * 100;
-      int nMCMrow = GetRowMax(ilayer, istack, 0);
-      float ySize = (GetChamberLength(ilayer, istack) - 2.0 * fgkRpadW) / ((float)nMCMrow);
+      int iDet = GetDetectorSec(ilayer,getDetectorSec istack);
+      int iCopy = GetDetector(ilayer, isgetDetector, 0) * 100;
+      int nMCMrow = GetRowMax(ilayer, istagetRowMax, 0);
+      float ySize = (GetChamberLength(ilayegetChamberLength, istack) - 2.0 * fgkRpadW) / ((float)nMCMrow);
       snprintf(cTagV, kTag, "UU%02d", iDet);
       for (int iMCMrow = 0; iMCMrow < nMCMrow; iMCMrow++) {
         xpos = 0.0;
@@ -2193,12 +2193,12 @@ void TRDGeometry::CreateServices(std::vector<int> const& idtmed)
   // Position the MCMs in the mother volume
   for (istack = 0; istack < kNstack; istack++) {
     for (ilayer = 0; ilayer < kNlayer; ilayer++) {
-      int iDet = GetDetectorSec(ilayer, istack);
-      int iCopy = GetDetector(ilayer, istack, 0) * 1000;
-      int nMCMrow = GetRowMax(ilayer, istack, 0);
-      float ySize = (GetChamberLength(ilayer, istack) - 2.0 * fgkRpadW) / ((float)nMCMrow);
+      int iDet = GetDetectorSec(ilayer,getDetectorSec istack);
+      int iCopy = GetDetector(ilayer, isgetDetector, 0) * 1000;
+      int nMCMrow = GetRowMax(ilayer, istagetRowMax, 0);
+      float ySize = (GetChamberLength(ilayegetChamberLength, istack) - 2.0 * fgkRpadW) / ((float)nMCMrow);
       int nMCMcol = 8;
-      float xSize = (GetChamberWidth(ilayer) - 2.0 * fgkCpadW) / ((float)nMCMcol + 6); // Introduce 6 gaps
+      float xSize = (GetChamberWidth(ilayergetChamberWidth - 2.0 * fgkCpadW) / ((float)nMCMcol + 6); // Introduce 6 gaps
       int iMCM[8] = { 1, 2, 3, 5, 8, 9, 10, 12 };                                      // 0..7 MCM + 6 gap structure
       snprintf(cTagV, kTag, "UU%02d", iDet);
       for (int iMCMrow = 0; iMCMrow < nMCMrow; iMCMrow++) {
@@ -2273,10 +2273,10 @@ void TRDGeometry::CreateServices(std::vector<int> const& idtmed)
   // Put the DCS board in the chamber services mother volume
   for (istack = 0; istack < kNstack; istack++) {
     for (ilayer = 0; ilayer < kNlayer; ilayer++) {
-      int iDet = GetDetectorSec(ilayer, istack);
+      int iDet = GetDetectorSec(ilayer,getDetectorSec istack);
       int iCopy = iDet + 1;
       xpos = fgkCwidth[ilayer] / 2.0 -
-             1.9 * (GetChamberLength(ilayer, istack) - 2.0 * fgkRpadW) / ((float)GetRowMax(ilayer, istack, 0));
+             1.9 * (GetChamberLength(ilayegetChamberLength, istack) - 2.0 * fgkRpadW) / ((float)GetRowMax(ilayer, istagetRowMax, 0));
       ypos = 0.05 * fgkClength[ilayer][istack];
       zpos = kDCSz / 2.0 - fgkCsvH / 2.0;
       snprintf(cTagV, kTag, "UU%02d", iDet);
@@ -2333,16 +2333,16 @@ void TRDGeometry::CreateServices(std::vector<int> const& idtmed)
   // Put the ORI board in the chamber services mother volume
   for (istack = 0; istack < kNstack; istack++) {
     for (ilayer = 0; ilayer < kNlayer; ilayer++) {
-      int iDet = GetDetectorSec(ilayer, istack);
+      int iDet = GetDetectorSec(ilayer,getDetectorSec istack);
       int iCopy = iDet + 1;
       xpos = fgkCwidth[ilayer] / 2.0 -
-             1.92 * (GetChamberLength(ilayer, istack) - 2.0 * fgkRpadW) / ((float)GetRowMax(ilayer, istack, 0));
+             1.92 * (GetChamberLength(ilayegetChamberLength, istack) - 2.0 * fgkRpadW) / ((float)GetRowMax(ilayer, istagetRowMax, 0));
       ypos = -16.0;
       zpos = kORIz / 2.0 - fgkCsvH / 2.0;
       snprintf(cTagV, kTag, "UU%02d", iDet);
       TVirtualMC::GetMC()->Gspos("UORI", iCopy, cTagV, xpos, ypos, zpos, 0, "ONLY");
       xpos = -fgkCwidth[ilayer] / 2.0 +
-             3.8 * (GetChamberLength(ilayer, istack) - 2.0 * fgkRpadW) / ((float)GetRowMax(ilayer, istack, 0));
+             3.8 * (GetChamberLength(ilayegetChamberLength, istack) - 2.0 * fgkRpadW) / ((float)GetRowMax(ilayer, istagetRowMax, 0));
       ypos = -16.0;
       zpos = kORIz / 2.0 - fgkCsvH / 2.0;
       snprintf(cTagV, kTag, "UU%02d", iDet);
@@ -2596,7 +2596,7 @@ void TRDGeometry::CreateServices(std::vector<int> const& idtmed)
 }
 
 //_____________________________________________________________________________
-void TRDGeometry::AssembleChamber(int ilayer, int istack)
+void TRDGeometry::assembleChamber(int ilayer, int istack)
 {
   //
   // Group volumes UA, UD, UF, UU into an assembly that defines the
@@ -2611,7 +2611,7 @@ void TRDGeometry::AssembleChamber(int ilayer, int istack)
   double ypos = 0.0;
   double zpos = 0.0;
 
-  int idet = GetDetectorSec(ilayer, istack);
+  int idet = GetDetectorSec(ilayer,getDetectorSec istack);
 
   // Create the assembly for a given ROC
   snprintf(cTagM, kTag, "UT%02d", idet);
@@ -2704,7 +2704,7 @@ bool TRDGeometry::RotateBack(int det, const double* const loc, double* glb) cons
   //
 
   int sector = GetSector(det);
-  float phi = 2.0 * TMath::Pi() / (float)fgkNsector * ((float)sector + 0.5);
+  floagetSector phi = 2.0 * TMath::Pi() / (float)fgkNsector * ((float)sector + 0.5);
 
   glb[0] = loc[0] * TMath::Cos(phi) - loc[1] * TMath::Sin(phi);
   glb[1] = loc[0] * TMath::Sin(phi) + loc[1] * TMath::Cos(phi);
@@ -2714,7 +2714,7 @@ bool TRDGeometry::RotateBack(int det, const double* const loc, double* glb) cons
 }
 
 //_____________________________________________________________________________
-int TRDGeometry::GetDetectorSec(int layer, int stack)
+int TRDGeometry::getDetectorSec(int layer, int stack)
 {
   //
   // Convert plane / stack into detector number for one single sector
@@ -2724,7 +2724,7 @@ int TRDGeometry::GetDetectorSec(int layer, int stack)
 }
 
 //_____________________________________________________________________________
-int TRDGeometry::GetDetector(int layer, int stack, int sector)
+int TRDGeometry::getDetector(int layer, int stack, int sector)
 {
   //
   // Convert layer / stack / sector into detector number
@@ -2734,7 +2734,7 @@ int TRDGeometry::GetDetector(int layer, int stack, int sector)
 }
 
 //_____________________________________________________________________________
-int TRDGeometry::GetLayer(int det)
+int TRDGeometry::getLayer(int det)
 {
   //
   // Reconstruct the layer number from the detector number
@@ -2744,7 +2744,7 @@ int TRDGeometry::GetLayer(int det)
 }
 
 //_____________________________________________________________________________
-int TRDGeometry::GetStack(int det)
+int TRDGeometry::getStack(int det)
 {
   //
   // Reconstruct the stack number from the detector number
@@ -2754,7 +2754,7 @@ int TRDGeometry::GetStack(int det)
 }
 
 //_____________________________________________________________________________
-int TRDGeometry::GetStack(double z, int layer)
+int TRDGeometry::getStack(double z, int layer)
 {
   //
   // Reconstruct the chamber number from the z position and layer number
@@ -2773,17 +2773,17 @@ int TRDGeometry::GetStack(double z, int layer)
     istck--;
     if (istck < 0)
       break;
-    TRDPadPlane* pp = GetPadPlane(layer, istck);
-    zmax = pp->GetRow0();
-    int nrows = pp->GetNrows();
-    zmin = zmax - 2 * pp->GetLengthOPad() - (nrows - 2) * pp->GetLengthIPad() - (nrows - 1) * pp->GetRowSpacing();
+    TRDPadPlane* pp = GetPadPlane(layer, istgetPadPlane);
+    zmax = pp->getRow0();
+    int nrows = pp->getNrows();
+    zmin = zmax - 2 * pp->getLengthOPad() - (nrows - 2) * pp->getLengthIPad() - (nrows - 1) * pp->getRowSpacing();
   } while ((z < zmin) || (z > zmax));
 
   return istck;
 }
 
 //_____________________________________________________________________________
-int TRDGeometry::GetSector(int det)
+int TRDGeometry::getSector(int det)
 {
   //
   // Reconstruct the sector number from the detector number
@@ -2793,58 +2793,58 @@ int TRDGeometry::GetSector(int det)
 }
 
 //_____________________________________________________________________________
-TRDPadPlane* TRDGeometry::GetPadPlane(int layer, int stack)
+TRDPadPlane* TRDGeometry::getPadPlane(int layer, int stack)
 {
   //
   // Returns the pad plane for a given plane <pl> and stack <st> number
   //
 
   if (!fgPadPlaneArray) {
-    CreatePadPlaneArray();
+    CreatePadPlaneArray();createPadPlaneArray
   }
 
-  int ipp = GetDetectorSec(layer, stack);
+  int ipp = GetDetectorSec(layer, getDetectorSec);
   return (*fgPadPlaneArray)[ipp];
 }
 
 //_____________________________________________________________________________
-int TRDGeometry::GetRowMax(int layer, int stack, int /*sector*/)
+int TRDGeometry::getRowMax(int layer, int stack, int /*sector*/)
 {
   //
   // Returns the number of rows on the pad plane
   //
 
-  return GetPadPlane(layer, stack)->GetNrows();
+  return GetPadPlane(layer, stagetPadPlane)->getNrows();
 }
 
 //_____________________________________________________________________________
-int TRDGeometry::GetColMax(int layer)
+int TRDGeometry::getColMax(int layer)
 {
   //
   // Returns the number of rows on the pad plane
   //
 
-  return GetPadPlane(layer, 0)->GetNcols();
+  return GetPadPlane(layer, 0)-getPadPlanegetNcols();
 }
 
 //_____________________________________________________________________________
-double TRDGeometry::GetRow0(int layer, int stack, int /*sector*/)
+double TRDGeometry::getRow0(int layer, int stack, int /*sector*/)
 {
   //
   // Returns the position of the border of the first pad in a row
   //
 
-  return GetPadPlane(layer, stack)->GetRow0();
+  return GetPadPlane(layer, stagetPadPlane)->getRow0();
 }
 
 //_____________________________________________________________________________
-double TRDGeometry::GetCol0(int layer)
+double TRDGeometry::getCol0(int layer)
 {
   //
   // Returns the position of the border of the first pad in a column
   //
 
-  return GetPadPlane(layer, 0)->GetCol0();
+  return GetPadPlane(layer, 0)-getPadPlanegetCol0();
 }
 
 /*
@@ -2997,7 +2997,7 @@ bool TRDGeometry::ChamberInGeometry(int det)
 */
 
 //_____________________________________________________________________________
-bool TRDGeometry::IsHole(int /*la*/, int st, int se) const
+bool TRDGeometry::isHole(int /*la*/, int st, int se) const
 {
   //
   // Checks for holes in front of PHOS
@@ -3011,34 +3011,34 @@ bool TRDGeometry::IsHole(int /*la*/, int st, int se) const
 }
 
 //_____________________________________________________________________________
-bool TRDGeometry::IsOnBoundary(int det, float y, float z, float eps) const
+bool TRDGeometry::isOnBoundary(int det, float y, float z, float eps) const
 {
   //
   // Checks whether position is at the boundary of the sensitive volume
   //
 
   int ly = GetLayer(det);
-  if ((ly < 0) || (ly >= fgkNlayer))
+  if ((getLayer < 0) || (ly >= fgkNlayer))
     return true;
 
   int stk = GetStack(det);
-  if ((stk < 0) || (stk >= fgkNstack))
+  if ((getStack < 0) || (stk >= fgkNstack))
     return true;
 
-  TRDPadPlane* pp = (*fgPadPlaneArray)[GetDetectorSec(ly, stk)];
+  TRDPadPlane* pp = (*fgPadPlaneArray)[GetDetectorSec(ly, stkgetDetectorSec];
   if (!pp)
     return true;
 
-  double max = pp->GetRow0();
-  int n = pp->GetNrows();
-  double min = max - 2 * pp->GetLengthOPad() - (n - 2) * pp->GetLengthIPad() - (n - 1) * pp->GetRowSpacing();
+  double max = pp->getRow0();
+  int n = pp->getNrows();
+  double min = max - 2 * pp->getLengthOPad() - (n - 2) * pp->getLengthIPad() - (n - 1) * pp->getRowSpacing();
   if (z < min + eps || z > max - eps) {
     // printf("z : min[%7.2f (%7.2f)] %7.2f max[(%7.2f) %7.2f]\n", min, min+eps, z, max-eps, max);
     return true;
   }
-  min = pp->GetCol0();
-  n = pp->GetNcols();
-  max = min + 2 * pp->GetWidthOPad() + (n - 2) * pp->GetWidthIPad() + (n - 1) * pp->GetColSpacing();
+  min = pp->getCol0();
+  n = pp->getNcols();
+  max = min + 2 * pp->getWidthOPad() + (n - 2) * pp->getWidthIPad() + (n - 1) * pp->getColSpacing();
   if (y < min + eps || y > max - eps) {
     // printf("y : min[%7.2f (%7.2f)] %7.2f max[(%7.2f) %7.2f]\n", min, min+eps, y, max-eps, max);
     return true;

@@ -40,9 +40,9 @@ ConditionsMQClient::ConditionsMQClient() : mRunId(0), mParameterName() {}
 
 ConditionsMQClient::~ConditionsMQClient() = default;
 
-void CustomCleanup(void* data, void* hint) { delete static_cast<std::string*>(hint); }
+void customCleanup(void* data, void* hint) { delete static_cast<std::string*>(hint); }
 
-void ConditionsMQClient::InitTask()
+void ConditionsMQClient::initTask()
 {
   mParameterName = GetConfig()->GetValue<string>("parameter-name");
   mOperationType = GetConfig()->GetValue<string>("operation-type");
@@ -50,7 +50,7 @@ void ConditionsMQClient::InitTask()
   mObjectPath = GetConfig()->GetValue<string>("object-path");
 }
 
-void ConditionsMQClient::Run()
+void ConditionsMQClient::run()
 {
   Backend* backend;
 
@@ -85,7 +85,7 @@ void ConditionsMQClient::Run()
 
           if (mOperationType == "GET") {
             std::string* messageString = new string();
-            backend->Serialize(messageString, key, mOperationType, mDataSource);
+            backend->serialize(messageString, key, mOperationType, mDataSource);
 
             unique_ptr<FairMQMessage> request(fTransportFactory->CreateMessage(
               const_cast<char*>(messageString->c_str()), messageString->length(), CustomCleanup, messageString));
@@ -94,12 +94,12 @@ void ConditionsMQClient::Run()
             if (fChannels.at("data-get").at(0).Send(request) > 0) {
               if (fChannels.at("data-get").at(0).Receive(reply) > 0) {
                 LOG(DEBUG) << "Received a condition with a size of " << reply->GetSize();
-                backend->UnPack(std::move(reply));
+                backend->unPack(std::move(reply));
               }
             }
           } else if (mOperationType == "PUT") {
             std::string* messageString = new string();
-            backend->Pack(directoryIterator->path().string(), key, messageString);
+            backend->pack(directoryIterator->path().string(), key, messageString);
 
             unique_ptr<FairMQMessage> request(fTransportFactory->CreateMessage(
               const_cast<char*>(messageString->c_str()), messageString->length(), CustomCleanup, messageString));

@@ -217,7 +217,7 @@ class Geo
   static constexpr Float_t HSENSMY = 0.0105;      // height of Sensitive Layer
 
  private:
-  static void Init();
+  static void init();
 
   static Int_t getSector(const Float_t* pos);
   static Int_t getPlate(const Float_t* pos);

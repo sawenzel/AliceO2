@@ -74,16 +74,16 @@ Bool_t Chip::operator<(const Chip &other) const
 }
 
 //_______________________________________________________________________
-void Chip::InsertHit(const Hit *p)
+void Chip::insertHit(const Hit *p)
 {
-  if (p->GetDetectorID() != mChipIndex) {
-    throw IndexException(mChipIndex, p->GetDetectorID());
+  if (p->getDetectorID() != mChipIndex) {
+    throw IndexException(mChipIndex, p->getDetectorID());
   }
   mHits.push_back(p);
 }
 
 //_______________________________________________________________________
-const Hit *Chip::GetHitAt(Int_t i) const
+const Hit *Chip::getHitAt(Int_t i) const
 {
   if (i < mHits.size()) {
     return mHits[i];
@@ -92,9 +92,9 @@ const Hit *Chip::GetHitAt(Int_t i) const
 }
 
 //_______________________________________________________________________
-void Chip::Clear()
+void Chip::clear()
 {
-  ClearHits();
+  clearHits();
 }
 
 
@@ -104,11 +104,11 @@ Bool_t Chip::LineSegmentLocal(const Hit* hit,
 			      Double_t &ystart, Double_t &ypoint,
 			      Double_t &zstart, Double_t &zpoint, Double_t &timestart, Double_t &eloss) const
 {
-  if (hit->IsEntering()) return kFALSE;
+  if (hit->isEntering()) return kFALSE;
 
   // convert to local position
-  auto posLoc  = (*mMat)^( hit->GetPos() );
-  auto posLocS = (*mMat)^( hit->GetPosStart() );  
+  auto posLoc  = (*mMat)^( hit->getPos() );
+  auto posLocS = (*mMat)^( hit->getPosStart() );  
 
   // Prepare output, hit point relative to starting point
   // RS: think about returning Point3D
@@ -119,8 +119,8 @@ Bool_t Chip::LineSegmentLocal(const Hit* hit,
   ypoint = posLoc.Y() - ystart;
   zpoint = posLoc.Z() - zstart;
 
-  timestart = hit->GetTime();
-  eloss = hit->GetEnergyLoss();
+  timestart = hit->getTime();
+  eloss = hit->getEnergyLoss();
 
   return kTRUE;
 }
@@ -130,35 +130,35 @@ Bool_t Chip::LineSegmentLocal(const Hit* hit,
 Bool_t Chip::LineSegmentGlobal(const Hit* hit, Double_t &xstart, Double_t &xpoint, Double_t &ystart, Double_t &ypoint,
                                Double_t &zstart, Double_t &zpoint, Double_t &timestart, Double_t &eloss) const
 {
-  if (hit->IsEntering()) return kFALSE;
+  if (hit->isEntering()) return kFALSE;
 
   // Fill output fields
-  xstart = hit->GetStartX();
-  ystart = hit->GetStartY();
-  zstart = hit->GetStartZ();
-  xpoint = hit->GetX() - xstart;
-  ypoint = hit->GetY() - ystart;
-  zpoint = hit->GetY() - zstart;
-  timestart = hit->GetTime();
-  eloss = hit->GetEnergyLoss();
+  xstart = hit->getStartX();
+  ystart = hit->getStartY();
+  zstart = hit->getStartZ();
+  xpoint = hit->getX() - xstart;
+  ypoint = hit->getY() - ystart;
+  zpoint = hit->getY() - zstart;
+  timestart = hit->getTime();
+  eloss = hit->getEnergyLoss();
 
   return kTRUE;
 }
 
 //_______________________________________________________________________
-Double_t Chip::PathLength(const Hit *p1, const Hit *p2) const
+Double_t Chip::pathLength(const Hit *p1, const Hit *p2) const
 {
-  Double_t xdiff = p2->GetX() - p1->GetX(),
-    ydiff = p2->GetY() - p1->GetY(),
-    zdiff = p2->GetZ() - p1->GetZ();
+  Double_t xdiff = p2->getX() - p1->getX(),
+    ydiff = p2->getY() - p1->getY(),
+    zdiff = p2->getZ() - p1->getZ();
   return TMath::Sqrt(xdiff * xdiff + ydiff * ydiff + zdiff * zdiff);
 }
 
 //_______________________________________________________________________
-void Chip::MedianHitGlobal(const Hit *p1, const Hit *p2, Double_t &x, Double_t &y, Double_t &z) const
+void Chip::medianHitGlobal(const Hit *p1, const Hit *p2, Double_t &x, Double_t &y, Double_t &z) const
 {
   // Get hit positions in global coordinates
-  Double_t pos1Glob[3] = {p1->GetX(), p1->GetY(), p1->GetZ()},pos2Glob[3] = {p2->GetX(), p2->GetY(), p2->GetZ()};
+  Double_t pos1Glob[3] = {p1->getX(), p1->getY(), p1->getZ()},pos2Glob[3] = {p2->getX(), p2->getY(), p2->getZ()};
   Point3D<float> posMedianLocal;
 
   // Calculate mean positions
@@ -179,11 +179,11 @@ void Chip::MedianHitGlobal(const Hit *p1, const Hit *p2, Double_t &x, Double_t &
 }
 
 //_______________________________________________________________________
-void Chip::MedianHitLocal(const Hit *p1, const Hit *p2, Double_t &x, Double_t &y, Double_t &z) const
+void Chip::medianHitLocal(const Hit *p1, const Hit *p2, Double_t &x, Double_t &y, Double_t &z) const
 {
   // Convert hit positions into local positions inside the chip
-  auto pos1Loc = (*mMat)^(p1->GetPos());
-  auto pos2Loc = (*mMat)^(p2->GetPos());
+  auto pos1Loc = (*mMat)^(p1->getPos());
+  auto pos2Loc = (*mMat)^(p2->getPos());
   
   // Calculate mean positions
   y = 0.;

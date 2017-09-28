@@ -57,26 +57,26 @@ int main(int argc, char *argv[])
 
 
   if (mode == "sim") {
-    run_sim_tpc(events,engine);
+    runSimTpc(events,engine);
   } else if (mode == "digi") {
-    run_digi_tpc(events,engine, isContinuous);
+    runDigiTpc(events,engine, isContinuous);
   } else if (mode == "clus") {
-    run_clus_tpc(events,engine, isContinuous);
+    runClusTpc(events,engine, isContinuous);
   } else if (mode == "all") {
     int status;
     pid_t PID = fork();
     if (PID == -1) { std::cout << "ERROR" << std::endl; return EXIT_FAILURE;}
-    if (PID == 0)  { run_sim_tpc(events,engine); return EXIT_SUCCESS;}
+    if (PID == 0)  { runSimTpc(events,engine); return EXIT_SUCCESS;}
     else waitpid(PID,&status,0);
     
     PID = fork();
     if (PID == -1) { std::cout << "ERROR" << std::endl; return EXIT_FAILURE;}
-    if (PID == 0)  { run_digi_tpc(events,engine,isContinuous); return EXIT_SUCCESS;}
+    if (PID == 0)  { runDigiTpc(events,engine,isContinuous); return EXIT_SUCCESS;}
     else waitpid(PID,&status,0);
 
     PID = fork();
     if (PID == -1) { std::cout << "ERROR" << std::endl; return EXIT_FAILURE;}
-    if (PID == 0)  { run_clus_tpc(events,engine,isContinuous); return EXIT_SUCCESS;}
+    if (PID == 0)  { runClusTpc(events,engine,isContinuous); return EXIT_SUCCESS;}
     else waitpid(PID,&status,0);
   } else {
       std::cout << "Mode was not recognised" << std::endl;

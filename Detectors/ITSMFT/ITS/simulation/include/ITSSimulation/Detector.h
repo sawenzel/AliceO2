@@ -73,22 +73,22 @@ class Detector : public o2::Base::Detector
     ~Detector() override;
 
     /// Initialization of the detector is done here
-    void Initialize() override;
+    void initialize() override;
 
     /// This method is called for each step during simulation (see FairMCApplication::Stepping())
     Bool_t ProcessHits(FairVolume *v = nullptr) override;
 
     /// Registers the produced collections in FAIRRootManager
-    void Register() override;
+    void register() override;
 
     /// Gets the produced collections
-    TClonesArray *GetCollection(Int_t iColl) const override;
+    TClonesArray *getCollection(Int_t iColl) const override;
 
     /// Has to be called after each event to reset the containers
-    void Reset() override;
+    void reset() override;
 
     /// Base class to create the detector geometry
-    void ConstructGeometry() override;
+    void constructGeometry() override;
 
     /// Creates the Service Barrel (as a simple cylinder) for IB and OB
     /// \param innerBarrel if true, build IB service barrel, otherwise for OB
@@ -166,19 +166,19 @@ class Detector : public o2::Base::Detector
     // The following methods can be implemented if you need to make
     // any optional action in your detector during the transport
 
-    void CopyClones(TClonesArray *cl1, TClonesArray *cl2, Int_t offset) override
+    void copyClones(TClonesArray *cl1, TClonesArray *cl2, Int_t offset) override
     {
       ;
     }
 
-    void SetSpecialPhysicsCuts() override
+    void setSpecialPhysicsCuts() override
     {
       ;
     }
 
-    void EndOfEvent() override;
+    void endOfEvent() override;
 
-    void FinishPrimary() override
+    void finishPrimary() override
     {
       ;
     }
@@ -188,22 +188,22 @@ class Detector : public o2::Base::Detector
       ;
     }
 
-    void BeginPrimary() override
+    void beginPrimary() override
     {
       ;
     }
 
-    void PostTrack() override
+    void postTrack() override
     {
       ;
     }
 
-    void PreTrack() override
+    void preTrack() override
     {
       ;
     }
 
-    void BeginEvent() override
+    void beginEvent() override
     {
       ;
     }
@@ -211,15 +211,15 @@ class Detector : public o2::Base::Detector
     /// Returns the pointer to the TParticle for the particle that created
     /// this hit. From the TParticle all kinds of information about this
     /// particle can be found. See the TParticle class.
-    virtual TParticle *GetParticle() const;
+    virtual TParticle *getParticle() const;
 
     /// Prints out the content of this class in ASCII format
     /// \param ostream *os The output stream
-    void Print(std::ostream *os) const;
+    void print(std::ostream *os) const;
 
     /// Reads in the content of this class in the format of Print
     /// \param istream *is The input stream
-    void Read(std::istream *is);
+    void read(std::istream *is);
 
     /// Returns the number of layers
     Int_t getNumberOfLayers() const
@@ -248,7 +248,7 @@ class Detector : public o2::Base::Detector
     }
 
     /// Clone this object (used in MT mode only)
-    FairModule *CloneModule() const override;
+    FairModule *cloneModule() const override;
 
     GeometryTGeo *mGeometryTGeo; //! access to geometry details
 

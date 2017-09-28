@@ -116,7 +116,7 @@ SpaceFrame::SpaceFrame(const SpaceFrame& frame)
 {
 }
 
-void SpaceFrame::CreateGeometry()
+void SpaceFrame::createGeometry()
 {
   LOG(DEBUG) << "Create CalFrame Geometry" << std::endl;
 

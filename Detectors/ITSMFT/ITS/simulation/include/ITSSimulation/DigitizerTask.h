@@ -42,10 +42,10 @@ class DigitizerTask : public FairTask
 
   ~DigitizerTask() override;
 
-  InitStatus Init() override;
+  InitStatus init() override;
 
-  void Exec(Option_t* option) override;
-  void FinishTask() override;
+  void exec(Option_t* option) override;
+  void finishTask() override;
 
   Digitizer& getDigitizer() { return mDigitizer; }
   void setContinuous(bool v) { mContinuous = v; }

@@ -39,7 +39,7 @@ Detector::Detector(const char* Name, Bool_t Active)
     mTOFSectors[i] = 1;
 }
 
-void Detector::Initialize() { o2::Base::Detector::Initialize(); }
+void Detector::initialize() { o2::Base::Detector::Initialize(); }
 Bool_t Detector::ProcessHits(FairVolume* v)
 {
   static auto* refMC = TVirtualMC::GetMC();
@@ -86,7 +86,7 @@ HitType* Detector::addHit(Float_t x, Float_t y, Float_t z, Float_t time, Float_t
   return hit;
 }
 
-void Detector::Register()
+void Detector::register()
 {
   auto* mgr = FairRootManager::Instance();
   mgr->Register("TOFHit", "TOF", mHitCollection, kTRUE);
@@ -94,15 +94,15 @@ void Detector::Register()
   mMCTrackBranchId = mgr->GetBranchId("MCTrack");
 }
 
-TClonesArray* Detector::GetCollection(Int_t iColl) const
+TClonesArray* Detector::getCollection(Int_t iColl) const
 {
   if (iColl > 0)
     return nullptr;
   return mHitCollection;
 }
 
-void Detector::Reset() { mHitCollection->Clear(); }
-void Detector::CreateMaterials()
+void Detector::reset() { mHitCollection->Clear(); }
+void Detector::createMaterials()
 {
   Int_t isxfld = 2;
   Float_t sxmgmx = 10.;
@@ -131,11 +131,11 @@ void Detector::CreateMaterials()
   Float_t wmatg10[5];
   Int_t nlmatg10 = 5;
   na[0] = 1., na[1] = 2., na[2] = 0., na[3] = 0., na[4] = 0.;
-  MaterialMixer(we, ag10, na, 5);
+  materialMixer(we, ag10, na, 5);
   wmatg10[0] = we[0] * 0.6;
   wmatg10[1] = we[1] * 0.6;
   na[0] = 0., na[1] = 0., na[2] = 14., na[3] = 20., na[4] = 3.;
-  MaterialMixer(we, ag10, na, 5);
+  materialMixer(we, ag10, na, 5);
   wmatg10[2] = we[2] * 0.4;
   wmatg10[3] = we[3] * 0.4;
   wmatg10[4] = we[4] * 0.4;
@@ -190,7 +190,7 @@ void Detector::CreateMaterials()
     nDummy[ii] = 0.;
   nDummy[0] = 1.;
   nDummy[1] = 2.;
-  MaterialMixer(wDummy, asc, nDummy, 2);
+  materialMixer(wDummy, asc, nDummy, 2);
   wsc[0] = 0.4375 * wDummy[0];
   wsc[1] = 0.4375 * wDummy[1];
   wsc[2] = 0.3244;
@@ -211,23 +211,23 @@ void Detector::CreateMaterials()
   Float_t dPlastic = 0.93; // (~+1.1%)
   Int_t nwPlastic = -2;
 
-  Mixture(0, "Air$", aAir, zAir, dAir, 4, wAir);
-  Mixture(1, "Nomex$", anox, znox, dnox, nnox, wnox);
-  Mixture(2, "G10$", ag10, zg10, densg10, nlmatg10, wmatg10);
-  Mixture(3, "fibre glass$", afg, zfg, dfg, nfg, wfg);
-  Material(4, "Al $", 26.981539, 13., 2.7, -8.9, 999.);
+  mixture(0, "Air$", aAir, zAir, dAir, 4, wAir);
+  mixture(1, "Nomex$", anox, znox, dnox, nnox, wnox);
+  mixture(2, "G10$", ag10, zg10, densg10, nlmatg10, wmatg10);
+  mixture(3, "fibre glass$", afg, zfg, dfg, nfg, wfg);
+  material(4, "Al $", 26.981539, 13., 2.7, -8.9, 999.);
   Float_t factor = 0.4 / 1.5 * 2. / 3.;
-  Material(5, "Al honeycomb$", 26.981539, 13., 2.7 * factor, -8.9 / factor, 999.);
-  Mixture(6, "Freon$", afre, zfre, densfre, nfre, wfre);
-  Mixture(7, "Glass$", aq, zq, dq, nq, wq);
-  Mixture(8, "Water$", awa, zwa, dwa, nwa, wwa);
-  Mixture(9, "cables+tubes$", acbt, zcbt, decbt, 2, wcbt);
-  Material(10, "Cu $", 63.546, 29., 8.96, -1.43, 999.);
-  Mixture(11, "cable$", asc, zsc, dsc, 4, wsc);
-  Mixture(12, "Al+Cu+steel$", acra, zcra, dcra, 5, wcra);
-  Mixture(13, "plastic$", aPlastic, zPlastic, dPlastic, nwPlastic, wPlastic);
+  material(5, "Al honeycomb$", 26.981539, 13., 2.7 * factor, -8.9 / factor, 999.);
+  mixture(6, "Freon$", afre, zfre, densfre, nfre, wfre);
+  mixture(7, "Glass$", aq, zq, dq, nq, wq);
+  mixture(8, "Water$", awa, zwa, dwa, nwa, wwa);
+  mixture(9, "cables+tubes$", acbt, zcbt, decbt, 2, wcbt);
+  material(10, "Cu $", 63.546, 29., 8.96, -1.43, 999.);
+  mixture(11, "cable$", asc, zsc, dsc, 4, wsc);
+  mixture(12, "Al+Cu+steel$", acra, zcra, dcra, 5, wcra);
+  mixture(13, "plastic$", aPlastic, zPlastic, dPlastic, nwPlastic, wPlastic);
   Float_t factorHoles = 1. / 36.5;
-  Material(14, "Al honey for holes$", 26.981539, 13., 2.7 * factorHoles, -8.9 / factorHoles, 999.);
+  material(14, "Al honey for holes$", 26.981539, 13., 2.7 * factorHoles, -8.9 / factorHoles, 999.);
 
   Float_t epsil, stmin, deemax, stemax;
 
@@ -243,25 +243,25 @@ void Detector::CreateMaterials()
   deemax = -.3; // Maximum fractional energy loss, DLS
   stmin = -.8;
 
-  Medium(kAir, "Air$", 0, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
-  Medium(kNomex, "Nomex$", 1, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
-  Medium(kG10, "G10$", 2, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
-  Medium(kFiberGlass, "fibre glass$", 3, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
-  Medium(kAlFrame, "Al Frame$", 4, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
-  Medium(kHoneycomb, "honeycomb$", 5, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
-  Medium(kFre, "Fre$", 6, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
-  Medium(kCuS, "Cu-S$", 10, 1, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
-  Medium(kGlass, "Glass$", 7, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
-  Medium(kWater, "Water$", 8, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
-  Medium(kCable, "Cable$", 11, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
-  Medium(kCableTubes, "Cables+Tubes$", 9, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
-  Medium(kCopper, "Copper$", 10, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
-  Medium(kPlastic, "Plastic$", 13, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
-  Medium(kCrates, "Crates$", 12, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
-  Medium(kHoneyHoles, "honey_holes$", 14, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
+  medium(kAir, "Air$", 0, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
+  medium(kNomex, "Nomex$", 1, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
+  medium(kG10, "G10$", 2, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
+  medium(kFiberGlass, "fibre glass$", 3, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
+  medium(kAlFrame, "Al Frame$", 4, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
+  medium(kHoneycomb, "honeycomb$", 5, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
+  medium(kFre, "Fre$", 6, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
+  medium(kCuS, "Cu-S$", 10, 1, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
+  medium(kGlass, "Glass$", 7, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
+  medium(kWater, "Water$", 8, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
+  medium(kCable, "Cable$", 11, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
+  medium(kCableTubes, "Cables+Tubes$", 9, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
+  medium(kCopper, "Copper$", 10, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
+  medium(kPlastic, "Plastic$", 13, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
+  medium(kCrates, "Crates$", 12, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
+  medium(kHoneyHoles, "honey_holes$", 14, 0, isxfld, sxmgmx, 10., stemax, deemax, epsil, stmin);
 }
 
-void Detector::MaterialMixer(Float_t* p, const Float_t* const a, const Float_t* const m, Int_t n) const
+void Detector::materialMixer(Float_t* p, const Float_t* const a, const Float_t* const m, Int_t n) const
 {
   // a[] atomic weights vector      (in)
   //     (atoms present in more compound appear separately)
@@ -276,9 +276,9 @@ void Detector::MaterialMixer(Float_t* p, const Float_t* const a, const Float_t* 
   }
 }
 
-void Detector::ConstructGeometry()
+void Detector::constructGeometry()
 {
-  CreateMaterials();
+  createMaterials();
 
   /*
     xTof = 124.5;//fTOFGeometry->StripLength()+2.*(0.3+0.03); // cm,  x-dimension of FTOA volume
@@ -287,7 +287,7 @@ void Detector::ConstructGeometry()
    */
 
   Float_t xTof = Geo::STRIPLENGTH + 2.5, yTof = Geo::RMAX - Geo::RMIN, zTof = Geo::ZLENA;
-  DefineGeometry(xTof, yTof, zTof);
+  defineGeometry(xTof, yTof, zTof);
 
   LOG(INFO) << "Loaded TOF geometry" << FairLogger::endl;
 
@@ -299,8 +299,8 @@ void Detector::ConstructGeometry()
   }
 }
 
-void Detector::EndOfEvent() { Reset(); }
-void Detector::DefineGeometry(Float_t xtof, Float_t ytof, Float_t zlenA)
+void Detector::endOfEvent() { reset(); }
+void Detector::defineGeometry(Float_t xtof, Float_t ytof, Float_t zlenA)
 {
   //
   // Definition of the Time Of Fligh Resistive Plate Chambers
@@ -409,8 +409,8 @@ void Detector::createModules(Float_t xtof, Float_t ytof, Float_t zlenA, Float_t 
     TMath::ATan(tgbe * 0.5) * TMath::RadToDeg(); // TMath::ATan((trpa[5] - trpa[4])/(2.*trpa[3]))*TMath::RadToDeg();
   TVirtualMC::GetMC()->Gsvolu("FWZ1D", "TRAP", getMediumID(kFiberGlass), trpa, 11); // Fibre glass
 
-  Matrix(idrotm[0], 90., 90., 180., 0., 90., 180.);
-  Matrix(idrotm[1], 90., 90., 0., 0., 90., 0.);
+  matrix(idrotm[0], 90., 90., 180., 0., 90., 180.);
+  matrix(idrotm[1], 90., 90., 0., 0., 90., 0.);
 
   // xcoor = 0.;
   // ycoor = -(yFLT - Geo::LENGTHINCEMODBORDER)*0.5;
@@ -470,8 +470,8 @@ void Detector::createModules(Float_t xtof, Float_t ytof, Float_t zlenA, Float_t 
     TMath::ATan(tgbe * 0.5) * TMath::RadToDeg(); // TMath::ATan((trpa[5] - trpa[4])/(2.*trpa[3]))*TMath::RadToDeg();
   TVirtualMC::GetMC()->Gsvolu("FWZ1U", "TRAP", getMediumID(kFiberGlass), trpa, 11); // Fibre glass
 
-  Matrix(idrotm[2], 90., 270., 0., 0., 90., 180.);
-  Matrix(idrotm[3], 90., 270., 180., 0., 90., 0.);
+  matrix(idrotm[2], 90., 270., 0., 0., 90., 180.);
+  matrix(idrotm[3], 90., 270., 180., 0., 90., 0.);
 
   // xcoor = 0.;
   // ycoor = (yFLT - Geo::LENGTHINCEMODBORDER)*0.5;
@@ -513,8 +513,8 @@ void Detector::createModules(Float_t xtof, Float_t ytof, Float_t zlenA, Float_t 
   trpa[5] = 0.;
   TVirtualMC::GetMC()->Gsvolu("FWZ2", "PARA", getMediumID(kFiberGlass), trpa, 6); // Fibre glass
 
-  Matrix(idrotm[4], alpha * TMath::RadToDeg(), 90., 90. + alpha * TMath::RadToDeg(), 90., 90., 180.);
-  Matrix(idrotm[5], 180. - alpha * TMath::RadToDeg(), 90., 90. - alpha * TMath::RadToDeg(), 90., 90., 0.);
+  matrix(idrotm[4], alpha * TMath::RadToDeg(), 90., 90. + alpha * TMath::RadToDeg(), 90., 90., 180.);
+  matrix(idrotm[5], 180. - alpha * TMath::RadToDeg(), 90., 90. - alpha * TMath::RadToDeg(), 90., 90., 0.);
 
   // xcoor = 0.;
   // ycoor = 0.;
@@ -598,8 +598,8 @@ void Detector::createModules(Float_t xtof, Float_t ytof, Float_t zlenA, Float_t 
   trpa[5] = 0.;
   TVirtualMC::GetMC()->Gsvolu("FWZ4", "PARA", getMediumID(kFiberGlass), trpa, 6); // Fibre glass
 
-  Matrix(idrotm[6], alpha * TMath::RadToDeg(), 90., 90. + alpha * TMath::RadToDeg(), 90., 90., 180.);
-  Matrix(idrotm[7], 180. - alpha * TMath::RadToDeg(), 90., 90. - alpha * TMath::RadToDeg(), 90., 90., 0.);
+  matrix(idrotm[6], alpha * TMath::RadToDeg(), 90., 90. + alpha * TMath::RadToDeg(), 90., 90., 180.);
+  matrix(idrotm[7], 180. - alpha * TMath::RadToDeg(), 90., 90. - alpha * TMath::RadToDeg(), 90., 90., 0.);
 
   // xcoor = 0.;
   ycoor = 0.;
@@ -754,11 +754,11 @@ void Detector::makeStripsInModules(Float_t ytof, Float_t zlenA) const
       ang = Geo::getAngles(iplate, istrip);
 
       if (ang > 0.)
-        Matrix(idrotm[istrip + totalStrip], 90., 0., 90. + ang, 90., ang, 90.);
+        matrix(idrotm[istrip + totalStrip], 90., 0., 90. + ang, 90., ang, 90.);
       else if (ang == 0.)
-        Matrix(idrotm[istrip + totalStrip], 90., 0., 90., 90., 0., 0.);
+        matrix(idrotm[istrip + totalStrip], 90., 0., 90., 90., 0., 0.);
       else if (ang < 0.)
-        Matrix(idrotm[istrip + totalStrip], 90., 0., 90. + ang, 90., -ang, 270.);
+        matrix(idrotm[istrip + totalStrip], 90., 0., 90. + ang, 90., -ang, 270.);
 
       xpos = 0.;
       ypos = Geo::getHeights(iplate, istrip) + yFLT * 0.5;
@@ -1012,7 +1012,7 @@ void Detector::createBackZone(Float_t xtof, Float_t ytof, Float_t zlenA) const
   TVirtualMC::GetMC()->Gsvolu("FCA2", "BOX ", getMediumID(kAir), carpar, 3); // Air
 
   // rotation matrix
-  Matrix(idrotm[0], 90., 180., 90., 90., 180., 0.);
+  matrix(idrotm[0], 90., 180., 90., 90., 180., 0.);
 
   // FEA card mother-volume positioning
   Float_t rowstep = 6.66;
@@ -1322,7 +1322,7 @@ void Detector::makeSuperModuleCooling(Float_t xtof, Float_t ytof, Float_t zlenA)
   TVirtualMC::GetMC()->Gsvolu("FTLN", "BOX ", getMediumID(kAlFrame), trapar, 3); // Al
 
   // rotation matrix
-  Matrix(idrotm[0], 180., 90., 90., 90., 90., 0.);
+  matrix(idrotm[0], 180., 90., 90., 90., 90., 0.);
 
   Float_t feaParam[3] = { Geo::FEAPARAMETERS[0], Geo::FEAPARAMETERS[1], Geo::FEAPARAMETERS[2] };
   Float_t feaRoof1[3] = { Geo::ROOF1PARAMETERS[0], Geo::ROOF1PARAMETERS[1], Geo::ROOF1PARAMETERS[2] };
@@ -1513,7 +1513,7 @@ void Detector::makeSuperModuleServices(Float_t xtof, Float_t ytof, Float_t zlenA
   TVirtualMC::GetMC()->Gsvolu("FCAL", "TUBE", getMediumID(kCable), cbparS, 3); // copper+alu
 
   // rotation matrix
-  Matrix(idrotm[0], 180., 90., 90., 90., 90., 0.);
+  matrix(idrotm[0], 180., 90., 90., 90., 90., 0.);
 
   Float_t carpar[3] = { static_cast<Float_t>(xtof * 0.5 - Geo::CBLW - Geo::SAWTHICKNESS),
                         static_cast<Float_t>(feaParam[1] + feaRoof1[1] + Geo::ROOF2PARAMETERS[1] * 0.5),
@@ -1567,8 +1567,8 @@ void Detector::makeSuperModuleServices(Float_t xtof, Float_t ytof, Float_t zlenA
   Float_t sawpar[3] = { static_cast<Float_t>(Geo::SAWTHICKNESS * 0.5), static_cast<Float_t>(Geo::CBLH2 * 0.5), kCBLl };
   TVirtualMC::GetMC()->Gsvolu("FSAW", "BOX ", getMediumID(kAlFrame), sawpar, 3); // Al
 
-  Matrix(idrotm[1], 90., 90., 180., 0., 90., 180.);
-  Matrix(idrotm[2], 90., 90., 0., 0., 90., 0.);
+  matrix(idrotm[1], 90., 90., 180., 0., 90., 180.);
+  matrix(idrotm[2], 90., 90., 0., 0., 90., 0.);
 
   // lateral cable and tube volume positioning
   xcoor = (xtof - Geo::CBLW) * 0.5 - 2. * sawpar[0];
@@ -1684,7 +1684,7 @@ void Detector::makeReadoutCrates(Float_t ytof) const
     phi += Geo::PHISEC;
     xcoor = ra * TMath::Cos(phi * TMath::DegToRad());
     ycoor = ra * TMath::Sin(phi * TMath::DegToRad());
-    Matrix(idrotm[i], 90., phi, 90., phi + 270., 0., 0.);
+    matrix(idrotm[i], 90., phi, 90., phi + 270., 0., 0.);
     TVirtualMC::GetMC()->Gspos("FTOS", i, "BFMO", xcoor, ycoor, zcoor, idrotm[i], "ONLY");
   }
 
@@ -1706,7 +1706,7 @@ void Detector::makeModulesInBTOFvolumes(Float_t ytof, Float_t zlenA) const
   Int_t idrotm[1] = { 0 };
 
   // Matrix(idrotm[0], 90.,  0., 0., 0., 90.,-90.);
-  Matrix(idrotm[0], 90., 0., 0., 0., 90., 270.);
+  matrix(idrotm[0], 90., 0., 0., 0., 90., 270.);
 
   Float_t xcoor, ycoor, zcoor;
   xcoor = 0.;
@@ -1756,7 +1756,7 @@ void Detector::makeCoversInBTOFvolumes() const
   Int_t idrotm[1] = { 0 };
 
   // Matrix(idrotm[0], 90.,  0., 0., 0., 90.,-90.);
-  Matrix(idrotm[0], 90., 0., 0., 0., 90., 270.);
+  matrix(idrotm[0], 90., 0., 0., 0., 90., 270.);
 
   Float_t xcoor, ycoor, zcoor;
   xcoor = 0.;
@@ -1792,7 +1792,7 @@ void Detector::makeBackInBTOFvolumes(Float_t ytof) const
   Int_t idrotm[1] = { 0 };
 
   // Matrix(idrotm[0], 90.,  0., 0., 0., 90.,-90.);
-  Matrix(idrotm[0], 90., 0., 0., 0., 90., 270.);
+  matrix(idrotm[0], 90., 0., 0., 0., 90., 270.);
 
   Float_t xcoor, ycoor, zcoor;
   xcoor = 0.;

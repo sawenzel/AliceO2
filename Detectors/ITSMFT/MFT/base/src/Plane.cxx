@@ -146,7 +146,7 @@ Plane::~Plane()
 }
 
 //_____________________________________________________________________________
-void Plane::Clear(const Option_t* /*opt*/) 
+void Plane::clear(const Option_t* /*opt*/) 
 {
 
   Info("Clear","Clear Plane");
@@ -172,7 +172,7 @@ Plane& Plane::operator=(const Plane& plane)
     TNamed::operator=(plane);
     
     // clear memory
-    Clear("");
+    clear("");
     
     mPlaneNumber                      = plane.mPlaneNumber;
     mZCenter                          = plane.mZCenter; 

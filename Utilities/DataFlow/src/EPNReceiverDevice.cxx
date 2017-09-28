@@ -28,7 +28,7 @@ using TPCTestPayload = o2::DataFlow::TPCTestPayload;
 using TPCTestCluster = o2::DataFlow::TPCTestCluster;
 using IndexElement = o2::DataFormat::IndexElement;
 
-void EPNReceiverDevice::InitTask()
+void EPNReceiverDevice::initTask()
 {
   mNumFLPs = GetConfig()->GetValue<int>("num-flps");
   mBufferTimeoutInMs = GetConfig()->GetValue<int>("buffer-timeout");
@@ -38,7 +38,7 @@ void EPNReceiverDevice::InitTask()
   mAckChannelName = GetConfig()->GetValue<string>("ack-chan-name");
 }
 
-void EPNReceiverDevice::PrintBuffer(const unordered_map<uint16_t, TFBuffer>& buffer) const
+void EPNReceiverDevice::printBuffer(const unordered_map<uint16_t, TFBuffer>& buffer) const
 {
   string header = "===== ";
 
@@ -59,7 +59,7 @@ void EPNReceiverDevice::PrintBuffer(const unordered_map<uint16_t, TFBuffer>& buf
   }
 }
 
-void EPNReceiverDevice::DiscardIncompleteTimeframes()
+void EPNReceiverDevice::discardIncompleteTimeframes()
 {
   auto it = mTimeframeBuffer.begin();
 
@@ -76,7 +76,7 @@ void EPNReceiverDevice::DiscardIncompleteTimeframes()
   }
 }
 
-void EPNReceiverDevice::Run()
+void EPNReceiverDevice::run()
 {
   uint16_t id = 0; // holds the timeframe id of the currently arrived sub-timeframe.
 
@@ -180,6 +180,6 @@ void EPNReceiverDevice::Run()
     // Check if any incomplete timeframes in the buffer are older than
     // timeout period, and discard them if they are
     // QUESTION: is this really what we want to do?
-    DiscardIncompleteTimeframes();
+    discardIncompleteTimeframes();
   }
 }

@@ -30,7 +30,7 @@ TRDSimParam* TRDSimParam::fgInstance = nullptr;
 bool TRDSimParam::fgTerminated = false;
 
 //_ singleton implementation __________________________________________________
-TRDSimParam* TRDSimParam::Instance()
+TRDSimParam* TRDSimParam::instance()
 {
   //
   // Singleton implementation
@@ -49,7 +49,7 @@ TRDSimParam* TRDSimParam::Instance()
 }
 
 //_ singleton implementation __________________________________________________
-void TRDSimParam::Terminate()
+void TRDSimParam::terminate()
 {
   //
   // Singleton implementation
@@ -96,11 +96,11 @@ TRDSimParam::TRDSimParam()
   // Default constructor
   //
 
-  Init();
+  init();
 }
 
 //_____________________________________________________________________________
-void TRDSimParam::Init()
+void TRDSimParam::init()
 {
   //
   // Default initializiation
@@ -145,7 +145,7 @@ void TRDSimParam::Init()
   mNTimeBins = 22;
   mNTBoverwriteOCDB = false;
 
-  ReInit();
+  reInit();
 }
 
 //_____________________________________________________________________________
@@ -166,13 +166,13 @@ TRDSimParam::~TRDSimParam()
 }
 
 //_____________________________________________________________________________
-void TRDSimParam::ReInit()
+void TRDSimParam::reInit()
 {
   //
   // Reinitializes the parameter class after a change
   //
 
-  if (TRDCommonParam::Instance()->IsXenon()) {
+  if (TRDCommonParam::Instance(instance->isXenon()) {
     // The range and the binwidth for the sampled TRF
     mTRFbin = 200;
     // Start 0.2 mus before the signal
@@ -181,7 +181,7 @@ void TRDSimParam::ReInit()
     mTRFhi = 3.58;
     // Standard gas gain
     mGasGain = 4000.0;
-  } else if (TRDCommonParam::Instance()->IsArgon()) {
+  } else if (TRDCommonParam::Instance(instance->isArgon()) {
     // The range and the binwidth for the sampled TRF
     mTRFbin = 50;
     // Start 0.2 mus before the signal
@@ -196,11 +196,11 @@ void TRDSimParam::ReInit()
   mTRFwid = (mTRFhi - mTRFlo) / ((float)mTRFbin);
 
   // Create the sampled TRF
-  SampleTRF();
+  sampleTRF();
 }
 
 //_____________________________________________________________________________
-void TRDSimParam::SampleTRF()
+void TRDSimParam::sampleTRF()
 {
   //
   // Samples the new time response function.
@@ -275,21 +275,21 @@ void TRDSimParam::SampleTRF()
   }
   mCTsmp = new float[mTRFbin];
 
-  if (TRDCommonParam::Instance()->IsXenon()) {
+  if (TRDCommonParam::Instance(instance->isXenon()) {
     if (mTRFbin != kNpasa) {
       LOG(ERROR) << "Array mismatch (xenon)\n\n";
     }
-  } else if (TRDCommonParam::Instance()->IsArgon()) {
+  } else if (TRDCommonParam::Instance(instance->isArgon()) {
     if (mTRFbin != kNpasaAr) {
       LOG(ERROR) << "Array mismatch (argon)\n\n";
     }
   }
 
   for (int iBin = 0; iBin < mTRFbin; iBin++) {
-    if (TRDCommonParam::Instance()->IsXenon()) {
+    if (TRDCommonParam::Instance(instance->isXenon()) {
       mTRFsmp[iBin] = signal[iBin];
       mCTsmp[iBin] = xtalk[iBin];
-    } else if (TRDCommonParam::Instance()->IsArgon()) {
+    } else if (TRDCommonParam::Instance(instance->isArgon()) {
       mTRFsmp[iBin] = signalAr[iBin];
       mCTsmp[iBin] = xtalkAr[iBin];
     }
@@ -297,7 +297,7 @@ void TRDSimParam::SampleTRF()
 }
 
 //_____________________________________________________________________________
-double TRDSimParam::TimeResponse(double time) const
+double TRDSimParam::timeResponse(double time) const
 {
   //
   // Applies the preamp shaper time response
@@ -315,7 +315,7 @@ double TRDSimParam::TimeResponse(double time) const
 }
 
 //_____________________________________________________________________________
-double TRDSimParam::CrossTalk(double time) const
+double TRDSimParam::crossTalk(double time) const
 {
   //
   // Applies the pad-pad capacitive cross talk

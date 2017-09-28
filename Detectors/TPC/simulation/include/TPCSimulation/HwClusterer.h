@@ -65,13 +65,13 @@ class HwClusterer : public Clusterer {
     
     // Should this really be a public member?
     // Maybe better to just call by process
-    void Init() override;
+    void init() override;
     
     /// Steer conversion of points to digits
     /// @param digits Container with TPC digits
     /// @return Container with clusters
-    ClusterContainer* Process(TClonesArray *digits) override;
-    ClusterContainer* Process(std::vector<std::unique_ptr<Digit>>& digits) override;
+    ClusterContainer* process(TClonesArray *digits) override;
+    ClusterContainer* process(std::vector<std::unique_ptr<Digit>>& digits) override;
 
     void setProcessingType(Processing processing)    { mProcessingType = processing; };   
 
@@ -114,7 +114,7 @@ class HwClusterer : public Clusterer {
 //              unsigned minTimeBin,
 //              unsigned maxTimeBin);
     
-    ClusterContainer* ProcessTimeBins(int iTimeBinMin, int iTimeBinMax);
+    ClusterContainer* processTimeBins(int iTimeBinMin, int iTimeBinMax);
 
     std::vector<std::vector<std::vector<HwClusterFinder*>>> mClusterFinder;
     std::vector<std::vector<std::vector<Digit*>>> mDigitContainer;

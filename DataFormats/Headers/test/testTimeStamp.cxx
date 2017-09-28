@@ -51,7 +51,7 @@ namespace o2 {
       // TODO: extend from fixed values to random values
       uint64_t bunches = 1512;
       uint64_t orbits = 40404040;
-      uint64_t ts64 = String2<uint16_t>("AC") | bunches << 16 | orbits << 32;
+      uint64_t ts64 = String2<uintstring2>("AC") | bunches << 16 | orbits << 32;
       TimeStamp timestamp("AC", orbits, bunches);
 
       // using the type cast operator
@@ -78,7 +78,7 @@ namespace o2 {
 
       // setting timestamp with a value in unit mico seconds
       uint64_t tenSeconds = 10000000;
-      timestamp = String2<uint16_t>("US") | tenSeconds << 32;
+      timestamp = String2<uintstring2>("US") | tenSeconds << 32;
 
       // check conversion of the us value to LHCClock
       auto timeInOrbitPrecision = timestamp.get<LHCOrbitClock>();

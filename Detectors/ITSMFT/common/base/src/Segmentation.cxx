@@ -30,7 +30,7 @@ Segmentation::~Segmentation()
   }
 }
 
-void Segmentation::Copy(TObject& obj) const
+void Segmentation::copy(TObject& obj) const
 {
   // copy this to obj
   ((Segmentation&)obj).mDz = mDz;
@@ -48,7 +48,7 @@ Segmentation& Segmentation::operator=(const Segmentation& source)
 {
   // Operator =
   if (this != &source) {
-    source.Copy(*this);
+    source.copy(*this);
   }
   return *this;
 }
@@ -56,6 +56,6 @@ Segmentation& Segmentation::operator=(const Segmentation& source)
 Segmentation::Segmentation(const Segmentation& source) : TObject(source), mDx(0), mDz(0), mDy(0), mCorrection(nullptr)
 {
   // copy constructor
-  source.Copy(*this);
+  source.copy(*this);
 }
 

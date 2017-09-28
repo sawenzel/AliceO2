@@ -49,13 +49,13 @@ BOOST_AUTO_TEST_CASE(MagneticField_test)
   swSlow.Start();
   for (int ii=repFactor;ii--;) {
     for (int it=ntst;it--;) {
-      fld->Field(xyz[it],bxyz[it]);
+      fld->field(xyz[it],bxyz[it]);
     }
   }
   swSlow.Stop();
 
   // init fast field
-  fld->AllowFastField(true);
+  fld->allowFastField(true);
   
   // timing: fast field
   TStopwatch swFast;
@@ -63,7 +63,7 @@ BOOST_AUTO_TEST_CASE(MagneticField_test)
   double bfast[3];
   for (int ii=repFactor;ii--;) {
     for (int it=ntst;it--;) {
-      fld->Field(xyz[it],bfast);
+      fld->field(xyz[it],bfast);
     }
   }
   swFast.Stop();
@@ -79,7 +79,7 @@ BOOST_AUTO_TEST_CASE(MagneticField_test)
   const char comp[] = "XYZ";
   LOG(INFO) << "Relative precision of fast field wrt exact field" << FairLogger::endl;
   for (int it=ntst;it--;) {
-    fld->Field(xyz[it],bfast);
+    fld->field(xyz[it],bfast);
     for (int i=0;i<3;i++) {
       double df = bxyz[it][i]-bfast[i]; 
       mean[i] += df;

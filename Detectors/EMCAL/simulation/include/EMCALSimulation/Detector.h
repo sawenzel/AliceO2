@@ -60,7 +60,7 @@ class Detector : public o2::Base::Detector
   ///
   /// Initializing detector
   ///
-  void Initialize() final;
+  void initialize() final;
 
   ///
   /// Processing hit creation in the EMCAL scintillator volume
@@ -82,71 +82,71 @@ class Detector : public o2::Base::Detector
   /// \param[in] time Time of the hit
   /// \param[in] energyloss Energy deposit in EMCAL
   ///
-  Hit* AddHit(Int_t trackID, Int_t parentID, Int_t primary, Double_t initialEnergy, Int_t detID,
+  Hit* addHit(Int_t trackID, Int_t parentID, Int_t primary, Double_t initialEnergy, Int_t detID,
               const Point3D<float>& pos, const Vector3D<float>& mom, Double_t time, Double_t energyloss);
 
   ///
   /// Register TClonesArray with hits
   ///
-  void Register() override;
+  void register() override;
 
   ///
   /// Get access to the point collection
   /// \return TClonesArray with points
   ///
-  TClonesArray* GetCollection(Int_t iColl) const final;
+  TClonesArray* getCollection(Int_t iColl) const final;
 
   ///
   /// Reset
   /// Clean point collection
   ///
-  void Reset() final;
+  void reset() final;
 
   ///
   /// Steps to be carried out at the end of the event
   /// For EMCAL cleaning the hit collection and the lookup table
   ///
-  void EndOfEvent() final;
+  void endOfEvent() final;
 
   ///
   /// Get the EMCAL geometry desciption
   /// Will be created the first time the function is called
   /// \return Access to the EMCAL Geometry description
   ///
-  Geometry* GetGeometry();
+  Geometry* getGeometry();
 
  protected:
   ///
   /// Creating detector materials for the EMCAL detector and space frame
   ///
-  void CreateMaterials();
+  void createMaterials();
 
-  void ConstructGeometry() override;
+  void constructGeometry() override;
 
   ///
   /// Generate EMCAL envelop (mother volume of all supermodules)
   ///
-  void CreateEmcalEnvelope();
+  void createEmcalEnvelope();
 
   ///
   /// Generate tower geometry
   ///
-  void CreateShiskebabGeometry();
+  void createShiskebabGeometry();
 
   ///
   /// Generate super module geometry
   ///
-  void CreateSupermoduleGeometry(const std::string_view mother = "XEN1");
+  void createSupermoduleGeometry(const std::string_view mother = "XEN1");
 
   ///
   /// Generate module geometry (2x2 towers)
   ///
-  void CreateEmcalModuleGeometry(const std::string_view mother = "SMOD", const std::string_view child = "EMOD");
+  void createEmcalModuleGeometry(const std::string_view mother = "SMOD", const std::string_view child = "EMOD");
 
   ///
   /// Generate aluminium plates geometry
   ///
-  void CreateAlFrontPlate(const std::string_view mother = "EMOD", const std::string_view child = "ALFP");
+  void createAlFrontPlate(const std::string_view mother = "EMOD", const std::string_view child = "ALFP");
 
   ///
   /// Calculate the amount of light seen by the APD for a given track segment (charged particles only)
@@ -156,7 +156,7 @@ class Detector : public o2::Base::Detector
   /// \param[in] tracklength Length of the track segment
   /// \param[in] charge Track charge (in units of elementary charge)
   ///
-  Double_t CalculateLightYield(Double_t energydeposit, Double_t tracklength, Int_t charge) const;
+  Double_t calculateLightYield(Double_t energydeposit, Double_t tracklength, Int_t charge) const;
 
  private:
   Int_t mBirkC0;

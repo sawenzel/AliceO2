@@ -50,7 +50,7 @@ constexpr double kDegrad = TMath::DegToRad();
 constexpr double kRaddeg = TMath::RadToDeg();
   
 // only here temporarily, I would like to harmonize Material treatment (outside of base detector)
-int Material(Int_t imat, const char* name, Float_t a, Float_t z, Float_t dens, Float_t radl, Float_t absl,
+int material(Int_t imat, const char* name, Float_t a, Float_t z, Float_t dens, Float_t radl, Float_t absl,
              Float_t* buf = nullptr, Int_t nwbuf = 0)
 {
   int kmat = -1;
@@ -58,7 +58,7 @@ int Material(Int_t imat, const char* name, Float_t a, Float_t z, Float_t dens, F
   return kmat;
 }
 
-int Mixture(Int_t imat, const char* name, Float_t* a, Float_t* z, Float_t dens, Int_t nlmat, Float_t* wmat = nullptr)
+int mixture(Int_t imat, const char* name, Float_t* a, Float_t* z, Float_t dens, Int_t nlmat, Float_t* wmat = nullptr)
 {
   // Check this!!!
   int kmat = -1;
@@ -66,7 +66,7 @@ int Mixture(Int_t imat, const char* name, Float_t* a, Float_t* z, Float_t dens, 
   return kmat;
 }
 
-int Medium(Int_t numed, const char* name, Int_t nmat, Int_t isvol, Int_t ifield, Float_t fieldm, Float_t tmaxfd,
+int medium(Int_t numed, const char* name, Int_t nmat, Int_t isvol, Int_t ifield, Float_t fieldm, Float_t tmaxfd,
            Float_t stemax, Float_t deemax, Float_t epsil, Float_t stmin, Float_t* ubuf = nullptr, Int_t nbuf = 0)
 {
   // Check this!!!
@@ -117,30 +117,30 @@ void Hall::createMaterials()
 
   //  Stainless Steel
   {
-    auto matid = Mixture(50, "STAINLESS STEEL3", asteel, zsteel, 7.88, 4, wsteel);
-    Medium(50, "HALL_STST_C2", matid, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+    auto matid = Mixture(50, "STAINLESS mixture", asteel, zsteel, 7.88, 4, wsteel);
+    Medium(50, "HALL_STST_Cmedium", matid, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
   }
 
   //  Air
   {
-    auto matid = Mixture(55, "AIR2", aAir, zAir, dAir, 4, wAir);
-    Medium(55, "HALL_AIR_C2", matid, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+    auto matid = Mixture(55, "AIR2", aAimixture, zAir, dAir, 4, wAir);
+    Medium(55, "HALL_AIR_C2medium
   }
 
   // Concrete
   {
-    auto matid = Mixture(57, "CONCRETE2", aconc, zconc, 2.35, 10, wconc);
-    Medium(57, "HALL_CC_C2", matid, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+    auto matid = Mixture(57, "CONCRETE2"mixture aconc, zconc, 2.35, 10, wconc);
+    Medium(57, "HALL_CC_C2"medium matid, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
   }
 
   //  Iron
   {
-    auto matid = Material(52, "IRON", 55.85, 26., 7.87, 1.76, 17.1);
-    Medium(52, "HALL_FE_C2", matid, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+    auto matid = Material(52, "IRON", 55material, 26., 7.87, 1.76, 17.1);
+    Medium(52, "HALL_FE_C2"medium matid, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
   }
 }
 
-void Hall::ConstructGeometry()
+void Hall::constructGeometry()
 {
   createMaterials();
 
@@ -571,5 +571,5 @@ void Hall::ConstructGeometry()
   top->AddNode(asHall, 1, gGeoIdentity);
 }
 
-FairModule* Hall::CloneModule() const { return new Hall(*this); }
+FairModule* Hall::cloneModule() const { return new Hall(*this); }
 ClassImp(o2::passive::Hall);

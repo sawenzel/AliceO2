@@ -58,13 +58,13 @@ class MagFieldFast
   static const float kSolR2Max[kNSolRRanges]; // Rmax2 of each range
   static const float kSolZMax;                // max |Z| for solenoid parametrization
 
-  int GetQuadrant(float x, float y) const
+  int getQuadrant(float x, float y) const
   {
     /// get point quadrant
     return y > 0 ? (x > 0 ? 0 : 1) : (x > 0 ? 3 : 2);
   }
 
-  float CalcPol(const float* cf, float x, float y, float z) const;
+  float calcPol(const float* cf, float x, float y, float z) const;
 
   float mFactorSol; // scaling factor
   SolParam mSolPar[kNSolRRanges][kNSolZRanges][kNQuadrants];
@@ -72,7 +72,7 @@ class MagFieldFast
   ClassDef(MagFieldFast, 1)
 };
 
-inline float MagFieldFast::CalcPol(const float* cf, float x, float y, float z) const
+inline float MagFieldFast::calcPol(const float* cf, float x, float y, float z) const
 {
   /** calculate polynomial
    *   cf[0] + cf[1]*x + cf[2]*y + cf[3]*z + cf[4]*xx + cf[5]*xy + cf[6]*xz + cf[7]*yy + cf[8]*yz + cf[9]*zz +

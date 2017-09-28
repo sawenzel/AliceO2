@@ -39,7 +39,7 @@ ProducerDevice::ProducerDevice(const char* producerId, shared_ptr<Producer>& pro
 }
 
 void ProducerDevice::deleteTMessage(void* data, void* hint) { delete static_cast<TMessage*>(hint); }
-void ProducerDevice::Run()
+void ProducerDevice::run()
 {
   while (CheckCurrentState(RUNNING)) {
     TObject* newDataObject = mProducer->produceData();

@@ -35,34 +35,34 @@ namespace o2 {
         public:
           Tracker(TrackingStation *stations[7]);
           // These functions must be implemented
-          int Clusters2Tracks();
-          int  PropagateBack();
-          int  RefitInward();
-          int  LoadClusters();
-          void UnloadClusters();
+          int clusters2Tracks();
+          int  propagateBack();
+          int  refitInward();
+          int  loadClusters();
+          void unloadClusters();
           // Possibly, other public functions
-          float    GetMaterialBudget(const double* p0, const double* p1, double& x2x0, double& rhol) const;
+          float    getMaterialBudget(const double* p0, const double* p1, double& x2x0, double& rhol) const;
           bool     GetSAonly() const { return mSAonly; }
-          void     SetChi2Cut(float cut) { mChi2Cut = cut; }
-          void     SetPhiCut(float cut) { mPhiCut = cut; }
-          void     SetSAonly(bool sa = true) { mSAonly = sa; }
-          void     SetZCut(float cut) { mZCut = cut; }
+          void     setChi2Cut(float cut) { mChi2Cut = cut; }
+          void     setPhiCut(float cut) { mPhiCut = cut; }
+          void     setSAonly(bool sa = true) { mSAonly = sa; }
+          void     setZCut(float cut) { mZCut = cut; }
           //
-          float    GetX() const { return mVertex[0]; }
-          float    GetY() const { return mVertex[1]; }
-          float    GetZ() const { return mVertex[2]; }
-          template<typename F> void SetVertex(F v[3]) { for(int i=0;i<3;++i) mVertex[i]=v[i]; }
+          float    getX() const { return mVertex[0]; }
+          float    getY() const { return mVertex[1]; }
+          float    getZ() const { return mVertex[2]; }
+          template<typename F> void setVertex(F v[3]) { for(int i=0;i<3;++i) mVertex[i]=v[i]; }
         private:
           Tracker(const Tracker&);
           Tracker &operator=(const Tracker &tr);
           //
           bool   CellParams(int l, const Cluster& c1, const Cluster& c2, const Cluster& c3, float &curv, std::array<float,3> &np);
-          void   CellsTreeTraversal(std::vector<Road> &roads, const int &iD, const int &doubl);
-          void   FindTracksCA(int iteration);
-          void   MakeCells(int iteration);
+          void   cellsTreeTraversal(std::vector<Road> &roads, const int &iD, const int &doubl);
+          void   findTracksCA(int iteration);
+          void   makeCells(int iteration);
           bool   RefitAt(float xx, Track* t);
-          void   SetCuts(int it);
-          void   SetLabel(Track &t, float wrong);
+          void   setCuts(int it);
+          void   setLabel(Track &t, float wrong);
           //
           TrackingStation**     mLayer;
           std::vector<bool>          mUsedClusters[7];

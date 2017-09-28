@@ -156,7 +156,7 @@ void TRDPadPlane::Copy(TObject &p) const
 */
 
 //_____________________________________________________________________________
-void TRDPadPlane::SetTiltingAngle(double t)
+void TRDPadPlane::setTiltingAngle(double t)
 {
   //
   // Set the tilting angle of the pads
@@ -167,7 +167,7 @@ void TRDPadPlane::SetTiltingAngle(double t)
 }
 
 //_____________________________________________________________________________
-int TRDPadPlane::GetPadRowNumber(double z) const
+int TRDPadPlane::getPadRowNumber(double z) const
 {
   //
   // Finds the pad row number for a given z-position in local supermodule system
@@ -178,7 +178,7 @@ int TRDPadPlane::GetPadRowNumber(double z) const
   int nbelow = 0;
   int middle = 0;
 
-  if ((z > GetRow0()) || (z < GetRowEnd())) {
+  if ((z > getRow0()) || (z < getRowEnd())) {
     row = -1;
 
   } else {
@@ -202,7 +202,7 @@ int TRDPadPlane::GetPadRowNumber(double z) const
 }
 
 //_____________________________________________________________________________
-int TRDPadPlane::GetPadRowNumberROC(double z) const
+int TRDPadPlane::getPadRowNumberROC(double z) const
 {
   //
   // Finds the pad row number for a given z-position in local ROC system
@@ -213,7 +213,7 @@ int TRDPadPlane::GetPadRowNumberROC(double z) const
   int nbelow = 0;
   int middle = 0;
 
-  if ((z > GetRow0ROC()) || (z < GetRowEndROC())) {
+  if ((z > getRow0ROC()) || (z < getRowEndROC())) {
     row = -1;
 
   } else {
@@ -237,7 +237,7 @@ int TRDPadPlane::GetPadRowNumberROC(double z) const
 }
 
 //_____________________________________________________________________________
-int TRDPadPlane::GetPadColNumber(double rphi) const
+int TRDPadPlane::getPadColNumber(double rphi) const
 {
   //
   // Finds the pad column number for a given rphi-position
@@ -248,7 +248,7 @@ int TRDPadPlane::GetPadColNumber(double rphi) const
   int nbelow = 0;
   int middle = 0;
 
-  if ((rphi < GetCol0()) || (rphi > GetColEnd())) {
+  if ((rphi < getCol0()) || (rphi > getColEnd())) {
     col = -1;
 
   } else {

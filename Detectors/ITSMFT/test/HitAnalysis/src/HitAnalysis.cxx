@@ -71,7 +71,7 @@ HitAnalysis::~HitAnalysis()
   delete mLocalZ1;
 }
 
-InitStatus HitAnalysis::Init()
+InitStatus HitAnalysis::init()
 {
   // Get the FairRootManager
   FairRootManager *mgr = FairRootManager::Instance();
@@ -87,8 +87,8 @@ InitStatus HitAnalysis::Init()
   }
 
   // Create geometry, initialize chip array
-  GeometryTGeo* geom = GeometryTGeo::Instance();
-  if ( !geom->isBuilt() ) geom->Build(true);
+  GeometryTGeo* geom = GeometryTGeo::Instance(instance;
+  if ( !geom->isBuilt() ) geom->build(true);
   geom->fillMatrixCache( bit2Mask(TransformType::L2G) ); // make sure T2L matrices are loaded
 
   mGeometry = geom;
@@ -102,8 +102,8 @@ InitStatus HitAnalysis::Init()
     // Test whether indices match:
     LOG(DEBUG) << "Testing for integrity of chip indices" << FairLogger::endl;
     for (int i = 0; i < mGeometry->getNumberOfChips(); i++) {
-      if (mChips[i]->GetChipIndex() != i) {
-        LOG(ERROR) << "Chip index mismatch for entry " << i << ", value " << mChips[i]->GetChipIndex() <<
+      if (mChips[i]->getChipIndex() != i) {
+        LOG(ERROR) << "Chip index mismatch for entry " << i << ", value " << mChips[i]->getChipIndex() <<
                    FairLogger::endl;
       }
     }
@@ -116,9 +116,9 @@ InitStatus HitAnalysis::Init()
   const Segmentation *itsseg(nullptr);
   for (int ily = 0; ily < 7; ily++) {
     itsseg = mGeometry->getSegmentation(ily);
-    if (itsseg->Dx() > maxLengthX) { maxLengthX = itsseg->Dx(); }
-    if (itsseg->Dy() > maxLengthY) { maxLengthY = itsseg->Dy(); }
-    if (itsseg->Dz() > maxLengthX) { maxLengthZ = itsseg->Dz(); }
+    if (itsseg->dx() > maxLengthX) { maxLengthX = itsseg->dx(); }
+    if (itsseg->dy() > maxLengthY) { maxLengthY = itsseg->dy(); }
+    if (itsseg->dz() > maxLengthX) { maxLengthZ = itsseg->dz(); }
   }
   mLineSegment = new TH1D("lineSegment", "Length of the line segment within the chip", 500, 0.0, 0.01);
   mLocalX0 = new TH1D("localX0", "X position in local (chip) coordinates at the start of a hit", 5000, -2 * maxLengthX,
@@ -136,7 +136,7 @@ InitStatus HitAnalysis::Init()
   return kSUCCESS;
 }
 
-void HitAnalysis::Exec(Option_t *option)
+void HitAnalysis::exec(Option_t *option)
 {
   if (!mIsInitialized) {
     return;
@@ -150,20 +150,20 @@ void HitAnalysis::Exec(Option_t *option)
   mHitCounter->Fill(1., mHitsArray->GetEntries());
 
   if (mProcessChips) {
-    ProcessChips();
+    processChips();
   } else {
-    ProcessHits();
+    processHits();
   }
 }
 
-void HitAnalysis::ProcessChips()
+void HitAnalysis::processChips()
 {
   // Add test: All chips must be empty
   Int_t nchipsNotEmpty(0);
   std::vector<int> nonEmptyChips;
   for (auto chipiter: mChips) {
-    if (chipiter.second->GetNumberOfHits() > 0) {
-      nonEmptyChips.push_back(chipiter.second->GetChipIndex());
+    if (chipiter.second->getNumberOfHits() > 0) {
+      nonEmptyChips.push_back(chipiter.second->getChipIndex());
       nchipsNotEmpty++;
     }
   }
@@ -178,7 +178,7 @@ void HitAnalysis::ProcessChips()
   for (TIter pointIter = TIter(mHitsArray).Begin(); pointIter != TIter::End(); ++pointIter) {
     Hit *point = static_cast<Hit *>(*pointIter);
     try {
-      mChips[point->GetDetectorID()]->InsertHit(point);
+      mChips[point->getDetectorID()]->insertHit(point);
     } catch (Chip::IndexException &e) {
       LOG(ERROR) << e.what() << FairLogger::endl;
     }
@@ -187,7 +187,7 @@ void HitAnalysis::ProcessChips()
   // Add test: Total number of hits assigned to chips must be the same as the size of the points array
   Int_t nHitsAssigned(0);
   for (auto chipiter : mChips) {
-    nHitsAssigned += chipiter.second->GetNumberOfHits();
+    nHitsAssigned += chipiter.second->getNumberOfHits();
   }
   if (nHitsAssigned != mHitsArray->GetEntries()) {
     LOG(ERROR) << "Number of points mismatch: Read(" << mHitsArray->GetEntries() << "), Assigned(" << nHitsAssigned <<
@@ -200,12 +200,12 @@ void HitAnalysis::ProcessChips()
   // loop over chips, get the line segment
   for (auto chipiter: mChips) {
     Chip &mychip = *(chipiter.second);
-    if (!mychip.GetNumberOfHits()) {
+    if (!mychip.getNumberOfHits()) {
       continue;
     }
     //LOG(DEBUG) << "Processing chip with index " << mychip.GetChipIndex() << FairLogger::endl;
-    for (int ihit = 0; ihit < mychip.GetNumberOfHits(); ihit++) {
-      if (mychip.GetHitAt(ihit)->IsEntering()) { continue; }
+    for (int ihit = 0; ihit < mychip.getNumberOfHits(); ihit++) {
+      if (mychip.getHitAt(ihit)->isEntering()) { continue; }
       mychip.LineSegmentLocal(ihit, x0, x1, y0, y1, z0, z1, tof, edep);
       steplength = TMath::Sqrt(x1 * x1 + y1 * y1 + z1 * z1);
       mLineSegment->Fill(steplength);
@@ -219,18 +219,18 @@ void HitAnalysis::ProcessChips()
   }
   // Clear all chips
   for (std::map<int, Chip *>::iterator chipiter = mChips.begin(); chipiter != mChips.end(); ++chipiter) {
-    chipiter->second->Clear();
+    chipiter->second->clear();
   }
 }
 
-void HitAnalysis::ProcessHits()
+void HitAnalysis::processHits()
 {
   for (TIter pointiter = TIter(mHitsArray).Begin(); pointiter != TIter::End(); ++pointiter) {
     Hit *p = static_cast<Hit *>(*pointiter);
-    auto loc = p->GetPos();
-    auto locS = p->GetPosStart();
-    auto glo = mGeometry->getMatrixL2G(p->GetDetectorID())(loc);
-    auto gloS = mGeometry->getMatrixL2G(p->GetDetectorID())(locS);
+    auto loc = p->getPos();
+    auto locS = p->getPosStart();
+    auto glo = mGeometry->getMatrixL2G(p->getDetectorID())(loc);
+    auto gloS = mGeometry->getMatrixL2G(p->getDetectorID())(locS);
     mLocalX0->Fill(locS.X());
     mLocalY0->Fill(locS.Y());
     mLocalZ0->Fill(locS.Z());
@@ -241,7 +241,7 @@ void HitAnalysis::ProcessHits()
   }
 }
 
-void HitAnalysis::FinishTask()
+void HitAnalysis::finishTask()
 {
   if (!mIsInitialized) {
     return;

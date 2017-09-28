@@ -46,7 +46,7 @@ GeneratorFromFile::GeneratorFromFile(const char* name)
   std::cout << "Found " << mEventsAvailable << " events in this file \n";
 }
 
-void GeneratorFromFile::SetStartEvent(int start)
+void GeneratorFromFile::setStartEvent(int start)
 {
   if (start < mEventsAvailable) {
     mEventCounter = start;

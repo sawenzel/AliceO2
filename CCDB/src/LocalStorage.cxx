@@ -224,7 +224,7 @@ ConditionId *LocalStorage::getId(const ConditionId &query)
   // look for filename matching query (called by getConditionId)
 
   // if querying for mRun and not specifying a version, look in the mValidFileIds list
-  if (!Manager::Instance()->getCvmfsOcdbTag().IsNull() && query.getFirstRun() == mRun && !query.hasVersion()) {
+  if (!Manager::Instance(instance->getCvmfsOcdbTag().IsNull() && query.getFirstRun() == mRun && !query.hasVersion()) {
     // if(query.getFirstRun() == mRun && !query.hasVersion()) {
     // get id from mValidFileIds
     TIter iter(&mValidFileIds);
@@ -391,7 +391,7 @@ Condition *LocalStorage::getCondition(const ConditionId &queryId)
 
   ConditionId *dataId = getConditionId(queryId);
 
-  TString errMessage(TString::Format("No valid CDB object found! request was: %s", queryId.ToString().Data()));
+  TString errMessage(TString::Format("No valid CDB object found! request was: %s", queryId.toString().Data()));
   if (!dataId || !dataId->isSpecified()) {
     LOG(ERROR) << "No file found matching this id!" << FairLogger::endl;
     throw std::runtime_error(errMessage.Data());
@@ -436,8 +436,8 @@ Condition *LocalStorage::getCondition(const ConditionId &queryId)
 
   if (!entryId.isEqual(dataId)) {
     LOG(WARNING) << "Mismatch between file name and object's ConditionId!" << FairLogger::endl;
-    LOG(WARNING) << "File name: " << dataId->ToString().Data() << FairLogger::endl;
-    LOG(WARNING) << "Object's ConditionId: " << entryId.ToString().Data() << FairLogger::endl;
+    LOG(WARNING) << "File name: " << dataId->toString().Data() << FairLogger::endl;
+    LOG(WARNING) << "Object's ConditionId: " << entryId.toString().Data() << FairLogger::endl;
   }
 
   // Check whether entry contains a TTree. In case load the tree in memory!

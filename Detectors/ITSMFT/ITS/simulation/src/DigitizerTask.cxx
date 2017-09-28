@@ -50,7 +50,7 @@ DigitizerTask::~DigitizerTask()
 /// \brief Init function
 ///
 /// Inititializes the digitizer and connects input and output container
-InitStatus DigitizerTask::Init()
+InitStatus DigitizerTask::init()
 {
   FairRootManager* mgr = FairRootManager::Instance();
   if (!mgr) {
@@ -76,7 +76,7 @@ InitStatus DigitizerTask::Init()
 
   mDigitizer.setCoeffToNanoSecond(mFairTimeUnitInNS);
   
-  GeometryTGeo* geom = GeometryTGeo::Instance();
+  GeometryTGeo* geom = GeometryTGeo::Instance(instance;
   geom->fillMatrixCache( bit2Mask(TransformType::L2G) ); // make sure L2G matrices are loaded
   mDigitizer.setGeometry(geom);
   
@@ -86,7 +86,7 @@ InitStatus DigitizerTask::Init()
 }
 
 //________________________________________________________
-void DigitizerTask::Exec(Option_t* option)
+void DigitizerTask::exec(Option_t* option)
 {
   FairRootManager* mgr = FairRootManager::Instance();
 
@@ -108,7 +108,7 @@ void DigitizerTask::Exec(Option_t* option)
 }
 
 //________________________________________________________
-void DigitizerTask::FinishTask()
+void DigitizerTask::finishTask()
 {
   // finalize digitization, if needed, flash remaining digits
   if(!mContinuous) return;

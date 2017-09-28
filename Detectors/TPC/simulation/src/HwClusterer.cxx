@@ -72,7 +72,7 @@ HwClusterer::~HwClusterer()
 }
 
 //________________________________________________________________________
-void HwClusterer::Init()
+void HwClusterer::init()
 {
   LOG(DEBUG) << "Enter Initializer of HwClusterer" << FairLogger::endl;     
 
@@ -122,7 +122,7 @@ void HwClusterer::Init()
     mDigitContainer[iCRU].resize(mapper.getNumberOfRowsPartition(iCRU));
 
   mClusterContainer = new ClusterContainer();
-  mClusterContainer->InitArray("o2::TPC::HwCluster");
+  mClusterContainer->initArray("o2::TPC::HwCluster");
 }
 
 //________________________________________________________________________
@@ -222,7 +222,7 @@ void HwClusterer::processDigits(
       // +2 so that for sure all data is processed
       for (time = 0; time < clusterFinder[iRow][0]->getNtimebins()+2; ++time){
         for (auto rit = clusterFinder[iRow].crbegin(); rit != clusterFinder[iRow].crend(); ++rit) {
-          (*rit)->AddZeroTimebin(time+timeDiff+config.iMinTimeBin,iPadsPerCF);
+          (*rit)->addZeroTimebin(time+timeDiff+config.iMinTimeBin,iPadsPerCF);
         }
 
         /*
@@ -272,9 +272,9 @@ void HwClusterer::processDigits(
 }
 
 //________________________________________________________________________
-ClusterContainer* HwClusterer::Process(TClonesArray *digits)
+ClusterContainer* HwClusterer::process(TClonesArray *digits)
 {
-  mClusterContainer->Reset();
+  mClusterContainer->reset();
 
 
   /*  
@@ -316,13 +316,13 @@ ClusterContainer* HwClusterer::Process(TClonesArray *digits)
     mDigitContainer[digit->getCRU()][digit->getRow()].push_back(digit);
   }
 
-  return ProcessTimeBins(iTimeBinMin, iTimeBinMax);
+  return processTimeBins(iTimeBinMin, iTimeBinMax);
 }
 
 //________________________________________________________________________
-ClusterContainer* HwClusterer::Process(std::vector<std::unique_ptr<Digit>>& digits)
+ClusterContainer* HwClusterer::process(std::vector<std::unique_ptr<Digit>>& digits)
 {
-  mClusterContainer->Reset();
+  mClusterContainer->reset();
 
 
   /*  
@@ -352,10 +352,10 @@ ClusterContainer* HwClusterer::Process(std::vector<std::unique_ptr<Digit>>& digi
     mDigitContainer[digit->getCRU()][digit->getRow()].push_back(digit);
   }
 
-  return ProcessTimeBins(iTimeBinMin, iTimeBinMax);
+  return processTimeBins(iTimeBinMin, iTimeBinMax);
 }
 
-ClusterContainer* HwClusterer::ProcessTimeBins(int iTimeBinMin, int iTimeBinMax)
+ClusterContainer* HwClusterer::processTimeBins(int iTimeBinMin, int iTimeBinMax)
 {
 
    /*
@@ -429,7 +429,7 @@ ClusterContainer* HwClusterer::ProcessTimeBins(int iTimeBinMin, int iTimeBinMax)
   for (std::vector<HwCluster> cc : mClusterStorage) {
     if (cc.size() != 0) {  
       for (HwCluster& c : cc){
-        mClusterContainer->AddCluster(c.getCRU(),c.getRow(),c.getQ(),c.getQmax(),
+        mClusterContainer->addCluster(c.getCRU(),c.getRow(),c.getQ(),c.getQmax(),
             c.getPadMean(),c.getTimeMean(),c.getPadSigma(),c.getTimeSigma());
 ////          if (c.getPadSigma() > 0.45 && c.getPadSigma() < 0.5) {
 //          if ((c.getCRU() == 179)){// && c.getRow() == 5)){// && (int)c.getPadMean() == 103 && (int)c.getTimeMean() == 170) || 

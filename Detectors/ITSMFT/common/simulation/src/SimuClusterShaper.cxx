@@ -57,15 +57,15 @@ SimuClusterShaper::~SimuClusterShaper() {
 
 
 //______________________________________________________________________
-void SimuClusterShaper::FillClusterRandomly() {
-  Int_t matrixSize = mCShape->GetNRows()*mCShape->GetNCols();
+void SimuClusterShaper::fillClusterRandomly() {
+  Int_t matrixSize = mCShape->getNRows()*mCShape->getNCols();
 
   // generate UNIQUE random numbers
   UInt_t i = 0, j = 0;
   auto *bits = new TBits(mNpixOn);
 
   if (mFireCenter) {
-    bits->SetBitNumber(mCShape->GetCenterIndex());
+    bits->SetBitNumber(mCShape->getCenterIndex());
     i++;
   }
   while (i < mNpixOn) {
@@ -78,7 +78,7 @@ void SimuClusterShaper::FillClusterRandomly() {
   Int_t bit = 0;
   for (i = 0; i < mNpixOn; ++i) {
     j = bits->FirstSetBit(bit);
-    mCShape->AddShapeValue(j);
+    mCShape->addShapeValue(j);
     bit = j+1;
   }
   delete bits;
@@ -86,23 +86,23 @@ void SimuClusterShaper::FillClusterRandomly() {
 
 
 //______________________________________________________________________
-void SimuClusterShaper::FillClusterSorted() {
-  UInt_t matrixSize = mCShape->GetNRows()*mCShape->GetNCols();
+void SimuClusterShaper::fillClusterSorted() {
+  UInt_t matrixSize = mCShape->getNRows()*mCShape->getNCols();
   if (matrixSize == 1) {
-    mCShape->AddShapeValue(mCShape->GetCenterIndex());
+    mCShape->addShapeValue(mCShape->getCenterIndex());
     return;
   }
 
-  ReComputeCenters();
+  reComputeCenters();
 
   std::map<Double_t, UInt_t> sortedpix;
   Float_t pX = 0.f, pZ = 0.f;
 
   for (UInt_t i = 0; i < matrixSize; ++i) {
-    UInt_t r = i / mCShape->GetNRows();
-    UInt_t c = i % mCShape->GetNRows();
-    UInt_t nx = mHitC - mCShape->GetCenterC() + c;
-    UInt_t nz = mHitR - mCShape->GetCenterR() + r;
+    UInt_t r = i / mCShape->getNRows();
+    UInt_t c = i % mCShape->getNRows();
+    UInt_t nx = mHitC - mCShape->getCenterC() + c;
+    UInt_t nz = mHitR - mCShape->getCenterR() + r;
     mSeg->detectorToLocal(nx, nz, pX, pZ);
     Double_t d = sqrt(pow(mHitX-pX,2)+pow(mHitZ-pZ,2));
 
@@ -115,16 +115,16 @@ void SimuClusterShaper::FillClusterSorted() {
   if (sortedpix.size() < mNpixOn) mNpixOn = sortedpix.size();
   for (std::map<Double_t, UInt_t>::iterator it = sortedpix.begin(); it != std::next(sortedpix.begin(),mNpixOn); ++it) {
     // std::cout << "  " << it->second << std::endl;
-    mCShape->AddShapeValue(it->second);
+    mCShape->addShapeValue(it->second);
   }
 }
 
 
 //______________________________________________________________________
-void SimuClusterShaper::AddNoisePixel() {
-  Int_t matrixSize = mCShape->GetNRows()*mCShape->GetNCols();
+void SimuClusterShaper::addNoisePixel() {
+  Int_t matrixSize = mCShape->getNRows()*mCShape->getNCols();
   UInt_t j = gRandom->Integer(matrixSize); // [0, matrixSize-1]
-  while (mCShape->HasElement(j)) {
+  while (mCShape->hasElement(j)) {
     j = gRandom->Integer(matrixSize);
   }
   //fCShape->SetShapeValue(i, j);
@@ -132,32 +132,32 @@ void SimuClusterShaper::AddNoisePixel() {
 
 
 //______________________________________________________________________
-void SimuClusterShaper::ReComputeCenters() {
+void SimuClusterShaper::reComputeCenters() {
   UInt_t  r  = 0,   c = 0;
   Float_t pX = 0.f, pZ = 0.f;
   mSeg->detectorToLocal(mHitC, mHitR, pX, pZ);
 
   // c is even
-  if (mCShape->GetNCols() % 2 == 0) {
+  if (mCShape->getNCols() % 2 == 0) {
     if (mHitX > pX) { // n/2 - 1
-      c = mCShape->GetNCols()/2 - 1;
+      c = mCShape->getNCols()/2 - 1;
     } else { // n/2
-      c = mCShape->GetNCols()/2;
+      c = mCShape->getNCols()/2;
     }
   } else { // c is odd
-    c = (mCShape->GetNCols()-1)/2;
+    c = (mCShape->getNCols()-1)/2;
   }
 
   // r is even
-  if (mCShape->GetNRows() % 2 == 0) {
+  if (mCShape->getNRows() % 2 == 0) {
     if (mHitZ > pZ) { // n/2 - 1
-      r = mCShape->GetNRows()/2 - 1;
+      r = mCShape->getNRows()/2 - 1;
     } else { // n/2
-      r = mCShape->GetNRows()/2;
+      r = mCShape->getNRows()/2;
     }
   } else { // r is odd
-    r = (mCShape->GetNRows()-1)/2;
+    r = (mCShape->getNRows()-1)/2;
   }
 
-  mCShape->SetCenter(r, c);
+  mCShape->setCenter(r, c);
 }

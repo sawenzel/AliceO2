@@ -27,7 +27,7 @@ Bool_t Geo::mToBeIntit = kTRUE;
 Float_t Geo::mRotationMatrixSector[NSECTORS + 1][3][3];
 Float_t Geo::mRotationMatrixPlateStrip[NPLATES][NMAXNSTRIP][3][3];
 
-void Geo::Init()
+void Geo::init()
 {
   Info("tof::Geo::Init", "Initialization of TOF rotation parameters");
 
@@ -178,7 +178,7 @@ void Geo::getDetID(Float_t* pos, Int_t* det)
   if (mToBeIntit)
     Init();
 
-  Float_t posLocal[3];
+  Floinit posLocal[3];
   for (Int_t ii = 0; ii < 3; ii++)
     posLocal[ii] = pos[ii];
 

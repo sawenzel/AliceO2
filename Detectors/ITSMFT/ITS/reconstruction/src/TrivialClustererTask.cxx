@@ -42,7 +42,7 @@ TrivialClustererTask::~TrivialClustererTask()
 //_____________________________________________________________________
 /// \brief Init function
 /// Inititializes the clusterer and connects input and output container
-InitStatus TrivialClustererTask::Init()
+InitStatus TrivialClustererTask::init()
 {
   FairRootManager* mgr = FairRootManager::Instance();
   if (!mgr) {
@@ -60,7 +60,7 @@ InitStatus TrivialClustererTask::Init()
   mClustersArray = new TClonesArray("o2::ITS::Cluster");
   mgr->Register("ITSCluster", "ITS", mClustersArray, kTRUE);
   
-  GeometryTGeo* geom = GeometryTGeo::Instance();
+  GeometryTGeo* geom = GeometryTGeo::Instance(instance;
   geom->fillMatrixCache( bit2Mask(TransformType::T2L) ); // make sure T2L matrices are loaded
   mGeometry = geom;
   mTrivialClusterer.setGeometry(geom);
@@ -69,7 +69,7 @@ InitStatus TrivialClustererTask::Init()
 }
 
 //_____________________________________________________________________
-void TrivialClustererTask::Exec(Option_t* option)
+void TrivialClustererTask::exec(Option_t* option)
 {
   mClustersArray->Clear();
   LOG(DEBUG) << "Running digitization on new event" << FairLogger::endl;

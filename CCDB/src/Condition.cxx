@@ -93,16 +93,16 @@ Condition::~Condition()
 void Condition::printId() const
 {
 
-  LOG(INFO) << mId.ToString().Data() << FairLogger::endl;
+  LOG(INFO) << mId.toString().Data() << FairLogger::endl;
 }
 
-Int_t Condition::Compare(const TObject *obj) const
+Int_t Condition::compare(const TObject *obj) const
 {
   Condition *o2 = (Condition *) obj;
   return TString(this->getId().getPathString()).CompareTo((o2->getId().getPathString()));
 }
 
-Bool_t Condition::IsSortable() const
+Bool_t Condition::isSortable() const
 {
   return kTRUE;
 }

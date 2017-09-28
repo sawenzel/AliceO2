@@ -170,7 +170,7 @@ MagneticWrapperChebyshev::MagneticWrapperChebyshev(const MagneticWrapperChebyshe
 
 void MagneticWrapperChebyshev::copyFrom(const MagneticWrapperChebyshev &src)
 {
-  Clear();
+  clear();
   SetName(src.GetName());
   SetTitle(src.GetTitle());
 
@@ -297,13 +297,13 @@ void MagneticWrapperChebyshev::copyFrom(const MagneticWrapperChebyshev &src)
 MagneticWrapperChebyshev &MagneticWrapperChebyshev::operator=(const MagneticWrapperChebyshev &rhs)
 {
   if (this != &rhs) {
-    Clear();
+    clear();
     copyFrom(rhs);
   }
   return *this;
 }
 
-void MagneticWrapperChebyshev::Clear(const Option_t *)
+void MagneticWrapperChebyshev::clear(const Option_t *)
 {
   if (mNumberOfParameterizationSolenoid) {
     mParameterizationSolenoid->SetOwner(kTRUE);
@@ -417,7 +417,7 @@ void MagneticWrapperChebyshev::Clear(const Option_t *)
   mMaxDipoleZ = -1e6;
 }
 
-void MagneticWrapperChebyshev::Field(const Double_t *xyz, Double_t *b) const
+void MagneticWrapperChebyshev::field(const Double_t *xyz, Double_t *b) const
 {
   Double_t rphiz[3];
 
@@ -443,7 +443,7 @@ void MagneticWrapperChebyshev::Field(const Double_t *xyz, Double_t *b) const
     return;
   }
 #endif
-  par->Eval(xyz, b);
+  par->eval(xyz, b);
 }
 
 Double_t MagneticWrapperChebyshev::getBz(const Double_t *xyz) const
@@ -465,10 +465,10 @@ Double_t MagneticWrapperChebyshev::getBz(const Double_t *xyz) const
     return 0.;
   }
 #endif
-  return par->Eval(xyz, 2);
+  return par->eval(xyz, 2);
 }
 
-void MagneticWrapperChebyshev::Print(Option_t *) const
+void MagneticWrapperChebyshev::print(Option_t *) const
 {
   printf("Alice magnetic field parameterized by Chebyshev polynomials\n");
   printf("Segmentation for Solenoid (%+.2f<Z<%+.2f cm | R<%.2f cm)\n", mMinZSolenoid, mMaxZSolenoid,
@@ -477,7 +477,7 @@ void MagneticWrapperChebyshev::Print(Option_t *) const
   if (mParameterizationSolenoid) {
     for (int i = 0; i < mNumberOfParameterizationSolenoid; i++) {
       printf("SOL%4d ", i);
-      getParameterSolenoid(i)->Print();
+      getParameterSolenoid(i)->print();
     }
   }
 
@@ -486,7 +486,7 @@ void MagneticWrapperChebyshev::Print(Option_t *) const
   if (mParameterizationTPC) {
     for (int i = 0; i < mNumberOfParameterizationTPC; i++) {
       printf("TPC%4d ", i);
-      getParameterTPCIntegral(i)->Print();
+      getParameterTPCIntegral(i)->print();
     }
   }
 
@@ -496,7 +496,7 @@ void MagneticWrapperChebyshev::Print(Option_t *) const
   if (mParameterizationTPCRat) {
     for (int i = 0; i < mNumberOfParameterizationTPCRat; i++) {
       printf("TPCRat%4d ", i);
-      getParameterTPCRatIntegral(i)->Print();
+      getParameterTPCRatIntegral(i)->print();
     }
   }
 
@@ -504,7 +504,7 @@ void MagneticWrapperChebyshev::Print(Option_t *) const
   if (mParameterizationDipole) {
     for (int i = 0; i < mNumberOfParameterizationDipole; i++) {
       printf("DIP%4d ", i);
-      getParameterDipole(i)->Print();
+      getParameterDipole(i)->print();
     }
   }
 }
@@ -746,7 +746,7 @@ void MagneticWrapperChebyshev::fieldCylindricalSolenoid(const Double_t *rphiz, D
     return;
   }
 #endif
-  par->Eval(rphiz, b);
+  par->eval(rphiz, b);
   return;
 }
 
@@ -758,7 +758,7 @@ Double_t MagneticWrapperChebyshev::fieldCylindricalSolenoidBz(const Double_t *rp
   }
   Chebyshev3D *par = getParameterSolenoid(id);
 #ifndef _BRING_TO_BOUNDARY_
-  return par->isInside(rphiz) ? par->Eval(rphiz, 2) : 0;
+  return par->isInside(rphiz) ? par->eval(rphiz, 2) : 0;
 #else
   return par->Eval(rphiz, 2);
 #endif
@@ -778,7 +778,7 @@ void MagneticWrapperChebyshev::getTPCIntegralCylindrical(const Double_t *rphiz, 
   }
   Chebyshev3D *par = getParameterTPCIntegral(id);
   if (par->isInside(rphiz)) {
-    par->Eval(rphiz, b);
+    par->eval(rphiz, b);
     return;
   }
   b[0] = b[1] = b[2] = 0;
@@ -799,7 +799,7 @@ void MagneticWrapperChebyshev::getTPCRatIntegralCylindrical(const Double_t *rphi
   }
   Chebyshev3D *par = getParameterTPCRatIntegral(id);
   if (par->isInside(rphiz)) {
-    par->Eval(rphiz, b);
+    par->eval(rphiz, b);
     return;
   }
   b[0] = b[1] = b[2] = 0;

@@ -30,10 +30,10 @@ namespace o2 {
 
       // Initialize the clones array
       // @param clusterType Possibility to store different types of clusters
-      void InitArray(const Char_t* clusterType="o2::TPC::Cluster");
+      void initArray(const Char_t* clusterType="o2::TPC::Cluster");
 
       // Empty array
-      void Reset();
+      void reset();
 
       /// Add cluster to array
       /// @param cru CRU (sector)
@@ -44,14 +44,14 @@ namespace o2 {
       /// @param padsigma Sigma of cluster in pad direction
       /// @param timemean Mean position of cluster in time direction
       /// @param timesigma Sigma of cluster in time direction
-      Cluster* AddCluster(Int_t cru, Int_t row, Float_t qTot, Float_t qMax,
+      Cluster* addCluster(Int_t cru, Int_t row, Float_t qTot, Float_t qMax,
 			  Float_t pad, Float_t time, Float_t sigmapad,
 			  Float_t sigmatime);
 
       // Copy container info into the output container
-      void FillOutputContainer(TClonesArray *outputcont);
+      void fillOutputContainer(TClonesArray *outputcont);
 
-      Int_t GetEntries() { return mClusterArray->GetEntries(); };
+      Int_t getEntries() { return mClusterArray->GetEntries(); };
 
     private:
       Int_t         mNclusters;        // number of clusters

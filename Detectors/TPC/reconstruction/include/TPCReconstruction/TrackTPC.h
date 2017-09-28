@@ -73,23 +73,23 @@ class TrackTPC {
 
 
 
-    float getX()                         const { return mTrackParCov.GetX(); }
-    float getAlpha()                     const { return mTrackParCov.GetAlpha(); }
-    float getY()                         const { return mTrackParCov.GetY(); }
-    float getZ()                         const { return mTrackParCov.GetZ(); }
-    float getSnp()                       const { return mTrackParCov.GetSnp(); }
-    float getTgl()                       const { return mTrackParCov.GetTgl(); }
-    float getQ2Pt()                      const { return mTrackParCov.GetQ2Pt(); }
+    float getX()                         const { return mTrackParCov.getX(); }
+    float getAlpha()                     const { return mTrackParCov.getAlpha(); }
+    float getY()                         const { return mTrackParCov.getY(); }
+    float getZ()                         const { return mTrackParCov.getZ(); }
+    float getSnp()                       const { return mTrackParCov.getSnp(); }
+    float getTgl()                       const { return mTrackParCov.getTgl(); }
+    float getQ2Pt()                      const { return mTrackParCov.getQ2Pt(); }
 
     // derived getters
-    float getCurvature(float b)          const { return mTrackParCov.GetCurvature(float(b));}
-    float getSign()                      const { return mTrackParCov.GetSign();}
-    float getPhi()                       const { return mTrackParCov.GetPhi();}
-    float getPhiPos()                    const { return mTrackParCov.GetPhiPos(); }
+    float getCurvature(float b)          const { return mTrackParCov.getCurvature(float(b));}
+    float getSign()                      const { return mTrackParCov.getSign();}
+    float getPhi()                       const { return mTrackParCov.getPhi();}
+    float getPhiPos()                    const { return mTrackParCov.getPhiPos(); }
 
-    float getP()                         const { return mTrackParCov.GetP(); }
-    float getPt()                        const { return mTrackParCov.GetPt(); }
-    void  getXYZ(std::array<float,3> &xyz)           const { mTrackParCov.GetXYZ(xyz); }
+    float getP()                         const { return mTrackParCov.getP(); }
+    float getPt()                        const { return mTrackParCov.getPt(); }
+    void  getXYZ(std::array<float,3> &xyz)           const { mTrackParCov.getXYZ(xyz); }
     bool  getPxPyPz(std::array<float,3> &pxyz)       const { return mTrackParCov.GetPxPyPz(pxyz); }
     bool  getPosDir(std::array<float,9> &posdirp)    const { return mTrackParCov.GetPosDir(posdirp); }
 
@@ -100,9 +100,9 @@ class TrackTPC {
     bool  rotateParam(float alpha)       { return mTrackParCov.Rotate(alpha); }
     bool  propagateParamTo(float xk, float b)        { return mTrackParCov.PropagateParamTo(xk, b); }
     bool  propagateParamTo(float xk, const std::array<float,3> &b)    { return mTrackParCov.PropagateParamTo(xk, b); }
-    void  invertParam()                  { mTrackParCov.InvertParam(); }
+    void  invertParam()                  { mTrackParCov.invertParam(); }
 
-    void  printParam()                   { mTrackParCov.PrintParam(); }
+    void  printParam()                   { mTrackParCov.printParam(); }
 
 
   private:

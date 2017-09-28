@@ -71,7 +71,7 @@ MCTrack::MCTrack(TParticle *part)
 MCTrack::~MCTrack()
 = default;
 
-void MCTrack::Print(Int_t trackId) const
+void MCTrack::print(Int_t trackId) const
 {
   LOG(DEBUG) << "Track " << trackId << ", mother : " << mMotherTrackId << ", Type " << mPdgCode << ", momentum ("
              << mStartVertexMomentumX << ", " << mStartVertexMomentumY << ", " << mStartVertexMomentumZ << ") GeV"
@@ -83,7 +83,7 @@ void MCTrack::Print(Int_t trackId) const
   //
 }
 
-Double_t MCTrack::GetMass() const
+Double_t MCTrack::getMass() const
 {
   if (TDatabasePDG::Instance()) {
     TParticlePDG *particle = TDatabasePDG::Instance()->GetParticle(mPdgCode);
@@ -96,9 +96,9 @@ Double_t MCTrack::GetMass() const
   return 0.;
 }
 
-Double_t MCTrack::GetRapidity() const
+Double_t MCTrack::getRapidity() const
 {
-  Double_t e = GetEnergy();
+  Double_t e = getEnergy();
   Double_t y = 0.5 * TMath::Log((e + mStartVertexMomentumZ) / (e - mStartVertexMomentumZ));
   return y;
 }

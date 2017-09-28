@@ -39,7 +39,7 @@ namespace alice_hlt {
 
     std::vector<BlockDescriptor> dataDescriptors;
     for (auto & dataField : dataFields) {
-      dataDescriptors.emplace_back((void*)dataField.c_str(), dataField.size() + 1, AliHLTComponentDataTypeInitializer("TESTDATA", "TEST"), 0);
+      dataDescriptors.emplace_back((void*)dataField.c_str(), dataField.size() + 1, aliHLTComponentDataTypeInitializer("TESTDATA", "TEST"), 0);
     }
 
     unsigned totalPayloadSize = 0;
@@ -89,7 +89,7 @@ namespace alice_hlt {
 
     std::vector<BlockDescriptor> dataDescriptors;
     for (auto & dataField : dataFields) {
-      dataDescriptors.emplace_back((void*)dataField.c_str(), dataField.size() + 1, AliHLTComponentDataTypeInitializer("TESTDATA", "TEST"), 0);
+      dataDescriptors.emplace_back((void*)dataField.c_str(), dataField.size() + 1, aliHLTComponentDataTypeInitializer("TESTDATA", "TEST"), 0);
     }
 
     unsigned totalPayloadSize = 0;
@@ -131,7 +131,7 @@ namespace alice_hlt {
 
     std::vector<BlockDescriptor> dataDescriptors;
     for (auto & dataField : dataFields) {
-      dataDescriptors.emplace_back((void*)dataField.c_str(), dataField.size() + 1, AliHLTComponentDataTypeInitializer("TESTDATA", "TEST"), 0);
+      dataDescriptors.emplace_back((void*)dataField.c_str(), dataField.size() + 1, aliHLTComponentDataTypeInitializer("TESTDATA", "TEST"), 0);
     }
 
     unsigned totalPayloadSize = 0;
@@ -214,7 +214,7 @@ namespace alice_hlt {
 
     std::vector<BlockDescriptor> dataDescriptors;
     for (auto & dataField : dataFields) {
-      dataDescriptors.emplace_back((void*)dataField.c_str(), dataField.size() + 1, AliHLTComponentDataTypeInitializer("TESTDATA", "TEST"), 0);
+      dataDescriptors.emplace_back((void*)dataField.c_str(), dataField.size() + 1, aliHLTComponentDataTypeInitializer("TESTDATA", "TEST"), 0);
     }
 
     unsigned totalPayloadSize = 0;

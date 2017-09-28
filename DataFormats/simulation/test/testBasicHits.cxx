@@ -30,7 +30,7 @@ BOOST_AUTO_TEST_CASE(BasicXYZHit)
   BOOST_CHECK_CLOSE(hit.GetEnergyLoss(), -1.1, 1E-4);
   BOOST_CHECK_CLOSE(hit.GetTime(), 0.01, 1E-4);
 
-  hit.SetX(0.);
+  hit.setX(0.);
   BOOST_CHECK_CLOSE(hit.GetX(), 0., 1E-4);
 
   // check coordinate transformation of the hit coordinate
@@ -39,7 +39,7 @@ BOOST_AUTO_TEST_CASE(BasicXYZHit)
   using ROOT::Math::Transform3D;
   Transform3D idtransf; // defaults to identity transformation
 
-  auto transformed = idtransf(hit.GetPos());
+  auto transformed = idtransf(hit.getPos());
   BOOST_CHECK_CLOSE(transformed.Y(), hit.GetY(), 1E-4);
 }
 

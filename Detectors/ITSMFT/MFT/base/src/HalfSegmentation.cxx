@@ -105,7 +105,7 @@ HalfSegmentation::~HalfSegmentation() {
 ///Clear the TClonesArray holding the HalfDiskSegmentation objects
 
 //_____________________________________________________________________________
-void HalfSegmentation::Clear(const Option_t* /*opt*/) {
+void HalfSegmentation::clear(const Option_t* /*opt*/) {
 
   if (mHalfDisks) mHalfDisks->Delete();
   delete mHalfDisks; 

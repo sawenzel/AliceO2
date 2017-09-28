@@ -58,7 +58,7 @@ TEveElement* DataInterpreterRND::interpretDataForType(EDataType type)
   colors[4] = settings.GetValue("tracks.byType.proton",797);
   
   TEveElementList *container = new TEveElementList("Random tracks by PID");
-  container->SetTitle(Form("Multiplicity = %d", minEvent->GetMultiplicity()));
+  container->SetTitle(Form("Multiplicity = %d", minEvent->getMultiplicity()));
   gEve->AddElement(container);
   
   TEveTrackList *trackList[nParticleTypes];
@@ -91,7 +91,7 @@ TEveElement* DataInterpreterRND::interpretDataForType(EDataType type)
     container->AddElement(trackList[i]);
   }
   
-  for (int iTrack=0; iTrack<minEvent->GetMultiplicity();iTrack++){
+  for (int iTrack=0; iTrack<minEvent->getMultiplicity();iTrack++){
     MinimalisticTrack *minTrack = minEvent->getTrack(iTrack);
     
     int listNumber = PIDtoListNumber[minTrack->getPID()];

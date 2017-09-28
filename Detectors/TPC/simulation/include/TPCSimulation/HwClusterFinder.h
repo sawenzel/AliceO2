@@ -62,10 +62,10 @@ class HwClusterFinder {
     /// Add a timebin with charges of 0
     /// \param globalTime Global time of this timebin
     /// \param length Size of array "timebin"
-    void AddZeroTimebin(unsigned globalTime = 0, int lengt = 8);
+    void addZeroTimebin(unsigned globalTime = 0, int lengt = 8);
 
     /// Print the local storagae of charges
-    void PrintLocalStorage();
+    void printLocalStorage();
 
     /// Resets the local storage to zeros
     /// \param globalTimeAfterReset Global time of the first timebin after reset

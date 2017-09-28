@@ -60,7 +60,7 @@ class MagneticWrapperChebyshev : public TNamed
 
     ~MagneticWrapperChebyshev() override
     {
-      Clear();
+      clear();
     }
 
     /// Copy method
@@ -70,7 +70,7 @@ class MagneticWrapperChebyshev : public TNamed
     MagneticWrapperChebyshev &operator=(const MagneticWrapperChebyshev &rhs);
 
     /// Clears all dynamic parts
-    void Clear(const Option_t * = "") override;
+    void clear(const Option_t * = "") override;
 
     Int_t getNumberOfParametersSol() const
     {
@@ -203,11 +203,11 @@ class MagneticWrapperChebyshev : public TNamed
     }
 
     /// Prints info
-    void Print(Option_t * = "") const override;
+    void print(Option_t * = "") const override;
 
     /// Computes field in cartesian coordinates. If point is outside of the parameterized region
     /// it gets it at closest valid point
-    virtual void Field(const Double_t *xyz, Double_t *b) const;
+    virtual void field(const Double_t *xyz, Double_t *b) const;
 
     /// Computes Bz for the point in cartesian coordinates. If point is outside of the parameterized region
     /// it gets it at closest valid point

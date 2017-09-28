@@ -36,7 +36,7 @@ IdPath::IdPath(const IdPath &other)
 {
   // constructor
   init();
-  InitPath();
+  initPath();
 }
 
 IdPath::IdPath(const char *level0, const char *level1, const char *level2)
@@ -68,17 +68,17 @@ IdPath::IdPath(const char *path)
   // constructor
 
   init();
-  InitPath();
+  initPath();
 }
 
 IdPath::IdPath(const TString &path)
   : TObject(), mPath(path), mLevel0(""), mLevel1(""), mLevel2(""), mValid(kTRUE), mWildcard(kFALSE)
 {
   init();
-  InitPath();
+  initPath();
 }
 
-void IdPath::InitPath()
+void IdPath::initPath()
 {
   // sets mLevel0, mLevel1, mLevel2, validity flagss from mPath
 

@@ -158,7 +158,7 @@ static void configITS(Detector *its) {
     kReadOutEdge // bottom
     );           // see SegmentationPixel.h for extra options
   seg0->Store(o2::ITS::GeometryTGeo::getITSSegmentationFileName());
-  seg0->Print();
+  seg0->print();
 
   double dzLr, rLr, phi0, turbo;
   int nStaveLr, nModPerStaveLr;
@@ -185,14 +185,14 @@ static void configITS(Detector *its) {
     nModPerStaveLr = TMath::Nint(tdr5dat[idLr][kNModPerStave]);
     int nChipsPerStaveLr = nModPerStaveLr;
     if (idLr >= kNLrInner) {
-      double modlen = nChipsPerModule*seg0->Dz() + (nChipsPerModule-1)*zChipGap;
+      double modlen = nChipsPerModule*seg0->dz() + (nChipsPerModule-1)*zChipGap;
       double zlen = nModPerStaveLr*modlen + (nModPerStaveLr-1)*zModuleGap;
       its->defineLayer(idLr, phi0, rLr, zlen, nStaveLr, nModPerStaveLr,
-                       kSiThickOB, seg0->Dy(), seg0->getChipTypeID(), kBuildLevel);
+                       kSiThickOB, seg0->dy(), seg0->getChipTypeID(), kBuildLevel);
     } else {
-      turbo = -radii2Turbo(tdr5dat[idLr][kRmn], rLr, tdr5dat[idLr][kRmx], seg0->Dx());
-      its->defineLayerTurbo(idLr, phi0, rLr, nChipsPerStaveLr * seg0->Dz(), nStaveLr,
-                            nChipsPerStaveLr, seg0->Dx(), turbo, kSiThickIB, seg0->Dy(),
+      turbo = -radii2Turbo(tdr5dat[idLr][kRmn], rLr, tdr5dat[idLr][kRmx], seg0->dx());
+      its->defineLayerTurbo(idLr, phi0, rLr, nChipsPerStaveLr * seg0->dz(), nStaveLr,
+                            nChipsPerStaveLr, seg0->dx(), turbo, kSiThickIB, seg0->dy(),
                             seg0->getChipTypeID(), kBuildLevel);
     }
   }
@@ -433,7 +433,7 @@ Detector &Detector::operator=(const Detector &rhs)
   return *this;
 }
 
-void Detector::Initialize()
+void Detector::initialize()
 {
   if (!mLayerID) {
     mLayerID = new Int_t[mNumberLayers];
@@ -443,7 +443,7 @@ void Detector::Initialize()
     mLayerID[i] = gMC ? TVirtualMC::GetMC()->VolId(mLayerName[i]) : 0;
   }
 
-  mGeometryTGeo = GeometryTGeo::Instance();
+  mGeometryTGeo = GeometryTGeo::Instance(instance;
 
   FairDetector::Initialize();
 
@@ -543,7 +543,7 @@ Bool_t Detector::ProcessHits(FairVolume *vol)
     // RS: not sure this is needed
     // Increment number of Detector det points in TParticle
     o2::Data::Stack *stack = (o2::Data::Stack *) TVirtualMC::GetMC()->GetStack();
-    stack->AddPoint(kAliIts);
+    stack->addPoint(kAliIts);
   }
   
   return kTRUE;
@@ -611,77 +611,77 @@ void Detector::createMaterials()
   Float_t dInox304   = 7.85;
 
 
-  o2::Base::Detector::Mixture(1, "AIR$", aAir, zAir, dAir, 4, wAir);
-  o2::Base::Detector::Medium(1, "AIR$", 1, 0, ifield, fieldm, tmaxfdAir, stemaxAir, deemaxAir,
+  o2::Base::Detector::mixture(1, "AIR$", aAir, zAir, dAir, 4, wAir);
+  o2::Base::Detector::medium(1, "AIR$", 1, 0, ifield, fieldm, tmaxfdAir, stemaxAir, deemaxAir,
                                   epsilAir, stminAir);
 
-  o2::Base::Detector::Mixture(2, "WATER$", aWater, zWater, dWater, 2, wWater);
-  o2::Base::Detector::Medium(2, "WATER$", 2, 0, ifield, fieldm, tmaxfd, stemax, deemax, epsil,
+  o2::Base::Detector::mixture(2, "WATER$", aWater, zWater, dWater, 2, wWater);
+  o2::Base::Detector::medium(2, "WATER$", 2, 0, ifield, fieldm, tmaxfd, stemax, deemax, epsil,
                                   stmin);
 
-  o2::Base::Detector::Material(3, "SI$", 0.28086E+02, 0.14000E+02, 0.23300E+01, 0.93600E+01,
+  o2::Base::Detector::material(3, "SI$", 0.28086E+02, 0.14000E+02, 0.23300E+01, 0.93600E+01,
                                     0.99900E+03);
-  o2::Base::Detector::Medium(3, "SI$", 3, 0, ifield, fieldm, tmaxfdSi, stemaxSi, deemaxSi,
+  o2::Base::Detector::medium(3, "SI$", 3, 0, ifield, fieldm, tmaxfdSi, stemaxSi, deemaxSi,
                                   epsilSi, stminSi);
 
-  o2::Base::Detector::Material(4, "BERILLIUM$", 9.01, 4., 1.848, 35.3, 36.7); // From AliPIPEv3
-  o2::Base::Detector::Medium(4, "BERILLIUM$", 4, 0, ifield, fieldm, tmaxfd, stemax, deemax,
+  o2::Base::Detector::material(4, "BERILLIUM$", 9.01, 4., 1.848, 35.3, 36.7); // From AliPIPEv3
+  o2::Base::Detector::medium(4, "BERILLIUM$", 4, 0, ifield, fieldm, tmaxfd, stemax, deemax,
                                   epsil, stmin);
 
-  o2::Base::Detector::Material(5, "COPPER$", 0.63546E+02, 0.29000E+02, 0.89600E+01,
+  o2::Base::Detector::material(5, "COPPER$", 0.63546E+02, 0.29000E+02, 0.89600E+01,
                                     0.14300E+01, 0.99900E+03);
-  o2::Base::Detector::Medium(5, "COPPER$", 5, 0, ifield, fieldm, tmaxfd, stemax, deemax, epsil,
+  o2::Base::Detector::medium(5, "COPPER$", 5, 0, ifield, fieldm, tmaxfd, stemax, deemax, epsil,
                                   stmin);
 
   // needed for STAVE , Carbon, kapton, Epoxy, flexcable
 
   // AliceO2::Base::Detector::Material(6,"CARBON$",12.0107,6,2.210,999,999);
-  o2::Base::Detector::Material(6, "CARBON$", 12.0107, 6, 2.210 / 1.3, 999, 999);
-  o2::Base::Detector::Medium(6, "CARBON$", 6, 0, ifield, fieldm, tmaxfdSi, stemaxSi, deemaxSi,
+  o2::Base::Detector::material(6, "CARBON$", 12.0107, 6, 2.210 / 1.3, 999, 999);
+  o2::Base::Detector::medium(6, "CARBON$", 6, 0, ifield, fieldm, tmaxfdSi, stemaxSi, deemaxSi,
                                   epsilSi, stminSi);
 
-  o2::Base::Detector::Mixture(7, "KAPTON(POLYCH2)$", aKapton, zKapton, dKapton, 4, wKapton);
-  o2::Base::Detector::Medium(7, "KAPTON(POLYCH2)$", 7, 0, ifield, fieldm, tmaxfd, stemax,
+  o2::Base::Detector::mixture(7, "KAPTON(POLYCH2)$", aKapton, zKapton, dKapton, 4, wKapton);
+  o2::Base::Detector::medium(7, "KAPTON(POLYCH2)$", 7, 0, ifield, fieldm, tmaxfd, stemax,
                                   deemax, epsil, stmin);
 
   // values below modified as compared to source AliITSv11 !
 
   // All types of carbon
   // Unidirectional prepreg
-  o2::Base::Detector::Material(8, "K13D2U2k$", 12.0107, 6, 1.643, 999, 999);
-  o2::Base::Detector::Medium(8, "K13D2U2k$", 8, 0, ifield, fieldm, tmaxfdSi, stemaxSi,
+  o2::Base::Detector::material(8, "K13D2U2k$", 12.0107, 6, 1.643, 999, 999);
+  o2::Base::Detector::medium(8, "K13D2U2k$", 8, 0, ifield, fieldm, tmaxfdSi, stemaxSi,
                                   deemaxSi, epsilSi, stminSi);
-  o2::Base::Detector::Material(17, "K13D2U120$", 12.0107, 6, 1.583, 999, 999);
-  o2::Base::Detector::Medium(17, "K13D2U120$", 17, 0, ifield, fieldm, tmaxfdSi, stemaxSi,
+  o2::Base::Detector::material(17, "K13D2U120$", 12.0107, 6, 1.583, 999, 999);
+  o2::Base::Detector::medium(17, "K13D2U120$", 17, 0, ifield, fieldm, tmaxfdSi, stemaxSi,
                                   deemaxSi, epsilSi, stminSi);
   // Carbon prepreg woven
-  o2::Base::Detector::Material(18, "F6151B05M$", 12.0107, 6, 2.133, 999, 999);
-  o2::Base::Detector::Medium(18, "F6151B05M$", 18, 0, ifield, fieldm, tmaxfdSi, stemaxSi,
+  o2::Base::Detector::material(18, "F6151B05M$", 12.0107, 6, 2.133, 999, 999);
+  o2::Base::Detector::medium(18, "F6151B05M$", 18, 0, ifield, fieldm, tmaxfdSi, stemaxSi,
 			          deemaxSi,epsilSi,stminSi);
   // Impregnated thread
-  o2::Base::Detector::Material(9, "M60J3K$", 12.0107, 6, 2.21, 999, 999);
-  o2::Base::Detector::Medium(9, "M60J3K$", 9, 0, ifield, fieldm, tmaxfdSi, stemaxSi, deemaxSi,
+  o2::Base::Detector::material(9, "M60J3K$", 12.0107, 6, 2.21, 999, 999);
+  o2::Base::Detector::medium(9, "M60J3K$", 9, 0, ifield, fieldm, tmaxfdSi, stemaxSi, deemaxSi,
                                   epsilSi, stminSi);
   // Impregnated thread
-  o2::Base::Detector::Material(10, "M55J6K$", 12.0107, 6, 1.63, 999, 999);
-  o2::Base::Detector::Medium(10, "M55J6K$", 10, 0, ifield, fieldm, tmaxfdSi, stemaxSi,
+  o2::Base::Detector::material(10, "M55J6K$", 12.0107, 6, 1.63, 999, 999);
+  o2::Base::Detector::medium(10, "M55J6K$", 10, 0, ifield, fieldm, tmaxfdSi, stemaxSi,
                                   deemaxSi, epsilSi, stminSi);
   // Fabric(0/90)
-  o2::Base::Detector::Material(11, "T300$", 12.0107, 6, 1.725, 999, 999);
-  o2::Base::Detector::Medium(11, "T300$", 11, 0, ifield, fieldm, tmaxfdSi, stemaxSi, deemaxSi,
+  o2::Base::Detector::material(11, "T300$", 12.0107, 6, 1.725, 999, 999);
+  o2::Base::Detector::medium(11, "T300$", 11, 0, ifield, fieldm, tmaxfdSi, stemaxSi, deemaxSi,
                                   epsilSi, stminSi);
   // AMEC Thermasol
-  o2::Base::Detector::Material(12, "FGS003$", 12.0107, 6, 1.6, 999, 999);
-  o2::Base::Detector::Medium(12, "FGS003$", 12, 0, ifield, fieldm, tmaxfdSi, stemaxSi,
+  o2::Base::Detector::material(12, "FGS003$", 12.0107, 6, 1.6, 999, 999);
+  o2::Base::Detector::medium(12, "FGS003$", 12, 0, ifield, fieldm, tmaxfdSi, stemaxSi,
                                   deemaxSi, epsilSi, stminSi);
   // Carbon fleece
-  o2::Base::Detector::Material(13, "CarbonFleece$", 12.0107, 6, 0.4, 999, 999);
-  o2::Base::Detector::Medium(13, "CarbonFleece$", 13, 0, ifield, fieldm, tmaxfdSi, stemaxSi,
+  o2::Base::Detector::material(13, "CarbonFleece$", 12.0107, 6, 0.4, 999, 999);
+  o2::Base::Detector::medium(13, "CarbonFleece$", 13, 0, ifield, fieldm, tmaxfdSi, stemaxSi,
                                   deemaxSi, epsilSi, stminSi);
 
   // PEEK CF30
-  o2::Base::Detector::Mixture(19, "PEEKCF30$", aPEEK, zPEEK, dPEEK, -3, wPEEK);
-  o2::Base::Detector::Medium(19,"PEEKCF30$", 19, 0, ifield, fieldm, tmaxfdSi, stemaxSi,
+  o2::Base::Detector::mixture(19, "PEEKCF30$", aPEEK, zPEEK, dPEEK, -3, wPEEK);
+  o2::Base::Detector::medium(19,"PEEKCF30$", 19, 0, ifield, fieldm, tmaxfdSi, stemaxSi,
 			          deemaxSi,epsilSi,stminSi);
 
   // Flex cable
@@ -692,43 +692,43 @@ void Detector::createMaterials()
   // Float_t dFCm = 2.55;   // conform with STAR
   Float_t dFCm = 2.595; // conform with Corrado
 
-  o2::Base::Detector::Mixture(14, "FLEXCABLE$", aFCm, zFCm, dFCm, 5, wFCm);
-  o2::Base::Detector::Medium(14, "FLEXCABLE$", 14, 0, ifield, fieldm, tmaxfd, stemax, deemax,
+  o2::Base::Detector::mixture(14, "FLEXCABLE$", aFCm, zFCm, dFCm, 5, wFCm);
+  o2::Base::Detector::medium(14, "FLEXCABLE$", 14, 0, ifield, fieldm, tmaxfd, stemax, deemax,
                                   epsil, stmin);
 
   // AliceO2::Base::Detector::Material(7,"GLUE$",0.12011E+02,0.60000E+01,0.1930E+01/2.015,999,999);
   // // original
-  o2::Base::Detector::Material(15, "GLUE$", 12.011, 6, 1.93 / 2.015, 999,
+  o2::Base::Detector::material(15, "GLUE$", 12.011, 6, 1.93 / 2.015, 999,
                                     999); // conform with ATLAS, Corrado, Stefan
-  o2::Base::Detector::Medium(15, "GLUE$", 15, 0, ifield, fieldm, tmaxfd, stemax, deemax, epsil,
+  o2::Base::Detector::medium(15, "GLUE$", 15, 0, ifield, fieldm, tmaxfd, stemax, deemax, epsil,
                                   stmin);
 
-  o2::Base::Detector::Material(16, "ALUMINUM$", 0.26982E+02, 0.13000E+02, 0.26989E+01,
+  o2::Base::Detector::material(16, "ALUMINUM$", 0.26982E+02, 0.13000E+02, 0.26989E+01,
                                     0.89000E+01, 0.99900E+03);
-  o2::Base::Detector::Medium(16, "ALUMINUM$", 16, 0, ifield, fieldm, tmaxfd, stemax, deemax,
+  o2::Base::Detector::medium(16, "ALUMINUM$", 16, 0, ifield, fieldm, tmaxfd, stemax, deemax,
                                   epsil, stmin);
 
-  o2::Base::Detector::Mixture(20, "TUNGCARB$", aWC, zWC, dWC, 2, wWC);
-  o2::Base::Detector::Medium(20, "TUNGCARB$", 20, 0, ifield, fieldm, tmaxfd, stemax,
+  o2::Base::Detector::mixture(20, "TUNGCARB$", aWC, zWC, dWC, 2, wWC);
+  o2::Base::Detector::medium(20, "TUNGCARB$", 20, 0, ifield, fieldm, tmaxfd, stemax,
 			          deemaxSi,epsilSi,stminSi);
 
   wInox304[3] = 1. - wInox304[0] - wInox304[1] - wInox304[2];
-  o2::Base::Detector::Mixture(21, "INOX304$", aInox304, zInox304, dInox304, 4, wInox304);
-  o2::Base::Detector::Medium(21, "INOX304$", 21, 0, ifield, fieldm, tmaxfd, stemax,
+  o2::Base::Detector::mixture(21, "INOX304$", aInox304, zInox304, dInox304, 4, wInox304);
+  o2::Base::Detector::medium(21, "INOX304$", 21, 0, ifield, fieldm, tmaxfd, stemax,
 			          deemaxSi,epsilSi,stminSi);
 
   //Tungsten (for gamma converter rods)
-  o2::Base::Detector::Material(28, "TUNGSTEN$", 183.84, 74, 19.25, 999, 999);
-  o2::Base::Detector::Medium(28, "TUNGSTEN$", 28,0, ifield, fieldm, tmaxfdSi, stemaxSi,
+  o2::Base::Detector::material(28, "TUNGSTEN$", 183.84, 74, 19.25, 999, 999);
+  o2::Base::Detector::medium(28, "TUNGSTEN$", 28,0, ifield, fieldm, tmaxfdSi, stemaxSi,
 			          deemaxSi,epsilSi,stminSi);
 }
 
-void Detector::EndOfEvent()
+void Detector::endOfEvent()
 {
   if (mHitCollection) { mHitCollection->Clear(); }
 }
 
-void Detector::Register()
+void Detector::register()
 {
   // This will create a branch in the output tree called Hit, setting the last
   // parameter to kFALSE means that this collection will not be written to the file,
@@ -739,7 +739,7 @@ void Detector::Register()
   }
 }
 
-TClonesArray *Detector::GetCollection(Int_t iColl) const
+TClonesArray *Detector::getCollection(Int_t iColl) const
 {
   if (iColl == 0) {
     return mHitCollection;
@@ -748,7 +748,7 @@ TClonesArray *Detector::GetCollection(Int_t iColl) const
   }
 }
 
-void Detector::Reset()
+void Detector::reset()
 {
   mHitCollection->Clear();
 }
@@ -943,7 +943,7 @@ TGeoVolume *Detector::createWrapperVolume(Int_t id)
   return wrapper;
 }
 
-void Detector::ConstructGeometry()
+void Detector::constructGeometry()
 {
   // Create the detector materials
   createMaterials();
@@ -1158,7 +1158,7 @@ Hit *Detector::addHit(int trackID, int detID, TVector3 startPos, TVector3 endPos
   return new(clref[size]) Hit(trackID, detID, startPos, endPos, startMom, startE, endTime, eLoss, startStatus, endStatus);
 }
 
-TParticle *Detector::GetParticle() const
+TParticle *Detector::getParticle() const
 {
   // Returns the pointer to the TParticle for the particle that created
   // this hit. From the TParticle all kinds of information about this
@@ -1170,10 +1170,10 @@ TParticle *Detector::GetParticle() const
   // Return:
   //   The TParticle of the track that created this hit.
   int trc = TVirtualMC::GetMC()->GetStack()->GetCurrentTrackNumber();
-  return ((o2::Data::Stack *) TVirtualMC::GetMC()->GetStack())->GetParticle(trc);
+  return ((o2::Data::Stack *) TVirtualMC::GetMC()->GetStack())->getParticle(trc);
 }
 
-void Detector::Print(std::ostream *os) const
+void Detector::print(std::ostream *os) const
 {
 // Standard output format for this class.
 // Inputs:
@@ -1209,7 +1209,7 @@ void Detector::Print(std::ostream *os) const
   return;
 }
 
-void Detector::Read(std::istream *is)
+void Detector::read(std::istream *is)
 {
   // Standard input format for this class.
   // Inputs:
@@ -1222,7 +1222,7 @@ void Detector::Read(std::istream *is)
   return;
 }
 
-FairModule *Detector::CloneModule() const
+FairModule *Detector::cloneModule() const
 {
   return new Detector(*this);
 }
@@ -1238,7 +1238,7 @@ std::ostream &operator<<(std::ostream &os, Detector &p)
   // Return:
   //   The input stream
 
-  p.Print(&os);
+  p.print(&os);
   return os;
 }
 
@@ -1253,7 +1253,7 @@ std::istream &operator>>(std::istream &is, Detector &r)
   // Return:
   //   The input stream
 
-  r.Read(&is);
+  r.read(&is);
   return is;
 }
 

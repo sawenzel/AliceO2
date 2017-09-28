@@ -61,7 +61,7 @@ void Storage::getSelection(/*const*/ ConditionId *id)
   while ((aSelection = (ConditionId *) iter.Next())) {
     // check if selection element contains id's path and run (range)
     if (aSelection->isSupersetOf(*id)) {
-      LOG(DEBUG) << "Using selection criterion: " << aSelection->ToString().Data() << " " << FairLogger::endl;
+      LOG(DEBUG) << "Using selection criterion: " << aSelection->toString().Data() << " " << FairLogger::endl;
       // return required version and subversion
 
       id->setVersion(aSelection->getVersion());
@@ -117,7 +117,7 @@ void Storage::addSelection(const ConditionId &selection)
   while ((anId = (ConditionId *) iter.Next())) {
     if (selection.isSupersetOf(*anId)) {
       LOG(WARNING) << "This selection is more general than a previous one and will hide it!" << FairLogger::endl;
-      LOG(WARNING) << (anId->ToString()).Data() << FairLogger::endl;
+      LOG(WARNING) << (anId->toString()).Data() << FairLogger::endl;
       mSelections.AddBefore(anId, new ConditionId(selection));
       return;
     }
@@ -191,7 +191,7 @@ void Storage::printSelectionList()
   // loop on the list of selection criteria
   int index = 0;
   while ((aSelection = (ConditionId *) iter.Next())) {
-    LOG(INFO) << "index " << index++ << " -> selection: " << aSelection->ToString().Data() << FairLogger::endl;
+    LOG(INFO) << "index " << index++ << " -> selection: " << aSelection->toString().Data() << FairLogger::endl;
   }
 }
 
@@ -202,13 +202,13 @@ Condition *Storage::getObject(const ConditionId &query)
   // check if query's path and runRange are valid
   // query is invalid also if version is not specified and subversion is!
   if (!query.isValid()) {
-    LOG(ERROR) << "Invalid query: " << query.ToString().Data() << FairLogger::endl;
+    LOG(ERROR) << "Invalid query: " << query.toString().Data() << FairLogger::endl;
     return nullptr;
   }
 
   // query is not specified if path contains wildcard or runrange = [-1,-1]
   if (!query.isSpecified()) {
-    LOG(ERROR) << "Unspecified query: " << query.ToString().Data() << FairLogger::endl;
+    LOG(ERROR) << "Unspecified query: " << query.toString().Data() << FairLogger::endl;
     return nullptr;
   }
 
@@ -223,8 +223,8 @@ Condition *Storage::getObject(const ConditionId &query)
   }
 
   // if drain storage is set, drain entry into drain storage
-  if (entry && (Manager::Instance())->isdrainSet()) {
-    Manager::Instance()->drain(entry);
+  if (entry && (Manager::Instance(instance)->isdrainSet()) {
+    Manager::Instance(instance->drain(entry);
   }
 
   return entry;
@@ -249,12 +249,12 @@ TList *Storage::getAllObjects(const ConditionId &query)
   // get multiple  Condition objects from the database
 
   if (!query.isValid()) {
-    LOG(ERROR) << "Invalid query: " << query.ToString().Data() << FairLogger::endl;
+    LOG(ERROR) << "Invalid query: " << query.toString().Data() << FairLogger::endl;
     return nullptr;
   }
 
   if (query.isAnyRange()) {
-    LOG(ERROR) << "Unspecified run or runrange: " << query.ToString().Data() << FairLogger::endl;
+    LOG(ERROR) << "Unspecified run or runrange: " << query.toString().Data() << FairLogger::endl;
     return nullptr;
   }
 
@@ -270,17 +270,17 @@ TList *Storage::getAllObjects(const ConditionId &query)
 
   Int_t nEntries = result->GetEntries();
 
-  LOG(INFO) << nEntries << " objects retrieved. Request was: " << query.ToString().Data() << FairLogger::endl;
+  LOG(INFO) << nEntries << " objects retrieved. Request was: " << query.toString().Data() << FairLogger::endl;
   for (int i = 0; i < nEntries; i++) {
     Condition *entry = (Condition *) result->At(i);
-    LOG(INFO) << entry->getId().ToString().Data() << FairLogger::endl;
+    LOG(INFO) << entry->getId().toString().Data() << FairLogger::endl;
   }
 
   // if drain storage is set, drain entries into drain storage
-  if ((Manager::Instance())->isdrainSet()) {
+  if ((Manager::Instance(instance)->isdrainSet()) {
     for (int i = 0; i < result->GetEntries(); i++) {
       Condition *entry = (Condition *) result->At(i);
-      Manager::Instance()->drain(entry);
+      Manager::Instance(instance->drain(entry);
     }
   }
 
@@ -308,13 +308,13 @@ ConditionId *Storage::getId(const ConditionId &query)
   // check if query's path and runRange are valid
   // query is invalid also if version is not specified and subversion is!
   if (!query.isValid()) {
-    LOG(ERROR) << "Invalid query: " << query.ToString().Data() << FairLogger::endl;
+    LOG(ERROR) << "Invalid query: " << query.toString().Data() << FairLogger::endl;
     return nullptr;
   }
 
   // query is not specified if path contains wildcard or runrange = [-1,-1]
   if (!query.isSpecified()) {
-    LOG(ERROR) << "Unspecified query: " << query.ToString().Data() << FairLogger::endl;
+    LOG(ERROR) << "Unspecified query: " << query.toString().Data() << FairLogger::endl;
     return nullptr;
   }
 
@@ -366,12 +366,12 @@ Bool_t Storage::putObject(Condition *entry, const char *mirrors)
   }
 
   if (!entry->getId().isValid()) {
-    LOG(ERROR) << "Invalid entry ID: " << entry->getId().ToString().Data() << FairLogger::endl;
+    LOG(ERROR) << "Invalid entry ID: " << entry->getId().toString().Data() << FairLogger::endl;
     return kFALSE;
   }
 
   if (!entry->getId().isSpecified()) {
-    LOG(ERROR) << "Unspecified entry ID: " << entry->getId().ToString().Data() << FairLogger::endl;
+    LOG(ERROR) << "Unspecified entry ID: " << entry->getId().toString().Data() << FairLogger::endl;
     return kFALSE;
   }
 
@@ -436,7 +436,7 @@ void Storage::printrQueryStorages()
   // print parameters used to load list of CDB ConditionId's (mRun, mPathFilter, mVersion)
 
   ConditionId paramId(mPathFilter, mRun, mRun, mVersion);
-  LOG(INFO) << "**** queryStorages Parameters **** \n\t\"" << paramId.ToString().Data() << R"(")" << FairLogger::endl;
+  LOG(INFO) << "**** queryStorages Parameters **** \n\t\"" << paramId.toString().Data() << R"(")" << FairLogger::endl;
 
   if (mConditionMetaDataFilter) {
     mConditionMetaDataFilter->printConditionMetaData();
@@ -448,7 +448,7 @@ void Storage::printrQueryStorages()
 
   // loop on the list of selection criteria
   while ((anId = dynamic_cast<ConditionId *>(iter.Next()))) {
-    message += Form("\t%s\n", anId->ToString().Data());
+    message += Form("\t%s\n", anId->toString().Data());
   }
   message += Form("\n\tTotal: %d objects found\n", mValidFileIds.GetEntriesFast());
   LOG(INFO) << message.Data() << FairLogger::endl;

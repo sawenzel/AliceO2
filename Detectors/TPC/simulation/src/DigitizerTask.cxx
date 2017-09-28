@@ -65,7 +65,7 @@ DigitizerTask::~DigitizerTask()
 }
 
 
-InitStatus DigitizerTask::Init()
+InitStatus DigitizerTask::init()
 {
   /// Initialize the task and the input and output containers
   FairRootManager *mgr = FairRootManager::Instance();
@@ -114,7 +114,7 @@ InitStatus DigitizerTask::Init()
   return kSUCCESS;
 }
 
-void DigitizerTask::Exec(Option_t *option)
+void DigitizerTask::exec(Option_t *option)
 {
   FairRootManager *mgr = FairRootManager::Instance();
 
@@ -135,12 +135,12 @@ void DigitizerTask::Exec(Option_t *option)
     // treat all sectors
     for (int s=0; s<Sector::MAXSECTOR; ++s){
       LOG(DEBUG) << "Processing sector " << s << "\n";
-      mDigitContainer = mDigitizer->Process(mSectorHitsArray[s]);
+      mDigitContainer = mDigitizer->process(mSectorHitsArray[s]);
     }
   }
   else {
     // treat only chosen sector
-    mDigitContainer = mDigitizer->Process(mSectorHitsArray[mHitSector]);
+    mDigitContainer = mDigitizer->process(mSectorHitsArray[mHitSector]);
   }
 
 #else
@@ -149,7 +149,7 @@ void DigitizerTask::Exec(Option_t *option)
   mDigitContainer->fillOutputContainer(mDigitsArray, mDigitsDebugArray, eventTime, mIsContinuousReadout);
 }
 
-void DigitizerTask::FinishTask()
+void DigitizerTask::finishTask()
 {
   if(!mIsContinuousReadout) return;
   FairRootManager *mgr = FairRootManager::Instance();

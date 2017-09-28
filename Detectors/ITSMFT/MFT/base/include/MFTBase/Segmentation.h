@@ -34,7 +34,7 @@ public:
   Segmentation(const Char_t *nameGeomFile);
   
   ~Segmentation() override;
-  void Clear(const Option_t* /*opt*/) override;
+  void clear(const Option_t* /*opt*/) override;
 
   /// \brief Returns pointer to the segmentation of the half-MFT
   /// \param iHalf Integer : 0 = Bottom; 1 = Top

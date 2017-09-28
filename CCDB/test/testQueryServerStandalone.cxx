@@ -22,7 +22,7 @@
 
 using namespace std;
 
-void CustomCleanup(void* data, void* hint) { delete static_cast<std::string*>(hint); }
+void customCleanup(void* data, void* hint) { delete static_cast<std::string*>(hint); }
 void queryConditionServer(string transport, string address)
 {
   auto factory = FairMQTransportFactory::CreateTransportFactory(transport);
@@ -38,7 +38,7 @@ void queryConditionServer(string transport, string address)
   // just a test key -- corresponding to example from unit test testWriteReadAny.cxx
   std::string key("TestParam/Test/Test/Run1_1_v1_s0");
   std::string source("OCDB");
-  backend->Serialize(messageString, key, operationType, source);
+  backend->serialize(messageString, key, operationType, source);
 
   std::cerr << messageString->c_str() << "\n";
   unique_ptr<FairMQMessage> request(factory->CreateMessage(const_cast<char*>(messageString->c_str()),
@@ -49,7 +49,7 @@ void queryConditionServer(string transport, string address)
   channel.Send(request);
   if (channel.Receive(reply) > 0) {
     LOG(DEBUG) << "Received a condition with a size of " << reply->GetSize();
-    auto condition = backend->UnPack(std::move(reply));
+    auto condition = backend->unPack(std::move(reply));
     LOG(DEBUG) << "TYPE " << condition->getObject()->IsA()->GetName() << "\n";
 
     // retrieve concrete type

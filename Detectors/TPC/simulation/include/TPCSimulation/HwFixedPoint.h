@@ -127,10 +127,10 @@ class HwFixedPoint
     //
     // Getter methods
     //
-    unsigned short GetDecPrecision()    const { return mDecPrecision; };
-    unsigned short GetTotalWidth()      const { return mTotalWidth; };
-    T        GetValue()           const { return mValue; };
-    T        GetMask()            const { return mMask; };
+    unsigned short getDecPrecision()    const { return mDecPrecision; };
+    unsigned short getTotalWidth()      const { return mTotalWidth; };
+    T        getValue()           const { return mValue; };
+    T        getMask()            const { return mMask; };
 
     //
     // Print operator

@@ -31,7 +31,7 @@ ClusterContainer::~ClusterContainer()
 }
 
 //________________________________________________________________________
-void ClusterContainer::InitArray(const Char_t* clusterType)
+void ClusterContainer::initArray(const Char_t* clusterType)
 {
   R__ASSERT(!mClusterArray);
   mClusterArray = new TClonesArray(clusterType);
@@ -42,11 +42,11 @@ void ClusterContainer::InitArray(const Char_t* clusterType)
   R__ASSERT(cluster);
 
   // reset array after test
-  Reset();
+  reset();
 }
 
 //________________________________________________________________________
-void ClusterContainer::Reset()
+void ClusterContainer::reset()
 {
   R__ASSERT(mClusterArray);
   mClusterArray->Clear();
@@ -54,7 +54,7 @@ void ClusterContainer::Reset()
 }
 
 //________________________________________________________________________
-Cluster* ClusterContainer::AddCluster(Int_t cru, Int_t row,
+Cluster* ClusterContainer::addCluster(Int_t cru, Int_t row,
 				      Float_t qtot, Float_t qmax,
 				      Float_t meanpad, Float_t meantime,
 				      Float_t sigmapad, Float_t sigmatime)
@@ -72,7 +72,7 @@ Cluster* ClusterContainer::AddCluster(Int_t cru, Int_t row,
 
 
 //________________________________________________________________________
-void ClusterContainer::FillOutputContainer(TClonesArray *output)
+void ClusterContainer::fillOutputContainer(TClonesArray *output)
 {
   output->Expand(mNclusters);
   TClonesArray &outputRef = *output;

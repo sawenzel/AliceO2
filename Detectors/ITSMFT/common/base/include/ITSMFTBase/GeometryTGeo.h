@@ -55,7 +55,7 @@ class GeometryTGeo : public o2::Base::DetMatrixCache
   Int_t getNumberOfChips() const { return mSize; }
   
   /// build detector layout data, must be overriden by detector
-  virtual void Build(Bool_t loadSegmentations, int loadTrans) = 0;
+  virtual void build(Bool_t loadSegmentations, int loadTrans) = 0;
 
   const char* getChipTypeName(Int_t i);
   void setChipTypeName(Int_t i, const char* nm);

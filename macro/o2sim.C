@@ -22,7 +22,7 @@
 
 void o2sim()
 {
-  auto& confref = o2::conf::SimConfig::Instance();
+  auto& confref = o2::conf::SimConfig::instance();
   auto genconfig = confref.getGenerator();
 
   auto run = new FairRunSim();
@@ -30,7 +30,7 @@ void o2sim()
   run->SetName(confref.getMCEngine().c_str()); // Transport engine
 
   // construct geometry / including magnetic field
-  build_geometry(run);
+  buildGeometry(run);
 
   // setup generator
   auto primGen = new FairPrimaryGenerator();
@@ -49,7 +49,7 @@ void o2sim()
     // needs precense of a kinematics file "Kinematics.root"
     // TODO: make this configurable and check for presence
     auto extGen =  new o2::eventgen::GeneratorFromFile(confref.getExtKinematicsFileName().c_str());
-    extGen->SetStartEvent(confref.getStartEvent());
+    extGen->setStartEvent(confref.getStartEvent());
     primGen->AddGenerator(extGen);
     std::cout << "using external kinematics\n";
   }

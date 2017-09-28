@@ -37,7 +37,7 @@ o2::DataFlow::SubframeBuilderDevice::SubframeBuilderDevice()
 o2::DataFlow::SubframeBuilderDevice::~SubframeBuilderDevice()
 = default;
 
-void o2::DataFlow::SubframeBuilderDevice::InitTask()
+void o2::DataFlow::SubframeBuilderDevice::initTask()
 {
   mOrbitDuration = GetConfig()->GetValue<uint32_t>(OptionKeyOrbitDuration);
   mOrbitsPerTimeframe = GetConfig()->GetValue<uint32_t>(OptionKeyOrbitsPerTimeframe);

@@ -32,7 +32,7 @@ TRDCommonParam* TRDCommonParam::fgInstance = nullptr;
 bool TRDCommonParam::fgTerminated = false;
 
 //_ singleton implementation __________________________________________________
-TRDCommonParam* TRDCommonParam::Instance()
+TRDCommonParam* TRDCommonParam::instance()
 {
   //
   // Singleton implementation
@@ -51,7 +51,7 @@ TRDCommonParam* TRDCommonParam::Instance()
 }
 
 //_____________________________________________________________________________
-void TRDCommonParam::Terminate()
+void TRDCommonParam::terminate()
 {
   //
   // Singleton implementation
@@ -104,7 +104,7 @@ TRDCommonParam::~TRDCommonParam()
 }
 
 //_____________________________________________________________________________
-float TRDCommonParam::GetOmegaTau(float vdrift)
+float TRDCommonParam::getOmegaTau(float vdrift)
 {
   /*
   //
@@ -250,7 +250,7 @@ bool TRDCommonParam::GetDiffCoeff(float& dl, float& dt, float vdrift)
 }
 
 //_____________________________________________________________________________
-double TRDCommonParam::TimeStruct(float vdrift, double dist, double z)
+double TRDCommonParam::timeStruct(float vdrift, double dist, double z)
 {
   //
   // Applies the time structure of the drift cells (by C.Lippmann).
@@ -270,7 +270,7 @@ double TRDCommonParam::TimeStruct(float vdrift, double dist, double z)
   // and fTimeStruct2, calculated for the two mentioned drift velocities.
   //
 
-  SampleTimeStruct(vdrift);
+  sampleTimeStruct(vdrift);
 
   // Indices:
   int r1 = (int)(10 * dist);
@@ -308,7 +308,7 @@ double TRDCommonParam::TimeStruct(float vdrift, double dist, double z)
 
   // Dist now is the drift distance to the anode wires (negative if electrons are
   // between anode wire plane and cathode pad plane)
-  dist -= TRDGeometry::AmThick() / 2.0;
+  dist -= TRDGeometry::AmThick()amThick / 2.0;
 
   // Interpolation in z-directions, lower drift time map
   const float ktdrift1 =
@@ -326,7 +326,7 @@ double TRDCommonParam::TimeStruct(float vdrift, double dist, double z)
 }
 
 //_____________________________________________________________________________
-void TRDCommonParam::SampleTimeStruct(float vdrift)
+void TRDCommonParam::sampleTimeStruct(float vdrift)
 {
   //
   // Samples the timing structure of a drift cell

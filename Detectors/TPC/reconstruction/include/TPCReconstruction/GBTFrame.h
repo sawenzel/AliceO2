@@ -184,8 +184,8 @@ class GBTFrame {
     /// Print function: Print GBT frame on the output stream
     /// @param output Stream to put the GBT frame on
     /// @return The output stream
-    std::ostream& Print(std::ostream& output) const; 
-    friend std::ostream& operator<< (std::ostream& out, const GBTFrame& f) { return f.Print(out); }
+    std::ostream& print(std::ostream& output) const; 
+    friend std::ostream& operator<< (std::ostream& out, const GBTFrame& f) { return f.print(out); }
 
   private:
 

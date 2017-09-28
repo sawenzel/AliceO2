@@ -81,7 +81,7 @@ HalfSegmentation* Segmentation::getHalf(Int_t iHalf) const
 ///Clear the TClonesArray holding the HalfSegmentation objects
 
 //_____________________________________________________________________________
-void Segmentation::Clear(const Option_t* /*opt*/) {
+void Segmentation::clear(const Option_t* /*opt*/) {
 
   if (mHalves) mHalves->Delete();
   delete mHalves; 

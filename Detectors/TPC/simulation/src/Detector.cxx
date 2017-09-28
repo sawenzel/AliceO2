@@ -109,7 +109,7 @@ Detector::~Detector()
   std::cout << "Stepping called " << mStepCounter << "\n";
 }
 
-void Detector::Initialize()
+void Detector::initialize()
 {
   o2::Base::Detector::Initialize();
   //     LOG(INFO) << "Initialize" << FairLogger::endl;
@@ -122,7 +122,7 @@ void Detector::Initialize()
     mSimulationType = SimulationType::Other;
 }
 
-void Detector::SetSpecialPhysicsCuts()
+void Detector::setSpecialPhysicsCuts()
 {
   FairRun* fRun = FairRun::Instance();
   
@@ -241,7 +241,7 @@ Bool_t  Detector::ProcessHits(FairVolume* vol)
     Float_t betaGamma = momentum.P()/refMC->TrackMass();
     betaGamma = TMath::Max(betaGamma, static_cast<Float_t>(7.e-3)); // protection against too small bg
     
-    const Float_t pp = gasParam.getNprim() * BetheBlochAleph(betaGamma, gasParam.getBetheBlochParam(0), gasParam.getBetheBlochParam(1), gasParam.getBetheBlochParam(2), gasParam.getBetheBlochParam(3), gasParam.getBetheBlochParam(4));
+    const Float_t pp = gasParam.getNprim() * betheBlochAleph(betaGamma, gasParam.getBetheBlochParam(0), gasParam.getBetheBlochParam(1), gasParam.getBetheBlochParam(2), gasParam.getBetheBlochParam(3), gasParam.getBetheBlochParam(4));
     
     refMC->SetMaxStep(-TMath::Log(rnd)/pp);
   } else {
@@ -271,7 +271,7 @@ Bool_t  Detector::ProcessHits(FairVolume* vol)
     
     const Double_t meanIon = refMC->Edep() / (wIon*scaleG4);
     if(meanIon > 0)
-      nel = static_cast<int>(fanoG4 * Gamma(meanIon/fanoG4));
+      nel = static_cast<int>(fanoG4 * gamma(meanIon/fanoG4));
     // LOG(INFO) << "TPC::AddHit" << FairLogger::endl << "GEANT4: Eloss: " 
     //	      << refMC->Edep() << ", Nelectrons: "
     //	      << nel << FairLogger::endl;
@@ -336,12 +336,12 @@ Bool_t  Detector::ProcessHits(FairVolume* vol)
   
   // Increment number of Detector det points in TParticle
   o2::Data::Stack* stack = (o2::Data::Stack*)refMC->GetStack();
-  stack->AddPoint(kAliTpc);
+  stack->addPoint(kAliTpc);
   
   return kTRUE;
 }
   
-void Detector::EndOfEvent()
+void Detector::endOfEvent()
 {
   mHitGroupCollection->Clear();
   for(int i=0;i<Sector::MAXSECTOR;++i) {
@@ -353,7 +353,7 @@ void Detector::EndOfEvent()
   ++mEventNr;
 }
 
-void Detector::Register()
+void Detector::register()
 {
   /** This will create a branch in the output tree called
       DetectorPoint, setting the last parameter to kFALSE means:
@@ -374,7 +374,7 @@ void Detector::Register()
   mMCTrackBranchId=mgr->GetBranchId("MCTrack");
 }
 
-TClonesArray* Detector::GetCollection(Int_t iColl) const
+TClonesArray* Detector::getCollection(Int_t iColl) const
 {
 #ifdef TPC_GROUPED_HITS
   if (iColl == 0) { return mHitGroupCollection; }
@@ -387,7 +387,7 @@ TClonesArray* Detector::GetCollection(Int_t iColl) const
   else { return nullptr; }
 }
 
-void Detector::Reset()
+void Detector::reset()
 {
 #ifdef TPC_GROUPED_HITS
   mHitGroupCollection->Clear();
@@ -399,23 +399,23 @@ void Detector::Reset()
 #endif
 }
 
-void Detector::ConstructGeometry()
+void Detector::constructGeometry()
 {
   // Create the detector materials
-  CreateMaterials();
+  createMaterials();
 
   // Load geometry
 //   LoadGeometryFromFile();
-  ConstructTPCGeometry();
+  constructTPCGeometry();
 
   // Define the list of sensitive volumes
-  DefineSensitiveVolumes();
+  defineSensitiveVolumes();
 
   // GeantHack
   //GeantHack();
 }
 
-void Detector::CreateMaterials()
+void Detector::createMaterials()
 {
   //-----------------------------------------------
   // Create Materials for for TPC simulations
@@ -459,7 +459,7 @@ void Detector::CreateMaterials()
   density=1.842e-3;
 
 
-  o2::Base::Detector::Mixture(10,"CO2",amat,zmat,density,2,wmat);
+  o2::Base::Detector::mixture(10,"CO2",amat,zmat,density,2,wmat);
   //
   // Air
   //
@@ -474,7 +474,7 @@ void Detector::CreateMaterials()
   //
   density=0.001205;
 
-  o2::Base::Detector::Mixture(11,"Air",amat,zmat,density,2,wmat);
+  o2::Base::Detector::mixture(11,"Air",amat,zmat,density,2,wmat);
 
   //----------------------------------------------------------------
   // drift gases 5 mixtures, 5 materials
@@ -578,9 +578,9 @@ void Detector::CreateMaterials()
   }
 
   //
-  o2::Base::Detector::Mixture(12,gname1.Data(),amat1,zmat1,density,cnt,wmat1); // nonsensitive
-  o2::Base::Detector::Mixture(13,gname2.Data(),amat1,zmat1,density,cnt,wmat1); // sensitive
-  o2::Base::Detector::Mixture(40,gname3.Data(),amat1,zmat1,density,cnt,wmat1); //sensitive Kr
+  o2::Base::Detector::mixture(12,gname1.Data(),amat1,zmat1,density,cnt,wmat1); // nonsensitive
+  o2::Base::Detector::mixture(13,gname2.Data(),amat1,zmat1,density,cnt,wmat1); // sensitive
+  o2::Base::Detector::mixture(40,gname3.Data(),amat1,zmat1,density,cnt,wmat1); //sensitive Kr
 
 
 
@@ -608,7 +608,7 @@ void Detector::CreateMaterials()
 
   density = 1.45;
 
-  o2::Base::Detector::Mixture(14,"Kevlar",amat,zmat,density,-4,wmat);
+  o2::Base::Detector::mixture(14,"Kevlar",amat,zmat,density,-4,wmat);
 
   // NOMEX
 
@@ -629,7 +629,7 @@ void Detector::CreateMaterials()
 
   density = 0.029;
 
-  o2::Base::Detector::Mixture(15,"NOMEX",amat,zmat,density,-4,wmat);
+  o2::Base::Detector::mixture(15,"NOMEX",amat,zmat,density,-4,wmat);
 
   // Makrolon C16H18O3
 
@@ -647,7 +647,7 @@ void Detector::CreateMaterials()
 
   density = 1.2;
 
-  o2::Base::Detector::Mixture(16,"Makrolon",amat,zmat,density,-3,wmat);
+  o2::Base::Detector::mixture(16,"Makrolon",amat,zmat,density,-3,wmat);
 
   // Tedlar C2H3F
 
@@ -665,7 +665,7 @@ void Detector::CreateMaterials()
 
   density = 1.71;
 
-  o2::Base::Detector::Mixture(17, "Tedlar",amat,zmat,density,-3,wmat);
+  o2::Base::Detector::mixture(17, "Tedlar",amat,zmat,density,-3,wmat);
 
   // Mylar C5H4O2
 
@@ -683,7 +683,7 @@ void Detector::CreateMaterials()
 
   density = 1.39;
 
-  o2::Base::Detector::Mixture(18, "Mylar",amat,zmat,density,-3,wmat);
+  o2::Base::Detector::mixture(18, "Mylar",amat,zmat,density,-3,wmat);
   // material for "prepregs"
   // Epoxy - C14 H20 O3
   // Quartz SiO2
@@ -703,7 +703,7 @@ void Detector::CreateMaterials()
 
   density=1.859;
 
-  o2::Base::Detector::Mixture(19, "Prepreg1",amat,zmat,density,3,wmat);
+  o2::Base::Detector::mixture(19, "Prepreg1",amat,zmat,density,3,wmat);
 
   //prepreg2 60% glass-fiber, 40% epoxy
 
@@ -724,7 +724,7 @@ void Detector::CreateMaterials()
 
   density=1.82;
 
-  o2::Base::Detector::Mixture(20, "Prepreg2",amat,zmat,density,4,wmat);
+  o2::Base::Detector::mixture(20, "Prepreg2",amat,zmat,density,4,wmat);
 
   //prepreg3 50% glass-fiber, 50% epoxy
 
@@ -745,7 +745,7 @@ void Detector::CreateMaterials()
 
   density=1.725;
 
-  o2::Base::Detector::Mixture(21, "Prepreg3",amat,zmat,density,4,wmat);
+  o2::Base::Detector::mixture(21, "Prepreg3",amat,zmat,density,4,wmat);
 
   // G10 60% SiO2 40% epoxy
 
@@ -766,7 +766,7 @@ void Detector::CreateMaterials()
 
   density=1.7;
 
-  o2::Base::Detector::Mixture(22, "G10",amat,zmat,density,4,wmat);
+  o2::Base::Detector::mixture(22, "G10",amat,zmat,density,4,wmat);
 
   // Al
 
@@ -775,7 +775,7 @@ void Detector::CreateMaterials()
 
   density = 2.7;
 
-  o2::Base::Detector::Material(23,"Al",amat[0],zmat[0],density,999.,999.);
+  o2::Base::Detector::material(23,"Al",amat[0],zmat[0],density,999.,999.);
 
   // Si (for electronics
 
@@ -784,7 +784,7 @@ void Detector::CreateMaterials()
 
   density = 2.33;
 
-  o2::Base::Detector::Material(24,"Si",amat[0],zmat[0],density,999.,999.);
+  o2::Base::Detector::material(24,"Si",amat[0],zmat[0],density,999.,999.);
 
   // Cu
 
@@ -793,7 +793,7 @@ void Detector::CreateMaterials()
 
   density = 8.96;
 
-  o2::Base::Detector::Material(25,"Cu",amat[0],zmat[0],density,999.,999.);
+  o2::Base::Detector::material(25,"Cu",amat[0],zmat[0],density,999.,999.);
 
   // brass
 
@@ -811,7 +811,7 @@ void Detector::CreateMaterials()
 
 
   //
-  o2::Base::Detector::Mixture(33,"Brass",amat,zmat,density,2,wmat);
+  o2::Base::Detector::mixture(33,"Brass",amat,zmat,density,2,wmat);
 
   // Epoxy - C14 H20 O3
 
@@ -829,7 +829,7 @@ void Detector::CreateMaterials()
 
   density=1.25;
 
-  o2::Base::Detector::Mixture(26,"Epoxy",amat,zmat,density,-3,wmat);
+  o2::Base::Detector::mixture(26,"Epoxy",amat,zmat,density,-3,wmat);
 
   // Epoxy - C14 H20 O3 for glue
 
@@ -849,7 +849,7 @@ void Detector::CreateMaterials()
 
   density *= 1.25;
 
-  o2::Base::Detector::Mixture(35,"Epoxy1",amat,zmat,density,-3,wmat);
+  o2::Base::Detector::mixture(35,"Epoxy1",amat,zmat,density,-3,wmat);
   //
   // epoxy film - 90% epoxy, 10% glass fiber
   //
@@ -871,7 +871,7 @@ void Detector::CreateMaterials()
 
   density=1.345;
 
-  o2::Base::Detector::Mixture(34, "Epoxy-film",amat,zmat,density,4,wmat);
+  o2::Base::Detector::mixture(34, "Epoxy-film",amat,zmat,density,4,wmat);
 
   // Plexiglas  C5H8O2
 
@@ -889,7 +889,7 @@ void Detector::CreateMaterials()
 
   density=1.18;
 
-  o2::Base::Detector::Mixture(27,"Plexiglas",amat,zmat,density,-3,wmat);
+  o2::Base::Detector::mixture(27,"Plexiglas",amat,zmat,density,-3,wmat);
 
   // Carbon
 
@@ -897,7 +897,7 @@ void Detector::CreateMaterials()
   zmat[0]=6.;
   density= 2.265;
 
-  o2::Base::Detector::Material(28,"C",amat[0],zmat[0],density,999.,999.);
+  o2::Base::Detector::material(28,"C",amat[0],zmat[0],density,999.,999.);
 
   // Fe (steel for the inner heat screen)
 
@@ -907,7 +907,7 @@ void Detector::CreateMaterials()
 
   density=7.87;
 
-  o2::Base::Detector::Material(29,"Fe",amat[0],zmat[0],density,999.,999.);
+  o2::Base::Detector::material(29,"Fe",amat[0],zmat[0],density,999.,999.);
   //
   // Peek - (C6H4-O-OC6H4-O-C6H4-CO)n
   amat[0]=12.011;
@@ -924,7 +924,7 @@ void Detector::CreateMaterials()
   //
   density=1.3;
   //
-  o2::Base::Detector::Mixture(30,"Peek",amat,zmat,density,-3,wmat);
+  o2::Base::Detector::mixture(30,"Peek",amat,zmat,density,-3,wmat);
   //
   //  Ceramics - Al2O3
   //
@@ -939,7 +939,7 @@ void Detector::CreateMaterials()
 
   density = 3.97;
 
-  o2::Base::Detector::Mixture(31,"Alumina",amat,zmat,density,-2,wmat);
+  o2::Base::Detector::mixture(31,"Alumina",amat,zmat,density,-2,wmat);
   //
   // Ceramics for resistors
   //
@@ -956,7 +956,7 @@ void Detector::CreateMaterials()
   //
   density *=1.25;
 
-  o2::Base::Detector::Mixture(36,"Alumina1",amat,zmat,density,-2,wmat);
+  o2::Base::Detector::mixture(36,"Alumina1",amat,zmat,density,-2,wmat);
   //
   // liquids
   //
@@ -974,50 +974,50 @@ void Detector::CreateMaterials()
 
   density=1.;
 
-  o2::Base::Detector::Mixture(32,"Water",amat,zmat,density,-2,wmat);
+  o2::Base::Detector::mixture(32,"Water",amat,zmat,density,-2,wmat);
 
 
   //----------------------------------------------------------
   // tracking media for gases
   //----------------------------------------------------------
 
-  o2::Base::Detector::Medium(0, "Air", 11, 0, iSXFLD, sXMGMX, 10., 999., .1, .01, .1);
-  o2::Base::Detector::Medium(1, "DriftGas1", 12, 0, iSXFLD, sXMGMX, 10., 999.,.1,.001, .001);
-  o2::Base::Detector::Medium(2, "DriftGas2", 13, 1, iSXFLD, sXMGMX, 10., 999.,.1,.001, .001);
-  o2::Base::Detector::Medium(3,"CO2",10,0, iSXFLD, sXMGMX, 10., 999.,.1, .001, .001);
-  o2::Base::Detector::Medium(20, "DriftGas3", 40, 1, iSXFLD, sXMGMX, 10., 999.,.1,.001, .001);
+  o2::Base::Detector::medium(0, "Air", 11, 0, iSXFLD, sXMGMX, 10., 999., .1, .01, .1);
+  o2::Base::Detector::medium(1, "DriftGas1", 12, 0, iSXFLD, sXMGMX, 10., 999.,.1,.001, .001);
+  o2::Base::Detector::medium(2, "DriftGas2", 13, 1, iSXFLD, sXMGMX, 10., 999.,.1,.001, .001);
+  o2::Base::Detector::medium(3,"CO2",10,0, iSXFLD, sXMGMX, 10., 999.,.1, .001, .001);
+  o2::Base::Detector::medium(20, "DriftGas3", 40, 1, iSXFLD, sXMGMX, 10., 999.,.1,.001, .001);
   //-----------------------------------------------------------
   // tracking media for solids
   //-----------------------------------------------------------
 
-  o2::Base::Detector::Medium(4,"Al",23,0, iSXFLD, sXMGMX, 10., 999., .1, .0005, .001);
-  o2::Base::Detector::Medium(5,"Kevlar",14,0, iSXFLD, sXMGMX, 10., 999., .1, .0005, .001);
-  o2::Base::Detector::Medium(6,"Nomex",15,0, iSXFLD, sXMGMX, 10., 999., .1, .001, .001);
-  o2::Base::Detector::Medium(7,"Makrolon",16,0, iSXFLD, sXMGMX, 10., 999., .1, .001, .001);
-  o2::Base::Detector::Medium(8,"Mylar",18,0, iSXFLD, sXMGMX, 10., 999., .1, .0005, .001);
-  o2::Base::Detector::Medium(9,"Tedlar",17,0, iSXFLD, sXMGMX, 10., 999., .1, .0005, .001);
+  o2::Base::Detector::medium(4,"Al",23,0, iSXFLD, sXMGMX, 10., 999., .1, .0005, .001);
+  o2::Base::Detector::medium(5,"Kevlar",14,0, iSXFLD, sXMGMX, 10., 999., .1, .0005, .001);
+  o2::Base::Detector::medium(6,"Nomex",15,0, iSXFLD, sXMGMX, 10., 999., .1, .001, .001);
+  o2::Base::Detector::medium(7,"Makrolon",16,0, iSXFLD, sXMGMX, 10., 999., .1, .001, .001);
+  o2::Base::Detector::medium(8,"Mylar",18,0, iSXFLD, sXMGMX, 10., 999., .1, .0005, .001);
+  o2::Base::Detector::medium(9,"Tedlar",17,0, iSXFLD, sXMGMX, 10., 999., .1, .0005, .001);
   //
-  o2::Base::Detector::Medium(10,"Prepreg1",19,0, iSXFLD, sXMGMX, 10., 999., .1, .0005, .001);
-  o2::Base::Detector::Medium(11,"Prepreg2",20,0, iSXFLD, sXMGMX, 10., 999., .1, .0005, .001);
-  o2::Base::Detector::Medium(12,"Prepreg3",21,0, iSXFLD, sXMGMX, 10., 999., .1, .0005, .001);
-  o2::Base::Detector::Medium(13,"Epoxy",26,0, iSXFLD, sXMGMX, 10., 999., .1, .0005, .001);
+  o2::Base::Detector::medium(10,"Prepreg1",19,0, iSXFLD, sXMGMX, 10., 999., .1, .0005, .001);
+  o2::Base::Detector::medium(11,"Prepreg2",20,0, iSXFLD, sXMGMX, 10., 999., .1, .0005, .001);
+  o2::Base::Detector::medium(12,"Prepreg3",21,0, iSXFLD, sXMGMX, 10., 999., .1, .0005, .001);
+  o2::Base::Detector::medium(13,"Epoxy",26,0, iSXFLD, sXMGMX, 10., 999., .1, .0005, .001);
 
-  o2::Base::Detector::Medium(14,"Cu",25,0, iSXFLD, sXMGMX, 10., 999., .1, .001, .001);
-  o2::Base::Detector::Medium(15,"Si",24,0, iSXFLD, sXMGMX, 10., 999., .1, .001, .001);
-  o2::Base::Detector::Medium(16,"G10",22,0, iSXFLD, sXMGMX, 10., 999., .1, .001, .001);
-  o2::Base::Detector::Medium(17,"Plexiglas",27,0, iSXFLD, sXMGMX, 10., 999., .1, .001, .001);
-  o2::Base::Detector::Medium(18,"Steel",29,0, iSXFLD, sXMGMX, 10., 999., .1, .001, .001);
-  o2::Base::Detector::Medium(19,"Peek",30,0, iSXFLD, sXMGMX, 10., 999., .1, .001, .001);
-  o2::Base::Detector::Medium(21,"Alumina",31,0, iSXFLD, sXMGMX, 10., 999., .1, .001, .001);
-  o2::Base::Detector::Medium(22,"Water",32,0, iSXFLD, sXMGMX, 10., 999., .1, .001, .001);
-  o2::Base::Detector::Medium(23,"Brass",33,0, iSXFLD, sXMGMX, 10., 999., .1, .001, .001);
-  o2::Base::Detector::Medium(24,"Epoxyfm",34,0, iSXFLD, sXMGMX, 10., 999., .1, .0005, .001);
-  o2::Base::Detector::Medium(25,"Epoxy1",35,0, iSXFLD, sXMGMX, 10., 999., .1, .0005, .001);
-  o2::Base::Detector::Medium(26,"Alumina1",36,0, iSXFLD, sXMGMX, 10., 999., .1, .001, .001);
+  o2::Base::Detector::medium(14,"Cu",25,0, iSXFLD, sXMGMX, 10., 999., .1, .001, .001);
+  o2::Base::Detector::medium(15,"Si",24,0, iSXFLD, sXMGMX, 10., 999., .1, .001, .001);
+  o2::Base::Detector::medium(16,"G10",22,0, iSXFLD, sXMGMX, 10., 999., .1, .001, .001);
+  o2::Base::Detector::medium(17,"Plexiglas",27,0, iSXFLD, sXMGMX, 10., 999., .1, .001, .001);
+  o2::Base::Detector::medium(18,"Steel",29,0, iSXFLD, sXMGMX, 10., 999., .1, .001, .001);
+  o2::Base::Detector::medium(19,"Peek",30,0, iSXFLD, sXMGMX, 10., 999., .1, .001, .001);
+  o2::Base::Detector::medium(21,"Alumina",31,0, iSXFLD, sXMGMX, 10., 999., .1, .001, .001);
+  o2::Base::Detector::medium(22,"Water",32,0, iSXFLD, sXMGMX, 10., 999., .1, .001, .001);
+  o2::Base::Detector::medium(23,"Brass",33,0, iSXFLD, sXMGMX, 10., 999., .1, .001, .001);
+  o2::Base::Detector::medium(24,"Epoxyfm",34,0, iSXFLD, sXMGMX, 10., 999., .1, .0005, .001);
+  o2::Base::Detector::medium(25,"Epoxy1",35,0, iSXFLD, sXMGMX, 10., 999., .1, .0005, .001);
+  o2::Base::Detector::medium(26,"Alumina1",36,0, iSXFLD, sXMGMX, 10., 999., .1, .001, .001);
 
 }
 
-void Detector::ConstructTPCGeometry()
+void Detector::constructTPCGeometry()
 {
   //
   // Create the geometry of Time Projection Chamber version 2
@@ -3075,7 +3075,7 @@ void Detector::ConstructTPCGeometry()
 
 } // end of function
 
-void Detector::LoadGeometryFromFile()
+void Detector::loadGeometryFromFile()
 {
   // ===| Read the TPC geometry from file |=====================================
   if (mGeoFileName.IsNull()) {
@@ -3100,7 +3100,7 @@ void Detector::LoadGeometryFromFile()
   alice->AddNode(tpcVolume,1);
 }
 
-void Detector::DefineSensitiveVolumes()
+void Detector::defineSensitiveVolumes()
 {
   TGeoManager* geoManager = gGeoManager;
   TGeoVolume* v=nullptr;
@@ -3124,7 +3124,7 @@ void Detector::DefineSensitiveVolumes()
   }
 }
 
-Double_t Detector::Gamma(Double_t k)
+Double_t Detector::gamma(Double_t k)
 {
   static Double_t n=0;
   static Double_t c1=0;
@@ -3162,7 +3162,7 @@ Double_t Detector::Gamma(Double_t k)
 #include <sstream>
 #include <string>
 #include "TVirtualMC.h"
-void Detector::GeantHack()
+void Detector::geantHack()
 {
   //   Med  GAM   ELEC  NHAD  CHAD  MUON  EBREM MUHAB EDEL  MUDEL MUPA ANNI BREM COMP DCAY DRAY HADR LOSS MULS PAIR PHOT RAYL STRA
   std::stringstream data("\

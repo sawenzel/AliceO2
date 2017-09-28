@@ -57,47 +57,47 @@ class Hit : public o2::BasicXYZEHit<Float_t,Float_t>
 
 
     // Entrance position getters
-    Point3D<Float_t> GetPosStart() const { return mPosStart; }
-    Float_t GetStartX() const { return mPosStart.X(); }
-    Float_t GetStartY() const { return mPosStart.Y(); }
-    Float_t GetStartZ() const { return mPosStart.Z(); }  
-    template<typename F> void GetStartPosition(F &x, F &y, F &z) const
+    Point3D<Float_t> getPosStart() const { return mPosStart; }
+    Float_t getStartX() const { return mPosStart.X(); }
+    Float_t getStartY() const { return mPosStart.Y(); }
+    Float_t getStartZ() const { return mPosStart.Z(); }  
+    template<typename F> void getStartPosition(F &x, F &y, F &z) const
     {
-      x = GetStartX();
-      y = GetStartY();
-      z = GetStartZ();
+      x = getStartX();
+      y = getStartY();
+      z = getStartZ();
     }
     // momentum getters
-    Vector3D<Float_t> GetMomentum() const { return mMomentum; }
-    Vector3D<Float_t>& GetMomentum()      { return mMomentum; }
-    Float_t GetPx() const { return mMomentum.X(); }
-    Float_t GetPy() const { return mMomentum.Y(); }
-    Float_t GetPz() const { return mMomentum.Z(); }
-    Float_t GetE()  const { return mE; }
-    Float_t GetTotalEnergy() const { return GetE(); }
+    Vector3D<Float_t> getMomentum() const { return mMomentum; }
+    Vector3D<Float_t>& getMomentum()      { return mMomentum; }
+    Float_t getPx() const { return mMomentum.X(); }
+    Float_t getPy() const { return mMomentum.Y(); }
+    Float_t getPz() const { return mMomentum.Z(); }
+    Float_t getE()  const { return mE; }
+    Float_t getTotalEnergy() const { return getE(); }
     
-    UChar_t GetStatusEnd()   const  { return mTrackStatusEnd; }
-    UChar_t GetStatusStart() const  { return mTrackStatusStart; }
+    UChar_t getStatusEnd()   const  { return mTrackStatusEnd; }
+    UChar_t getStatusStart() const  { return mTrackStatusStart; }
 
-    Bool_t IsEntering()      const  { return mTrackStatusEnd & kTrackEntering; }
-    Bool_t IsInside()        const  { return mTrackStatusEnd & kTrackInside; }
-    Bool_t IsExiting()       const  { return mTrackStatusEnd & kTrackExiting; }
-    Bool_t IsOut()           const  { return mTrackStatusEnd & kTrackOut; }
-    Bool_t IsStopped()       const  { return mTrackStatusEnd & kTrackStopped; }
-    Bool_t IsAlive()         const  { return mTrackStatusEnd & kTrackAlive; }
+    Bool_t isEntering()      const  { return mTrackStatusEnd & kTrackEntering; }
+    Bool_t isInside()        const  { return mTrackStatusEnd & kTrackInside; }
+    Bool_t isExiting()       const  { return mTrackStatusEnd & kTrackExiting; }
+    Bool_t isOut()           const  { return mTrackStatusEnd & kTrackOut; }
+    Bool_t isStopped()       const  { return mTrackStatusEnd & kTrackStopped; }
+    Bool_t isAlive()         const  { return mTrackStatusEnd & kTrackAlive; }
 
-    Bool_t IsEnteringStart() const  { return mTrackStatusStart & kTrackEntering; }
-    Bool_t IsInsideStart()   const  { return mTrackStatusStart & kTrackInside; }
-    Bool_t IsExitingStart()  const  { return mTrackStatusStart & kTrackExiting; }
-    Bool_t IsOutStart()      const  { return mTrackStatusStart & kTrackOut; }
-    Bool_t IsStoppedStart()  const  { return mTrackStatusStart & kTrackStopped; }
-    Bool_t IsAliveStart()    const  { return mTrackStatusStart & kTrackAlive; }
+    Bool_t isEnteringStart() const  { return mTrackStatusStart & kTrackEntering; }
+    Bool_t isInsideStart()   const  { return mTrackStatusStart & kTrackInside; }
+    Bool_t isExitingStart()  const  { return mTrackStatusStart & kTrackExiting; }
+    Bool_t isOutStart()      const  { return mTrackStatusStart & kTrackOut; }
+    Bool_t isStoppedStart()  const  { return mTrackStatusStart & kTrackStopped; }
+    Bool_t isAliveStart()    const  { return mTrackStatusStart & kTrackAlive; }
 
     /// Output to screen
-    void Print(const Option_t *opt) const override;
+    void print(const Option_t *opt) const override;
     friend std::ostream &operator<<(std::ostream &of, const Hit &point)
     {
-      of << "-I- Hit: O2its point for track " << point.GetTrackID() << " in detector " << point.GetDetectorID() << std::endl;
+      of << "-I- Hit: O2its point for track " << point.getTrackID() << " in detector " << point.getDetectorID() << std::endl;
       /*
       of << "    Position (" << point.fX << ", " << point.fY << ", " << point.fZ << ") cm" << std::endl;
       of << "    Momentum (" << point.fPx << ", " << point.fPy << ", " << point.fPz << ") GeV" << std::endl;
@@ -107,7 +107,7 @@ class Hit : public o2::BasicXYZEHit<Float_t,Float_t>
       return of;
     }
 
-    void SetSrcEvID(int srcID, int evID) {
+    void setSrcEvID(int srcID, int evID) {
       /// RS: ATTENTION! this is just a trick until we clarify how the hits from different source are
       // provided and identified. At the moment we just create a combined identifier from eventID
       // and sourceID and store it TEMPORARILY in the cached Point's TObject UniqueID
@@ -120,7 +120,7 @@ class Hit : public o2::BasicXYZEHit<Float_t,Float_t>
       // and SrcEv id stored as UniqueID
       int srcID = ( GetUniqueID()>>Label::nbitsEvID ) & Label::maskSrcID;
       int evID = GetUniqueID() & Label::maskEvID;
-      return Label( GetTrackID(), evID, srcID );
+      return Label( getTrackID(), evID, srcID );
     }
     
   private:

@@ -70,7 +70,7 @@ EventSampler::~EventSampler()
 
 constexpr const char* EventSampler::OptionKeys[];
 
-bpo::options_description EventSampler::GetOptionsDescription()
+bpo::options_description EventSampler::getOptionsDescription()
 {
   // assemble the options for the device class and component
   bpo::options_description od("EventSampler options");
@@ -93,7 +93,7 @@ bpo::options_description EventSampler::GetOptionsDescription()
   return od;
 }
 
-void EventSampler::InitTask()
+void EventSampler::initTask()
 {
   /// inherited from FairMQDevice
   const auto * config = GetConfig();
@@ -107,7 +107,7 @@ void EventSampler::InitTask()
   mNEvents=0;
 }
 
-void EventSampler::Run()
+void EventSampler::run()
 {
   /// inherited from FairMQDevice
   int iResult=0;
@@ -204,7 +204,7 @@ void EventSampler::Run()
   samplerThread.join();
 }
 
-void EventSampler::Pause()
+void EventSampler::pause()
 {
   /// inherited from FairMQDevice
 

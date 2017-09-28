@@ -32,7 +32,7 @@ O2FLPex::O2FLPex() :
 O2FLPex::~O2FLPex()
 = default;
 
-void O2FLPex::InitTask()
+void O2FLPex::initTask()
 {
   srand(time(nullptr));
 

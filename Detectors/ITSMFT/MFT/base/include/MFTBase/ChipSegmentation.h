@@ -29,7 +29,7 @@ public:
   ChipSegmentation(UInt_t uniqueID);
   
   ~ChipSegmentation() override = default;
-  void Clear(const Option_t* /*opt*/) override {;}
+  void clear(const Option_t* /*opt*/) override {;}
   virtual void print(Option_t* /*option*/);
 
   /// \brief Transform (x,y) Hit coordinate into Pixel ID on the matrix

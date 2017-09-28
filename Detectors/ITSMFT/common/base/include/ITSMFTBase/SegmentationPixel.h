@@ -44,7 +44,7 @@ class SegmentationPixel : public Segmentation
 
   SegmentationPixel& operator=(const SegmentationPixel& source);
 
-  void Init() override;
+  void init() override;
 
   void setNumberOfPads(Int_t, Int_t) override { MayNotUse("SetPadSize"); }
   Int_t getNumberOfPads() const override { return mNumberOfColumns * mNumberOfRows; }
@@ -138,7 +138,7 @@ class SegmentationPixel : public Segmentation
     LOG(WARNING) << "No def. parameters defined as const static data members" << FairLogger::endl;
   }
 
-  void Print(Option_t* option = "") const override;
+  void print(Option_t* option = "") const override;
 
   virtual Int_t getChipTypeID() const { return GetUniqueID(); }
   /// Set matrix of periodic shifts of diod center. Provided arrays must be in the format

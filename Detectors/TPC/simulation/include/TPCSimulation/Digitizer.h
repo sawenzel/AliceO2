@@ -71,7 +71,7 @@ class Digitizer {
     /// Steer conversion of points to digits
     /// \param points Container with TPC points
     /// \return digits container
-    DigitContainer *Process(TClonesArray *points);
+    DigitContainer *process(TClonesArray *points);
 
     DigitContainer *getDigitContainer() const { return mDigitContainer; }
 

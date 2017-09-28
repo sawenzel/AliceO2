@@ -95,12 +95,12 @@ HOMERFactory::~HOMERFactory()
   //  UnloadHOMERLibrary();
 }
 
-AliHLTHOMERReader* HOMERFactory::OpenReader(const char* hostname, unsigned short port )
+AliHLTHOMERReader* HOMERFactory::openReader(const char* hostname, unsigned short port )
 {
   // Open Reader instance for host
   if (sLibraryStatus<0) return nullptr;
 
-  sLibraryStatus=LoadHOMERLibrary();
+  sLibraryStatus=loadHOMERLibrary();
   if (sLibraryStatus <= 0) {
         return nullptr;
   }
@@ -113,12 +113,12 @@ AliHLTHOMERReader* HOMERFactory::OpenReader(const char* hostname, unsigned short
   return pReader;
 }
 
-AliHLTHOMERReader* HOMERFactory::OpenReader(unsigned int tcpCnt, const char** hostnames, unsigned short* ports)
+AliHLTHOMERReader* HOMERFactory::openReader(unsigned int tcpCnt, const char** hostnames, unsigned short* ports)
 {
   // Open Reader instance for a list of hosts
   if (sLibraryStatus<0) return nullptr;
 
-  sLibraryStatus=LoadHOMERLibrary();
+  sLibraryStatus=loadHOMERLibrary();
   if (sLibraryStatus <= 0) {
         return nullptr;
   }
@@ -132,12 +132,12 @@ AliHLTHOMERReader* HOMERFactory::OpenReader(unsigned int tcpCnt, const char** ho
   return pReader;
 }
 
-AliHLTHOMERReader* HOMERFactory::OpenReaderBuffer(const AliHLTUInt8_t* pBuffer, int size)
+AliHLTHOMERReader* HOMERFactory::openReaderBuffer(const AliHLTUInt8_t* pBuffer, int size)
 {
   // Open Reader instance for a data buffer
   if (sLibraryStatus<0) return nullptr;
 
-  sLibraryStatus=LoadHOMERLibrary();
+  sLibraryStatus=loadHOMERLibrary();
   if (sLibraryStatus <= 0) {
         return nullptr;
   }
@@ -150,14 +150,14 @@ AliHLTHOMERReader* HOMERFactory::OpenReaderBuffer(const AliHLTUInt8_t* pBuffer, 
   return pReader;
 }
 
-int HOMERFactory::DeleteReader(AliHLTHOMERReader* pReader)
+int HOMERFactory::deleteReader(AliHLTHOMERReader* pReader)
 {
   // delete a reader
 
   // the actual deletion function is inside the HOMER library
   if (sLibraryStatus<0) return sLibraryStatus;
 
-  sLibraryStatus=LoadHOMERLibrary();
+  sLibraryStatus=loadHOMERLibrary();
   if (sLibraryStatus <= 0) {
         return sLibraryStatus;
   }
@@ -169,12 +169,12 @@ int HOMERFactory::DeleteReader(AliHLTHOMERReader* pReader)
   return 0;
 }
 
-AliHLTHOMERWriter* HOMERFactory::OpenWriter()
+AliHLTHOMERWriter* HOMERFactory::openWriter()
 {
   // open a Writer instance
   if (sLibraryStatus<0) return nullptr;
 
-  sLibraryStatus=LoadHOMERLibrary();
+  sLibraryStatus=loadHOMERLibrary();
   if (sLibraryStatus <= 0) {
         return nullptr;
   }
@@ -187,12 +187,12 @@ AliHLTHOMERWriter* HOMERFactory::OpenWriter()
   return pWriter;
 }
 
-int HOMERFactory::DeleteWriter(AliHLTHOMERWriter* pWriter)
+int HOMERFactory::deleteWriter(AliHLTHOMERWriter* pWriter)
 {
   // see header file for class documentation
   if (sLibraryStatus<0) return sLibraryStatus;
 
-  sLibraryStatus=LoadHOMERLibrary();
+  sLibraryStatus=loadHOMERLibrary();
   if (sLibraryStatus <= 0) {
         return sLibraryStatus;
   }
@@ -204,7 +204,7 @@ int HOMERFactory::DeleteWriter(AliHLTHOMERWriter* pWriter)
   return 0;
 }
 
-int HOMERFactory::LoadHOMERLibrary()
+int HOMERFactory::loadHOMERLibrary()
 {
   // delete a writer
 
@@ -256,7 +256,7 @@ int HOMERFactory::LoadHOMERLibrary()
   return iResult;
 }
 
-int HOMERFactory::UnloadHOMERLibrary()
+int HOMERFactory::unloadHOMERLibrary()
 {
   // unload HOMER library
   int iResult=0;

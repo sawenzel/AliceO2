@@ -213,7 +213,7 @@ TGeoCompositeShape* FrameStructure::createTOFRail(float y)
 namespace
 {
 // only here temporarily, I would like to harmonize Material treatment (outside of base detector)
-int Material(int imat, const char* name, float a, float z, float dens, float radl, float absl, float* buf = nullptr,
+int material(int imat, const char* name, float a, float z, float dens, float radl, float absl, float* buf = nullptr,
              int nwbuf = 0)
 {
   int kmat = -1;
@@ -222,7 +222,7 @@ int Material(int imat, const char* name, float a, float z, float dens, float rad
   return kmat;
 }
 
-int Mixture(int imat, const char* name, float* a, float* z, float dens, int nlmat, float* wmat = nullptr)
+int mixture(int imat, const char* name, float* a, float* z, float dens, int nlmat, float* wmat = nullptr)
 {
   // Check this!!!
   int kmat = -1;
@@ -231,7 +231,7 @@ int Mixture(int imat, const char* name, float* a, float* z, float dens, int nlma
   return kmat;
 }
 
-int Medium(int numed, const char* name, int nmat, int isvol, int ifield, float fieldm, float tmaxfd, float stemax,
+int medium(int numed, const char* name, int nmat, int isvol, int ifield, float fieldm, float tmaxfd, float stemax,
            float deemax, float epsil, float stmin, float* ubuf = nullptr, int nbuf = 0)
 {
   // Check this!!!
@@ -273,15 +273,15 @@ void FrameStructure::createMaterials()
   float zg10[4] = { 6., 1., 8., 14. };
   float wg10[4] = { 0.194, 0.023, 0.443, 0.340 };
 
-  auto kG10MatId = Mixture(22, "G10", ag10, zg10, 1.7, 4, wg10);
-  auto kSteelMatId = Mixture(65, "STEEL$", asteel, zsteel, 7.88, 4, wsteel);
-  auto kAirMatId = Mixture(5, "AIR$      ", aAir, zAir, dAir, 4, wAir);
-  auto kAluMatId = Material(9, "ALU      ", 26.98, 13., 2.7, 8.9, 37.2);
+  auto kG10MatId = Mixture(22, "G10", ag10, zg10, 1.7, mixture, wg10);
+  auto kSteelMatId = Mixture(65, "STEEL$", asteel, zsteelmixture 7.88, 4, wsteel);
+  auto kAirMatId = Mixture(5, "AIR$      ", aAir, zAir,mixture dAir, 4, wAir);
+  auto kAluMatId = Material(9, "ALU      ", 26.98, 13.,material 2.7, 8.9, 37.2);
 
-  mSteelMedID = Medium(65, "FRAME_Steel", kSteelMatId, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  mAirMedID = Medium(5, "FRAME_Air", kAirMatId, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  mAluMedID = Medium(9, "FRAME_Aluminum", kAluMatId, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  mG10MedID = Medium(22, "FRAME_G10", kG10MatId, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  mSteelMedID = Medium(65, "FRAME_Steel", kSteelMatImedium, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  mAirMedID = Medium(5, "FRAME_Air", kAirMatId, 0,medium isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  mAluMedID = Medium(9, "FRAME_Aluminum", kAluMatImedium, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  mG10MedID = Medium(22, "FRAME_G10", kG10MatId, 0medium isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   // do a cross check
   assert(gGeoManager->GetMedium("FRAME_Air")->GetId() == mAirMedID);
@@ -290,7 +290,7 @@ void FrameStructure::createMaterials()
   assert(gGeoManager->GetMedium("FRAME_G10")->GetId() == mG10MedID);
 }
 
-void FrameStructure::ConstructGeometry()
+void FrameStructure::constructGeometry()
 {
   auto vmc = TVirtualMC::GetMC();
 

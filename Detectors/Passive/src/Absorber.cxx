@@ -52,7 +52,7 @@ Absorber& Absorber::operator=(const Absorber& rhs)
 namespace
 {
 // only here temporarily, I would like to harmonize Material treatment (outside of base detector)
-int Material(Int_t imat, const char* name, Float_t a, Float_t z, Float_t dens, Float_t radl, Float_t absl,
+int material(Int_t imat, const char* name, Float_t a, Float_t z, Float_t dens, Float_t radl, Float_t absl,
              Float_t* buf = nullptr, Int_t nwbuf = 0)
 {
   int kmat = -1;
@@ -60,7 +60,7 @@ int Material(Int_t imat, const char* name, Float_t a, Float_t z, Float_t dens, F
   return kmat;
 }
 
-int Mixture(Int_t imat, const char* name, Float_t* a, Float_t* z, Float_t dens, Int_t nlmat, Float_t* wmat = nullptr)
+int mixture(Int_t imat, const char* name, Float_t* a, Float_t* z, Float_t dens, Int_t nlmat, Float_t* wmat = nullptr)
 {
   // Check this!!!
   int kmat = -1;
@@ -68,7 +68,7 @@ int Mixture(Int_t imat, const char* name, Float_t* a, Float_t* z, Float_t dens, 
   return kmat;
 }
 
-int Medium(Int_t numed, const char* name, Int_t nmat, Int_t isvol, Int_t ifield, Float_t fieldm, Float_t tmaxfd,
+int medium(Int_t numed, const char* name, Int_t nmat, Int_t isvol, Int_t ifield, Float_t fieldm, Float_t tmaxfd,
            Float_t stemax, Float_t deemax, Float_t epsil, Float_t stmin, Float_t* ubuf = nullptr, Int_t nbuf = 0)
 {
   // Check this!!!
@@ -156,137 +156,137 @@ void Absorber::createMaterials()
 
   //    Carbon Material and Medium
   //
-  auto kC0 = Material(6, "CARBON0$", 12.01, 6., 1.75, 24.4, 49.9);
-  auto kC1 = Material(26, "CARBON1$", 12.01, 6., 1.75, 24.4, 49.9);
-  auto kC2 = Material(46, "CARBON2$", 12.01, 6., 1.75, 24.4, 49.9);
-  Medium(6, "ABSO_C_C0", kC0, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(26, "ABSO_C_C1", kC1, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(46, "ABSO_C_C2", kC2, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto kC0 = Material(6, "CARBON0$",material 12.01, 6., 1.75, 24.4, 49.9);
+  auto kC1 = Material(26, "CARBON1$"material 12.01, 6., 1.75, 24.4, 49.9);
+  auto kC2 = Material(46, "CARBON2$"material 12.01, 6., 1.75, 24.4, 49.9);
+  Medium(6, "ABSO_C_C0", medium, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(26, "ABSO_C_C1",medium kC1, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(46, "ABSO_C_C2",medium kC2, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //
   //    Aluminum Material and Medium
-  auto kAl0 = Material(9, "ALUMINIUM0$", 26.98, 13., 2.7, 8.9, 37.2);
-  auto kAl1 = Material(29, "ALUMINIUM1$", 26.98, 13., 2.7, 8.9, 37.2);
-  auto kAl2 = Material(49, "ALUMINIUM2$", 26.98, 13., 2.7, 8.9, 37.2);
-  Medium(9, "ABSO_ALU_C0", kAl0, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(29, "ABSO_ALU_C1", kAl1, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(49, "ABSO_ALU_C2", kAl2, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto kAl0 = Material(9, "ALUMINIUM0material", 26.98, 13., 2.7, 8.9, 37.2);
+  auto kAl1 = Material(29, "ALUMINIUMmaterial$", 26.98, 13., 2.7, 8.9, 37.2);
+  auto kAl2 = Material(49, "ALUMINIUMmaterial$", 26.98, 13., 2.7, 8.9, 37.2);
+  Medium(9, "ABSO_ALU_C0"medium kAl0, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(29, "ABSO_ALU_C1medium
+  Medium(49, "ABSO_ALU_C2medium
 
   //
   //    Magnesium
-  auto kMAG = Material(7, "MAGNESIUM$", 24.31, 12., 1.74, 25.3, 46.0);
-  Medium(7, "ABSO_MG_C0", kMAG, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto kMAG = Material(7, "MAGNESIUM$material
+  Medium(7, "ABSO_MG_C0",medium kMAG, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //
   //    Iron
-  auto kFe0 = Material(10, "IRON0$", 55.85, 26., 7.87, 1.76, 17.1);
-  auto kFe1 = Material(30, "IRON1$", 55.85, 26., 7.87, 1.76, 17.1);
-  auto kFe2 = Material(50, "IRON2$", 55.85, 26., 7.87, 1.76, 17.1);
-  Medium(10, "ABSO_FE_C0", kFe0, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(30, "ABSO_FE_C1", kFe1, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(50, "ABSO_FE_C2", kFe2, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto kFe0 = Material(10, "IRON0$", material, 26., 7.87, 1.76, 17.1);
+  auto kFe1 = Material(30, "IRON1$", material, 26., 7.87, 1.76, 17.1);
+  auto kFe2 = Material(50, "IRON2$", material, 26., 7.87, 1.76, 17.1);
+  Medium(10, "ABSO_FE_C0"medium kFe0, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(30, "ABSO_FE_C1"medium kFe1, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(50, "ABSO_FE_C2"medium kFe2, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //
   //    Copper
-  auto kCu0 = Material(11, "COPPER0$", 63.55, 29., 8.96, 1.43, 15.1);
-  auto kCu1 = Material(31, "COPPER1$", 63.55, 29., 8.96, 1.43, 15.1);
-  auto kCu2 = Material(51, "COPPER2$", 63.55, 29., 8.96, 1.43, 15.1);
-  Medium(11, "ABSO_Cu_C0", kCu0, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(31, "ABSO_Cu_C1", kCu1, 0, isxfld, sxmgmx, tmaxfd, -stemax, deemax, epsil, stmin);
-  Medium(51, "ABSO_Cu_C2", kCu2, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto kCu0 = Material(11, "COPPER0$"material 63.55, 29., 8.96, 1.43, 15.1);
+  auto kCu1 = Material(31, "COPPER1$"material 63.55, 29., 8.96, 1.43, 15.1);
+  auto kCu2 = Material(51, "COPPER2$"material 63.55, 29., 8.96, 1.43, 15.1);
+  Medium(11, "ABSO_Cu_C0"medium kCu0, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(31, "ABSO_Cu_C1"medium kCu1, 0, isxfld, sxmgmx, tmaxfd, -stemax, deemax, epsil, stmin);
+  Medium(51, "ABSO_Cu_C2"medium kCu2, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //
   //    Tungsten
-  auto kW0 = Material(12, "TUNGSTEN0$ ", 183.85, 74., 19.3, .35, 10.3);
-  auto kW1 = Material(32, "TUNGSTEN1$ ", 183.85, 74., 19.3, .35, 10.3);
-  auto kW2 = Material(52, "TUNGSTEN2$ ", 183.85, 74., 19.3, .35, 10.3);
-  Medium(12, "ABSO_W_C0", kW0, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(32, "ABSO_W_C1", kW1, 0, isxfld, sxmgmx, tmaxfd, -stemax, deemax, epsil, stmin);
-  Medium(52, "ABSO_W_C2", kW2, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto kW0 = Material(12, "TUNGSTEN0material ", 183.85, 74., 19.3, .35, 10.3);
+  auto kW1 = Material(32, "TUNGSTEN1material ", 183.85, 74., 19.3, .35, 10.3);
+  auto kW2 = Material(52, "TUNGSTEN2material ", 183.85, 74., 19.3, .35, 10.3);
+  Medium(12, "ABSO_W_C0",medium kW0, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(32, "ABSO_W_C1",medium kW1, 0, isxfld, sxmgmx, tmaxfd, -stemax, deemax, epsil, stmin);
+  Medium(52, "ABSO_W_C2",medium kW2, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //
   //     Ni-W-Cu
-  auto k1 = Mixture(21, "Ni-W-Cu0$", aniwcu, zniwcu, 18.78, 3, wniwcu);
-  auto k2 = Mixture(41, "Ni-W-Cu1$", aniwcu, zniwcu, 18.78, 3, wniwcu);
-  auto k3 = Mixture(61, "Ni-W-Cu2$", aniwcu, zniwcu, 18.78, 3, wniwcu);
-  Medium(21, "ABSO_Ni/W0", k1, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(41, "ABSO_Ni/W1", k2, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(61, "ABSO_Ni/W3", k3, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto k1 = Mixture(21, "Ni-W-Cu0$"mixture aniwcu, zniwcu, 18.78, 3, wniwcu);
+  auto k2 = Mixture(41, "Ni-W-Cu1$"mixture aniwcu, zniwcu, 18.78, 3, wniwcu);
+  auto k3 = Mixture(61, "Ni-W-Cu2$"mixture aniwcu, zniwcu, 18.78, 3, wniwcu);
+  Medium(21, "ABSO_Ni/W0"medium k1, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(41, "ABSO_Ni/W1"medium k2, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(61, "ABSO_Ni/W3"medium k3, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //
   //    Lead
-  auto kPb0 = Material(13, "LEAD0$", 207.19, 82., 11.35, .56, 18.5);
-  auto kPb1 = Material(33, "LEAD1$", 207.19, 82., 11.35, .56, 18.5);
-  auto kPb2 = Material(53, "LEAD2$", 207.19, 82., 11.35, .56, 18.5);
-  Medium(13, "ABSO_PB_C0", kPb0, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(33, "ABSO_PB_C1", kPb1, 0, isxfld, sxmgmx, tmaxfd, -stemax, deemax, epsil, stmin);
-  Medium(53, "ABSO_PB_C2", kPb2, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto kPb0 = Material(13, "LEAD0$", material, 82., 11.35, .56, 18.5);
+  auto kPb1 = Material(33, "LEAD1$", material, 82., 11.35, .56, 18.5);
+  auto kPb2 = Material(53, "LEAD2$", material, 82., 11.35, .56, 18.5);
+  Medium(13, "ABSO_PB_C0"medium kPb0, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(33, "ABSO_PB_C1"medium kPb1, 0, isxfld, sxmgmx, tmaxfd, -stemax, deemax, epsil, stmin);
+  Medium(53, "ABSO_PB_C2"medium kPb2, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //
   //    Insulation Powder
-  auto kINS0 = Mixture(14, "INSULATION0$", ains, zins, 0.41, 4, wins);
-  auto kINS1 = Mixture(34, "INSULATION1$", ains, zins, 0.41, 4, wins);
-  auto kINS2 = Mixture(54, "INSULATION2$", ains, zins, 0.41, 4, wins);
-  Medium(14, "ABSO_INS_C0", kINS0, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(34, "ABSO_INS_C1", kINS1, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(54, "ABSO_INS_C2", kINS2, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto kINS0 = Mixture(14, "INSULATIONmixture$", ains, zins, 0.41, 4, wins);
+  auto kINS1 = Mixture(34, "INSULATIONmixture$", ains, zins, 0.41, 4, wins);
+  auto kINS2 = Mixture(54, "INSULATIONmixture$", ains, zins, 0.41, 4, wins);
+  Medium(14, "ABSO_INS_C0medium
+  Medium(34, "ABSO_INS_C1medium
+  Medium(54, "ABSO_INS_C2medium
 
   //
   //    Air
-  auto kAir0 = Mixture(15, "AIR0$", aAir, zAir, dAir, 4, wAir);
-  auto kAir1 = Mixture(35, "AIR1$", aAir, zAir, dAir, 4, wAir);
-  auto kAir2 = Mixture(55, "AIR2$", aAir, zAir, dAir, 4, wAir);
-  Medium(15, "ABSO_AIR_C0", kAir0, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(35, "ABSO_AIR_C1", kAir1, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(55, "ABSO_AIR_C2", kAir2, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto kAir0 = Mixture(15, "AIR0$", aAmixture, zAir, dAir, 4, wAir);
+  auto kAir1 = Mixture(35, "AIR1$", aAmixture, zAir, dAir, 4, wAir);
+  auto kAir2 = Mixture(55, "AIR2$", aAmixture, zAir, dAir, 4, wAir);
+  Medium(15, "ABSO_AIR_C0medium
+  Medium(35, "ABSO_AIR_C1medium
+  Medium(55, "ABSO_AIR_C2medium
 
   //
   //    Vacuum
-  auto kVA0 = Mixture(16, "VACUUM0$", aAir, zAir, dAir1, 4, wAir);
-  auto kVA1 = Mixture(36, "VACUUM1$", aAir, zAir, dAir1, 4, wAir);
-  auto kVA2 = Mixture(56, "VACUUM2$", aAir, zAir, dAir1, 4, wAir);
-  Medium(16, "ABSO_VA_C0", kVA0, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(36, "ABSO_VA_C1", kVA1, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(56, "ABSO_VA_C2", kVA2, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto kVA0 = Mixture(16, "VACUUM0$",mixture aAir, zAir, dAir1, 4, wAir);
+  auto kVA1 = Mixture(36, "VACUUM1$",mixture aAir, zAir, dAir1, 4, wAir);
+  auto kVA2 = Mixture(56, "VACUUM2$",mixture aAir, zAir, dAir1, 4, wAir);
+  Medium(16, "ABSO_VA_C0"medium kVA0, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(36, "ABSO_VA_C1"medium kVA1, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(56, "ABSO_VA_C2"medium kVA2, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //
   //    Concrete
-  auto kCC0 = Mixture(17, "CONCRETE0$", aconc, zconc, 2.35, 10, wconc);
-  auto kCC1 = Mixture(37, "CONCRETE1$", aconc, zconc, 2.35, 10, wconc);
-  auto kCC2 = Mixture(57, "CONCRETE2$", aconc, zconc, 2.35, 10, wconc);
-  Medium(17, "ABSO_CC_C0", kCC0, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(37, "ABSO_CC_C1", kCC1, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(57, "ABSO_CC_C2", kCC2, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto kCC0 = Mixture(17, "CONCRETE0$mixture
+  auto kCC1 = Mixture(37, "CONCRETE1$mixture
+  auto kCC2 = Mixture(57, "CONCRETE2$mixture
+  Medium(17, "ABSO_CC_C0"medium kCC0, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(37, "ABSO_CC_C1"medium kCC1, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(57, "ABSO_CC_C2"medium kCC2, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //
   //    Polyethilene CH2
-  auto kCH2_0 = Mixture(18, "POLYETHYLEN0$", apoly, zpoly, .95, -2, wpoly);
-  auto kCH2_1 = Mixture(38, "POLYETHYLEN1$", apoly, zpoly, .95, 2, wpoly);
-  auto kCH2_2 = Mixture(58, "POLYETHYLEN2$", apoly, zpoly, .95, 2, wpoly);
-  Medium(18, "ABSO_CH2_C0", kCH2_0, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(38, "ABSO_CH2_C1", kCH2_1, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(58, "ABSO_CH2_C2", kCH2_2, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto kCH2_0 = Mixture(18, "POLYETHYLEmixture", apoly, zpoly, .95, -2, wpoly);
+  auto kCH2_1 = Mixture(38, "POLYETHYLEmixture", apoly, zpoly, .95, 2, wpoly);
+  auto kCH2_2 = Mixture(58, "POLYETHYLEmixture", apoly, zpoly, .95, 2, wpoly);
+  Medium(18, "ABSO_CH2_C0medium
+  Medium(38, "ABSO_CH2_C1medium
+  Medium(58, "ABSO_CH2_C2medium
 
   //
   //    Steel
-  auto kST0 = Mixture(19, "STAINLESS STEEL0$", asteel, zsteel, 7.88, 4, wsteel);
-  auto kST1 = Mixture(39, "STAINLESS STEEL1$", asteel, zsteel, 7.88, 4, wsteel);
-  auto kST2 = Mixture(59, "STAINLESS STEEL2$", asteel, zsteel, 7.88, 4, wsteel);
-  Medium(19, "ABSO_ST_C0", kST0, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(39, "ABSO_ST_C1", kST1, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(59, "ABSO_ST_C3", kST2, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto kST0 = Mixture(19, "STAINLESS mixture", asteel, zsteel, 7.88, 4, wsteel);
+  auto kST1 = Mixture(39, "STAINLESS mixture", asteel, zsteel, 7.88, 4, wsteel);
+  auto kST2 = Mixture(59, "STAINLESS mixture", asteel, zsteel, 7.88, 4, wsteel);
+  Medium(19, "ABSO_ST_C0"medium kST0, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(39, "ABSO_ST_C1"medium kST1, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(59, "ABSO_ST_C3"medium kST2, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //
   // Polymer Concrete
-  auto kPolyC0 = Mixture(20, "Poly Concrete0$", aPolyCc, zPolyCc, 3.53, -9, wPolyCc);
-  auto kPolyC1 = Mixture(40, "Poly Concrete1$", aPolyCc, zPolyCc, 3.53, 9, wPolyCc);
-  auto kPolyC2 = Mixture(60, "Poly Concrete2$", aPolyCc, zPolyCc, 3.53, 9, wPolyCc);
-  Medium(20, "ABSO_PCc_C0", kPolyC0, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(40, "ABSO_PCc_C1", kPolyC1, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(60, "ABSO_PCc_C3", kPolyC2, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto kPolyC0 = Mixture(20, "Poly Concrmixture", aPolyCc, zPolyCc, 3.53, -9, wPolyCc);
+  auto kPolyC1 = Mixture(40, "Poly Concrmixture", aPolyCc, zPolyCc, 3.53, 9, wPolyCc);
+  auto kPolyC2 = Mixture(60, "Poly Concrmixture", aPolyCc, zPolyCc, 3.53, 9, wPolyCc);
+  Medium(20, "ABSO_PCc_C0medium
+  Medium(40, "ABSO_PCc_C1medium
+  Medium(60, "ABSO_PCc_C3medium
 }
 
-TGeoPcon* MakeShapeFromTemplate(const TGeoPcon* pcon, Float_t drMin, Float_t drMax)
+TGeoPcon* makeShapeFromTemplate(const TGeoPcon* pcon, Float_t drMin, Float_t drMax)
 {
   //
   // Returns new shape based on a template changing
@@ -300,7 +300,7 @@ TGeoPcon* MakeShapeFromTemplate(const TGeoPcon* pcon, Float_t drMin, Float_t drM
   return cpcon;
 }
 
-void Absorber::ConstructGeometry()
+void Absorber::constructGeometry()
 {
   createMaterials();
 
@@ -759,7 +759,7 @@ void Absorber::ConstructGeometry()
   TGeoVolume* voFaPbCone = new TGeoVolume("AFaPbCone", shFaPbCone, kMedPb);
   //
   // Inner region with higher transport cuts
-  TGeoPcon* shFaPbConeI = MakeShapeFromTemplate(shFaPbCone, 0., -3.);
+  TGeoPcon* shFaPbConeI = makeShapeFromTemplate(shFaPbCone, 0., -3.);
   TGeoVolume* voFaPbConeI = new TGeoVolume("AFaPbConeI", shFaPbConeI, kMedPbSh);
   voFaPbCone->AddNode(voFaPbConeI, 1, gGeoIdentity);
 
@@ -1119,5 +1119,5 @@ void Absorber::ConstructGeometry()
   top->AddNode(voFA, 1, new TGeoCombiTrans(0., 0., -90., rotxz));
 }
 
-FairModule* Absorber::CloneModule() const { return new Absorber(*this); }
+FairModule* Absorber::cloneModule() const { return new Absorber(*this); }
 ClassImp(o2::passive::Absorber);

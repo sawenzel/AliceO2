@@ -108,9 +108,9 @@ void SimulationAlpide::updateACSWithAngle(Double_t& acs, Double_t angle) const {
 }
 
 //______________________________________________________________________
-void SimulationAlpide::Hits2Digits(const SegmentationPixel *seg, Double_t eventTime, UInt_t &minFr, UInt_t &maxFr)
+void SimulationAlpide::hits2Digits(const SegmentationPixel *seg, Double_t eventTime, UInt_t &minFr, UInt_t &maxFr)
 {
-  Int_t nhits = GetNumberOfHits();
+  Int_t nhits = getNumberOfHits();
 
   // convert hits to digits, returning the min and max RO frames processed
   //
@@ -120,11 +120,11 @@ void SimulationAlpide::Hits2Digits(const SegmentationPixel *seg, Double_t eventT
 
   for (Int_t h = 0; h < nhits; ++h) {
 
-    const Hit *hit = GetHitAt(h);
-    double hTime0 = hit->GetTime()*sec2ns + eventTime - mParams->getTimeOffset(); // time from the RO start, in ns
+    const Hit *hit = getHitAt(h);
+    double hTime0 = hit->getTime()*sec2ns + eventTime - mParams->getTimeOffset(); // time from the RO start, in ns
     if (hTime0 > UINT_MAX) {
       LOG(WARNING) << "Hit RO Frame undefined: time: " << hTime0 << " is in far future: hitTime: "
-		   << hit->GetTime() << " EventTime: " << eventTime << " ChipOffset: "
+		   << hit->getTime() << " EventTime: " << eventTime << " ChipOffset: "
 		   << mParams->getTimeOffset() << FairLogger::endl;
       return;
     }
@@ -141,10 +141,10 @@ void SimulationAlpide::Hits2Digits(const SegmentationPixel *seg, Double_t eventT
 
     switch (mParams->getHit2DigitsMethod()) {
     case DigiParams::p2dCShape :
-      Hit2DigitsCShape(hit, roframe, eventTime, seg);
+      hit2DigitsCShape(hit, roframe, eventTime, seg);
       break;
     case DigiParams::p2dSimple :
-      Hit2DigitsSimple(hit, roframe, eventTime, seg);
+      hit2DigitsSimple(hit, roframe, eventTime, seg);
       break;
     default:
       LOG(ERROR) << "Unknown point to digit mode " <<  mParams->getHit2DigitsMethod() << FairLogger::endl;
@@ -154,12 +154,12 @@ void SimulationAlpide::Hits2Digits(const SegmentationPixel *seg, Double_t eventT
 }
 
 //________________________________________________________________________
-void SimulationAlpide::Hit2DigitsCShape(const Hit *hit, UInt_t roFrame, double eventTime, const SegmentationPixel* seg)
+void SimulationAlpide::hit2DigitsCShape(const Hit *hit, UInt_t roFrame, double eventTime, const SegmentationPixel* seg)
 {
   // convert single hit to digits with CShape generation method
   Double_t x0, x1, y0, y1, z0, z1, tof, de;
   if (!LineSegmentLocal(hit, x0, x1, y0, y1, z0, z1, tof, de)) return;
-  double hTime  = hit->GetTime()*sec2ns + eventTime; // time in ns
+  double hTime  = hit->getTime()*sec2ns + eventTime; // time in ns
   
   // To local coordinates
   Float_t x = x0 + 0.5*x1;
@@ -167,7 +167,7 @@ void SimulationAlpide::Hit2DigitsCShape(const Hit *hit, UInt_t roFrame, double e
   Float_t z = z0 + 0.5*z1;
   
   TLorentzVector trackP4;
-  trackP4.SetPxPyPzE(hit->GetPx(), hit->GetPy(), hit->GetPz(), hit->GetTotalEnergy());
+  trackP4.SetPxPyPzE(hit->getPx(), hit->getPy(), hit->getPz(), hit->getTotalEnergy());
   Double_t beta = std::min(0.99999, trackP4.Beta());
   Double_t bgamma = beta / std::sqrt(1. - beta*beta);
   if (bgamma < 0.001) return;
@@ -185,17 +185,17 @@ void SimulationAlpide::Hit2DigitsCShape(const Hit *hit, UInt_t roFrame, double e
   // Create the shape
   std::vector<UInt_t> cshape;
   auto csManager = std::make_unique<SimuClusterShaper>(cs);
-  csManager->SetFireCenter(true);
+  csManager->setFireCenter(true);
   
-  csManager->SetHit(ix, iz, x, z, seg);
-  csManager->FillClusterSorted();
+  csManager->setHit(ix, iz, x, z, seg);
+  csManager->fillClusterSorted();
   
-  cs = csManager->GetCS();
-  csManager->GetShape(cshape);
-  UInt_t nrows = csManager->GetNRows();
-  UInt_t ncols = csManager->GetNCols();
-  Int_t cx = csManager->GetCenterC();
-  Int_t cz = csManager->GetCenterR();
+  cs = csManager->getCS();
+  csManager->getShape(cshape);
+  UInt_t nrows = csManager->getNRows();
+  UInt_t ncols = csManager->getNCols();
+  Int_t cx = csManager->getCenterC();
+  Int_t cz = csManager->getCenterR();
   
   LOG(DEBUG) << "_/_/_/_/_/_/_/_/_/_/_/_/_/_/" << FairLogger::endl;
   LOG(DEBUG) << "_/_/_/ pALPIDE debug  _/_/_/" << FairLogger::endl;
@@ -203,7 +203,7 @@ void SimulationAlpide::Hit2DigitsCShape(const Hit *hit, UInt_t roFrame, double e
   LOG(DEBUG) << " Beta*Gamma: " << bgamma << FairLogger::endl;
   LOG(DEBUG) << "        ACS: " << acs << FairLogger::endl;
   LOG(DEBUG) << "         CS: " <<  cs << FairLogger::endl;
-  LOG(DEBUG) << "      Shape: " << ClusterShape::ShapeSting(cshape).c_str() << FairLogger::endl;
+  LOG(DEBUG) << "      Shape: " << ClusterShape::ShapeSting(cshapeSting).c_str() << FairLogger::endl;
   LOG(DEBUG) << "     Center: " << cx << ' ' << cz << FairLogger::endl;
   LOG(DEBUG) << "_/_/_/_/_/_/_/_/_/_/_/_/_/_/" << FairLogger::endl;
   
@@ -216,7 +216,7 @@ void SimulationAlpide::Hit2DigitsCShape(const Hit *hit, UInt_t roFrame, double e
     Int_t nz = iz - cz + r;
     if (nz<0) continue;
     if (nz>=seg->getNumberOfColumns()) continue;
-    Double_t charge = hit->GetEnergyLoss();
+    Double_t charge = hit->getEnergyLoss();
     
     addDigit(roFrame,nx,nz,charge,hit->getCombLabel(),hTime);
   }
@@ -224,12 +224,12 @@ void SimulationAlpide::Hit2DigitsCShape(const Hit *hit, UInt_t roFrame, double e
 }
 
 //________________________________________________________________________
-void SimulationAlpide::Hit2DigitsSimple(const Hit *hit, UInt_t roFrame, double eventTime, const SegmentationPixel* seg)
+void SimulationAlpide::hit2DigitsSimple(const Hit *hit, UInt_t roFrame, double eventTime, const SegmentationPixel* seg)
 {
   // convert single hit to digits with 1 to 1 mapping
-  Point3D<float> glo( 0.5*(hit->GetX() + hit->GetStartX()),
-		      0.5*(hit->GetY() + hit->GetStartY()),
-		      0.5*(hit->GetZ() + hit->GetStartZ()) );
+  Point3D<float> glo( 0.5*(hit->getX() + hit->getStartX()),
+		      0.5*(hit->getY() + hit->getStartY()),
+		      0.5*(hit->getZ() + hit->getStartZ()) );
   auto loc = (*mMat)^( glo );
   
   int ix, iz;
@@ -238,7 +238,7 @@ void SimulationAlpide::Hit2DigitsSimple(const Hit *hit, UInt_t roFrame, double e
     LOG(DEBUG) << "Out of the chip" << FairLogger::endl;
     return;
   }
-  addDigit(roFrame, ix, iz, hit->GetEnergyLoss(), hit->getCombLabel(), hit->GetTime()*sec2ns + eventTime);
+  addDigit(roFrame, ix, iz, hit->getEnergyLoss(), hit->getCombLabel(), hit->getTime()*sec2ns + eventTime);
 }
 
 

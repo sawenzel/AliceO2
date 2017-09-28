@@ -273,7 +273,7 @@ Chebyshev3D &Chebyshev3D::operator=(const Chebyshev3D &rhs)
 {
   // assignment operator
   if (this != &rhs) {
-    Clear();
+    clear();
     mOutputArrayDimension = rhs.mOutputArrayDimension;
     mPrecision = rhs.mPrecision;
     mMaxCoefficients = rhs.mMaxCoefficients;
@@ -296,7 +296,7 @@ Chebyshev3D &Chebyshev3D::operator=(const Chebyshev3D &rhs)
   return *this;
 }
 
-void Chebyshev3D::Clear(const Option_t *)
+void Chebyshev3D::clear(const Option_t *)
 {
   // clear all dynamic structures
   if (mTemporaryUserResults) {
@@ -315,7 +315,7 @@ void Chebyshev3D::Clear(const Option_t *)
   mChebyshevParameter.Delete();
 }
 
-void Chebyshev3D::Print(const Option_t *opt) const
+void Chebyshev3D::print(const Option_t *opt) const
 {
   // print info
   printf("%s: Chebyshev parameterization for 3D->%dD function. Precision: %e\n", GetName(), mOutputArrayDimension,
@@ -327,7 +327,7 @@ void Chebyshev3D::Print(const Option_t *opt) const
   if (opts.Contains("l")) {
     for (int i = 0; i < mOutputArrayDimension; i++) {
       printf("Output dimension %d:\n", i + 1);
-      getChebyshevCalc(i)->Print();
+      getChebyshevCalc(i)->print();
     }
   }
 }
@@ -787,7 +787,7 @@ void Chebyshev3D::loadData(FILE *stream)
     mLogger->Fatal(MESSAGE_ORIGIN, "No stream provided.\nStop");
   }
   TString buffs;
-  Clear();
+  clear();
   Chebyshev3DCalc::readLine(buffs, stream);
   if (!buffs.BeginsWith("START")) {
     mLogger->Fatal(MESSAGE_ORIGIN, "Expected: \"START <fit_name>\", found \"%s\"\nStop\n", buffs.Data());
@@ -860,7 +860,7 @@ void Chebyshev3D::shiftBound(int id, float dif)
 }
 
 #ifdef _INC_CREATION_Chebyshev3D_
-TH1* Chebyshev3D::TestRMS(int idim, int npoints, TH1* histo)
+TH1* Chebyshev3D::testRMS(int idim, int npoints, TH1* histo)
 {
   // fills the difference between the original function and parameterization (for idim-th component of the output)
   // to supplied histogram. Calculations are done in npoints random points.
@@ -883,7 +883,7 @@ TH1* Chebyshev3D::TestRMS(int idim, int npoints, TH1* histo)
     }
     evaluateUserFunction();
     Float_t valFun = mTemporaryUserResults[idim];
-    Eval(mTemporaryCoefficient, mTemporaryUserResults);
+    eval(mTemporaryCoefficient, mTemporaryUserResults);
     Float_t valPar = mTemporaryUserResults[idim];
     histo->Fill(valFun - valPar);
   }

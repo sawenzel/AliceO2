@@ -34,7 +34,7 @@ ClassImp(Manager)
 TString Manager::sOcdbFolderXmlFile("alien:///alice/data/OCDBFoldervsIdRunRange.xml");
 Manager *Manager::sInstance = nullptr;
 
-Manager *Manager::Instance(TMap *entryCache, Int_t run)
+Manager *Manager::instance(TMap *entryCache, Int_t run)
 {
   // returns Manager instance (singleton)
 
@@ -978,13 +978,13 @@ Condition *Manager::getCondition(const ConditionId &queryId, Bool_t forceCaching
   // check if queryId's path and runRange are valid
   // queryId is invalid also if version is not specified and subversion is!
   if (!queryId.isValid()) {
-    LOG(ERROR) << "Invalid query: " << queryId.ToString().Data() << FairLogger::endl;
+    LOG(ERROR) << "Invalid query: " << queryId.toString().Data() << FairLogger::endl;
     return nullptr;
   }
 
   // query is not specified if path contains wildcard or run range= [-1,-1]
   if (!queryId.isSpecified()) {
-    LOG(ERROR) << "Unspecified query: " << queryId.ToString().Data() << FairLogger::endl;
+    LOG(ERROR) << "Unspecified query: " << queryId.toString().Data() << FairLogger::endl;
     return nullptr;
   }
 
@@ -1209,13 +1209,13 @@ ConditionId *Manager::getId(const ConditionId &query)
   // check if query's path and runRange are valid
   // query is invalid also if version is not specified and subversion is!
   if (!query.isValid()) {
-    LOG(ERROR) << "Invalid query: " << query.ToString().Data() << FairLogger::endl;
+    LOG(ERROR) << "Invalid query: " << query.toString().Data() << FairLogger::endl;
     return nullptr;
   }
 
   // query is not specified if path contains wildcard or run range= [-1,-1]
   if (!query.isSpecified()) {
-    LOG(ERROR) << "Unspecified query: " << query.ToString().Data() << FairLogger::endl;
+    LOG(ERROR) << "Unspecified query: " << query.toString().Data() << FairLogger::endl;
     return nullptr;
   }
 
@@ -1289,7 +1289,7 @@ TList *Manager::getAllObjects(const ConditionId &query)
   }
 
   if (!query.isValid()) {
-    LOG(ERROR) << "Invalid query: " << query.ToString().Data() << FairLogger::endl;
+    LOG(ERROR) << "Invalid query: " << query.toString().Data() << FairLogger::endl;
     return nullptr;
   }
 
@@ -1300,7 +1300,7 @@ TList *Manager::getAllObjects(const ConditionId &query)
   }
 
   if (query.isAnyRange()) {
-    LOG(ERROR) << "Unspecified run or runrange: " << query.ToString().Data() << FairLogger::endl;
+    LOG(ERROR) << "Unspecified run or runrange: " << query.toString().Data() << FairLogger::endl;
     return nullptr;
   }
 
@@ -1379,7 +1379,7 @@ TList *Manager::getAllObjects(const ConditionId &query)
     LOG(INFO) << "After look into other specific storages, result list is:" << FairLogger::endl;
     for (int i = 0; i < nEntries; i++) {
       Condition *entry = (Condition *) result->At(i);
-      LOG(INFO) << entry->getId().ToString().Data() << FairLogger::endl;
+      LOG(INFO) << entry->getId().toString().Data() << FairLogger::endl;
     }
   }
 
@@ -1432,12 +1432,12 @@ Bool_t Manager::putCondition(Condition *entry, const char *mirrors)
   }
 
   if (!entry->getId().isValid()) {
-    LOG(ERROR) << "Invalid entry ID: " << entry->getId().ToString().Data() << FairLogger::endl;
+    LOG(ERROR) << "Invalid entry ID: " << entry->getId().toString().Data() << FairLogger::endl;
     return kFALSE;
   }
 
   if (!entry->getId().isSpecified()) {
-    LOG(ERROR) << "Unspecified entry ID: " << entry->getId().ToString().Data() << FairLogger::endl;
+    LOG(ERROR) << "Unspecified entry ID: " << entry->getId().toString().Data() << FairLogger::endl;
     return kFALSE;
   }
 

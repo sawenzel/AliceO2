@@ -25,7 +25,7 @@ namespace CCDB
 // a dictionary for TObjectWrapper<A> must exist (next to the one for A)
 BOOST_AUTO_TEST_CASE(ReadWriteTest1)
 {
-  auto cdb = o2::CDB::Manager::Instance();
+  auto cdb = o2::CDB::Manager::instance();
   cdb->setDefaultStorage("local://O2CDB");
 
   TestClass parameter;

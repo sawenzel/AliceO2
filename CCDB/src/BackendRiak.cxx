@@ -27,7 +27,7 @@ BackendRiak::BackendRiak() {}
 
 // Compression/decompression code taken from https://panthema.net/2007/0328-ZLibString.html
 
-void BackendRiak::Compress(const std::string& uncompressed_string, std::string& compressed_string)
+void BackendRiak::compress(const std::string& uncompressed_string, std::string& compressed_string)
 {
   // z_stream is zlib's control structure
   z_stream zs;
@@ -66,7 +66,7 @@ void BackendRiak::Compress(const std::string& uncompressed_string, std::string& 
   compressed_string.assign(outstring);
 }
 
-void BackendRiak::Decompress(std::string& uncompressed_string, const std::string& compressed_string)
+void BackendRiak::decompress(std::string& uncompressed_string, const std::string& compressed_string)
 {
   // z_stream is zlib's control structure
   z_stream zs;
@@ -104,7 +104,7 @@ void BackendRiak::Decompress(std::string& uncompressed_string, const std::string
   uncompressed_string.assign(outstring);
 }
 
-void BackendRiak::Deserialize(const std::string& messageString, std::string& object)
+void BackendRiak::deserialize(const std::string& messageString, std::string& object)
 {
   messaging::RequestMessage* requestMessage = new messaging::RequestMessage;
   requestMessage->ParseFromString(messageString);
@@ -114,31 +114,31 @@ void BackendRiak::Deserialize(const std::string& messageString, std::string& obj
   delete requestMessage;
 }
 
-void BackendRiak::Pack(const std::string& path, const std::string& key, std::string*& messageString)
+void BackendRiak::pack(const std::string& path, const std::string& key, std::string*& messageString)
 {
   // Load the AliCDBEntry object from disk
   std::string object;
-  ObjectHandler::GetObject(path, object);
+  ObjectHandler::GetObjectgetObjectpath, object);
 
   // Compress the object before storing to Riak
   std::string compressed_object;
-  Compress(object, compressed_object);
+  compress(object, compressed_object);
 
-  Serialize(messageString, key, "PUT", "Riak", compressed_object);
+  serialize(messageString, key, "PUT", "Riak", compressed_object);
 }
 
-Condition* BackendRiak::UnPack(std::unique_ptr<FairMQMessage> msg)
+Condition* BackendRiak::unPack(std::unique_ptr<FairMQMessage> msg)
 {
   // FIXME: how to actually extract a condition or a binary blob here?
   std::string brokerString(static_cast<char*>(msg->GetData()), msg->GetSize());
 
   // Deserialize the received string
   std::string compressedObject;
-  Deserialize(brokerString, compressedObject);
+  deserialize(brokerString, compressedObject);
 
   // Decompress the compressed object
   std::string object;
-  Decompress(object, compressedObject);
+  decompress(object, compressedObject);
   
   // nullptr since no other possibility at moment
   return nullptr;

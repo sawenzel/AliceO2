@@ -33,7 +33,7 @@ namespace TPC {
       // we use the TObjectID for the time
       SetUniqueID(time);
     }
-    int GetTimeStamp() const { return TObject::GetUniqueID(); }
+    int getTimeStamp() const { return TObject::GetUniqueID(); }
     ClassDef(TimeStamp, 1);
   };
   using DigitBase = TimeStamp;
@@ -65,7 +65,7 @@ class DigitMC : public DigitBase, public Digit {
 
     /// Get the timeBin of the DigitMC
     /// \return timeBin of the DigitMC
-    int getTimeStamp() const final { return static_cast<int>(DigitBase::GetTimeStamp()); };
+    int getTimeStamp() const final { return static_cast<int>(DigitBase::getTimeStamp()); };
 
     /// Get the number of MC labels associated to the DigitMC
     /// \return Number of MC labels associated to the DigitMC

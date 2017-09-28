@@ -19,7 +19,7 @@
   #include "TPCSimulation/DigitizerTask.h"
 #endif
 
-void run_digi_tpc(Int_t nEvents = 10, TString mcEngine = "TGeant3", Int_t isContinuous=1){
+void runDigiTpc(Int_t nEvents = 10, TString mcEngine = "TGeant3", Int_t isContinuous=1){
         // Initialize logger
         FairLogger *logger = FairLogger::GetLogger();
         logger->SetLogVerbosityLevel("LOW");

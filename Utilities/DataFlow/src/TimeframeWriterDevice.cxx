@@ -41,7 +41,7 @@ TimeframeWriterDevice::TimeframeWriterDevice()
 {
 }
 
-void TimeframeWriterDevice::InitTask()
+void TimeframeWriterDevice::initTask()
 {
   mInChannelName = GetConfig()->GetValue<std::string>(OptionKeyInputChannelName);
   mOutFileName = GetConfig()->GetValue<std::string>(OptionKeyOutputFileName);
@@ -50,7 +50,7 @@ void TimeframeWriterDevice::InitTask()
   mMaxFiles = GetConfig()->GetValue<size_t>(OptionKeyMaxFiles);
 }
 
-void TimeframeWriterDevice::Run()
+void TimeframeWriterDevice::run()
 {
   boost::filesystem::path p(mOutFileName);
   size_t streamedTimeframes = 0;
@@ -86,7 +86,7 @@ void TimeframeWriterDevice::Run()
   }
 }
 
-void TimeframeWriterDevice::PostRun()
+void TimeframeWriterDevice::postRun()
 {
   if (mFile.is_open()) {
     mFile.flush();

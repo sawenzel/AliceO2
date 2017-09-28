@@ -31,15 +31,15 @@ namespace o2 {
           int z() const { return mVector[2]; }
           int d0() const { return md0; }
           int d1() const { return md1; }
-          int GetLevel() const { return mVector[3]; }
-          float GetCurvature() const { return m1OverR; }
-          std::array<float,3>& GetN() { return mN; }
+          int getLevel() const { return mVector[3]; }
+          float getCurvature() const { return m1OverR; }
+          std::array<float,3>& getN() { return mN; }
 
-          void SetLevel(int lev) { mVector[3] = lev; }
+          void setLevel(int lev) { mVector[3] = lev; }
 
           int operator()(const int i) { return mVector[4 + i]; }
 
-          std::vector<int>::size_type NumberOfNeighbours() { return (mVector.size() - 4u); }
+          std::vector<int>::size_type numberOfNeighbours() { return (mVector.size() - 4u); }
 
           bool Combine(Cell &neigh, int idd);
 
@@ -53,11 +53,11 @@ namespace o2 {
       class Road {
         public:
           Road() : Elements(), N(0) {
-            ResetElements();
+            resetElements();
           }
 
           Road(int layer, int idd) : Elements(), N() {
-            ResetElements();
+            resetElements();
             N = 1;
             Elements[layer] = idd;
           }
@@ -72,13 +72,13 @@ namespace o2 {
             return Elements[i];
           }
 
-          void ResetElements() {
+          void resetElements() {
             for ( int i=0; i<5; ++i )
               Elements[i] = -1;
             N = 0;
           }
 
-          void AddElement(int i, int el) {
+          void addElement(int i, int el) {
             ++N;
             Elements[i] = el;
           }
@@ -102,14 +102,14 @@ namespace o2 {
         public:
           Track(float x, float a, std::array<float,Base::Track::kNParams> p, std::array<float,Base::Track::kCovMatSize> c, int *cl);
 
-          int* Clusters() { return mCl; }
-          Base::Track::TrackParCov& Param() { return mT; }
+          int* clusters() { return mCl; }
+          Base::Track::TrackParCov& param() { return mT; }
 
-          int GetLabel() const { return mLabel; }
-          float GetChi2() const { return mChi2; }
+          int getLabel() const { return mLabel; }
+          float getChi2() const { return mChi2; }
 
-          void SetLabel(int label) { mLabel = label; }
-          void SetChi2(float chi) { mChi2 = chi; }
+          void setLabel(int label) { mLabel = label; }
+          void setChi2(float chi) { mChi2 = chi; }
 
           bool Update(const Cluster& cl);
           bool GetPhiZat(float r, float bfield,float &phi, float &z) const;
@@ -150,7 +150,7 @@ namespace o2 {
         return x.f;
       }
 
-      inline float Curvature(float x1, float y1, float x2, float y2, float x3, float y3) {
+      inline float curvature(float x1, float y1, float x2, float y2, float x3, float y3) {
         //
         // Initial approximation of the track curvature
         //
@@ -160,7 +160,7 @@ namespace o2 {
               ((x3 - x1) * (x3 - x1) + (y3 - y1) * (y3 - y1)));
       }
 
-      inline float TanLambda(float x1, float y1, float x2, float y2, float z1, float z2) {
+      inline float tanLambda(float x1, float y1, float x2, float y2, float z1, float z2) {
         //
         // Initial approximation of the tangent of the track dip angle
         //

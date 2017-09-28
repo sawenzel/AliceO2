@@ -51,7 +51,7 @@ void Digitizer::init()
 //  mDebugTreePRF->Branch("GEMresponse", &GEMresponse, "CRU:timeBin:row:pad:nElectrons");
 }
 
-DigitContainer *Digitizer::Process(TClonesArray *points)
+DigitContainer *Digitizer::process(TClonesArray *points)
 {
 //  mDigitContainer->reset();
   const static Mapper& mapper = Mapper::instance();
@@ -74,7 +74,7 @@ DigitContainer *Digitizer::Process(TClonesArray *points)
   for(auto pointObject : *points) {
 #ifdef TPC_GROUPED_HITS
     auto *inputgroup = static_cast<LinkableHitGroup*>(pointObject);
-    const int MCTrackID = inputgroup->GetTrackID();
+    const int MCTrackID = inputgroup->getTrackID();
     for(size_t hitindex = 0; hitindex<inputgroup->getSize(); ++hitindex){
       ElementalHit eh = inputgroup->getHit(hitindex);
       auto *inputpoint = &eh;
@@ -83,10 +83,10 @@ DigitContainer *Digitizer::Process(TClonesArray *points)
     const int MCTrackID = inputpoint->GetTrackID();
 #endif
 
-    const GlobalPosition3D posEle(inputpoint->GetX(), inputpoint->GetY(), inputpoint->GetZ());
+    const GlobalPosition3D posEle(inputpoint->getX(), inputpoint->getY(), inputpoint->getZ());
 
     // The energy loss stored is really nElectrons
-    const int nPrimaryElectrons = static_cast<int>(inputpoint->GetEnergyLoss());
+    const int nPrimaryElectrons = static_cast<int>(inputpoint->getEnergyLoss());
 
     /// Loop over electrons
     /// \todo can be vectorized?
@@ -97,7 +97,7 @@ DigitContainer *Digitizer::Process(TClonesArray *points)
       const GlobalPosition3D posEleDiff = electronTransport.getElectronDrift(posEle);
 
       /// \todo Time management in continuous mode (adding the time of the event?)
-      const float driftTime = getTime(posEleDiff.Z()) + inputpoint->GetTime() * 0.001; /// in us
+      const float driftTime = getTime(posEleDiff.Z()) + inputpoint->getTime() * 0.001; /// in us
       const float absoluteTime = driftTime + eventTime;
 
       /// Attachment

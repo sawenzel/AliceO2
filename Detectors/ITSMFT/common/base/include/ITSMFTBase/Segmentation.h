@@ -64,21 +64,21 @@ class Segmentation : public TObject
     ~OutOfActiveAreaException() throw() override = default;
     /// Get the value for which the exception was raised
     /// @return Value (point in one direction)
-    Double_t GetValue() const { return mValue; }
+    Double_t getValue() const { return mValue; }
     /// Get the lower limit in direction for which the exception
     /// was raised
     /// @return Lower limit of the direction
-    Double_t GetLowerLimit() const { return mLower; }
+    Double_t getLowerLimit() const { return mLower; }
     /// Get the upper limit in direction for which the exception
     /// was raised
     /// @return Upper limit of the direction
-    Double_t GetUpperLimit() const { return mUpper; }
+    Double_t getUpperLimit() const { return mUpper; }
     /// Check whether exception was raised in x-directon
     /// @return True if exception was raised in x-direction, false otherwise
-    Bool_t IsX() const { return mDirection == kX; }
+    Bool_t isX() const { return mDirection == kX; }
     /// Check whether exception was raised in z-direction
     /// @return True if exception was raised in z-direction, false otherwise
-    Bool_t IsZ() const { return mDirection == kZ; }
+    Bool_t isZ() const { return mDirection == kZ; }
     /// Provide error message string containing direction,
     /// value of the point, and limits
     /// @return Error message
@@ -120,16 +120,16 @@ class Segmentation : public TObject
     ~InvalidPixelException() override = default;
     /// Get the ID of the pixel which raised the exception
     /// @return ID of the pixel
-    Int_t GetPixelID() const { return mValue; }
+    Int_t getPixelID() const { return mValue; }
     /// Get the maximum number of pixels in a given direction
     /// @return Max. number of pixels
-    Int_t GetMaxNumberOfPixels() const { return mMaxPixelID; }
+    Int_t getMaxNumberOfPixels() const { return mMaxPixelID; }
     /// Check whether exception was raised in x-directon
     /// @return True if exception was raised in x-direction, false otherwise
-    Bool_t IsX() const { return mDirection == kX; }
+    Bool_t isX() const { return mDirection == kX; }
     /// Check whether exception was raised in z-direction
     /// @return True if exception was raised in z-direction, false otherwise
-    Bool_t IsZ() const { return mDirection == kZ; }
+    Bool_t isZ() const { return mDirection == kZ; }
     /// Provide error message string containing direction,
     /// index of the pixel out of range, and the maximum pixel ID
     const char* what() const noexcept override { return mErrorMessage.c_str(); }
@@ -224,16 +224,16 @@ class Segmentation : public TObject
   virtual Bool_t detectorToLocal(Int_t, Int_t, Float_t&, Float_t&) const = 0;
 
   /// Initialisation
-  virtual void Init() = 0;
+  virtual void init() = 0;
 
   /// Get member data
 
   /// Detector length
-  virtual Float_t Dx() const { return mDx; }
+  virtual Float_t dx() const { return mDx; }
   /// Detector width
-  virtual Float_t Dz() const { return mDz; }
+  virtual Float_t dz() const { return mDz; }
   /// Detector thickness
-  virtual Float_t Dy() const { return mDy; }
+  virtual Float_t dy() const { return mDy; }
   /// Cell size in x
   virtual Float_t cellSizeX(Int_t) const = 0;
 
@@ -269,7 +269,7 @@ class Segmentation : public TObject
   virtual void printDefaultParameters() const = 0;
 
  protected:
-  void Copy(TObject& obj) const override;
+  void copy(TObject& obj) const override;
 
   Float_t mDx; // SPD: Full width of the detector (x axis)- microns
   // SDD: Drift distance of the 1/2detector (x axis)-microns

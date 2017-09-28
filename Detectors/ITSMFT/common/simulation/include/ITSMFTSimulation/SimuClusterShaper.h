@@ -34,28 +34,28 @@ namespace o2 {
       SimuClusterShaper();
       SimuClusterShaper(const UInt_t &cs);
       ~SimuClusterShaper() override;
-      void FillClusterRandomly();
-      void FillClusterSorted();
-      inline void SetFireCenter(Bool_t v) {
+      void fillClusterRandomly();
+      void fillClusterSorted();
+      inline void setFireCenter(Bool_t v) {
         mFireCenter = v;
       }
-      void AddNoisePixel();
+      void addNoisePixel();
 
-      inline void    SetHit(Int_t ix, Int_t iz, Float_t x, Float_t z, const SegmentationPixel* seg) {
+      inline void    setHit(Int_t ix, Int_t iz, Float_t x, Float_t z, const SegmentationPixel* seg) {
         mHitC = ix;
         mHitR = iz;
         mHitX = x;
         mHitZ = z;
         mSeg  = seg;
       }
-      inline UInt_t  GetNRows() {return mCShape->GetNRows();}
-      inline UInt_t  GetNCols() {return mCShape->GetNCols();}
-      inline void    GetShape(std::vector<UInt_t>& v) {mCShape->GetShape(v);}
-      inline UInt_t  GetCenterR() {return mCShape->GetCenterR();}
-      inline UInt_t  GetCenterC() {return mCShape->GetCenterC();}
-      inline size_t  GetCS() {return mCShape->GetNFiredPixels();}
+      inline UInt_t  getNRows() {return mCShape->getNRows();}
+      inline UInt_t  getNCols() {return mCShape->getNCols();}
+      inline void    getShape(std::vector<UInt_t>& v) {mCShape->getShape(v);}
+      inline UInt_t  getCenterR() {return mCShape->getCenterR();}
+      inline UInt_t  getCenterC() {return mCShape->getCenterC();}
+      inline size_t  getCS() {return mCShape->getNFiredPixels();}
 
-      inline std::string ShapeSting(UInt_t cs, UInt_t *cshape) const {
+      inline std::string shapeSting(UInt_t cs, UInt_t *cshape) const {
         std::stringstream out;
         for (Int_t i = 0; i < cs; ++i) {
           out << cshape[i];
@@ -65,7 +65,7 @@ namespace o2 {
       }
 
     private:
-      void ReComputeCenters();
+      void reComputeCenters();
 
       Float_t mHitX;
       Float_t mHitZ;

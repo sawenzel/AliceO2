@@ -48,13 +48,13 @@ class Clusterer {
     virtual ~Clusterer() = default;
     
     /// Initialization function for clusterer
-    virtual void Init() = 0;
+    virtual void init() = 0;
     
     /// Processing all digits
     /// \param digits Container with TPC digits
     /// \return Container with clusters
-    virtual ClusterContainer* Process(TClonesArray *digits) = 0;
-    virtual ClusterContainer* Process(std::vector<std::unique_ptr<Digit>>& digits) = 0;
+    virtual ClusterContainer* process(TClonesArray *digits) = 0;
+    virtual ClusterContainer* process(std::vector<std::unique_ptr<Digit>>& digits) = 0;
 
     void setRowsMax(int val)                    { mRowsMax = val; };
     void setPadsMax(int val)                    { mPadsMax = val; };

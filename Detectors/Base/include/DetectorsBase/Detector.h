@@ -42,13 +42,13 @@ class Detector : public FairDetector
     ~Detector() override;
 
     // Module composition
-    void Material(Int_t imat, const char *name, Float_t a, Float_t z, Float_t dens, Float_t radl, Float_t absl,
+    void material(Int_t imat, const char *name, Float_t a, Float_t z, Float_t dens, Float_t radl, Float_t absl,
                   Float_t *buf = nullptr, Int_t nwbuf = 0);
 
-    void Mixture(Int_t imat, const char *name, Float_t *a, Float_t *z, Float_t dens, Int_t nlmat,
+    void mixture(Int_t imat, const char *name, Float_t *a, Float_t *z, Float_t dens, Int_t nlmat,
                  Float_t *wmat);
 
-    void Medium(Int_t numed, const char *name, Int_t nmat, Int_t isvol, Int_t ifield, Float_t fieldm,
+    void medium(Int_t numed, const char *name, Int_t nmat, Int_t isvol, Int_t ifield, Float_t fieldm,
                 Float_t tmaxfd, Float_t stemax, Float_t deemax, Float_t epsil, Float_t stmin, Float_t *ubuf = nullptr,
                 Int_t nbuf = 0);
 
@@ -60,7 +60,7 @@ class Detector : public FairDetector
     /// \param phi1 azimuthal angle for axis I
     /// \param phi2 azimuthal angle for axis II
     /// \param phi3 azimuthal angle for axis III
-    void Matrix(Int_t &nmat, Float_t theta1, Float_t phi1, Float_t theta2, Float_t phi2, Float_t theta3,
+    void matrix(Int_t &nmat, Float_t theta1, Float_t phi1, Float_t theta2, Float_t phi2, Float_t theta3,
                 Float_t phi3) const;
 
     static void setDensityFactor(Float_t density)

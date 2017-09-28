@@ -25,7 +25,7 @@
 #include <cstring> // strncpy
 
 //the answer to life and everything
-const uint32_t o2::Header::BaseHeader::sMagicString = String2<uint32_t>("O2O2");
+const uint32_t o2::Header::BaseHeader::sMagicString = String2<uintstring2>("O2O2");
 
 //possible serialization types
 const o2::Header::SerializationMethod o2::Header::gSerializationMethodAny    ("*******");
@@ -74,7 +74,7 @@ const o2::Header::SerializationMethod o2::Header::BaseHeader::sSerializationMeth
 
 //storage for DataHeader static members
 const uint32_t o2::Header::DataHeader::sVersion = 1;
-const o2::Header::HeaderType o2::Header::DataHeader::sHeaderType = String2<uint64_t>("DataHead");
+const o2::Header::HeaderType o2::Header::DataHeader::sHeaderType = String2<uintstring2>("DataHead");
 const o2::Header::SerializationMethod o2::Header::DataHeader::sSerializationMethod = o2::Header::gSerializationMethodNone;
 
 //storage fr NameHeader static

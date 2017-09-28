@@ -81,14 +81,14 @@ HalfDiskSegmentation::HalfDiskSegmentation(const HalfDiskSegmentation& input):
 HalfDiskSegmentation::~HalfDiskSegmentation() 
 {
 
-  Clear("");
+  clear("");
 
 }
 
 /// Clear the TClonesArray holding the ladder segmentations
 
 //_____________________________________________________________________________
-void HalfDiskSegmentation::Clear(const Option_t* /*opt*/) 
+void HalfDiskSegmentation::clear(const Option_t* /*opt*/) 
 {
 
   if (mLadders) mLadders->Delete();

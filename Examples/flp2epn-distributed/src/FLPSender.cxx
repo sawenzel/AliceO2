@@ -51,7 +51,7 @@ FLPSender::FLPSender()
 FLPSender::~FLPSender()
 = default;
 
-void FLPSender::InitTask()
+void FLPSender::initTask()
 {
   mIndex = GetConfig()->GetValue<int>("flp-index");
   mEventSize = GetConfig()->GetValue<int>("event-size");
@@ -63,7 +63,7 @@ void FLPSender::InitTask()
   mOutChannelName = GetConfig()->GetValue<string>("out-chan-name");
 }
 
-void FLPSender::Run()
+void FLPSender::run()
 {
   // base buffer, to be copied from for every timeframe body (zero-copy)
   FairMQMessagePtr baseMsg(NewMessage(mEventSize));

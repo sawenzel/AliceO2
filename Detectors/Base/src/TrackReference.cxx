@@ -146,10 +146,10 @@ TrackReference::TrackReference(Int_t label, Int_t id)
 //   return track;
 // }
 
-void TrackReference::Print(Option_t * /*opt*/) const
+void TrackReference::print(Option_t * /*opt*/) const
 {
   cout << Form("Label %d P=%7.2f (PX,PY,PZ)=(%7.2f,%7.2f,%7.2f) (X,Y,Z)=(%7.2f,%7.2f,%7.2f)"
                  " Length=%7.2f Time=%7.2f UserId=%d",
-               Label(), P(), Px(), Py(), Pz(), X(), Y(), Z(), GetLength(), GetTime(), UserId())
+               label(), p(), px(), py(), pz(), x(), y(), z(), getLength(), getTime(), userId())
   << endl;
 }

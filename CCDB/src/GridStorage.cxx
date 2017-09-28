@@ -293,7 +293,7 @@ Bool_t GridStorage::prepareId(ConditionId &id)
 
   // GRP entries with explicitly set version escape default incremental versioning
   if (id.getPathString().Contains("GRP") && id.hasVersion() && lastVersion != 0) {
-    LOG(DEBUG) << "Condition " << id.ToString().Data() << " won't be put in the destination OCDB" << FairLogger::endl;
+    LOG(DEBUG) << "Condition " << id.toString().Data() << " won't be put in the destination OCDB" << FairLogger::endl;
     return kFALSE;
   }
 
@@ -439,7 +439,7 @@ Condition *GridStorage::getCondition(const ConditionId &queryId)
   ConditionId *dataId = getConditionId(queryId);
 
   if (!dataId) {
-    LOG(FATAL) << "No valid CDB object found! request was: " << queryId.ToString().Data() << FairLogger::endl;
+    LOG(FATAL) << "No valid CDB object found! request was: " << queryId.toString().Data() << FairLogger::endl;
     return nullptr;
   }
 
@@ -447,14 +447,14 @@ Condition *GridStorage::getCondition(const ConditionId &queryId)
   if (!idToFilename(*dataId, filename)) {
     LOG(DEBUG) << "Bad data ID encountered! Subnormal error!" << FairLogger::endl;
     delete dataId;
-    LOG(FATAL) << "No valid CDB object found! request was: " << queryId.ToString().Data() << FairLogger::endl;
+    LOG(FATAL) << "No valid CDB object found! request was: " << queryId.toString().Data() << FairLogger::endl;
   }
 
   Condition *anCondition = getConditionFromFile(filename, dataId);
 
   delete dataId;
   if (!anCondition)
-    LOG(FATAL) << "No valid CDB object found! request was: " << queryId.ToString().Data() << FairLogger::endl;
+    LOG(FATAL) << "No valid CDB object found! request was: " << queryId.toString().Data() << FairLogger::endl;
 
   return anCondition;
 }
@@ -512,8 +512,8 @@ Condition *GridStorage::getConditionFromFile(TString &filename, ConditionId *dat
     dataId->setSubVersion(entryId.getSubVersion()); // otherwise filename and id may mismatch
     if (!entryId.isEqual(dataId)) {
       LOG(WARNING) << "Mismatch between file name and object's ConditionId!" << FairLogger::endl;
-      LOG(WARNING) << "File name: " << dataId->ToString().Data() << FairLogger::endl;
-      LOG(WARNING) << "Object's ConditionId: " << entryId.ToString().Data() << FairLogger::endl;
+      LOG(WARNING) << "File name: " << dataId->toString().Data() << FairLogger::endl;
+      LOG(WARNING) << "Object's ConditionId: " << entryId.toString().Data() << FairLogger::endl;
     }
     dataId->setSubVersion(tmpSubVersion);
   }
@@ -831,7 +831,7 @@ Bool_t GridStorage::putCondition(Condition *entry, const char *mirrors)
         remainingSEs++;
       } else {
         reOpenResult = kTRUE;
-        if (!Manager::Instance()->isOcdbUploadMode()) {
+        if (!Manager::Instance(instance->isOcdbUploadMode()) {
           reopenedFile->Close();
           delete reopenedFile;
           reopenedFile = nullptr;
@@ -888,7 +888,7 @@ Bool_t GridStorage::putCondition(Condition *entry, const char *mirrors)
   arraySEs->Delete();
   arraySEs = nullptr;
 
-  if (Manager::Instance()->isOcdbUploadMode()) { // if uploading to OCDBs, add to cvmfs too
+  if (Manager::Instance(instance->isOcdbUploadMode()) { // if uploading to OCDBs, add to cvmfs too
     if (!filename.BeginsWith("/alice/data") && !filename.BeginsWith("/alice/simulation/2008/v4-15-Release")) {
       LOG(ERROR) << R"(Cannot upload to CVMFS OCDBs a non official CDB object: ")" << filename.Data() << R"("!)"
                  << FairLogger::endl;
@@ -1360,7 +1360,7 @@ Storage *GridStorageFactory::createStorage(const StorageParameters *param)
   GridStorage *grid = nullptr;
   if (GridStorageParameters::Class() == param->IsA()) {
     const GridStorageParameters *gridParam = (const GridStorageParameters *) param;
-    grid = new GridStorage(gridParam->GridUrl().Data(), gridParam->getUser().Data(), gridParam->getDBFolder().Data(),
+    grid = new GridStorage(gridParam->gridUrl().Data(), gridParam->getUser().Data(), gridParam->getDBFolder().Data(),
                            gridParam->getSE().Data(), gridParam->getCacheFolder().Data(),
                            gridParam->getOperateDisconnected(),
                            gridParam->getCacheSize(), gridParam->getCleanupInterval());

@@ -31,7 +31,7 @@ DataSourceDevice::DataSourceDevice(const DeviceSpec &spec, ServiceRegistry &regi
 {
 }
 
-void DataSourceDevice::Init() {
+void DataSourceDevice::init() {
   LOG(DEBUG) << "DataSourceDevice::InitTask::START\n";
   LOG(DEBUG) << "Init thread" << pthread_self();
   std::unique_ptr<ParamRetriever> retriever{new FairOptionsRetriever(GetConfig())};

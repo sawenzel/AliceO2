@@ -38,18 +38,18 @@ MagFieldParam::MagFieldParam(const char* name, const char* title, const char* co
   /// create param for alice mag. field
 }
 
-void MagFieldParam::SetParam(const MagneticField* field)
+void MagFieldParam::setParam(const MagneticField* field)
 {
   /// fill parameters from the initialized field
   //  SetName(field->GetName()); ? is this needed
   //  SetTitle(field->GetTitle());
   mMapType = field->getMapType();
   mBeamType = field->getBeamType();
-  mDefaultIntegration = field->Integral();
+  mDefaultIntegration = field->integral();
   mFactorSol = field->getFactorSolenoid();
   mFactorDip = field->getFactorDipole();
   mBeamEnergy = field->getBeamEnergy();
-  mMaxField = field->Max();
+  mMaxField = field->max();
   mMapPath = field->getDataFileName();
   //
 }

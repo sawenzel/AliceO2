@@ -38,7 +38,7 @@ MagFieldFact::MagFieldFact()
 MagFieldFact::~MagFieldFact()
 = default;
 
-void MagFieldFact::SetParm()
+void MagFieldFact::setParm()
 {
   FairRunAna *Run = FairRunAna::Instance();
   FairRuntimeDb *RunDB = Run->GetRuntimeDb();

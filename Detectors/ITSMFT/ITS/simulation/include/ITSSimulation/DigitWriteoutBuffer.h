@@ -37,13 +37,13 @@ class DigitWriteoutBuffer : public FairWriteoutBuffer
     ~DigitWriteoutBuffer() override;
 
     // Implementation of virtual function required by the interface
-    void AddNewDataToTClonesArray(FairTimeStamp *) override;
+    void addNewDataToTClonesArray(FairTimeStamp *) override;
 
-    double FindTimeForData(FairTimeStamp *) override;
+    double findTimeForData(FairTimeStamp *) override;
 
-    void FillDataMap(FairTimeStamp *data, double activeTime) override;
+    void fillDataMap(FairTimeStamp *data, double activeTime) override;
 
-    void EraseDataFromDataMap(FairTimeStamp *data) override;
+    void eraseDataFromDataMap(FairTimeStamp *data) override;
 
   protected:
     std::map<o2::ITSMFT::Digit, double> mData_map;

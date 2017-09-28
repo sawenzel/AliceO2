@@ -27,11 +27,11 @@ bool Digit::operator<(const Digit &other) const {
   return GetTimeStamp() < other.GetTimeStamp();
 }
 
-void Digit::PrintStream(std::ostream &stream) const {
+void Digit::printStream(std::ostream &stream) const {
   stream << "EMCAL Digit: Module " << mModule <<", Tower " << mTower << ", Time " << GetTimeStamp() << " wiht amplitude " << mAmplitude;
 }
 
 std::ostream& operator<<(std::ostream &stream, const Digit &digi){
-  digi.PrintStream(stream);
+  digi.printStream(stream);
   return stream;
 }

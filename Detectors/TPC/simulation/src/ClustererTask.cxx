@@ -59,7 +59,7 @@ ClustererTask::~ClustererTask()
 //_____________________________________________________________________
 /// \brief Init function
 /// Inititializes the clusterer and connects input and output container
-InitStatus ClustererTask::Init()
+InitStatus ClustererTask::init()
 {
   LOG(DEBUG) << "Enter Initializer of ClustererTask" << FairLogger::endl;
 
@@ -78,7 +78,7 @@ InitStatus ClustererTask::Init()
 
   if (mBoxClustererEnable) {
     mBoxClusterer = new BoxClusterer();
-    mBoxClusterer->Init();
+    mBoxClusterer->init();
     
     // Register output container
     mClustersArray = new TClonesArray("o2::TPC::Cluster");
@@ -88,7 +88,7 @@ InitStatus ClustererTask::Init()
   if (mHwClustererEnable) {
     mHwClusterer = new HwClusterer();
     mHwClusterer->setContinuousReadout(mIsContinuousReadout);
-    mHwClusterer->Init();
+    mHwClusterer->init();
 // TODO: implement noise/pedestal objecta
 //    mHwClusterer->setNoiseObject();
 //    mHwClusterer->setPedestalObject();
@@ -102,20 +102,20 @@ InitStatus ClustererTask::Init()
 }
 
 //_____________________________________________________________________
-void ClustererTask::Exec(Option_t *option)
+void ClustererTask::exec(Option_t *option)
 {
   LOG(DEBUG) << "Running clusterization on new event with " << mDigitsArray->GetEntriesFast() << " digits" << FairLogger::endl;
 
   if (mBoxClustererEnable) {
     mClustersArray->Clear();
-    ClusterContainer* clusters = mBoxClusterer->Process(mDigitsArray);
-    clusters->FillOutputContainer(mClustersArray);
+    ClusterContainer* clusters = mBoxClusterer->process(mDigitsArray);
+    clusters->fillOutputContainer(mClustersArray);
   }
 
   if (mHwClustererEnable) {
     mHwClustersArray->Clear();
-    ClusterContainer* hwClusters = mHwClusterer->Process(mDigitsArray);
-    hwClusters->FillOutputContainer(mHwClustersArray);
+    ClusterContainer* hwClusters = mHwClusterer->process(mDigitsArray);
+    hwClusters->fillOutputContainer(mHwClustersArray);
     LOG(DEBUG) << "Hw clusterer found " << mHwClustersArray->GetEntriesFast() << " clusters" << FairLogger::endl;
   }
 

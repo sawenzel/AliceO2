@@ -72,7 +72,7 @@ WrapperDevice::~WrapperDevice()
 
 constexpr const char* WrapperDevice::OptionKeys[];
 
-bpo::options_description WrapperDevice::GetOptionsDescription()
+bpo::options_description WrapperDevice::getOptionsDescription()
 {
   // assemble the options for the device class and component
   bpo::options_description od("WrapperDevice options");
@@ -83,11 +83,11 @@ bpo::options_description WrapperDevice::GetOptionsDescription()
     ((std::string(OptionKeys[OptionKeyDryRun]) + ",n").c_str(),
      bpo::value<bool>()->zero_tokens()->default_value(false),
      "skip component processing");
-  od.add(Component::GetOptionsDescription());
+  od.add(Component::GetOptionsDescrgetOptionsDescription());
   return od;
 }
 
-void WrapperDevice::InitTask()
+void WrapperDevice::initTask()
 {
   /// inherited from FairMQDevice
 
@@ -102,7 +102,7 @@ void WrapperDevice::InitTask()
   // option_description entires, but options_description does not
   // provide such a functionality
   vector<std::string> argstrings;
-  bpo::options_description componentOptionDescriptions = Component::GetOptionsDescription();
+  bpo::options_description componentOptionDescriptions = Component::GetOptionsDescrgetOptionsDescription();
   const auto * config = GetConfig();
   if (config) {
     const auto varmap = config->GetVarMap();
@@ -159,7 +159,7 @@ void WrapperDevice::InitTask()
   mNSamples=0;
 }
 
-void WrapperDevice::Run()
+void WrapperDevice::run()
 {
   /// inherited from FairMQDevice
   int iResult=0;

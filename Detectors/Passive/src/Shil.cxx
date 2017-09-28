@@ -48,7 +48,7 @@ Shil& Shil::operator=(const Shil& rhs)
 namespace
 {
 // only here temporarily, I would like to harmonize Material treatment (outside of base detector)
-int Material(Int_t imat, const char* name, Float_t a, Float_t z, Float_t dens, Float_t radl, Float_t absl,
+int material(Int_t imat, const char* name, Float_t a, Float_t z, Float_t dens, Float_t radl, Float_t absl,
              Float_t* buf = nullptr, Int_t nwbuf = 0)
 {
   int kmat = -1;
@@ -56,7 +56,7 @@ int Material(Int_t imat, const char* name, Float_t a, Float_t z, Float_t dens, F
   return kmat;
 }
 
-int Mixture(Int_t imat, const char* name, Float_t* a, Float_t* z, Float_t dens, Int_t nlmat, Float_t* wmat = nullptr)
+int mixture(Int_t imat, const char* name, Float_t* a, Float_t* z, Float_t dens, Int_t nlmat, Float_t* wmat = nullptr)
 {
   // Check this!!!
   int kmat = -1;
@@ -64,7 +64,7 @@ int Mixture(Int_t imat, const char* name, Float_t* a, Float_t* z, Float_t dens, 
   return kmat;
 }
 
-int Medium(Int_t numed, const char* name, Int_t nmat, Int_t isvol, Int_t ifield, Float_t fieldm, Float_t tmaxfd,
+int medium(Int_t numed, const char* name, Int_t nmat, Int_t isvol, Int_t ifield, Float_t fieldm, Float_t tmaxfd,
            Float_t stemax, Float_t deemax, Float_t epsil, Float_t stmin, Float_t* ubuf = nullptr, Int_t nbuf = 0)
 {
   // Check this!!!
@@ -74,7 +74,7 @@ int Medium(Int_t numed, const char* name, Int_t nmat, Int_t isvol, Int_t ifield,
   return kmed;
 }
 
-void InvertPcon(TGeoPcon* pcon)
+void invertPcon(TGeoPcon* pcon)
 {
   //
   //  z -> -z
@@ -104,7 +104,7 @@ void InvertPcon(TGeoPcon* pcon)
   delete[] rmax;
 }
 
-TGeoPcon* MakeShapeFromTemplate(const TGeoPcon* pcon, Float_t drMin, Float_t drMax)
+TGeoPcon* makeShapeFromTemplate(const TGeoPcon* pcon, Float_t drMin, Float_t drMax)
 {
   //
   // Returns new shape based on a template changing
@@ -118,7 +118,7 @@ TGeoPcon* MakeShapeFromTemplate(const TGeoPcon* pcon, Float_t drMin, Float_t drM
 }
 }
 
-void Shil::ConstructGeometry()
+void Shil::constructGeometry()
 {
   createMaterials();
 
@@ -604,7 +604,7 @@ void Shil::ConstructGeometry()
   TGeoVolume* voSaa1PbComp = new TGeoVolume("YSAA1_PbComp", shSaa1PbComp, kMedPb);
   //
   // Inner region with higher transport cuts
-  TGeoPcon* shSaa1PbCompI = MakeShapeFromTemplate(shSaa1PbComp, 0., -3.);
+  TGeoPcon* shSaa1PbCompI = MakeShapeFromTemplate(smakeShapeFromTemplate, 0., -3.);
   TGeoVolume* voSaa1PbCompI = new TGeoVolume("YSAA1_PbCompI", shSaa1PbCompI, kMedPbSh);
   voSaa1PbComp->AddNode(voSaa1PbCompI, 1, gGeoIdentity);
 
@@ -898,13 +898,13 @@ void Shil::ConstructGeometry()
   //    Mother volume and outer steel envelope
   Float_t rOuSaa1Saa2Steel = 36.9;
 
-  TGeoPcon* shSaa1Saa2 = MakeShapeFromTemplate(shSaa1Saa2Pb, 0., rOuSaa1Saa2Steel - rOuSaa1Saa2);
+  TGeoPcon* shSaa1Saa2 = MakeShapeFromTemplate(smakeShapeFromTemplate, 0., rOuSaa1Saa2Steel - rOuSaa1Saa2);
   TGeoVolume* voSaa1Saa2 = new TGeoVolume("YSAA1SAA2", shSaa1Saa2, kMedSteel);
   voSaa1Saa2->AddNode(voSaa1Saa2Pb, 1, gGeoIdentity);
   //
   //    Inner region with higher transport cuts
   //
-  TGeoPcon* shSaa1Saa2I = MakeShapeFromTemplate(shSaa1Saa2Pb, 0., -3.);
+  TGeoPcon* shSaa1Saa2I = MakeShapeFromTemplate(smakeShapeFromTemplate, 0., -3.);
   TGeoVolume* voSaa1Saa2I = new TGeoVolume("YSAA1_SAA2I", shSaa1Saa2I, kMedPbSh);
   voSaa1Saa2Pb->AddNode(voSaa1Saa2I, 1, gGeoIdentity);
 
@@ -1328,7 +1328,7 @@ void Shil::ConstructGeometry()
   shYOUT1->DefineSection(23, ziDipole, rOut + eps, 150.);
 
   InvertPcon(shYOUT1);
-  TGeoVolume* voYOUT1 = new TGeoVolume("YOUT1", shYOUT1, kMedAirMu);
+  invertPcon* voYOUT1 = new TGeoVolume("YOUT1", shYOUT1, kMedAirMu);
   voYOUT1->SetVisibility(0);
 
   voYOUT1->AddNode(asSaa1ExtraShield, 1,
@@ -1371,7 +1371,7 @@ void Shil::ConstructGeometry()
   shYOUT21->DefineSection(13, z, rInSaa2StEnv2 + dSt, 460.);
 
   InvertPcon(shYOUT21);
-  shYOUT21->SetName("shYOUT21");
+ invertPcon shYOUT21->SetName("shYOUT21");
 
   TGeoBBox* shYOUT22 = new TGeoBBox(460., 200., 65. - 1.5);
   shYOUT22->SetName("shYOUT22");
@@ -1449,112 +1449,112 @@ void Shil::createMaterials()
   // ***************
 
   //    Aluminum
-  auto kalu0 = Material(9, "ALU1      ", 26.98, 13., 2.7, 8.9, 37.2);
-  auto kalu1 = Material(29, "ALU2      ", 26.98, 13., 2.7, 8.9, 37.2);
-  auto kalu2 = Material(49, "ALU3      ", 26.98, 13., 2.7, 8.9, 37.2);
-  Medium(9, "SHIL_ALU_C0          ", kalu0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(29, "SHIL_ALU_C1          ", kalu1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(49, "SHIL_ALU_C2          ", kalu2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto kalu0 = Material(9, "ALU1      material
+  auto kalu1 = Material(29, "ALU2     material ", 26.98, 13., 2.7, 8.9, 37.2);
+  auto kalu2 = Material(49, "ALU3     material ", 26.98, 13., 2.7, 8.9, 37.2);
+  Medium(9, "SHIL_ALU_C0 medium         ", kalu0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(29, "SHIL_ALU_C1medium          ", kalu1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(49, "SHIL_ALU_C2medium          ", kalu2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //    Iron
-  auto kir0 = Material(10, "IRON1     ", 55.85, 26., 7.87, 1.76, 17.1);
-  auto kir1 = Material(30, "IRON2     ", 55.85, 26., 7.87, 1.76, 17.1);
-  auto kir2 = Material(50, "IRON3     ", 55.85, 26., 7.87, 1.76, 17.1);
-  Medium(10, "SHIL_FE_C0           ", kir0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(30, "SHIL_FE_C1           ", kir1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(50, "SHIL_FE_C2           ", kir2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto kir0 = Material(10, "IRON1    material ", 55.85, 26., 7.87, 1.76, 17.1);
+  auto kir1 = Material(30, "IRON2    material ", 55.85, 26., 7.87, 1.76, 17.1);
+  auto kir2 = Material(50, "IRON3    material ", 55.85, 26., 7.87, 1.76, 17.1);
+  Medium(10, "SHIL_FE_C0 medium          ", kir0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(30, "SHIL_FE_C1 medium          ", kir1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(50, "SHIL_FE_C2 medium          ", kir2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //    Copper
-  auto kCu0 = Material(11, "COPPER1   ", 63.55, 29., 8.96, 1.43, 15.1);
-  auto kCu1 = Material(31, "COPPER2   ", 63.55, 29., 8.96, 1.43, 15.1);
-  auto kCu2 = Material(51, "COPPER3   ", 63.55, 29., 8.96, 1.43, 15.1);
-  Medium(11, "SHIL_Cu_C0           ", kCu0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(31, "SHIL_Cu_C1           ", kCu1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(51, "SHIL_Cu_C2           ", kCu2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto kCu0 = Material(11, "COPPER1  material ", 63.55, 29., 8.96, 1.43, 15.1);
+  auto kCu1 = Material(31, "COPPER2  material ", 63.55, 29., 8.96, 1.43, 15.1);
+  auto kCu2 = Material(51, "COPPER3  material ", 63.55, 29., 8.96, 1.43, 15.1);
+  Medium(11, "SHIL_Cu_C0 medium          ", kCu0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(31, "SHIL_Cu_C1 medium          ", kCu1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(51, "SHIL_Cu_C2 medium          ", kCu2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //    Tungsten
-  auto ktung0 = Material(12, "TUNGSTEN1 ", 183.85, 74., 19.3, .35, 10.3);
-  auto ktung1 = Material(32, "TUNGSTEN2 ", 183.85, 74., 19.3, .35, 10.3);
-  auto ktung2 = Material(52, "TUNGSTEN3 ", 183.85, 74., 19.3, .35, 10.3);
-  Medium(12, "SHIL_W_C0            ", ktung0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(32, "SHIL_W_C1            ", ktung1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(52, "SHIL_W_C2            ", ktung2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto ktung0 = Material(12, "TUNGSTEN1material ", 183.85, 74., 19.3, .35, 10.3);
+  auto ktung1 = Material(32, "TUNGSTEN2material ", 183.85, 74., 19.3, .35, 10.3);
+  auto ktung2 = Material(52, "TUNGSTEN3material ", 183.85, 74., 19.3, .35, 10.3);
+  Medium(12, "SHIL_W_C0  medium          ", ktung0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(32, "SHIL_W_C1  medium          ", ktung1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(52, "SHIL_W_C2  medium          ", ktung2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //    Lead
-  auto kPb0 = Material(13, "LEAD1     ", 207.19, 82., 11.35, .56, 18.5);
-  auto kPb1 = Material(33, "LEAD2     ", 207.19, 82., 11.35, .56, 18.5);
-  auto kPb2 = Material(53, "LEAD3     ", 207.19, 82., 11.35, .56, 18.5);
-  Medium(13, "SHIL_PB_C0           ", kPb0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(33, "SHIL_PB_C1           ", kPb1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(53, "SHIL_PB_C2           ", kPb2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto kPb0 = Material(13, "LEAD1    material ", 207.19, 82., 11.35, .56, 18.5);
+  auto kPb1 = Material(33, "LEAD2    material ", 207.19, 82., 11.35, .56, 18.5);
+  auto kPb2 = Material(53, "LEAD3    material ", 207.19, 82., 11.35, .56, 18.5);
+  Medium(13, "SHIL_PB_C0 medium          ", kPb0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(33, "SHIL_PB_C1 medium          ", kPb1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(53, "SHIL_PB_C2 medium          ", kPb2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //    Insulation Powder
-  auto kIns0 = Mixture(14, "INSULATION1", ains, zins, 0.41, 4, wins);
-  auto kIns1 = Mixture(34, "INSULATION2", ains, zins, 0.41, 4, wins);
-  auto kIns2 = Mixture(54, "INSULATION3", ains, zins, 0.41, 4, wins);
-  Medium(14, "SHIL_INS_C0          ", kIns0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(34, "SHIL_INS_C1          ", kIns1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(54, "SHIL_INS_C2          ", kIns2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto kIns0 = Mixture(14, "INSULATIONmixture", ains, zins, 0.41, 4, wins);
+  auto kIns1 = Mixture(34, "INSULATIONmixture", ains, zins, 0.41, 4, wins);
+  auto kIns2 = Mixture(54, "INSULATIONmixture", ains, zins, 0.41, 4, wins);
+  Medium(14, "SHIL_INS_C0medium          ", kIns0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(34, "SHIL_INS_C1medium          ", kIns1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(54, "SHIL_INS_C2medium          ", kIns2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //    Air
-  auto kAir0 = Mixture(15, "AIR1      ", aAir, zAir, dAir, 4, wAir);
-  auto kAir1 = Mixture(35, "AIR2      ", aAir, zAir, dAir, 4, wAir);
-  auto kAir2 = Mixture(55, "AIR3      ", aAir, zAir, dAir, 4, wAir);
-  auto kAirM = Mixture(75, "AIR_MUON  ", aAir, zAir, dAir, 4, wAir);
-  Medium(15, "SHIL_AIR_C0          ", kAir0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(35, "SHIL_AIR_C1          ", kAir1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(55, "SHIL_AIR_C2          ", kAir2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(75, "SHIL_AIR_MUON        ", kAirM, 0, isxfld2, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto kAir0 = Mixture(15, "AIR1      mixture
+  auto kAir1 = Mixture(35, "AIR2      mixture
+  auto kAir2 = Mixture(55, "AIR3      mixture
+  auto kAirM = Mixture(75, "AIR_MUON  mixture
+  Medium(15, "SHIL_AIR_C0medium          ", kAir0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(35, "SHIL_AIR_C1medium          ", kAir1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(55, "SHIL_AIR_C2medium          ", kAir2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(75, "SHIL_AIR_MUmedium        ", kAirM, 0, isxfld2, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //    Vacuum
-  auto kVac0 = Mixture(16, "VACUUM1 ", aAir, zAir, dAir1, 4, wAir);
-  auto kVac1 = Mixture(36, "VACUUM2 ", aAir, zAir, dAir1, 4, wAir);
-  auto kVac2 = Mixture(56, "VACUUM3 ", aAir, zAir, dAir1, 4, wAir);
-  Medium(16, "SHIL_VA_C0           ", kVac0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(36, "SHIL_VA_C1           ", kVac1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(56, "SHIL_VA_C2           ", kVac2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto kVac0 = Mixture(16, "VACUUM1 ",mixture aAir, zAir, dAir1, 4, wAir);
+  auto kVac1 = Mixture(36, "VACUUM2 ",mixture aAir, zAir, dAir1, 4, wAir);
+  auto kVac2 = Mixture(56, "VACUUM3 ",mixture aAir, zAir, dAir1, 4, wAir);
+  Medium(16, "SHIL_VA_C0 medium          ", kVac0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(36, "SHIL_VA_C1 medium          ", kVac1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(56, "SHIL_VA_C2 medium          ", kVac2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //     Stainless Steel
-  auto kSt0 = Mixture(19, "STAINLESS STEEL1", asteel, zsteel, 7.88, 4, wsteel);
-  auto kSt1 = Mixture(39, "STAINLESS STEEL2", asteel, zsteel, 7.88, 4, wsteel);
-  auto kSt2 = Mixture(59, "STAINLESS STEEL3", asteel, zsteel, 7.88, 4, wsteel);
-  Medium(19, "SHIL_ST_C0           ", kSt0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(39, "SHIL_ST_C1           ", kSt1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(59, "SHIL_ST_C3           ", kSt2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto kSt0 = Mixture(19, "STAINLESS mixture", asteel, zsteel, 7.88, 4, wsteel);
+  auto kSt1 = Mixture(39, "STAINLESS mixture", asteel, zsteel, 7.88, 4, wsteel);
+  auto kSt2 = Mixture(59, "STAINLESS mixture", asteel, zsteel, 7.88, 4, wsteel);
+  Medium(19, "SHIL_ST_C0 medium          ", kSt0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(39, "SHIL_ST_C1 medium          ", kSt1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(59, "SHIL_ST_C3 medium          ", kSt2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //    Lead/Tungsten
-  auto kPbW0 = Mixture(20, "LEAD/TUNGSTEN1", apbw, zpbw, 15.325, 2, wpbw);
-  auto kPbW1 = Mixture(40, "LEAD/TUNGSTEN2", apbw, zpbw, 15.325, 2, wpbw);
-  auto kPbW2 = Mixture(60, "LEAD/TUNGSTEN3", apbw, zpbw, 15.325, 2, wpbw);
-  Medium(20, "SHIL_PB/W0           ", kPbW0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(40, "SHIL_PB/W1           ", kPbW1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(60, "SHIL_PB/W3           ", kPbW2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto kPbW0 = Mixture(20, "LEAD/TUNGSmixture", apbw, zpbw, 15.325, 2, wpbw);
+  auto kPbW1 = Mixture(40, "LEAD/TUNGSmixture", apbw, zpbw, 15.325, 2, wpbw);
+  auto kPbW2 = Mixture(60, "LEAD/TUNGSmixture", apbw, zpbw, 15.325, 2, wpbw);
+  Medium(20, "SHIL_PB/W0 medium          ", kPbW0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(40, "SHIL_PB/W1 medium          ", kPbW1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(60, "SHIL_PB/W3 medium          ", kPbW2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //    Ni/Tungsten
   //     Ni-W-Cu
-  auto kNuWCu1 = Mixture(21, "Ni-W-Cu1", aniwcu, zniwcu, 18.78, 3, wniwcu);
-  auto kNuWCu2 = Mixture(41, "Ni-W-Cu2", aniwcu, zniwcu, 18.78, 3, wniwcu);
-  auto kNuWCu3 = Mixture(61, "Ni-W-Cu3", aniwcu, zniwcu, 18.78, 3, wniwcu);
-  Medium(21, "SHIL_Ni/W0           ", kNuWCu1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(41, "SHIL_Ni/W1           ", kNuWCu2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(61, "SHIL_Ni/W3           ", kNuWCu3, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto kNuWCu1 = Mixture(21, "Ni-W-Cu1",mixture aniwcu, zniwcu, 18.78, 3, wniwcu);
+  auto kNuWCu2 = Mixture(41, "Ni-W-Cu2",mixture aniwcu, zniwcu, 18.78, 3, wniwcu);
+  auto kNuWCu3 = Mixture(61, "Ni-W-Cu3",mixture aniwcu, zniwcu, 18.78, 3, wniwcu);
+  Medium(21, "SHIL_Ni/W0 medium          ", kNuWCu1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(41, "SHIL_Ni/W1 medium          ", kNuWCu2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(61, "SHIL_Ni/W3 medium          ", kNuWCu3, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //    Concrete
-  auto kCC0 = Mixture(17, "CONCRETE1", aconc, zconc, 2.35, 10, wconc);
-  auto kCC1 = Mixture(37, "CONCRETE2", aconc, zconc, 2.35, 10, wconc);
-  auto kCC2 = Mixture(57, "CONCRETE3", aconc, zconc, 2.35, 10, wconc);
-  Medium(17, "SHIL_CC_C0           ", kCC0, 0, 0, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(37, "SHIL_CC_C1           ", kCC1, 0, 0, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(57, "SHIL_CC_C2           ", kCC2, 0, 0, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto kCC0 = Mixture(17, "CONCRETE1"mixture aconc, zconc, 2.35, 10, wconc);
+  auto kCC1 = Mixture(37, "CONCRETE2"mixture aconc, zconc, 2.35, 10, wconc);
+  auto kCC2 = Mixture(57, "CONCRETE3"mixture aconc, zconc, 2.35, 10, wconc);
+  Medium(17, "SHIL_CC_C0 medium          ", kCC0, 0, 0, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(37, "SHIL_CC_C1 medium          ", kCC1, 0, 0, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(57, "SHIL_CC_C2 medium          ", kCC2, 0, 0, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //    Cast iron
-  auto kCast0 = Mixture(18, "CAST IRON1", acasti, zcasti, 7.2, 4, wcasti);
-  auto kCast1 = Mixture(38, "CAST IRON2", acasti, zcasti, 7.2, 4, wcasti);
-  auto kCast2 = Mixture(58, "CAST IRON3", acasti, zcasti, 7.2, 4, wcasti);
-  Medium(18, "SHIL_CAST_IRON0      ", kCast0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(38, "SHIL_CAST_IRON1      ", kCast1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(58, "SHIL_CAST_IRON2      ", kCast2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto kCast0 = Mixture(18, "CAST IRON1mixture
+  auto kCast1 = Mixture(38, "CAST IRON2mixture
+  auto kCast2 = Mixture(58, "CAST IRON3mixture
+  Medium(18, "SHIL_CAST_Imedium      ", kCast0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(38, "SHIL_CAST_Imedium      ", kCast1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(58, "SHIL_CAST_Imedium      ", kCast2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 }
 
-FairModule* Shil::CloneModule() const { return new Shil(*this); }
+FairModule* Shil::cloneModule() const { return new Shil(*this); }
 ClassImp(o2::passive::Shil);

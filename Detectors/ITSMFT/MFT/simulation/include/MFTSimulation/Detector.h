@@ -40,32 +40,32 @@ public:
   ~Detector() override;
 
   /// Initialization of the detector is done here
-  void Initialize() override;
+  void initialize() override;
 
   /// This method is called for each step during simulation (see FairMCApplication::Stepping())
   Bool_t ProcessHits(FairVolume* v = nullptr) override;
 
   /// Has to be called after each event to reset the containers
-  void Reset() override;
+  void reset() override;
 
   /// Registers the produced collections in FAIRRootManager
-  void Register() override; 
+  void register() override; 
 
   /// Gets the produced collections
-  TClonesArray* GetCollection(Int_t iColl) const override;
+  TClonesArray* getCollection(Int_t iColl) const override;
 
-  void EndOfEvent() override;
+  void endOfEvent() override;
 
-  void CopyClones(TClonesArray* cl1, TClonesArray* cl2, Int_t offset) override {;}
-  void FinishPrimary() override {;}
-  void FinishRun() override {;}
-  void BeginPrimary() override {;}
-  void PostTrack() override {;}
-  void PreTrack() override {;}
-  void BeginEvent() override {;}
-  void SetSpecialPhysicsCuts() override {;}
+  void copyClones(TClonesArray* cl1, TClonesArray* cl2, Int_t offset) override {;}
+  void finishPrimary() override {;}
+  void finishRun() override {;}
+  void beginPrimary() override {;}
+  void postTrack() override {;}
+  void preTrack() override {;}
+  void beginEvent() override {;}
+  void setSpecialPhysicsCuts() override {;}
 
-  void ConstructGeometry() override;  // inherited from FairModule
+  void constructGeometry() override;  // inherited from FairModule
 
   //
 

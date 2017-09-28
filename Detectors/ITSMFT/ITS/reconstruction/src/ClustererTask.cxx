@@ -42,7 +42,7 @@ ClustererTask::~ClustererTask()
 //_____________________________________________________________________
 /// \brief Init function
 /// Inititializes the clusterer and connects input and output container
-InitStatus ClustererTask::Init()
+InitStatus ClustererTask::init()
 {
   FairRootManager* mgr = FairRootManager::Instance();
   if (!mgr) {
@@ -61,7 +61,7 @@ InitStatus ClustererTask::Init()
   mClustersArray = new TClonesArray("o2::ITSMFT::Cluster");
   mgr->Register("ITSCluster", "ITS", mClustersArray, kTRUE);
 
-  GeometryTGeo* geom = GeometryTGeo::Instance();
+  GeometryTGeo* geom = GeometryTGeo::Instance(instance;
   geom->fillMatrixCache( bit2Mask(TransformType::T2L) ); // make sure T2L matrices are loaded
   mGeometry = geom;
   mClusterer.setGeometry(geom);
@@ -77,7 +77,7 @@ InitStatus ClustererTask::Init()
 }
 
 //_____________________________________________________________________
-void ClustererTask::Exec(Option_t* option)
+void ClustererTask::exec(Option_t* option)
 {
   mClustersArray->Clear();
   LOG(DEBUG) << "Running digitization on new event" << FairLogger::endl;

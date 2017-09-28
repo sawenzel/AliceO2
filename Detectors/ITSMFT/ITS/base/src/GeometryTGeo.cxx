@@ -77,7 +77,7 @@ GeometryTGeo::GeometryTGeo(bool build, bool loadSegmentations, int loadTrans)
     mLayerToWrapper[i] = -1;
   }
   if (build) {
-    Build(loadSegmentations,loadTrans);
+    build(loadSegmentations,loadTrans);
   }
 }
 
@@ -318,7 +318,7 @@ TGeoHMatrix* GeometryTGeo::extractMatrixSensor(int index) const
 }
 
 //__________________________________________________________________________
-void GeometryTGeo::Build(bool loadSegmentations, int loadTrans)
+void GeometryTGeo::build(bool loadSegmentations, int loadTrans)
 {
   if ( isBuilt() ) {
     LOG(WARNING) << "Already built" << FairLogger::endl;
@@ -376,7 +376,7 @@ void GeometryTGeo::fillMatrixCache(int mask)
   //  
   if (mSize<1) {    
     LOG(WARNING) << "The method Build was not called yet" << FairLogger::endl;
-    Build(true,mask);
+    build(true,mask);
     return;
   }
   
@@ -683,7 +683,7 @@ UInt_t GeometryTGeo::composeChipTypeId(UInt_t segmId)
 }
 
 //__________________________________________________________________________
-void GeometryTGeo::Print(Option_t*) const
+void GeometryTGeo::print(Option_t*) const
 {
   printf("NLayers:%d NChips:%d\n", mNumberOfLayers, getNumberOfChips());
   if ( !isBuilt() ) return;
@@ -713,7 +713,7 @@ void GeometryTGeo::extractSensorXAlpha(int isn, float &x, float &alp)
   double xp = gloB[0] - dx * t,  yp = gloB[1] - dy * t;
   x = Sqrt(xp*xp+yp*yp);
   alp = ATan2(yp,xp);
-  BringTo02Pi(alp);
+  BringTo02Pi(alp);bringTo02Pi
 }
 
 

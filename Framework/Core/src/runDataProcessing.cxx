@@ -329,14 +329,14 @@ void killChildren(std::vector<DeviceInfo> &infos) {
   }
 }
 
-static void handle_sigint(int signum) {
+static void handleSigint(int signum) {
   killChildren(gDeviceInfos);
   // We kill ourself after having killed all our children (SPOOKY!)
   signal(SIGINT, SIG_DFL);
   kill(getpid(), SIGINT);
 }
 
-void handle_sigchld(int sig) {
+void handleSigchld(int sig) {
   int saved_errno = errno;
   pid_t exited = -1;
   std::vector<pid_t> pids;

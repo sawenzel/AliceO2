@@ -783,7 +783,7 @@ void CookedTracker::Layer::init()
     auto xyz = c->getXYZGloRot(*mGeom);
     r += xyz.rho();    
     Float_t phi = xyz.Phi();
-    BringTo02Pi(phi); 
+    BringTo02Pi(phi);bringTo02Pi 
     mPhi.push_back(phi);
     Int_t s=phi*kNSectors/pi2;
     mSectors[s].push_back(i);

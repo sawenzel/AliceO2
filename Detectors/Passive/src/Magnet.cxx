@@ -59,7 +59,7 @@ Magnet& Magnet::operator=(const Magnet& rhs)
 namespace
 {
 // only here temporarily, I would like to harmonize Material treatment (outside of base detector)
-int Material(Int_t imat, const char* name, Float_t a, Float_t z, Float_t dens, Float_t radl, Float_t absl,
+int material(Int_t imat, const char* name, Float_t a, Float_t z, Float_t dens, Float_t radl, Float_t absl,
              Float_t* buf = nullptr, Int_t nwbuf = 0)
 {
   int kmat = -1;
@@ -67,7 +67,7 @@ int Material(Int_t imat, const char* name, Float_t a, Float_t z, Float_t dens, F
   return kmat;
 }
 
-int Mixture(Int_t imat, const char* name, Float_t* a, Float_t* z, Float_t dens, Int_t nlmat, Float_t* wmat = nullptr)
+int mixture(Int_t imat, const char* name, Float_t* a, Float_t* z, Float_t dens, Int_t nlmat, Float_t* wmat = nullptr)
 {
   // Check this!!!
   int kmat = -1;
@@ -75,7 +75,7 @@ int Mixture(Int_t imat, const char* name, Float_t* a, Float_t* z, Float_t dens, 
   return kmat;
 }
 
-int Medium(Int_t numed, const char* name, Int_t nmat, Int_t isvol, Int_t ifield, Float_t fieldm, Float_t tmaxfd,
+int medium(Int_t numed, const char* name, Int_t nmat, Int_t isvol, Int_t ifield, Float_t fieldm, Float_t tmaxfd,
            Float_t stemax, Float_t deemax, Float_t epsil, Float_t stmin, Float_t* ubuf = nullptr, Int_t nbuf = 0)
 {
   // Check this!!!
@@ -110,24 +110,24 @@ void Magnet::createMaterials()
   Float_t wWater[2] = { 0.111894, 0.888106 };
 
   //     Aluminum
-  auto kAl0MatId = Material(9, "Al0$", 26.98, 13., 2.7, 8.9, 37.2);
-  auto kAl1MatId = Material(29, "Al1$", 26.98, 13., 2.7, 8.9, 37.2);
+  auto kAl0MatId = Material(9, "Al0$", 26.material, 13., 2.7, 8.9, 37.2);
+  auto kAl1MatId = Material(29, "Al1$", 26material, 13., 2.7, 8.9, 37.2);
 
   //     Stainless Steel
-  auto kSteel1MatId = Mixture(19, "STAINLESS STEEL1", asteel, zsteel, 7.88, 4, wsteel);
-  auto kSteel2MatId = Mixture(39, "STAINLESS STEEL2", asteel, zsteel, 7.88, 4, wsteel);
-  auto kSteel3MatId = Mixture(59, "STAINLESS STEEL3", asteel, zsteel, 7.88, 4, wsteel);
+  auto kSteel1MatId = Mixture(19, "STAINLESS mixture", asteel, zsteel, 7.88, 4, wsteel);
+  auto kSteel2MatId = Mixture(39, "STAINLESS mixture", asteel, zsteel, 7.88, 4, wsteel);
+  auto kSteel3MatId = Mixture(59, "STAINLESS mixture", asteel, zsteel, 7.88, 4, wsteel);
 
   //     Iron
-  auto kFe0MatId = Material(10, "Fe0$", 55.85, 26., 7.87, 1.76, 17.1);
-  auto kFe1MatId = Material(30, "Fe1$", 55.85, 26., 7.87, 1.76, 17.1);
+  auto kFe0MatId = Material(10, "Fe0$", 55material, 26., 7.87, 1.76, 17.1);
+  auto kFe1MatId = Material(30, "Fe1$", 55material, 26., 7.87, 1.76, 17.1);
 
   //     Air
-  auto kAir0MatId = Mixture(15, "AIR0$", aAir, zAir, dAir, 4, wAir);
-  auto kAir1MatId = Mixture(35, "AIR1$", aAir, zAir, dAir, 4, wAir);
+  auto kAir0MatId = Mixture(15, "AIR0$", aAmixture, zAir, dAir, 4, wAir);
+  auto kAir1MatId = Mixture(35, "AIR1$", aAmixture, zAir, dAir, 4, wAir);
 
   //     Water
-  auto kWaterMatId = Mixture(16, "WATER", aWater, zWater, 1., 2, wWater);
+  auto kWaterMatId = Mixture(16, "WATER", aWmixture, zWater, 1., 2, wWater);
 
   // ****************
   //     Defines tracking media parameters.
@@ -141,26 +141,26 @@ void Magnet::createMaterials()
   // ***************
 
   //    IRON
-  Medium(10, "MAG_FE_C0", kFe0MatId, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(30, "MAG_FE_C1", kFe1MatId, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(10, "MAG_FE_C0",medium kFe0MatId, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(30, "MAG_FE_C1",medium kFe1MatId, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //     ALUMINUM
-  Medium(9, "MAG_ALU_C0", kAl0MatId, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(29, "MAG_ALU_C1", kAl1MatId, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(9, "MAG_ALU_C0",medium kAl0MatId, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(29, "MAG_ALU_C1"medium kAl1MatId, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //     AIR
-  Medium(15, "MAG_AIR_C0", kAir0MatId, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(35, "MAG_AIR_C1", kAir1MatId, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(15, "MAG_AIR_C0"medium kAir0MatId, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(35, "MAG_AIR_C1"medium kAir1MatId, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //    Steel
-  Medium(19, "MAG_ST_C0", kSteel1MatId, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(39, "MAG_ST_C1", kSteel2MatId, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(59, "MAG_ST_C3", kSteel3MatId, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(19, "MAG_ST_C0",medium kSteel1MatId, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(39, "MAG_ST_C1",medium kSteel2MatId, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(59, "MAG_ST_C3",medium kSteel3MatId, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
   //    WATER
-  Medium(16, "MAG_WATER", kWaterMatId, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(16, "MAG_WATER",medium kWaterMatId, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 }
 
-void Magnet::ConstructGeometry()
+void Magnet::constructGeometry()
 {
   createMaterials();
 
@@ -435,5 +435,5 @@ void Magnet::ConstructGeometry()
   top->AddNode(l3, 1, new TGeoTranslation(0., os, 0.));
 }
 
-FairModule* Magnet::CloneModule() const { return new Magnet(*this); }
+FairModule* Magnet::cloneModule() const { return new Magnet(*this); }
 ClassImp(o2::passive::Magnet);

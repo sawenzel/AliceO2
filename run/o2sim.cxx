@@ -13,7 +13,7 @@
 
 int main(int argc, char* argv[])
 {
-  auto& conf = o2::conf::SimConfig::Instance();
+  auto& conf = o2::conf::SimConfig::instance();
   if (!conf.resetFromArguments(argc, argv)) {
     return 1;
   }

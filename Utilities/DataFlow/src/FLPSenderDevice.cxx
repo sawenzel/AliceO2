@@ -24,7 +24,7 @@ using namespace std::chrono;
 using namespace o2::Devices;
 using SubframeMetadata = o2::DataFlow::SubframeMetadata;
 
-void FLPSenderDevice::InitTask()
+void FLPSenderDevice::initTask()
 {
   mIndex = GetConfig()->GetValue<int>("flp-index");
   mEventSize = GetConfig()->GetValue<int>("event-size");
@@ -37,7 +37,7 @@ void FLPSenderDevice::InitTask()
 }
 
 
-void FLPSenderDevice::Run()
+void FLPSenderDevice::run()
 {
   // base buffer, to be copied from for every timeframe body (zero-copy)
   FairMQMessagePtr baseMsg(NewMessage(mEventSize));

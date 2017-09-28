@@ -33,7 +33,7 @@ BOOST_AUTO_TEST_CASE(Cartesian3D_test)
   // local to master
   auto pdt = tr(pd); // operator form
   Point3D<float> pft;
-  tr.LocalToMaster(pf, pft); // TGeoHMatrix form
+  tr.localToMaster(pf, pft); // TGeoHMatrix form
 
   std::cout << "Create Transform3D " << std::endl << tr << std::endl << "from" << std::endl;
   hmat.Print();
@@ -52,7 +52,7 @@ BOOST_AUTO_TEST_CASE(Cartesian3D_test)
   // inverse transform
   auto pfti = tr ^ (pft); // operator form
   Point3D<double> pdti;
-  tr.MasterToLocal(pdt, pdti); // TGeoHMatrix form
+  tr.masterToLocal(pdt, pdti); // TGeoHMatrix form
 
   std::cout << " Transforming back to local" << std::endl;
   std::cout << "Float:  " << pfti << std::endl;

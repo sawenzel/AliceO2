@@ -34,12 +34,12 @@ o2::DataFlow::TimeframeValidatorDevice::TimeframeValidatorDevice()
 {
 }
 
-void o2::DataFlow::TimeframeValidatorDevice::InitTask()
+void o2::DataFlow::TimeframeValidatorDevice::initTask()
 {
   mInChannelName = GetConfig()->GetValue<std::string>(OptionKeyInputChannelName);
 }
 
-void o2::DataFlow::TimeframeValidatorDevice::Run()
+void o2::DataFlow::TimeframeValidatorDevice::run()
 {
   while (CheckCurrentState(RUNNING)) {
     FairMQParts timeframeParts;

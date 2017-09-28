@@ -27,8 +27,8 @@ class BaseHit : public FairMultiLinkedData_Interface
  public:
   BaseHit() = default;
   BaseHit(int id) : mTrackID{id} {}
-  int GetTrackID() const { return mTrackID; }
-  void SetTrackID(int id) { mTrackID = id; }
+  int getTrackID() const { return mTrackID; }
+  void setTrackID(int id) { mTrackID = id; }
 
  private:
   int mTrackID; // track_id
@@ -58,31 +58,31 @@ class BasicXYZEHit : public BaseHit
   }
 
   // getting the cartesian coordinates
-  T GetX() const { return mPos.X(); }
-  T GetY() const { return mPos.Y(); }
-  T GetZ() const { return mPos.Z(); }
-  Point3D<T> GetPos() const { return mPos; }
+  T getX() const { return mPos.X(); }
+  T getY() const { return mPos.Y(); }
+  T getZ() const { return mPos.Z(); }
+  Point3D<T> getPos() const { return mPos; }
   // getting energy loss
-  E GetEnergyLoss() const { return mELoss; }
+  E getEnergyLoss() const { return mELoss; }
   // getting the time
-  E GetTime() const { return mTime; }
+  E getTime() const { return mTime; }
   // get detector + track information
-  short GetDetectorID() const { return mDetectorID; }
+  short getDetectorID() const { return mDetectorID; }
 
   // modifiers
-  void SetTime(E time) { mTime = time; }
-  void SetEnergyLoss(E eLoss) { mELoss = eLoss; }
-  void SetDetectorID(short detID) { mDetectorID = detID; }
-  void SetX(T x) { mPos.SetX(x); }
-  void SetY(T y) { mPos.SetY(y); }
-  void SetZ(T z) { mPos.SetZ(z); }
-  void SetXYZ(T x, T y, T z)
+  void setTime(E time) { mTime = time; }
+  void setEnergyLoss(E eLoss) { mELoss = eLoss; }
+  void setDetectorID(short detID) { mDetectorID = detID; }
+  void setX(T x) { mPos.SetX(x); }
+  void setY(T y) { mPos.SetY(y); }
+  void setZ(T z) { mPos.SetZ(z); }
+  void setXYZ(T x, T y, T z)
   {
     SetX(x);
     SetY(y);
     SetZ(z);
   }
-  void SetPos(Point3D<T> const &p) { mPos = p; }
+  void setPos(Point3D<T> const &p) { mPos = p; }
 
   ClassDefOverride(BasicXYZEHit, 1);
 };

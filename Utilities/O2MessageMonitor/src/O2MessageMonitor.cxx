@@ -54,7 +54,7 @@ O2MessageMonitor::O2MessageMonitor()
 }
 
 //__________________________________________________________________________________________________
-void O2MessageMonitor::InitTask()
+void O2MessageMonitor::initTask()
 {
   mDelay = GetConfig()->GetValue<int>("sleep");
   mIterations = GetConfig()->GetValue<int>("n");
@@ -65,7 +65,7 @@ void O2MessageMonitor::InitTask()
 }
 
 //__________________________________________________________________________________________________
-void O2MessageMonitor::Run()
+void O2MessageMonitor::run()
 {
   //check socket type of data channel
   std::string type;

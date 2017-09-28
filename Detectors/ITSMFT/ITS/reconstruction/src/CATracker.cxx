@@ -134,7 +134,7 @@ bool Tracker::CellParams(int l, const ClsInfo_t& c1, const ClsInfo_t& c2, const 
   return true;
 }
 
-void Tracker::CellsTreeTraversal(vector<Road> &roads,
+void Tracker::cellsTreeTraversal(vector<Road> &roads,
     const int &iD, const int &doubl) {
 
   // Each cells contains a list of neighbours. Each neighbour has presumably other neighbours.
@@ -145,12 +145,12 @@ void Tracker::CellsTreeTraversal(vector<Road> &roads,
   if (doubl < 0) return;
 
   // [1] add current cell to current cell
-  roads.back().AddElement(doubl,iD);
+  roads.back().addElement(doubl,iD);
   // We want the right number of elements in the roads also in the case of multiple neighbours
   const int currentN = roads.back().N;
 
   // [2] loop on the neighbours of the current cell
-  for (size_t iN = 0; iN < mCells[doubl][iD].NumberOfNeighbours(); ++iN) {
+  for (size_t iN = 0; iN < mCells[doubl][iD].numberOfNeighbours(); ++iN) {
     const int currD = doubl - 1;
     const int neigh = mCells[doubl][iD](iN);
 
@@ -160,13 +160,13 @@ void Tracker::CellsTreeTraversal(vector<Road> &roads,
       roads.back().N = currentN;
     }
     // [4] play this game again until the end of the road
-    CellsTreeTraversal(roads,neigh,currD);
+    cellsTreeTraversal(roads,neigh,currD);
   }
 
-  mCells[doubl][iD].SetLevel(0u); // Level = -1
+  mCells[doubl][iD].setLevel(0u); // Level = -1
 }
 
-int Tracker::Clusters2Tracks() {
+int Tracker::clusters2Tracks() {
   // This is the main tracking function
   // The clusters must already be loaded
 
@@ -178,8 +178,8 @@ int Tracker::Clusters2Tracks() {
     mCandidates[2].clear();
     mCandidates[3].clear();
 
-    MakeCells(iteration);
-    FindTracksCA(iteration);
+    makeCells(iteration);
+    findTracksCA(iteration);
 
     for (int iL = 3; iL >= 0; --iL) {
       const int nCand = mCandidates[iL].size();
@@ -188,7 +188,7 @@ int Tracker::Clusters2Tracks() {
 
       for (int iC = 0; iC < nCand; ++iC) {
         Track &tr = mCandidates[iL][iC];
-        chi2[iC] = tr.GetChi2();
+        chi2[iC] = tr.getChi2();
         index[iC] = iC;
         //CookLabel(tr,0.f);
       }
@@ -202,7 +202,7 @@ int Tracker::Clusters2Tracks() {
         }
 
         Track* tr = &mCandidates[iL][iC];
-        int* idx = tr->Clusters();
+        int* idx = tr->clusters();
         bool sharingCluster = false;
         for (int k = 0; k < 7; ++k) {
           if (idx[k] > -1) {
@@ -242,7 +242,7 @@ int Tracker::Clusters2Tracks() {
   return 0;
 }
 
-void Tracker::FindTracksCA(int iteration) {
+void Tracker::findTracksCA(int iteration) {
   // Main pattern recognition routine. It has 4 steps (planning to split in different methods)
   // 1. Tracklet finding (using vertex position)
   // 2. Tracklet association, cells building
@@ -259,12 +259,12 @@ void Tracker::FindTracksCA(int iteration) {
     // the roads.
     for (int iCL = 4; iCL >= level - 1; --iCL) {
       for (size_t iCell = 0; iCell < mCells[iCL].size(); ++iCell) {
-        if (mCells[iCL][iCell].GetLevel() != level)
+        if (mCells[iCL][iCell].getLevel() != level)
           continue;
         // [1] Add current cell to road
         roads.emplace_back(iCL,iCell);
         // [2] Loop on current cell neighbours
-        for(size_t iN = 0; iN < mCells[iCL][iCell].NumberOfNeighbours(); ++iN) {
+        for(size_t iN = 0; iN < mCells[iCL][iCell].numberOfNeighbours(); ++iN) {
           const int currD = iCL - 1;
           const int neigh = mCells[iCL][iCell](iN);
           // [3] if more than one neighbour => more than one road, one road for each neighbour
@@ -272,9 +272,9 @@ void Tracker::FindTracksCA(int iteration) {
             roads.emplace_back(iCL,iCell);
           }
           // [4] Essentially the neighbour became the current cell and then go to [1]
-          CellsTreeTraversal(roads,neigh,currD);
+          cellsTreeTraversal(roads,neigh,currD);
         }
-        mCells[iCL][iCell].SetLevel(0u); // Level = -1
+        mCells[iCL][iCell].setLevel(0u); // Level = -1
       }
     }
 
@@ -304,7 +304,7 @@ void Tracker::FindTracksCA(int iteration) {
       float cv  = Curvature(cl0.x,cl0.y,cl1.x,cl1.y,cl2.x,cl2.y);
       float tgl = TanLambda(cl0.x,cl0.y,cl2.x,cl2.y,cl0.z,cl2.z);
 
-      ITSDetInfo_t det = (*mLayer[last + 2]).GetDetInfo(cl2.detid);
+      ITSDetInfo_t det = (*mLayer[last + 2]).getDetInfo(cl2.detid);
       float x = det.xTF + cl2.x; // I'd like to avoit using AliITSUClusterPix...
       float alp = det.phiTF;
       std::array<float,5> par {cl2.y,cl2.z,0,tgl,cv};
@@ -322,22 +322,22 @@ void Tracker::FindTracksCA(int iteration) {
   }
 }
 
-int Tracker::LoadClusters() {
+int Tracker::loadClusters() {
   // This function reads the ITSU clusters from the tree,
   // sort them, distribute over the internal tracker arrays, etc
 
   // I consider a single vertex event for the moment.
   //TODO: pile-up (trivial here), fast reco of primary vertices (not so trivial)
   for (int iL = 0; iL < 7; ++iL) {
-    mLayer[iL]->SortClusters(mVertex);
-    mUsedClusters[iL].resize(mLayer[iL]->GetNClusters(),false);
+    mLayer[iL]->sortClusters(mVertex);
+    mUsedClusters[iL].resize(mLayer[iL]->getNClusters(),false);
   }
   return 0;
 }
 
-void Tracker::MakeCells(int iteration) {
+void Tracker::makeCells(int iteration) {
 
-  SetCuts(iteration);
+  setCuts(iteration);
   if (iteration >= 1) {
     for (int i = 0; i < 5; ++i)
       vector<Cell>().swap(mCells[i]);
@@ -351,25 +351,25 @@ void Tracker::MakeCells(int iteration) {
   // mLayer[l+1][i]
   vector<int> dLUT[5];
   for (int iL = 0; iL < 6; ++iL) {
-    if (mLayer[iL]->GetNClusters() == 0) continue;
+    if (mLayer[iL]->getNClusters() == 0) continue;
     if (iL < 5)
-      dLUT[iL].resize((*mLayer[iL + 1]).GetNClusters(),-1);
+      dLUT[iL].resize((*mLayer[iL + 1]).getNClusters(),-1);
     if (dLUT[iL - 1].size() == 0u)
       continue;
-    for (int iC = 0; iC < mLayer[iL]->GetNClusters(); ++iC) {
-      const ClsInfo_t& cls = mLayer[iL]->GetClusterInfo(iC);
+    for (int iC = 0; iC < mLayer[iL]->getNClusters(); ++iC) {
+      const ClsInfo_t& cls = mLayer[iL]->getClusterInfo(iC);
       if (mUsedClusters[iL][iC]) {
         continue;
       }
-      const float tanL = (cls.z - GetZ()) / cls.r;
+      const float tanL = (cls.z - getZ()) / cls.r;
       const float extz = tanL * (mkR[iL + 1] - cls.r) + cls.z;
-      const int nClust = mLayer[iL + 1]->SelectClusters(extz - 2 * mCZ, extz + 2 * mCZ,
+      const int nClust = mLayer[iL + 1]->selectClusters(extz - 2 * mCZ, extz + 2 * mCZ,
           cls.phi - mCPhi, cls.phi + mCPhi);
       bool first = true;
 
       for (int iC2 = 0; iC2 < nClust; ++iC2) {
-        const int iD2 = mLayer[iL + 1]->GetNextClusterInfoID();
-        const ClsInfo_t& cls2 = mLayer[iL + 1]->GetClusterInfo(iD2);
+        const int iD2 = mLayer[iL + 1]->getNextClusterInfoID();
+        const ClsInfo_t& cls2 = mLayer[iL + 1]->getClusterInfo(iD2);
         if (mUsedClusters[iL + 1][iC2]) {
           continue;
         }
@@ -384,7 +384,7 @@ void Tracker::MakeCells(int iteration) {
           mDoublets[iL].emplace_back(iC,iD2,dTanL,phi);
         }
       }
-      mLayer[iL + 1]->ResetFoundIterator();
+      mLayer[iL + 1]->resetFoundIterator();
     }
   }
 
@@ -412,7 +412,7 @@ void Tracker::MakeCells(int iteration) {
           const float tan = 0.5f * (mDoublets[iD][iD0].tanL + mDoublets[iD + 1][iD1].tanL);
           const float extz = -tan * (*mLayer[iD])[mDoublets[iD][iD0].x].r +
             (*mLayer[iD])[mDoublets[iD][iD0].x].z;
-          if (fabs(extz - GetZ()) < mCDCAz[iD]) {
+          if (fabs(extz - getZ()) < mCDCAz[iD]) {
             float curv = 0.f;
             array<float,3> n {0.f};
             if (CellParams(iD,(*mLayer[iD])[mDoublets[iD][iD0].x],(*mLayer[iD + 1])[mDoublets[iD][iD0].y],
@@ -442,11 +442,11 @@ void Tracker::MakeCells(int iteration) {
       if (tLUT[iD][idx] == -1) continue;
       for (size_t c1 = tLUT[iD][idx]; c1 < mCells[iD + 1].size(); ++c1) {
         if (idx != mCells[iD + 1][c1].d0()) break;
-        auto& n0 = mCells[iD][c0].GetN();
-        auto& n1 = mCells[iD + 1][c1].GetN();
+        auto& n0 = mCells[iD][c0].getN();
+        auto& n1 = mCells[iD + 1][c1].getN();
         const float dn2 = ((n0[0] - n1[0]) * (n0[0] - n1[0]) + (n0[1] - n1[1]) * (n0[1] - n1[1]) +
             (n0[2] - n1[2]) * (n0[2] - n1[2]));
-        const float dp = fabs(mCells[iD][c0].GetCurvature() - mCells[iD + 1][c1].GetCurvature());
+        const float dp = fabs(mCells[iD][c0].getCurvature() - mCells[iD + 1][c1].getCurvature());
         if (dn2 < mCDN[iD] && dp < mCDP[iD]) {
           mCells[iD + 1][c1].Combine(mCells[iD][c0], c0);
         }
@@ -455,7 +455,7 @@ void Tracker::MakeCells(int iteration) {
   }
 }
 
-int Tracker::PropagateBack() {
+int Tracker::propagateBack() {
 
   /*int n=event->GetNumberOfTracks();
     int ntrk=0;
@@ -495,11 +495,11 @@ bool Tracker::RefitAt(float xx, Track *track) {
   // the clusters from "c"
 
   const int nLayers = 7;
-  int* index = track->Clusters();
-  TrackPC* t = &(track->Param());
+  int* index = track->clusters();
+  TrackPC* t = &(track->param());
 
   int from, to, step;
-  if (xx > t->GetX()) {
+  if (xx > t->getX()) {
     from = 0;
     to = nLayers;
     step = +1;
@@ -513,7 +513,7 @@ bool Tracker::RefitAt(float xx, Track *track) {
     int idx = index[i];
     if (idx >= 0) {
       const Cluster &cl = (*mLayer[i])[idx];
-      float xr = cl.x, ar = mLayer[i]->GetDetInfo(cl.detid).phiTF;
+      float xr = cl.x, ar = mLayer[i]->getDetInfo(cl.detid).phiTF;
       if (!t->Rotate(ar) || !t->PropagateTo(xr, mBz)) {
         return false;
       }
@@ -539,7 +539,7 @@ bool Tracker::RefitAt(float xx, Track *track) {
   return true;
 }
 
-int Tracker::RefitInward() {
+int Tracker::refitInward() {
   // Some final refit, after the outliers get removed by the smoother ?
   // The clusters must be loaded
 
@@ -576,7 +576,7 @@ int Tracker::RefitInward() {
   return 0;
 }
 
-void Tracker::SetCuts(int it) {
+void Tracker::setCuts(int it) {
   switch (it) {
     case 0:
       mCPhi = mPhiCut;
@@ -616,7 +616,7 @@ void Tracker::SetCuts(int it) {
   }
 }
 
-void Tracker::UnloadClusters() {
+void Tracker::unloadClusters() {
   /// This function unloads ITSU clusters from the memory
   for (int i = 0;i < 7;++i)
     mUsedClusters[i].clear();

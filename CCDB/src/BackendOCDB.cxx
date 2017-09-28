@@ -33,12 +33,12 @@ public:
 
 BackendOCDB::BackendOCDB() {}
 
-void BackendOCDB::Pack(const std::string& path, const std::string& key, std::string*& messageString)
+void BackendOCDB::pack(const std::string& path, const std::string& key, std::string*& messageString)
 {
   LOG(ERROR) << "The PUT operation is not supported for the OCDB backend yet";
 }
 
-Condition* BackendOCDB::UnPack(std::unique_ptr<FairMQMessage> msg)
+Condition* BackendOCDB::unPack(std::unique_ptr<FairMQMessage> msg)
 {
   WrapTMessage tmsg(msg->GetData(), msg->GetSize());
   Condition* aCondition = (Condition*)(tmsg.ReadObject(tmsg.GetClass()));

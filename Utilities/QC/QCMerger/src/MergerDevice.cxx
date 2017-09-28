@@ -162,7 +162,7 @@ void MergerDevice::sendControlResponse(const ptree& response, string senderId)
   ddsCustomCmd->send(responseStream.str(), senderId);
 }
 
-void MergerDevice::Run()
+void MergerDevice::run()
 {
   while (CheckCurrentState(RUNNING)) {
     handleReceivedDataObject();

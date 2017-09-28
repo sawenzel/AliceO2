@@ -31,7 +31,7 @@ ViewerDevice::ViewerDevice(std::string viewerId, string drawingOptions)
   mDrawingOptions = drawingOptions;
 }
 
-void ViewerDevice::Run()
+void ViewerDevice::run()
 {
   while (CheckCurrentState(RUNNING)) {
     TObject* receivedObject = receiveDataObjectFromMerger();

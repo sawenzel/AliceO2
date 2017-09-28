@@ -36,8 +36,8 @@ mCenterC(0) {
 ClusterShape::ClusterShape(UInt_t Nrows, UInt_t Ncols) :
 mNrows(Nrows),
 mNcols(Ncols) {
-  mCenterR = ComputeCenter(Nrows);
-  mCenterC = ComputeCenter(Ncols);
+  mCenterR = computeCenter(Nrows);
+  mCenterC = computeCenter(Ncols);
   mShape.clear();
 }
 
@@ -46,8 +46,8 @@ mNcols(Ncols) {
 ClusterShape::ClusterShape(UInt_t Nrows, UInt_t Ncols, const std::vector<UInt_t>& Shape) :
 mNrows(Nrows),
 mNcols(Ncols) {
-  mCenterR = ComputeCenter(Nrows);
-  mCenterC = ComputeCenter(Ncols);
+  mCenterR = computeCenter(Nrows);
+  mCenterC = computeCenter(Ncols);
   mShape = Shape;
 }
 
@@ -57,7 +57,7 @@ ClusterShape::~ClusterShape() = default;
 
 
 //______________________________________________________________________
-Bool_t ClusterShape::IsValidShape() {
+Bool_t ClusterShape::isValidShape() {
   // Check the size
   if (mShape.size() > mNrows*mNcols) return false;
 
@@ -73,7 +73,7 @@ Bool_t ClusterShape::IsValidShape() {
 
 
 //______________________________________________________________________
-Long64_t ClusterShape::GetShapeID() const {
+Long64_t ClusterShape::getShapeID() const {
   // DJBX33X
   Long64_t id = 5381;
   id = ((id << 5) + id) ^ mNrows;
@@ -86,7 +86,7 @@ Long64_t ClusterShape::GetShapeID() const {
 
 
 //______________________________________________________________________
-Bool_t ClusterShape::HasElement(UInt_t value) const {
+Bool_t ClusterShape::hasElement(UInt_t value) const {
   for (auto & el : mShape) {
     if (el > value) break;
     if (el == value) return true;
@@ -96,7 +96,7 @@ Bool_t ClusterShape::HasElement(UInt_t value) const {
 
 
 //______________________________________________________________________
-UInt_t ClusterShape::ComputeCenter(UInt_t n) {
+UInt_t ClusterShape::computeCenter(UInt_t n) {
   UInt_t c = 0;
   if (n % 2 == 0) {
     UInt_t r = gRandom->Integer(2); // 0 or 1

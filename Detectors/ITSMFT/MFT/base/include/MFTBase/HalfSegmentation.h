@@ -36,7 +36,7 @@ public:
   HalfSegmentation(const HalfSegmentation &source);
 
   ~HalfSegmentation() override;
-  void Clear(const Option_t* /*opt*/) override;
+  void clear(const Option_t* /*opt*/) override;
   
   Bool_t getID() const {return (GetUniqueID()>>12);};
   

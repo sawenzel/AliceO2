@@ -35,8 +35,8 @@ class ClustererTask : public FairTask{
     ClustererTask();
     ~ClustererTask() override;
     
-    InitStatus Init() override;
-    void Exec(Option_t *option) override;
+    InitStatus init() override;
+    void exec(Option_t *option) override;
 
     enum class ClustererType : int { HW, Box};
     void setClustererEnable(ClustererType type, bool val) {

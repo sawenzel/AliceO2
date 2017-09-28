@@ -121,15 +121,15 @@ Stack &Stack::operator=(const Stack &rhs)
   return *this;
 }
 
-void Stack::PushTrack(Int_t toBeDone, Int_t parentId, Int_t pdgCode, Double_t px, Double_t py, Double_t pz, Double_t e,
+void Stack::pushTrack(Int_t toBeDone, Int_t parentId, Int_t pdgCode, Double_t px, Double_t py, Double_t pz, Double_t e,
                       Double_t vx, Double_t vy, Double_t vz, Double_t time, Double_t polx, Double_t poly, Double_t polz,
                       TMCProcess proc, Int_t &ntr, Double_t weight, Int_t is)
 {
 
-  PushTrack(toBeDone, parentId, pdgCode, px, py, pz, e, vx, vy, vz, time, polx, poly, polz, proc, ntr, weight, is, -1);
+  pushTrack(toBeDone, parentId, pdgCode, px, py, pz, e, vx, vy, vz, time, polx, poly, polz, proc, ntr, weight, is, -1);
 }
 
-void Stack::PushTrack(Int_t toBeDone, Int_t parentId, Int_t pdgCode, Double_t px, Double_t py, Double_t pz, Double_t e,
+void Stack::pushTrack(Int_t toBeDone, Int_t parentId, Int_t pdgCode, Double_t px, Double_t py, Double_t pz, Double_t e,
                       Double_t vx, Double_t vy, Double_t vz, Double_t time, Double_t polx, Double_t poly, Double_t polz,
                       TMCProcess proc, Int_t &ntr, Double_t weight, Int_t is, Int_t secondparentID)
 {
@@ -162,7 +162,7 @@ void Stack::PushTrack(Int_t toBeDone, Int_t parentId, Int_t pdgCode, Double_t px
   }
 }
 
-TParticle *Stack::PopNextTrack(Int_t &iTrack)
+TParticle *Stack::popNextTrack(Int_t &iTrack)
 {
 
   // If end of stack: Return empty pointer
@@ -186,7 +186,7 @@ TParticle *Stack::PopNextTrack(Int_t &iTrack)
   return thisParticle;
 }
 
-TParticle *Stack::PopPrimaryForTracking(Int_t iPrim)
+TParticle *Stack::popPrimaryForTracking(Int_t iPrim)
 {
 
   // Get the iPrimth particle from the mStack TClonesArray. This
@@ -213,9 +213,9 @@ TParticle *Stack::PopPrimaryForTracking(Int_t iPrim)
   return part;
 }
 
-TParticle *Stack::GetCurrentTrack() const
+TParticle *Stack::getCurrentTrack() const
 {
-  TParticle *currentPart = GetParticle(mIndexOfCurrentTrack);
+  TParticle *currentPart = getParticle(mIndexOfCurrentTrack);
   if (!currentPart) {
     if (mLogger) {
       mLogger->Warning(MESSAGE_ORIGIN, "Stack: Current track not found in stack!");
@@ -225,7 +225,7 @@ TParticle *Stack::GetCurrentTrack() const
   return currentPart;
 }
 
-void Stack::AddParticle(TParticle *oldPart)
+void Stack::addParticle(TParticle *oldPart)
 {
   TClonesArray &array = *mParticles;
   auto *newPart = new(array[mIndex]) TParticle(*oldPart);
@@ -234,7 +234,7 @@ void Stack::AddParticle(TParticle *oldPart)
   mIndex++;
 }
 
-void Stack::FillTrackArray()
+void Stack::fillTrackArray()
 {
   if (mLogger) {
     mLogger->Debug(MESSAGE_ORIGIN, "Stack: Filling MCTrack array...");
@@ -247,7 +247,7 @@ void Stack::FillTrackArray()
   mNumberOfEntriesInTracks = 0;
 
   // Check tracks for selection criteria
-  SelectTracks();
+  selectTracks();
 
   // Loop over mParticles array and copy selected tracks
   for (Int_t iPart = 0; iPart < mNumberOfEntriesInParticles; iPart++) {
@@ -262,7 +262,7 @@ void Stack::FillTrackArray()
     Bool_t store = (*mStoreIterator).second;
 
     if (store) {
-      auto *track = new((*mTracks)[mNumberOfEntriesInTracks]) MCTrack(GetParticle(iPart));
+      auto *track = new((*mTracks)[mNumberOfEntriesInTracks]) MCTrack(getParticle(iPart));
       mIndexMap[iPart] = mNumberOfEntriesInTracks;
       // Set the number of points in the detectors for this track
       for (Int_t iDet = kAliIts; iDet < kSTOPHERE; iDet++) {
@@ -282,7 +282,7 @@ void Stack::FillTrackArray()
   // Print(1);
 }
 
-void Stack::UpdateTrackIndex(TRefArray *detList)
+void Stack::updateTrackIndex(TRefArray *detList)
 {
   if (mLogger) {
     mLogger->Debug(MESSAGE_ORIGIN, "Stack: Updating track indices...");
@@ -302,7 +302,7 @@ void Stack::UpdateTrackIndex(TRefArray *detList)
       }
       Fatal("Stack::UpdateTrackIndex", "Track index not found in map");
     }
-    track->SetMotherTrackId((*mIndexIterator).second);
+    track->setMotherTrackId((*mIndexIterator).second);
   }
 
   if (fDetList == nullptr) {
@@ -326,7 +326,7 @@ void Stack::UpdateTrackIndex(TRefArray *detList)
       // Update track index for all MCPoints in the collection
       for (Int_t iPoint = 0; iPoint < nPoints; iPoint++) {
         auto *point = (o2::BaseHit *) hitArray->UncheckedAt(iPoint);
-        Int_t iTrack = point->GetTrackID();
+        Int_t iTrack = point->getTrackID();
 
         mIndexIterator = mIndexMap.find(iTrack);
         if (mIndexIterator == mIndexMap.end()) {
@@ -335,7 +335,7 @@ void Stack::UpdateTrackIndex(TRefArray *detList)
           }
           Fatal("Stack::UpdateTrackIndex", "Track index not found in map");
         }
-        point->SetTrackID((*mIndexIterator).second);
+        point->setTrackID((*mIndexIterator).second);
         point->SetLink(FairLink("MCTrack", (*mIndexIterator).second));
       }
 
@@ -348,7 +348,7 @@ void Stack::UpdateTrackIndex(TRefArray *detList)
   }
 }
 
-void Stack::Reset()
+void Stack::reset()
 {
   mIndex = 0;
   mIndexOfCurrentTrack = -1;
@@ -361,7 +361,7 @@ void Stack::Reset()
   mPointsMap.clear();
 }
 
-void Stack::Register()
+void Stack::register()
 {
   // LOG(INFO) << this << " register in "
   //   << FairGenericRootManager::Instance() << " mTracks: " <<  mTracks << std::endl;
@@ -369,26 +369,26 @@ void Stack::Register()
   FairGenericRootManager::Instance()->Register("MCTrack", "Stack", mTracks, kTRUE);
 }
 
-void Stack::Print(Int_t iVerbose) const
+void Stack::print(Int_t iVerbose) const
 {
   cout << "-I- Stack: Number of primaries        = " << mNumberOfPrimaryParticles << endl;
   cout << "              Total number of particles  = " << mNumberOfEntriesInParticles << endl;
   cout << "              Number of tracks in output = " << mNumberOfEntriesInTracks << endl;
   if (iVerbose) {
     for (Int_t iTrack = 0; iTrack < mNumberOfEntriesInTracks; iTrack++) {
-      ((MCTrack *) mTracks->At(iTrack))->Print(iTrack);
+      ((MCTrack *) mTracks->At(iTrack))->print(iTrack);
     }
   }
 }
 
-void Stack::Print(Option_t* option) const
+void Stack::print(Option_t* option) const
 {
   Int_t verbose = 0;
   if ( option ) verbose = 1;
-  Print(verbose);
+  print(verbose);
 }
 
-void Stack::AddPoint(DetectorId detId)
+void Stack::addPoint(DetectorId detId)
 {
   Int_t iDet = detId;
   // cout << "Add point for Detektor" << iDet << endl;
@@ -400,7 +400,7 @@ void Stack::AddPoint(DetectorId detId)
   }
 }
 
-void Stack::AddPoint(DetectorId detId, Int_t iTrack)
+void Stack::addPoint(DetectorId detId, Int_t iTrack)
 {
   if (iTrack < 0) {
     return;
@@ -414,9 +414,9 @@ void Stack::AddPoint(DetectorId detId, Int_t iTrack)
   }
 }
 
-Int_t Stack::GetCurrentParentTrackNumber() const
+Int_t Stack::getCurrentParentTrackNumber() const
 {
-  TParticle *currentPart = GetCurrentTrack();
+  TParticle *currentPart = getCurrentTrack();
   if (currentPart) {
     return currentPart->GetFirstMother();
   } else {
@@ -424,7 +424,7 @@ Int_t Stack::GetCurrentParentTrackNumber() const
   }
 }
 
-TParticle *Stack::GetParticle(Int_t trackID) const
+TParticle *Stack::getParticle(Int_t trackID) const
 {
   if (trackID < 0 || trackID >= mNumberOfEntriesInParticles) {
     if (mLogger) {
@@ -435,7 +435,7 @@ TParticle *Stack::GetParticle(Int_t trackID) const
   return (TParticle *) mParticles->At(trackID);
 }
 
-void Stack::SelectTracks()
+void Stack::selectTracks()
 {
 
   // Clear storage map
@@ -446,7 +446,7 @@ void Stack::SelectTracks()
   // Check particles in the fParticle array
   for (Int_t i = 0; i < mNumberOfEntriesInParticles; i++) {
 
-    TParticle *thisPart = GetParticle(i);
+    TParticle *thisPart = getParticle(i);
     Bool_t store = kTRUE;
 
     // Get track parameters
@@ -490,17 +490,17 @@ void Stack::SelectTracks()
   if (mStoreMothers) {
     for (Int_t i = 0; i < mNumberOfEntriesInParticles; i++) {
       if (mStoreMap[i]) {
-        Int_t iMother = GetParticle(i)->GetMother(0);
+        Int_t iMother = getParticle(i)->GetMother(0);
         while (iMother >= 0) {
           mStoreMap[iMother] = kTRUE;
-          iMother = GetParticle(iMother)->GetMother(0);
+          iMother = getParticle(iMother)->GetMother(0);
         }
       }
     }
   }
 }
 
-FairGenericStack *Stack::CloneStack() const
+FairGenericStack *Stack::cloneStack() const
 {
   return new o2::Data::Stack(*this);
 }

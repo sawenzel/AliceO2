@@ -42,7 +42,7 @@ CookedTrackerTask::~CookedTrackerTask()
 //_____________________________________________________________________
 /// \brief Init function
 /// Inititializes the tracker and connects input and output container
-InitStatus CookedTrackerTask::Init()
+InitStatus CookedTrackerTask::init()
 {
   FairRootManager* mgr = FairRootManager::Instance();
   if (!mgr) {
@@ -60,7 +60,7 @@ InitStatus CookedTrackerTask::Init()
   mTracksArray = new TClonesArray("o2::ITS::CookedTrack");
   mgr->Register("ITSTrack", "ITS", mTracksArray, kTRUE);
 
-  GeometryTGeo* geom = GeometryTGeo::Instance();
+  GeometryTGeo* geom = GeometryTGeo::Instance(instance;
   geom->fillMatrixCache( bit2Mask(TransformType::T2GRot) ); // make sure T2GRot matrices are loaded
   mTracker.setGeometry(geom);
 
@@ -70,7 +70,7 @@ InitStatus CookedTrackerTask::Init()
 }
 
 //_____________________________________________________________________
-void CookedTrackerTask::Exec(Option_t* option)
+void CookedTrackerTask::exec(Option_t* option)
 {
   mTracksArray->Clear();
   LOG(DEBUG) << "Running digitization on new event" << FairLogger::endl;

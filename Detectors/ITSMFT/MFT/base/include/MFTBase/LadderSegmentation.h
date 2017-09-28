@@ -34,7 +34,7 @@ public:
 
   ~LadderSegmentation() override { if(mChips){mChips->Delete(); delete mChips; mChips=nullptr;} }
   virtual void print(Option_t* opt="");
-  void Clear(const Option_t* /*opt*/) override { if(mChips){mChips->Clear();} }
+  void clear(const Option_t* /*opt*/) override { if(mChips){mChips->Clear();} }
   
   ChipSegmentation* getSensor(Int_t sensor) const ;
 

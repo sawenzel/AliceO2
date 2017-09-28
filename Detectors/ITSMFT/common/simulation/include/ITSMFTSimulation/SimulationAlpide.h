@@ -46,16 +46,16 @@ namespace o2 {
 
       SimulationAlpide& operator=(const SimulationAlpide&) = delete;
 
-      void      Hits2Digits(const SegmentationPixel *seg, double eventTime, UInt_t &minFr, UInt_t &maxFr);
+      void      hits2Digits(const SegmentationPixel *seg, double eventTime, UInt_t &minFr, UInt_t &maxFr);
 
       void      addNoise(const SegmentationPixel* seg, UInt_t rofMin, UInt_t rofMax);
       
-      void      clearSimulation() { Chip::Clear(); }
+      void      clearSimulation() { Chip::clear(); }
       
     private:
       
-      void      Hit2DigitsCShape(const Hit *hit, UInt_t roFrame, double eventTime, const SegmentationPixel* seg);
-      void      Hit2DigitsSimple(const Hit *hit, UInt_t roFrame, double eventTime, const SegmentationPixel* seg);
+      void      hit2DigitsCShape(const Hit *hit, UInt_t roFrame, double eventTime, const SegmentationPixel* seg);
+      void      hit2DigitsSimple(const Hit *hit, UInt_t roFrame, double eventTime, const SegmentationPixel* seg);
 
       
       Double_t  betaGammaFunction(Double_t, Double_t, Double_t, Double_t) const;

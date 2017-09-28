@@ -74,7 +74,7 @@ class HwCluster : public Cluster {
     /// \return The output stream
     friend std::ostream& operator<< (std::ostream& out, const HwCluster &c) { return c.print(out); }
     std::ostream& print(std::ostream &output) const override;
-    std::ostream& PrintDetails(std::ostream &output) const;
+    std::ostream& printDetails(std::ostream &output) const;
 
   private:
     /// Calculates the cluster properties according to locally stored data

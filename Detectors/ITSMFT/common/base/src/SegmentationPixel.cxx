@@ -295,8 +295,8 @@ void SegmentationPixel::cellBoundries(Int_t ix, Int_t iz, Double_t& xl, Double_t
   detectorToLocal(ix, iz, x, z);
 
   if (ix < 0 || ix >= mNumberOfRows || iz < 0 || iz >= mNumberOfColumns) {
-    xl = xu = -0.5 * Dx(); // default value.
-    zl = zu = -0.5 * Dz(); // default value.
+    xl = xu = -0.5 * dx(); // default value.
+    zl = zu = -0.5 * dz(); // default value.
     return;                // outside of detctor
   }
   float zpitchH = cellSizeZ(iz) * 0.5;
@@ -366,7 +366,7 @@ Int_t SegmentationPixel::getChipsInLocalWindow(Int_t* array, Float_t zmin, Float
   return nChipInW;
 }
 
-void SegmentationPixel::Init()
+void SegmentationPixel::init()
 {
   // init settings
 }
@@ -525,15 +525,15 @@ void SegmentationPixel::setDiodShiftMatrix(Int_t nrow, Int_t ncol, const Double_
   }
 }
 
-void SegmentationPixel::Print(Option_t* /*option*/) const
+void SegmentationPixel::print(Option_t* /*option*/) const
 {
   const double kmc = 1e4;
   printf("Segmentation %d: Active Size: DX: %.1f DY: %.1f DZ: %.1f | Pitch: X:%.1f Z:%.1f\n", GetUniqueID(),
-         kmc * dxActive(), kmc * Dy(), kmc * dzActive(), kmc * cellSizeX(1), kmc * cellSizeZ(1));
+         kmc * dxActive(), kmc * dy(), kmc * dzActive(), kmc * cellSizeX(1), kmc * cellSizeZ(1));
   printf(
     "Passive Edges: Bottom: %.1f Right: %.1f Top: %.1f Left: %.1f -> DX: %.1f DZ: %.1f Shift: "
     "x:%.1f z:%.1f\n",
-    kmc * mGuardBottom, kmc * mGuardRight, kmc * mGuardTop, kmc * mGuardLeft, kmc * Dx(), kmc * Dz(),
+    kmc * mGuardBottom, kmc * mGuardRight, kmc * mGuardTop, kmc * mGuardLeft, kmc * dx(), kmc * dz(),
     kmc * mShiftLocalX, kmc * mShiftLocalZ);
   printf("%d chips along Z: chip Ncol=%d Nrow=%d\n", mNumberOfChips, mNumberOfColumnsPerChip, mNumberOfRows);
   if (Abs(mPitchZLeftColumn - mPitchZ) > 1e-5) {

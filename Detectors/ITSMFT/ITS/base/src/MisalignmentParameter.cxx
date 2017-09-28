@@ -32,7 +32,7 @@ ClassImp(o2::ITS::MisalignmentParameter)
 }
 
 MisalignmentParameter::~MisalignmentParameter() = default;
-void MisalignmentParameter::Clear() {}
+void MisalignmentParameter::clear() {}
 void MisalignmentParameter::putParams(FairParamList* list)
 {
   if (!list) {

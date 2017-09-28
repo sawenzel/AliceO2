@@ -42,9 +42,9 @@ using std::endl;
 using std::cout;
 using std::string;
 
-ConditionsMQServer::ConditionsMQServer() : ParameterMQServer(), mCdbManager(o2::CDB::Manager::Instance()) {}
+ConditionsMQServer::ConditionsMQServer() : ParameterMQServer(), mCdbManager(o2::CDB::Manager::instance()) {}
 
-void ConditionsMQServer::InitTask()
+void ConditionsMQServer::initTask()
 {
   ParameterMQServer::InitTask();
   // Set first input
@@ -65,9 +65,9 @@ void ConditionsMQServer::InitTask()
   }
 }
 
-void free_tmessage(void* data, void* hint) { delete static_cast<TMessage*>(hint); }
+void freeTmessage(void* data, void* hint) { delete static_cast<TMessage*>(hint); }
 
-void ConditionsMQServer::ParseDataSource(std::string& dataSource, const std::string& data)
+void ConditionsMQServer::parseDataSource(std::string& dataSource, const std::string& data)
 {
   messaging::RequestMessage* msgReply = new messaging::RequestMessage;
   msgReply->ParseFromString(data);
@@ -79,7 +79,7 @@ void ConditionsMQServer::ParseDataSource(std::string& dataSource, const std::str
   delete msgReply;
 }
 
-void ConditionsMQServer::Deserialize(const std::string& messageString, std::string& object)
+void ConditionsMQServer::deserialize(const std::string& messageString, std::string& object)
 {
   messaging::RequestMessage* requestMessage = new messaging::RequestMessage;
   requestMessage->ParseFromString(messageString);
@@ -89,7 +89,7 @@ void ConditionsMQServer::Deserialize(const std::string& messageString, std::stri
   delete requestMessage;
 }
 
-void ConditionsMQServer::Run()
+void ConditionsMQServer::run()
 {
   std::unique_ptr<FairMQPoller> poller(
     fTransportFactory->CreatePoller(fChannels, { "data-put", "data-get", "broker-get" }));
@@ -107,12 +107,12 @@ void ConditionsMQServer::Run()
         //LOG(DEBUG) << "Received a GET client message: " << serialString;
 
         std::string dataSource;
-        ParseDataSource(dataSource, serialString);
+        parseDataSource(dataSource, serialString);
 
         if (dataSource == "OCDB") {
           // Retrieve the key from the serialized message
           std::string key;
-          Deserialize(serialString, key);
+          deserialize(serialString, key);
 
           getFromOCDB(key);
         } else if (dataSource == "Riak") {
@@ -132,7 +132,7 @@ void ConditionsMQServer::Run()
         LOG(DEBUG) << "Message size: " << input->GetSize();
 
         std::string dataSource;
-        ParseDataSource(dataSource, serialString);
+        parseDataSource(dataSource, serialString);
 
         if (dataSource == "OCDB") {
           LOG(ERROR) << "The GET operation is not supported for the OCDB data source yet";

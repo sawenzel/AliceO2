@@ -43,7 +43,7 @@ class DigitizerTask : public FairTask{
     ~DigitizerTask() override;
       
     /// Inititializes the digitizer and connects input and output container
-    InitStatus Init() override;
+    InitStatus init() override;
 
     void setHitFileName(std::string name) { mHitFileName = name; }
 
@@ -63,9 +63,9 @@ class DigitizerTask : public FairTask{
       
     /// Digitization
     /// \param option Option
-    void Exec(Option_t *option) override;
+    void exec(Option_t *option) override;
       
-    void FinishTask() override;
+    void finishTask() override;
 
   private:
     void fillHitArrayFromFile();

@@ -42,7 +42,7 @@ class GeneratorFromFile : public FairGenerator
   bool ReadEvent(FairPrimaryGenerator* primGen) override;
 
   // Set from which event to start
-  void SetStartEvent(int start);
+  void setStartEvent(int start);
 
  private:
   TFile* mEventFile = nullptr; //! the file containing the persistent events

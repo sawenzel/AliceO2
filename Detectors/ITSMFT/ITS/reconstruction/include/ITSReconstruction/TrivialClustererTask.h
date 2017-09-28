@@ -31,8 +31,8 @@ class TrivialClustererTask : public FairTask
   TrivialClustererTask();
   ~TrivialClustererTask() override;
 
-  InitStatus Init() override;
-  void Exec(Option_t* option) override;
+  InitStatus init() override;
+  void exec(Option_t* option) override;
   
  private:
   const o2::ITSMFT::GeometryTGeo* mGeometry = nullptr; ///< ITS geometry

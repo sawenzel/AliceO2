@@ -34,7 +34,7 @@ ClassImp(o2::Passive::Cave)
 
 
 
-void Cave::ConstructGeometry()
+void Cave::constructGeometry()
 {
   FairGeoLoader* loader=FairGeoLoader::Instance();
   FairGeoInterface* GeoInterface =loader->getGeoInterface();
@@ -84,7 +84,7 @@ Cave& Cave::operator=(const Cave& rhs)
   return *this;
 }
 
-FairModule* Cave::CloneModule() const
+FairModule* Cave::cloneModule() const
 {
   return new Cave(*this);
 }

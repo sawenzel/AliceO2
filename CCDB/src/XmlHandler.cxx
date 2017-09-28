@@ -63,20 +63,20 @@ XmlHandler::~XmlHandler()
   //
 }
 
-void XmlHandler::OnStartDocument()
+void XmlHandler::onStartDocument()
 {
   // if something should happen right at the beginning of the
   // XML document, this must happen here
   LOG(INFO) << "Reading XML file for LHCPeriod <-> Run Range correspondence" << FairLogger::endl;
 }
 
-void XmlHandler::OnEndDocument()
+void XmlHandler::onEndDocument()
 {
   // if something should happen at the end of the XML document
   // this must be done here
 }
 
-void XmlHandler::OnStartElement(const char *name, const TList *attributes)
+void XmlHandler::onStartElement(const char *name, const TList *attributes)
 {
   // when a new XML element is found, it is processed here
 
@@ -110,14 +110,14 @@ void XmlHandler::OnStartElement(const char *name, const TList *attributes)
   return;
 }
 
-void XmlHandler::OnEndElement(const char *name)
+void XmlHandler::onEndElement(const char *name)
 {
   // do everything that needs to be done when an end tag of an element is found
   TString strName(name);
   LOG(DEBUG) << "name = " << strName.Data() << FairLogger::endl;
 }
 
-void XmlHandler::OnCharacters(const char *characters)
+void XmlHandler::onCharacters(const char *characters)
 {
   // copy the text content of an XML element
   // mContent = characters;
@@ -125,30 +125,30 @@ void XmlHandler::OnCharacters(const char *characters)
   LOG(DEBUG) << "characters = " << strCharacters.Data() << FairLogger::endl;
 }
 
-void XmlHandler::OnComment(const char * /*text*/)
+void XmlHandler::onComment(const char * /*text*/)
 {
   // comments within the XML file are ignored
 }
 
-void XmlHandler::OnWarning(const char *text)
+void XmlHandler::onWarning(const char *text)
 {
   // process warnings here
   LOG(INFO) << "Warning: " << text << FairLogger::endl;
 }
 
-void XmlHandler::OnError(const char *text)
+void XmlHandler::onError(const char *text)
 {
   // process errors here
   LOG(ERROR) << "Error: " << text << FairLogger::endl;
 }
 
-void XmlHandler::OnFatalError(const char *text)
+void XmlHandler::onFatalError(const char *text)
 {
   // process fatal errors here
   LOG(FATAL) << "Fatal error: " << text << FairLogger::endl;
 }
 
-void XmlHandler::OnCdataBlock(const char * /*text*/, Int_t /*len*/)
+void XmlHandler::onCdataBlock(const char * /*text*/, Int_t /*len*/)
 {
   // process character data blocks here
   // not implemented and should not be used here

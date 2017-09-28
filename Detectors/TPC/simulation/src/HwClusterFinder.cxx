@@ -147,7 +147,7 @@ bool HwClusterFinder::AddTimebins(int nBins, float** timebins, unsigned globalTi
 }
 
 //________________________________________________________________________
-void HwClusterFinder::AddZeroTimebin(unsigned globalTime, int length)
+void HwClusterFinder::addZeroTimebin(unsigned globalTime, int length)
 {
   if (mZeroTimebin == nullptr) {
     mZeroTimebin = new float[length];
@@ -157,7 +157,7 @@ void HwClusterFinder::AddZeroTimebin(unsigned globalTime, int length)
 }
 
 //________________________________________________________________________
-void HwClusterFinder::PrintLocalStorage()
+void HwClusterFinder::printLocalStorage()
 {
   short t,p;
   for (t = 0; t < mTimebins; ++t){

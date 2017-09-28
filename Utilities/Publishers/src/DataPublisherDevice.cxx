@@ -56,7 +56,7 @@ o2::Utilities::DataPublisherDevice::DataPublisherDevice()
 o2::Utilities::DataPublisherDevice::~DataPublisherDevice()
 = default;
 
-void o2::Utilities::DataPublisherDevice::InitTask()
+void o2::Utilities::DataPublisherDevice::initTask()
 {
   mInputChannelName = GetConfig()->GetValue<std::string>(OptionKeyInputChannelName);
   mOutputChannelName = GetConfig()->GetValue<std::string>(OptionKeyOutputChannelName);

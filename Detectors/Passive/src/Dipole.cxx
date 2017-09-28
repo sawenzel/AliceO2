@@ -51,7 +51,7 @@ Dipole& Dipole::operator=(const Dipole& rhs)
 namespace
 {
 // only here temporarily, I would like to harmonize Material treatment (outside of base detector)
-int Material(Int_t imat, const char* name, Float_t a, Float_t z, Float_t dens, Float_t radl, Float_t absl,
+int material(Int_t imat, const char* name, Float_t a, Float_t z, Float_t dens, Float_t radl, Float_t absl,
              Float_t* buf = nullptr, Int_t nwbuf = 0)
 {
   int kmat = -1;
@@ -59,7 +59,7 @@ int Material(Int_t imat, const char* name, Float_t a, Float_t z, Float_t dens, F
   return kmat;
 }
 
-int Mixture(Int_t imat, const char* name, Float_t* a, Float_t* z, Float_t dens, Int_t nlmat, Float_t* wmat = nullptr)
+int mixture(Int_t imat, const char* name, Float_t* a, Float_t* z, Float_t dens, Int_t nlmat, Float_t* wmat = nullptr)
 {
   // Check this!!!
   int kmat = -1;
@@ -67,7 +67,7 @@ int Mixture(Int_t imat, const char* name, Float_t* a, Float_t* z, Float_t dens, 
   return kmat;
 }
 
-int Medium(Int_t numed, const char* name, Int_t nmat, Int_t isvol, Int_t ifield, Float_t fieldm, Float_t tmaxfd,
+int medium(Int_t numed, const char* name, Int_t nmat, Int_t isvol, Int_t ifield, Float_t fieldm, Float_t tmaxfd,
            Float_t stemax, Float_t deemax, Float_t epsil, Float_t stmin, Float_t* ubuf = nullptr, Int_t nbuf = 0)
 {
   // Check this!!!
@@ -126,78 +126,78 @@ void Dipole::createMaterials()
 
   // --- Define the various materials + tracking media for GEANT ---
   //     Aluminum
-  auto matAl0 = Material(9, "ALUMINIUM0", 26.98, 13., 2.7, 8.9, 37.2);
-  Medium(9, "DIPO_ALU_C0", matAl0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  auto matAl1 = Material(29, "ALUMINIUM1", 26.98, 13., 2.7, 8.9, 37.2);
-  Medium(29, "DIPO_ALU_C1", matAl1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  auto matAl2 = Material(49, "ALUMINIUM2", 26.98, 13., 2.7, 8.9, 37.2);
-  Medium(49, "DIPO_ALU_C2", matAl2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto matAl0 = Material(9, "ALUMINIUM0material
+  Medium(9, "DIPO_ALU_C0"medium matAl0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto matAl1 = Material(29, "ALUMINIUMmaterial", 26.98, 13., 2.7, 8.9, 37.2);
+  Medium(29, "DIPO_ALU_C1medium
+  auto matAl2 = Material(49, "ALUMINIUMmaterial", 26.98, 13., 2.7, 8.9, 37.2);
+  Medium(49, "DIPO_ALU_C2medium
 
   //    Iron
-  auto matIr0 = Material(10, "IRON0", 55.85, 26., 7.87, 1.76, 17.1);
-  Medium(10, "DIPO_FE_C0", matIr0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  auto matIr1 = Material(30, "IRON1", 55.85, 26., 7.87, 1.76, 17.1);
-  Medium(30, "DIPO_FE_C1", matIr1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  auto matIr2 = Material(50, "IRON2", 55.85, 26., 7.87, 1.76, 17.1);
-  Medium(50, "DIPO_FE_C2", matIr2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto matIr0 = Material(10, "IRON0", 5material, 26., 7.87, 1.76, 17.1);
+  Medium(10, "DIPO_FE_C0"medium matIr0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto matIr1 = Material(30, "IRON1", 5material, 26., 7.87, 1.76, 17.1);
+  Medium(30, "DIPO_FE_C1"medium matIr1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto matIr2 = Material(50, "IRON2", 5material, 26., 7.87, 1.76, 17.1);
+  Medium(50, "DIPO_FE_C2"medium matIr2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //     Air
-  auto matair0 = Mixture(15, "AIR0", aAir, zAir, dAir, 4, wAir);
-  auto matair1 = Mixture(35, "AIR1", aAir, zAir, dAir, 4, wAir);
-  auto matair2 = Mixture(55, "AIR2", aAir, zAir, dAir, 4, wAir);
-  auto matairmuon = Mixture(75, "AIR_MUON", aAir, zAir, dAir, 4, wAir);
-  Medium(15, "DIPO_AIR_C0", matair0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(35, "DIPO_AIR_C1", matair1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(55, "DIPO_AIR_C2", matair2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(75, "DIPO_AIR_MUON", matairmuon, 0, isxfld2, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto matair0 = Mixture(15, "AIR0", aAimixture, zAir, dAir, 4, wAir);
+  auto matair1 = Mixture(35, "AIR1", aAimixture, zAir, dAir, 4, wAir);
+  auto matair2 = Mixture(55, "AIR2", aAimixture, zAir, dAir, 4, wAir);
+  auto matairmuon = Mixture(75, "AIR_MUON",mixture aAir, zAir, dAir, 4, wAir);
+  Medium(15, "DIPO_AIR_C0medium
+  Medium(35, "DIPO_AIR_C1medium
+  Medium(55, "DIPO_AIR_C2medium
+  Medium(75, "DIPO_AIR_MUmedium", matairmuon, 0, isxfld2, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //    Vacuum
-  auto matvac0 = Mixture(16, "VACUUM0", aAir, zAir, dAir1, 4, wAir);
-  auto matvac1 = Mixture(36, "VACUUM1", aAir, zAir, dAir1, 4, wAir);
-  auto matvac2 = Mixture(56, "VACUUM2", aAir, zAir, dAir1, 4, wAir);
-  Medium(16, "DIPO_VA_C0", matvac0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(36, "DIPO_VA_C1", matvac1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(56, "DIPO_VA_C2", matvac2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto matvac0 = Mixture(16, "VACUUM0", mixture, zAir, dAir1, 4, wAir);
+  auto matvac1 = Mixture(36, "VACUUM1", mixture, zAir, dAir1, 4, wAir);
+  auto matvac2 = Mixture(56, "VACUUM2", mixture, zAir, dAir1, 4, wAir);
+  Medium(16, "DIPO_VA_C0"medium matvac0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(36, "DIPO_VA_C1"medium matvac1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(56, "DIPO_VA_C2"medium matvac2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //     stainless Steel
-  auto matst0 = Mixture(19, "STAINLESS STEEL0$", asteel, zsteel, 7.88, 4, wsteel);
-  auto matst1 = Mixture(39, "STAINLESS STEEL1$", asteel, zsteel, 7.88, 4, wsteel);
-  auto matst2 = Mixture(59, "STAINLESS STEEL2$", asteel, zsteel, 7.88, 4, wsteel);
-  Medium(19, "DIPO_ST_C0", matst0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(39, "DIPO_ST_C1", matst1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(59, "DIPO_ST_C3", matst2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto matst0 = Mixture(19, "STAINLESS mixture", asteel, zsteel, 7.88, 4, wsteel);
+  auto matst1 = Mixture(39, "STAINLESS mixture", asteel, zsteel, 7.88, 4, wsteel);
+  auto matst2 = Mixture(59, "STAINLESS mixture", asteel, zsteel, 7.88, 4, wsteel);
+  Medium(19, "DIPO_ST_C0"medium matst0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(39, "DIPO_ST_C1"medium matst1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(59, "DIPO_ST_C3"medium matst2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //    Coil
-  auto matcoil0 = Mixture(14, "Al0", acoil, zcoil, 2.122, 3, wcoil);
-  auto matcoil1 = Mixture(34, "Al1", acoil, zcoil, 2.122, 3, wcoil);
-  auto matcoil2 = Mixture(54, "Al2", acoil, zcoil, 2.122, 3, wcoil);
-  Medium(14, "DIPO_Coil_C1", matcoil0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(34, "DIPO_Coil_C2", matcoil1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(54, "DIPO_Coil_C3", matcoil2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto matcoil0 = Mixture(14, "Al0", acoimixture, zcoil, 2.122, 3, wcoil);
+  auto matcoil1 = Mixture(34, "Al1", acoimixture, zcoil, 2.122, 3, wcoil);
+  auto matcoil2 = Mixture(54, "Al2", acoimixture, zcoil, 2.122, 3, wcoil);
+  Medium(14, "DIPO_Coil_Cmedium", matcoil0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(34, "DIPO_Coil_Cmedium", matcoil1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(54, "DIPO_Coil_Cmedium", matcoil2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //    Resin
-  auto matresin0 = Mixture(13, "RESIN0", aresi, zresi, 1.05, 3, wresi);
-  auto matresin1 = Mixture(33, "RESIN1", aresi, zresi, 1.05, 3, wresi);
-  auto matresin2 = Mixture(53, "RESIN2", aresi, zresi, 1.05, 3, wresi);
-  Medium(13, "DIPO_RESIN_C0", matresin0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(33, "DIPO_RESIN_C1", matresin1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(53, "DIPO_RESIN_C2", matresin2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto matresin0 = Mixture(13, "RESIN0", amixture, zresi, 1.05, 3, wresi);
+  auto matresin1 = Mixture(33, "RESIN1", amixture, zresi, 1.05, 3, wresi);
+  auto matresin2 = Mixture(53, "RESIN2", amixture, zresi, 1.05, 3, wresi);
+  Medium(13, "DIPO_RESIN_medium", matresin0, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(33, "DIPO_RESIN_medium", matresin1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(53, "DIPO_RESIN_medium", matresin2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //    G10
-  auto matG100 = Mixture(11, "G100", aG10, zG10, 1.7, 5, wG10);
-  auto matG101 = Mixture(31, "G101", aG10, zG10, 1.7, 5, wG10);
-  auto matG102 = Mixture(51, "G102", aG10, zG10, 1.7, 5, wG10);
-  Medium(11, "DIPO_G10_C0", matG100, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(31, "DIPO_G10_C1", matG101, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(51, "DIPO_G10_C2", matG102, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto matG100 = Mixture(11, "G100", aG1mixture, zG10, 1.7, 5, wG10);
+  auto matG101 = Mixture(31, "G101", aG1mixture, zG10, 1.7, 5, wG10);
+  auto matG102 = Mixture(51, "G102", aG1mixture, zG10, 1.7, 5, wG10);
+  Medium(11, "DIPO_G10_C0medium
+  Medium(31, "DIPO_G10_C1medium
+  Medium(51, "DIPO_G10_C2medium
 
   //    Copper
-  auto matCu1 = Material(17, "COPPER0", 63.55, 29., 8.96, 1.43, 15.1);
-  auto matCu2 = Material(37, "COPPER1", 63.55, 29., 8.96, 1.43, 15.1);
-  auto matCu3 = Material(57, "COPPER2", 63.55, 29., 8.96, 1.43, 15.1);
-  Medium(17, "DIPO_Cu_C0", matCu1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(37, "DIPO_Cu_C1", matCu2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  Medium(57, "DIPO_Cu_C2", matCu3, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  auto matCu1 = Material(17, "COPPER0",material 63.55, 29., 8.96, 1.43, 15.1);
+  auto matCu2 = Material(37, "COPPER1",material 63.55, 29., 8.96, 1.43, 15.1);
+  auto matCu3 = Material(57, "COPPER2",material 63.55, 29., 8.96, 1.43, 15.1);
+  Medium(17, "DIPO_Cu_C0"medium matCu1, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(37, "DIPO_Cu_C1"medium matCu2, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+  Medium(57, "DIPO_Cu_C2"medium matCu3, 0, isxfld1, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 }
 
 auto GetMedium = [](const char* x) {
@@ -207,7 +207,7 @@ auto GetMedium = [](const char* x) {
   return med;
 };
 
-void Dipole::ConstructGeometry()
+void Dipole::constructGeometry()
 {
   createMaterials();
   createSpectrometerDipole();
@@ -793,5 +793,5 @@ TGeoVolume* Dipole::createMagnetYoke()
   return (TGeoVolume*)voMagnet;
 }
 
-FairModule* Dipole::CloneModule() const { return new Dipole(*this); }
+FairModule* Dipole::cloneModule() const { return new Dipole(*this); }
 ClassImp(o2::passive::Dipole);

@@ -27,7 +27,7 @@ TimeframeReaderDevice::TimeframeReaderDevice()
 {
 }
 
-void TimeframeReaderDevice::InitTask()
+void TimeframeReaderDevice::initTask()
 {
   mOutChannelName = GetConfig()->GetValue<std::string>(OptionKeyOutputChannelName);
   mInFileName = GetConfig()->GetValue<std::string>(OptionKeyInputFileName);

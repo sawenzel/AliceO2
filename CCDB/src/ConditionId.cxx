@@ -120,7 +120,7 @@ Bool_t ConditionId::isEqual(const TObject *obj) const
          mVersion == other->getVersion() && mSubVersion == other->getSubVersion();
 }
 
-TString ConditionId::ToString() const
+TString ConditionId::toString() const
 {
   // returns a string of ConditionId data
 
@@ -139,10 +139,10 @@ void ConditionId::print(Option_t * /*option*/) const
 {
   // Prints ToString()
 
-  std::cout << ToString().Data() << std::endl;
+  std::cout << toString().Data() << std::endl;
 }
 
-Int_t ConditionId::Compare(const TObject *obj) const
+Int_t ConditionId::compare(const TObject *obj) const
 {
   //
   // compare according y
@@ -150,7 +150,7 @@ Int_t ConditionId::Compare(const TObject *obj) const
   return TString(this->getPathString()).CompareTo((o2->getPathString()));
 }
 
-Bool_t ConditionId::IsSortable() const
+Bool_t ConditionId::isSortable() const
 {
   return kTRUE;
 }

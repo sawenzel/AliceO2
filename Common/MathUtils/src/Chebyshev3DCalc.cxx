@@ -110,7 +110,7 @@ Chebyshev3DCalc::Chebyshev3DCalc(FILE *stream)
 Chebyshev3DCalc &Chebyshev3DCalc::operator=(const Chebyshev3DCalc &rhs)
 {
   if (this != &rhs) {
-    Clear();
+    clear();
     SetName(rhs.GetName());
     SetTitle(rhs.GetTitle());
     mNumberOfCoefficients = rhs.mNumberOfCoefficients;
@@ -157,7 +157,7 @@ Chebyshev3DCalc &Chebyshev3DCalc::operator=(const Chebyshev3DCalc &rhs)
   return *this;
 }
 
-void Chebyshev3DCalc::Clear(const Option_t *)
+void Chebyshev3DCalc::clear(const Option_t *)
 {
   if (mTemporaryCoefficients2D) {
     delete[] mTemporaryCoefficients2D;
@@ -189,7 +189,7 @@ void Chebyshev3DCalc::Clear(const Option_t *)
   }
 }
 
-void Chebyshev3DCalc::Print(const Option_t *) const
+void Chebyshev3DCalc::print(const Option_t *) const
 {
   printf("Chebyshev parameterization data %s for 3D->1 function, precision: %e\n",
          GetName(), mPrecision);
@@ -319,7 +319,7 @@ void Chebyshev3DCalc::loadData(FILE *stream)
     exit(1);
   }
   TString buffs;
-  Clear();
+  clear();
   readLine(buffs, stream);
 
   if (!buffs.BeginsWith("START")) {
