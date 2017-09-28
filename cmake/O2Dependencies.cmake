@@ -660,6 +660,7 @@ o2_define_bucket(
     Gen
     Base
     TreePlayer
+    Steer
     #   Core
     #    root_base_bucket
     #    fairroot_geom

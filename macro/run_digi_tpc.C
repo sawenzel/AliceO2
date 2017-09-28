@@ -15,6 +15,7 @@
   #include "FairLinkManager.h"
 
   #include "Field/MagneticField.h"
+  #include "Steer/O2RunAna.h"
 
   #include "TPCSimulation/DigitizerTask.h"
 #endif
@@ -35,8 +36,9 @@ void run_digi_tpc(Int_t nEvents = 10, TString mcEngine = "TGeant3", Int_t isCont
         TStopwatch timer;
 
         // Setup FairRoot analysis manager
-        FairRunAna * run = new FairRunAna();
-
+        // auto run = std::unique_ptr<FairRunAna>(new FairRunAna());
+        auto run = o2::steer::O2RunAna::Instance();
+	
         // ===| Activation of fair links for MC ID |============================
         run->SetUseFairLinks(kTRUE);
         // -- only store the link to the MC track
@@ -56,8 +58,8 @@ void run_digi_tpc(Int_t nEvents = 10, TString mcEngine = "TGeant3", Int_t isCont
         fFileSource->SetEventMeanTime(20*1000); //is in us
       //  TGeoManager::Import("geofile_full.root");
 
-        o2::field::MagneticField *magField = new o2::field::MagneticField("Maps","Maps", -1., -1., o2::field::MagFieldParam::k5kG);
-        run->SetField(magField);
+        //o2::field::MagneticField *magField = new o2::field::MagneticField("Maps","Maps", -1., -1., o2::field::MagFieldParam::k5kG);
+        //run->SetField(magField);
 
         // Setup digitizer
         o2::TPC::DigitizerTask *digiTPC = new o2::TPC::DigitizerTask;
@@ -72,7 +74,7 @@ void run_digi_tpc(Int_t nEvents = 10, TString mcEngine = "TGeant3", Int_t isCont
         run->Run();
 
         std::cout << std::endl << std::endl;
-
+        
         // Extract the maximal used memory an add is as Dart measurement
         // This line is filtered by CTest and the value send to CDash
         FairSystemInfo sysInfo;
