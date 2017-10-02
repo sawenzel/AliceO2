@@ -23,9 +23,34 @@
 #include <bitset>
 #include "../include/Types/ValuePack.h"
 
+using TwoFourNinePack = o2::types::ValuePack<unsigned int, 2, 4, 9>;
+
+union Foo {
+  unsigned int value;
+private:
+  struct {
+    unsigned int x:2;
+    unsigned int y:4;
+    unsigned int z:9;
+  };
+public:
+  unsigned int getX() const { return x; }
+  unsigned int getY() const { return y; }
+  unsigned int getZ() const { return z; }
+};
+
+__attribute__((noinline))
+unsigned int Get2(Foo const &f) {
+  return f.getY();
+}
+
+__attribute__((noinline))
+unsigned int Get2(TwoFourNinePack const &f) {
+  return f.get<1,unsigned int>();
+}
+
 BOOST_AUTO_TEST_CASE(test_valuepack)
 {
-  using TwoFourNinePack = o2::types::ValuePack<unsigned int, 2, 4, 9>;
   std::cout << TwoFourNinePack::nbits << " "
             << TwoFourNinePack::nfields << " "
             << TwoFourNinePack::size << " "
@@ -49,5 +74,10 @@ BOOST_AUTO_TEST_CASE(test_valuepack)
             << ": " << std::bitset<TwoFourNinePack::nbits>(pack) << std::endl;
   BOOST_CHECK((pack.get<1, unsigned int>()) == 10);
 
+  // check consistency with union
+  Foo f; f.value = pack;
+  BOOST_CHECK(Get2(f) == Get2(pack));
+  
   TwoFourNinePack copy = pack;
 }
+
