@@ -51,7 +51,7 @@ void Digitizer::init()
 //  mDebugTreePRF->Branch("GEMresponse", &GEMresponse, "CRU:timeBin:row:pad:nElectrons");
 }
 
-DigitContainer *Digitizer::Process(TClonesArray *points)
+DigitContainer *Digitizer::Process(const std::vector<o2::TPC::LinkableHitGroup>* hits)
 {
 //  mDigitContainer->reset();
   const static Mapper& mapper = Mapper::instance();
@@ -71,11 +71,11 @@ DigitContainer *Digitizer::Process(TClonesArray *points)
   signalArray.resize(nShapedPoints);
 
   static size_t hitCounter=0;
-  for(auto pointObject : *points) {
-    auto *inputgroup = static_cast<LinkableHitGroup*>(pointObject);
-    const int MCTrackID = inputgroup->GetTrackID();
-    for(size_t hitindex = 0; hitindex<inputgroup->getSize(); ++hitindex){
-      ElementalHit eh = inputgroup->getHit(hitindex);
+  for(auto& inputgroup : *hits) {
+    //    auto *inputgroup = static_cast<LinkableHitGroup*>(pointObject);
+    const int MCTrackID = inputgroup.GetTrackID();
+    for(size_t hitindex = 0; hitindex < inputgroup.getSize(); ++hitindex){
+      ElementalHit eh = inputgroup.getHit(hitindex);
       auto *inputpoint = &eh;
 
     const GlobalPosition3D posEle(inputpoint->GetX(), inputpoint->GetY(), inputpoint->GetZ());
