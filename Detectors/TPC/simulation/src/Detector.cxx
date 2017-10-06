@@ -62,18 +62,6 @@ using std::ifstream;
 using namespace o2::TPC;
 
 
-Detector::Detector()
-  : o2::Base::Detector("TPC", kTRUE),
-    mSimulationType(SimulationType::Other),
-    mGeoFileName(),
-    mEventNr(0)
-{
-  for(int i=0;i<Sector::MAXSECTOR;++i){
-    mHitsPerSectorCollection[i]=new TClonesArray("o2::TPC::LinkableHitGroup");
-    mHitsPerSectorCollection[i]->BypassStreamer(true);
-  }
-}
-
 Detector::Detector(Bool_t active)
   : o2::Base::Detector("TPC", active),
     mSimulationType(SimulationType::Other),
@@ -81,16 +69,17 @@ Detector::Detector(Bool_t active)
     mEventNr(0)
 {
   for(int i=0;i<Sector::MAXSECTOR;++i){
-    mHitsPerSectorCollection[i]=new TClonesArray("o2::TPC::LinkableHitGroup");
-    mHitsPerSectorCollection[i]->BypassStreamer(true);
+    mHitsPerSectorCollection[i]=new std::vector<o2::TPC::LinkableHitGroup>;
   }
 }
 
+// forward default constructor
+Detector::Detector() : o2::TPC::Detector(kTRUE) {}
 
 Detector::~Detector()
 {
   for(int i=0;i<Sector::MAXSECTOR;++i){
-    mHitsPerSectorCollection[i]->Delete();
+    mHitsPerSectorCollection[i]->clear();
     delete mHitsPerSectorCollection[i];
   }
   std::cout << "Produced hits " << mHitCounter << "\n";
@@ -287,14 +276,17 @@ Bool_t  Detector::ProcessHits(FairVolume* vol)
   //  a new group is starting -> put it into the container
   static LinkableHitGroup *currentgroup = nullptr;
   if (groupCounter == 0) {
-    TClonesArray& clref = *mHitsPerSectorCollection[sectorID];
+//    TClonesArray& clref = *mHitsPerSectorCollection[sectorID];
 
     // push-back in place
-    Int_t size = clref.GetEntriesFast();
-    currentgroup = new(clref[size]) LinkableHitGroup(trackID);
+//    Int_t size = clref.GetEntriesFast();
+//    currentgroup = new(clref[size]) LinkableHitGroup(trackID);
 
     // set the MC truth link for this group
-    currentgroup->SetLink(FairLink(-1, mEventNr, mMCTrackBranchId, trackID)); 
+//    currentgroup->SetLink(FairLink(-1, mEventNr, mMCTrackBranchId, trackID)); 
+
+    mHitsPerSectorCollection[sectorID]->emplace_back(trackID);
+    currentgroup = &(mHitsPerSectorCollection[sectorID]->back());
   }
   if ( trackID == oldTrackId && oldSectorId == sectorID ){
     groupCounter++;
@@ -304,7 +296,7 @@ Bool_t  Detector::ProcessHits(FairVolume* vol)
   }
   // finish group
   else {
-    currentgroup->shrinkToFit();
+//    currentgroup->shrinkToFit();
     oldTrackId = trackID;
     oldSectorId = sectorID;
     groupCounter = 0;
@@ -329,7 +321,9 @@ void Detector::EndOfEvent()
   for(int i=0;i<Sector::MAXSECTOR;++i) {
     // passing "C" since objects contain other pointer data
     // which needs to be cleaned up
-    mHitsPerSectorCollection[i]->Clear("C");
+//    mHitsPerSectorCollection[i]->Clear("C");
+
+    mHitsPerSectorCollection[i]->clear();
   }
   ++mEventNr;
 }
@@ -345,7 +339,7 @@ void Detector::Register()
   for (int i=0;i<Sector::MAXSECTOR;++i) {
     TString name;
     name.Form("%sHitsSector%d", GetName(), i);
-    mgr->Register(name.Data(), GetName(), mHitsPerSectorCollection[i], kTRUE);
+    mgr->RegisterAny(name.Data(), mHitsPerSectorCollection[i], kTRUE);
   }
   mMCTrackBranchId=mgr->GetBranchId("MCTrack");
 }
@@ -359,7 +353,7 @@ TClonesArray* Detector::GetCollection(Int_t iColl) const
 void Detector::Reset()
 {
   for(int i=0;i<Sector::MAXSECTOR;++i) {
-    mHitsPerSectorCollection[i]->Clear();
+    mHitsPerSectorCollection[i]->clear();
   }
 }
 
