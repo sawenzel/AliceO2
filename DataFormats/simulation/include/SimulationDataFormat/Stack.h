@@ -20,14 +20,11 @@
 
 #include "Rtypes.h"
 #include "TMCProcess.h"
+#include "TParticle.h"
 
 #include <map>
 #include <stack>
 #include <utility>
-
-class TClonesArray;
-
-class TParticle;
 
 class TRefArray;
 
@@ -192,12 +189,12 @@ class Stack : public FairGenericStack
     void AddPoint(int iDet, Int_t iTrack);
 
     /// Accessors
-    TParticle *GetParticle(Int_t trackId) const;
+    TParticle* GetParticle(Int_t trackId) const;
 
-    TClonesArray *GetListOfParticles() override
-    {
-      return mParticles;
-    }
+    //TClonesArray *GetListOfParticles() override
+    //{
+//      return mParticles;
+  //  }
 
     /// Clone for worker (used in MT mode only)
     FairGenericStack *CloneStack() const override;
@@ -210,7 +207,8 @@ class Stack : public FairGenericStack
 
     /// Array of TParticles (contains all TParticles put into or created
     /// by the transport
-    TClonesArray* mParticles; //!
+    // TClonesArray* mParticles; //!
+    std::vector<TParticle> mParticles; //!
     
     /// vector of reducded tracks written to the output
     std::vector<o2::MCTrack>* mTracks;
