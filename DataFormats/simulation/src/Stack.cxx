@@ -28,6 +28,7 @@
 #include "TLorentzVector.h"   // for TLorentzVector
 #include "TParticle.h"        // for TParticle
 #include "TRefArray.h"        // for TRefArray
+#include "TDatabasePDG.h"
 
 #include <cstddef>           // for NULL
 
@@ -146,6 +147,9 @@ void Stack::PushTrack(Int_t toBeDone, Int_t parentId, Int_t pdgCode, Double_t px
   // We could pack additional information into this integer.
   particle->SetUniqueID(0);
 
+  auto db = TDatabasePDG::Instance();
+  LOG(INFO) << "Pushing track " << trackId << " pdg " << pdgCode << " ( " << db->GetParticle(pdgCode)->GetName() << " )  with parent " << parentId << FairLogger::endl;
+  
   // Increment counter
   if (parentId < 0) {
     mNumberOfPrimaryParticles++;

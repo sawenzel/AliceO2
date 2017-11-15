@@ -102,9 +102,9 @@ class Detector: public o2::Base::DetImpl<Detector> {
     void   SetSpecialPhysicsCuts() override;
 
     void   EndOfEvent() override;
-    void   FinishPrimary() override {;}
+    void   FinishPrimary() override;
     void   FinishRun() override {;}
-    void   BeginPrimary() override {;}
+    void   BeginPrimary() override;
     void   PostTrack() override {;}
     void   PreTrack() override {;}
     void   BeginEvent() override {;}

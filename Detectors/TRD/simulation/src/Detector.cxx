@@ -29,6 +29,11 @@ Detector::Detector(Bool_t active)
 
 void Detector::Initialize() { o2::Base::Detector::Initialize(); }
 
+void Detector::FinishPrimary()
+{
+  LOG(INFO) << "TRD: Primary finished" << FairLogger::endl;
+}
+
 bool Detector::ProcessHits(FairVolume* v)
 {
   // very rudimentatary hit creation

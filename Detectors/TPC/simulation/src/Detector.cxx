@@ -358,6 +358,16 @@ void Detector::ConstructGeometry()
   //GeantHack();
 }
 
+void Detector::FinishPrimary()
+{
+  LOG(INFO) << "TPC: Primary finished" << FairLogger::endl;
+}
+
+void Detector::BeginPrimary()
+{
+  LOG(INFO) << "TPC: Start primary " << gMC->GetStack()->GetCurrentTrackNumber() <<  FairLogger::endl;
+}
+
 void Detector::CreateMaterials()
 {
   //-----------------------------------------------

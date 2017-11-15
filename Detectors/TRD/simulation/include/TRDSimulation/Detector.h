@@ -50,6 +50,7 @@ class Detector : public o2::Base::DetImpl<Detector>
 
   void Reset() override;
   void EndOfEvent() override;
+  void FinishPrimary() override;
 
   void createMaterials();
   void ConstructGeometry() override;
