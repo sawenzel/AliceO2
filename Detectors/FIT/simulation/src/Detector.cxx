@@ -17,7 +17,7 @@
 #include "TSystem.h"
 #include "TVirtualMC.h"
 
-#include "FairGenericRootManager.h" // for FairGenericRootManager
+#include "FairRootManager.h"
 #include "FairLogger.h"
 #include "FairVolume.h"
 
@@ -41,7 +41,18 @@ Detector::Detector(Bool_t Active)
   //  TString gn(geo->GetName());
 }
 
-void Detector::Initialize() { o2::Base::Detector::Initialize(); }
+void Detector::Initialize()
+{
+  // FIXME: we need to register the sensitive volumes with FairRoot
+  TGeoVolume* v = gGeoManager->GetVolume("0REG");
+  if (v == nullptr)
+    printf("Sensitive volume 0REG not found!!!!!!!!");
+  else {
+    AddSensitiveVolume(v);
+  }
+
+  o2::Base::Detector::Initialize();
+}
 
 void Detector::ConstructGeometry()
 {
@@ -180,14 +191,6 @@ void Detector::ConstructGeometry()
 
   // MCP + 4 x wrapped radiator + 4xphotocathod + MCP + Al top in front of radiators
   SetOneMCP(ins);
-
-  // FIXME: we need to register the sensitive volumes with FairRoot
-  TGeoVolume* v = gGeoManager->GetVolume("0REG");
-  if (v == nullptr)
-    printf("Sensitive volume 0REG not found!!!!!!!!");
-  else {
-    AddSensitiveVolume(v);
-  }
 }
 
 //_________________________________________
@@ -302,8 +305,8 @@ void Detector::Register()
   // parameter to kFALSE means that this collection will not be written to the file,
   // it will exist only during the simulation
 
-  if (FairGenericRootManager::Instance()) {
-    FairGenericRootManager::Instance()->GetFairRootManager()->RegisterAny(addNameTo("Hit").data(), mHits, kTRUE);
+  if (FairRootManager::Instance()) {
+    FairRootManager::Instance()->RegisterAny(addNameTo("Hit").data(), mHits, kTRUE);
   }
 }
 

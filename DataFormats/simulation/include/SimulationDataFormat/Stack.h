@@ -143,6 +143,9 @@ class Stack : public FairGenericStack
     /// Update the track index in the MCTracks and data produced by detectors
     void UpdateTrackIndex(TRefArray *detArray = nullptr) override;
 
+    /// Finish primary
+    void FinishPrimary() override;
+
     /// Resets arrays and stack and deletes particles and tracks
     void Reset() override;
 
@@ -187,9 +190,6 @@ class Stack : public FairGenericStack
 
     /// Clone for worker (used in MT mode only)
     FairGenericStack *CloneStack() const override;
-
-    // receive notification that primary is finished
-    void notifyFinishPrimary();
 
   private:
     FairLogger *mLogger;
@@ -246,9 +246,13 @@ class Stack : public FairGenericStack
     /// returns false if some tracks are discarded
     bool selectTracks();
     
+  /// copy constructor (used in MT)
     Stack(const Stack &);
 
     Stack &operator=(const Stack &);
+
+    // receive notification that primary is finished
+    void notifyFinishPrimary();
 
     /// function called after each primary
     /// and all its secondaries where transported

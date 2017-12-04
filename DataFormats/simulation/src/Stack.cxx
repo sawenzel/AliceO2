@@ -20,7 +20,6 @@
 #include "FairDetector.h"     // for FairDetector
 #include "FairLogger.h"       // for MESSAGE_ORIGIN, FairLogger
 #include "SimulationDataFormat/BaseHits.h"
-#include "FairGenericRootManager.h"  // for FairGenericRootManager
 #include "FairRootManager.h"
 
 #include "TLorentzVector.h"   // for TLorentzVector
@@ -40,7 +39,7 @@ Stack::Stack(Int_t size)
     mStack(),
     //mParticles(new TClonesArray("TParticle", size)),
     mParticles(),
-	mTracks(new std::vector<o2::MCTrack>),
+    mTracks(new std::vector<o2::MCTrack>),
     mIndexMap(),
     mIndexOfCurrentTrack(-1),
     mNumberOfPrimaryParticles(0),
@@ -80,8 +79,9 @@ Stack::Stack(const Stack &rhs)
     mLogger(FairLogger::GetLogger()),
     mIsG4Like(rhs.mIsG4Like)
 {
-  LOG(FATAL) << "copy constructor called" << FairLogger::endl;
-  mTracks = new std::vector<MCTrack>(rhs.mTracks->size());
+  LOG(DEBUG) << "copy constructor called" << FairLogger::endl;
+  mTracks = new std::vector<MCTrack>();
+  // LOG(INFO) << "Stack::Stack(rhs) " << this << " mTracks " << mTracks << std::endl;
 }
 
 Stack::~Stack()
@@ -348,6 +348,13 @@ void Stack::UpdateTrackIndex(TRefArray *detList)
   }
 }
 
+void Stack::FinishPrimary()
+{
+  if ( mIsG4Like ) {
+    notifyFinishPrimary();
+  }
+}
+
 void Stack::Reset()
 {
   mIndex = 0;
@@ -369,9 +376,8 @@ void Stack::Reset()
 void Stack::Register()
 {
   // LOG(INFO) << this << " register in "
-  //   << FairGenericRootManager::Instance() << " mTracks: " <<  mTracks << std::endl;
+  //   << FairRootManager::Instance() << " mTracks: " <<  mTracks << std::endl;
 
-  //  FairGenericRootManager::Instance()->Register("MCTrack", "Stack", mTracks, kTRUE);
   FairRootManager::Instance()->RegisterAny("MCTrack", mTracks, kTRUE);
 }
 

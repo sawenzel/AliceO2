@@ -30,8 +30,8 @@
 #include "TGeoManager.h"
 
 #include "FairLogger.h"
-#include "FairGenericRootManager.h"
 #include "FairVolume.h"
+#include "FairRootManager.h"
 
 using o2::ITSMFT::Hit;
 using namespace o2::MFT;
@@ -98,8 +98,9 @@ void Detector::Initialize()
 
   mGeometryTGeo = GeometryTGeo::Instance();
 
-  FairDetector::Initialize();
+  defineSensitiveVolumes();
 
+  FairDetector::Initialize();
 }
 
 //_____________________________________________________________________________
@@ -431,7 +432,6 @@ void Detector::ConstructGeometry()
 
   createMaterials();
   createGeometry();
-  defineSensitiveVolumes();
 
 }
 
@@ -471,8 +471,8 @@ void Detector::Register()
   // parameter to kFALSE means that this collection will not be written to the file,
   // it will exist only during the simulation
 
-  if (FairGenericRootManager::Instance()) {
-    FairGenericRootManager::Instance()->GetFairRootManager()->RegisterAny(addNameTo("Hit").data(), mHits, kTRUE);
+  if (FairRootManager::Instance()) {
+    FairRootManager::Instance()->RegisterAny(addNameTo("Hit").data(), mHits, kTRUE);
   }
 
 }
