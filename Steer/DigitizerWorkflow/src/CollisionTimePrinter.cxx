@@ -48,21 +48,23 @@ DataProcessorSpec getCollisionTimePrinter() {
     auto header = o2::header::get<const o2::header::DataHeader>(dataref.header);
 	LOG(INFO) << "PAYLOAD SIZE " << header->payloadSize;
 
+    auto view = DataRefUtils::as<o2::MCInteractionRecord>(dataref);
+
     //auto view = DataRefUtils::as<int>(dataref);
     //LOG(INFO) << "## " << view[0] << "\n";
 
-	auto msg = DataRefUtils::as<TMessage>(dataref);
-	msg->Print();
-	return;
-    using T = std::vector<o2::MCInteractionRecord>;
-    auto cl = TClass::GetClass(typeid(T));
-    assert(cl);
-    auto records = static_cast<T*>(msg->ReadObjectAny(cl));
-    assert(records);
+//	auto msg = DataRefUtils::as<TMessage>(dataref);
+//	msg->Print();
+//	return;
+//    using T = std::vector<o2::MCInteractionRecord>;
+//    auto cl = TClass::GetClass(typeid(T));
+//    assert(cl);
+//    auto records = static_cast<T*>(msg->ReadObjectAny(cl));
+//    assert(records);
 
-    LOG(INFO) << "GOT " << records->size() << "times";
+    LOG(INFO) << "GOT " << view.size() << "times";
     int counter=0;
-    for (auto& collrecord : *records) {
+    for (auto& collrecord : view) {
       LOG(INFO) << "TIME " << counter++ << " : " << collrecord.timeNS;
     }
   };
