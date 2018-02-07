@@ -20,6 +20,7 @@
 #include <memory>  // std::unique_ptr
 #include <cstring> // memcpy
 #include <string>  // std::string
+#include <cassert>
 
 using DataProcessorSpec = o2::framework::DataProcessorSpec;
 using Inputs = o2::framework::Inputs;
@@ -44,8 +45,22 @@ DataProcessorSpec getSimReaderSpec() {
     auto& mgr = steer::HitProcessingManager::instance();
     auto eventrecords = mgr.getRunContext().getEventRecords();
 
+    // send data via data allocator
+    // for times a flat buffer
+   // pc.allocator().snapshot(OutputSpec{ "SIM", "EVENTTIMES", 0, OutputSpec::Timeframe }, eventrecords);
+
+    auto msg = new TMessage();
+    auto cl = TClass::GetClass(typeid(decltype(eventrecords)));
+    assert(cl);
+    msg->WriteObjectAny(&eventrecords, cl);
+
+    pc.allocator().adopt(OutputSpec{ "SIM", "EVENTTIMES", 0, OutputSpec::Timeframe }, msg);
+
+    //static int counter = 0;
+    //pc.allocator().snapshot(OutputSpec{ "SIM", "EVENTTIMES", 0, OutputSpec::Timeframe }, counter++);
+
     // do this only one
-    pc.services().get<ControlService>().readyToQuit(true);
+    // pc.services().get<ControlService>().readyToQuit(true);
   };
 
   // init function return a lambda taking a ProcessingContext
@@ -55,7 +70,7 @@ DataProcessorSpec getSimReaderSpec() {
     mgr.addInputFile(ctx.options().get<std::string>("simFile").c_str());
     mgr.setupRun();
 
-    LOG(INFO) << "Initializing Spec";
+    LOG(INFO) << "Initializing Spec ... have " << mgr.getRunContext().getEventRecords().size() << " times ";
     return doit;
   };
 

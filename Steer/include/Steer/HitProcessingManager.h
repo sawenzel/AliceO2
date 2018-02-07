@@ -111,7 +111,7 @@ inline void HitProcessingManager::setupRun()
 {
   setupChain();
   // load geometry
-  TGeoManager::Import("O2geometry.root");
+  // TGeoManager::Import("O2geometry.root");
   sampleEventTimes();
 }
 
