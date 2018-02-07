@@ -28,7 +28,7 @@ struct DataRefUtils {
   // a POD, this is to distinguish it from the alternative below,
   // which works for TObject (which are serialised).
   template <typename T>
-  static typename std::enable_if<std::is_pod<T>::value == true, gsl::span<T>>::type
+  static typename std::enable_if<std::is_trivially_copyable<T>::value == true, gsl::span<T>>::type
   as(DataRef const &ref) {
     using DataHeader = o2::header::DataHeader;
     auto header = o2::header::get<const DataHeader>(ref.header);
