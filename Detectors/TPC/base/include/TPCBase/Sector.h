@@ -115,6 +115,12 @@ class Sector
     return s;
   }
 
+  template <typename T>
+  static int ToSector(const Point3D<T>& p)
+  {
+    return ToSector(p.X(), p.Y(), p.Z());
+  }
+
   /// helper function to retrieve a TPC sector given cartesian coordinates
   /// the sector counting is shifte by -10deg in this case, so sector 0 will
   /// be from -10 deg to +10 deg instead of 0-20

@@ -137,8 +137,8 @@ bool ElectronTransport::isCompletelyOutOfSectorCourseElectronDrift(GlobalPositio
       (dSectorBoundaryLeft < 0 && dSectorBoundaryRight > 0)) {
     return false;
   }
-  if (abs(dSectorBoundaryLeft) > threeSigmaT &&
-      abs(dSectorBoundaryRight) > threeSigmaT) {
+  if (std::abs(dSectorBoundaryLeft) > threeSigmaT &&
+      std::abs(dSectorBoundaryRight) > threeSigmaT) {
     return true;
   }
   return false;

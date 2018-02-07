@@ -12,14 +12,16 @@ R__ADD_LIBRARY_PATH($O2_ROOT/lib)
 R__LOAD_LIBRARY(libSimulationDataFormat)
 
 #include <Steer/HitProcessingManager.h>
-#include <TPCSimulation/Digitizer.h>
-#include <TPCSimulation/DigitizerTask.h>
-#include <cassert>
-#include <functional>
-#include "ITSMFTSimulation/Hit.h"
-#include "TPCBase/Sector.h"
-#include "TPCSimulation/Point.h"
-#include "TPCSimulation/SAMPAProcessing.h"
+//#include <TPCSimulation/Digitizer.h>
+//#include <TPCSimulation/DigitizerTask.h>
+//#include <cassert>
+//#include <functional>
+//#include "ITSMFTSimulation/Hit.h"
+//#include "TPCBase/Sector.h"
+//#include "TPCSimulation/Point.h"
+//#include "TPCSimulation/SAMPAProcessing.h"
+//#include "TPCBase/Mapper.h"
+//
 
 void getHits(const o2::steer::RunContext& context, std::vector<std::vector<o2::TPC::HitGroup>*>& hitvectors,
              std::vector<o2::TPC::TPCHitGroupID>& hitids,
@@ -58,6 +60,7 @@ void getHits(const o2::steer::RunContext& context, std::vector<std::vector<o2::T
     int groupid = -1;
     auto groups = hitvectors[entry];
     for (auto& singlegroup : *groups) {
+      std::cout << "This Group is in sector " << o2::TPC::Sector::ToSector(singlegroup.getHit(0).getPos()) << "\n";
       groupid++;
       auto zmax = singlegroup.mZAbsMax;
       auto zmin = singlegroup.mZAbsMin;
@@ -117,7 +120,7 @@ void runTPCDigitization(const o2::steer::RunContext& context)
   }
 
   const auto TPCDRIFT = 100000;
-  for (int driftinterval = 0;driftinterval<1; ++driftinterval) {
+  for (int driftinterval = 0;driftinterval<2; ++driftinterval) {
     auto tmin = driftinterval * TPCDRIFT;
     auto tmax = (driftinterval + 1) * TPCDRIFT;
 
@@ -130,7 +133,8 @@ void runTPCDigitization(const o2::steer::RunContext& context)
 
     bool hasData = false;
     // loop over sectors
-    for (int s = 0; s < 36; ++s) {
+    for (int s = 4; s < 5; ++s) {
+      std::cout << "SECTOR " << s << "\n";
       task.setSector(s);
       task.setOutputData(digitArrays[s], mcTruthArrays[s]);
       std::stringstream sectornamestreamleft;
@@ -140,6 +144,9 @@ void runTPCDigitization(const o2::steer::RunContext& context)
       std::stringstream sectornamestreamright;
       sectornamestreamright << "TPCHitsShiftedSector" << int(o2::TPC::Sector::getLeft(s));
       getHits(context, hitvectorsright, hitidsright, sectornamestreamright.str().c_str(), tmin, tmax, fTPC);
+
+      std::cout << "right " << hitidsright.size() << "\n";
+      std::cout << "left " << hitidsleft.size() << "\n";
 
       task.setData(&hitvectorsleft, &hitvectorsright, &hitidsleft, &hitidsright, &context);
       task.setTimeRange(tmin, tmax);
@@ -153,7 +160,7 @@ void runTPCDigitization(const o2::steer::RunContext& context)
 
     // condition to end:
     if (!hasData) {
-      break;
+    //  break;
     }
     task.FinishTask();
   }

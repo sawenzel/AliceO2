@@ -109,10 +109,13 @@ void Digitizer::ProcessHitGroup(const HitGroup &inputgroup, const Sector &sector
     const auto& eh = inputgroup.getHit(hitindex);
 
     const GlobalPosition3D posEle(eh.GetX(), eh.GetY(), eh.GetZ());
+    std::cout << Sector::ToSector(eh.GetX(), eh.GetY(), eh.GetZ()) << "\n";
     if (electronTransport.isCompletelyOutOfSectorCourseElectronDrift(posEle, sector)) {
-      std::cout << "not processing hit \n";
+      std::cout << "not processing hit ... " << Sector::ToSector(eh.GetX(), eh.GetY(), eh.GetZ()) << "\n";
       continue;
     }
+    std::cout << "PROCESSING hit ... " << Sector::ToSector(eh.GetX(), eh.GetY(), eh.GetZ()) << "\n";
+
 
     // The energy loss stored is really nElectrons
     const int nPrimaryElectrons = static_cast<int>(eh.GetEnergyLoss());

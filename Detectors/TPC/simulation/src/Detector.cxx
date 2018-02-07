@@ -211,7 +211,9 @@ Bool_t  Detector::ProcessHits(FairVolume* vol)
   refMC->TrackPosition(position);
   // for processing reasons in the digitizer, the sectors are shifted by -10deg, so sector 0 will be
   //   from -10 - +10 deg instead of 0-20 and so on
+  const int realsecID = static_cast<int>(Sector::ToSector(position.X(), position.Y(), position.Z()));
   const int sectorID = static_cast<int>(Sector::ToShiftedSector(position.X(), position.Y(), position.Z()));
+  LOG(INFO) << "S " << realsecID << " : " << sectorID;
   //const int sectorID = static_cast<int>(Sector::ToSector(position.X(), position.Y(), position.Z()));
   // TODO: Temporary hack to process only one sector
   //if (sectorID != 0) return kFALSE;

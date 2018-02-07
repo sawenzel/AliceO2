@@ -65,6 +65,7 @@ void getHits(std::vector<std::vector<o2::TPC::HitGroup>*>& hitvectors, std::vect
     int groupid = -1;
     auto groups = hitvectors[entry];
     for (auto& singlegroup : *groups) {
+      std::cout << "This Group is in sector " << o2::TPC::Sector::ToSector(singlegroup.getHit(0).getPos()) << "\n";
       groupid++;
       const auto zmax = singlegroup.mZAbsMax;
       const auto zmin = singlegroup.mZAbsMin;
