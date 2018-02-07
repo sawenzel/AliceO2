@@ -73,9 +73,11 @@ class HitProcessingManager
 
   void registerRunFunction(RunFunct_t&& f);
 
+  void setupRun();
+  const RunContext& getRunContext() { return mRunContext; }
+
  private:
   HitProcessingManager() : mSimChain("o2sim") {}
-  void setupRun();
   void setupChain();
 
   std::vector<RunFunct_t> mRegisteredRunFunctions;

@@ -1145,6 +1145,7 @@ o2_define_bucket(
     Field
     Generators
     DataFormatsParameters
+    Framework
 )
 
 o2_define_bucket(
