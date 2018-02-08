@@ -8,15 +8,15 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-#ifndef O2_STEER_SIMREADERSPEC_H
-#define O2_STEER_SIMREADERSPEC_H
+#ifndef STEER_DIGITIZERWORKFLOW_SRC_TPCDRIFTTIMEFILTER_H_
+#define STEER_DIGITIZERWORKFLOW_SRC_TPCDRIFTTIMEFILTER_H_
 
 #include "Framework/DataProcessorSpec.h"
 
 namespace o2 {
 namespace steer {
-  o2::framework::DataProcessorSpec getSimReaderSpec(int fanoutsize);
+  o2::framework::DataProcessorSpec getTPCDriftTimeDigitizer(int sector, int channel, bool cachehits=false);
 }
 }
 
-#endif //O2_STEER_SIMREADERSPEC_H
+#endif /* STEER_DIGITIZERWORKFLOW_SRC_TPCDRIFTTIMEFILTER_H_ */

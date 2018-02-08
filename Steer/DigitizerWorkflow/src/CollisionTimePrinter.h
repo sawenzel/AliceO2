@@ -5,7 +5,7 @@
 
 namespace o2 {
 namespace steer {
-  o2::framework::DataProcessorSpec getCollisionTimePrinter();
+  o2::framework::DataProcessorSpec getCollisionTimePrinter(int subchannel);
 }
 }
 

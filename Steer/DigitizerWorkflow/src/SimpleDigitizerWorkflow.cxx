@@ -14,6 +14,12 @@
 #include "SimReaderSpec.h"
 #include "CollisionTimePrinter.h"
 
+// for TPC
+#include "TPCDriftTimeFilter.h"
+
+// for ITS
+//#include "ITSDigitizer.h"
+
 using namespace o2::framework;
 
 /// This function is required to be implemented to define the workflow
@@ -21,10 +27,16 @@ using namespace o2::framework;
 void defineDataProcessing(WorkflowSpec &specs) {
   specs.clear();
 
-  //
-  specs.emplace_back(o2::steer::getSimReaderSpec());
-  specs.emplace_back(o2::steer::getCollisionTimePrinter());
+  int fanoutsize = 0;
 
-  // specs.emplace_back(o2::steer::getTPCHitFilterSpec());
-  // specs.emplace_back(o2::steer::getTPCDigitizerSpec());
+  //
+  specs.emplace_back(o2::steer::getCollisionTimePrinter(fanoutsize++));
+
+
+  for(int s=1; s<3; ++s) {
+   //probably a parallel construct can be used here
+   specs.emplace_back(o2::steer::getTPCDriftTimeDigitizer(s, fanoutsize++));
+  }
+
+  specs.emplace_back(o2::steer::getSimReaderSpec(fanoutsize));
 }

@@ -24,6 +24,7 @@ O2_GENERATE_EXECUTABLE(
   src/SimpleDigitizerWorkflow.cxx
   src/SimReaderSpec.cxx
   src/CollisionTimePrinter.cxx
+  src/TPCDriftTimeFilter.cxx
 
   BUCKET_NAME ${MODULE_BUCKET_NAME}
 )

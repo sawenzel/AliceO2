@@ -33,10 +33,10 @@ using InitContext = o2::framework::InitContext;
 using ProcessingContext = o2::framework::ProcessingContext;
 using VariantType = o2::framework::VariantType;
 using DataRefUtils = o2::framework::DataRefUtils;
-
+using SubSpecificationType = o2::framework::DataAllocator::SubSpecificationType;
 namespace o2 {
 namespace steer {
-DataProcessorSpec getCollisionTimePrinter() {
+DataProcessorSpec getCollisionTimePrinter(int channel) {
   // set up the processing function
 
   // init function return a lambda taking a ProcessingContext
@@ -46,14 +46,14 @@ DataProcessorSpec getCollisionTimePrinter() {
     // access data
     auto dataref = pc.inputs().get("input");
     auto header = o2::header::get<const o2::header::DataHeader>(dataref.header);
-	LOG(INFO) << "PAYLOAD SIZE " << header->payloadSize;
+    LOG(INFO) << "PAYLOAD SIZE " << header->payloadSize;
 
-    //auto view = DataRefUtils::as<int>(dataref);
-    //LOG(INFO) << "## " << view[0] << "\n";
+    // auto view = DataRefUtils::as<int>(dataref);
+    // LOG(INFO) << "## " << view[0] << "\n";
 
-	auto msg = DataRefUtils::as<TMessage>(dataref);
-	msg->Print();
-	return;
+    auto msg = DataRefUtils::as<TMessage>(dataref);
+    msg->Print();
+    return;
     using T = std::vector<o2::MCInteractionRecord>;
     auto cl = TClass::GetClass(typeid(T));
     assert(cl);
@@ -61,16 +61,16 @@ DataProcessorSpec getCollisionTimePrinter() {
     assert(records);
 
     LOG(INFO) << "GOT " << records->size() << "times";
-    int counter=0;
+    int counter = 0;
     for (auto& collrecord : *records) {
       LOG(INFO) << "TIME " << counter++ << " : " << collrecord.timeNS;
     }
   };
 
-  return DataProcessorSpec{
+  return DataProcessorSpec {
 	  /*ID*/ "CollTimePrinter",
 	  /*INPUT CHANNELS*/ Inputs{
-		InputSpec{"input", "SIM", "EVENTTIMES", 0, InputSpec::Timeframe}
+		InputSpec{"input", "SIM", "EVENTTIMES", static_cast<SubSpecificationType>(channel), InputSpec::Timeframe}
 	  },
 	  /*OUTPUT CHANNELS*/ Outputs{},
      /* ALGORITHM */
