@@ -45,16 +45,17 @@ DataProcessorSpec getSimReaderSpec() {
     auto& mgr = steer::HitProcessingManager::instance();
     auto eventrecords = mgr.getRunContext().getEventRecords();
 
+    LOG(INFO) << "SENDING " << eventrecords.size() << " records"; 
     // send data via data allocator
     // for times a flat buffer
-   // pc.allocator().snapshot(OutputSpec{ "SIM", "EVENTTIMES", 0, OutputSpec::Timeframe }, eventrecords);
+    pc.allocator().snapshot(OutputSpec{ "SIM", "EVENTTIMES", 0, OutputSpec::Timeframe }, eventrecords);
 
-    auto msg = new TMessage();
-    auto cl = TClass::GetClass(typeid(decltype(eventrecords)));
-    assert(cl);
-    msg->WriteObjectAny(&eventrecords, cl);
-
-    pc.allocator().adopt(OutputSpec{ "SIM", "EVENTTIMES", 0, OutputSpec::Timeframe }, msg);
+//    auto msg = new TMessage();
+//    auto cl = TClass::GetClass(typeid(decltype(eventrecords)));
+//    assert(cl);
+//    msg->WriteObjectAny(&eventrecords, cl);
+//
+//    pc.allocator().adopt(OutputSpec{ "SIM", "EVENTTIMES", 0, OutputSpec::Timeframe }, msg);
 
     //static int counter = 0;
     //pc.allocator().snapshot(OutputSpec{ "SIM", "EVENTTIMES", 0, OutputSpec::Timeframe }, counter++);
