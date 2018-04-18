@@ -15,6 +15,7 @@
 #include "Framework/DataProcessorSpec.h"
 #include "Framework/DataRefUtils.h"
 #include "Headers/DataHeader.h"
+#include "Framework/Lifetime.h"
 #include "Steer/HitProcessingManager.h"
 #include <FairMQLogger.h>
 #include <TMessage.h> // object serialization
@@ -22,17 +23,7 @@
 #include <cstring> // memcpy
 #include <string>  // std::string
 
-using DataProcessorSpec = o2::framework::DataProcessorSpec;
-using Inputs = o2::framework::Inputs;
-using Outputs = o2::framework::Outputs;
-using Options = o2::framework::Options;
-using InputSpec = o2::framework::InputSpec;
-using OutputSpec = o2::framework::OutputSpec;
-using AlgorithmSpec = o2::framework::AlgorithmSpec;
-using InitContext = o2::framework::InitContext;
-using ProcessingContext = o2::framework::ProcessingContext;
-using VariantType = o2::framework::VariantType;
-using DataRefUtils = o2::framework::DataRefUtils;
+using namespace o2::framework;
 using SubSpecificationType = o2::framework::DataAllocator::SubSpecificationType;
 namespace o2 {
 namespace steer {
@@ -45,10 +36,12 @@ DataProcessorSpec getCollisionTimePrinter(int channel) {
 
     // access data
     auto dataref = pc.inputs().get("input");
-    auto header = o2::header::get<const o2::header::DataHeader>(dataref.header);
+    auto header = o2::header::get<const o2::header::DataHeader*>(dataref.header);
     LOG(INFO) << "PAYLOAD SIZE " << header->payloadSize;
 
-    auto view = DataRefUtils::as<o2::MCInteractionRecord>(dataref);
+    const auto context = pc.inputs().get<o2::steer::RunContext>("input");
+//    auto view = DataRefUtils::as<o2::MCInteractionRecord>(dataref);
+    auto view = context->getEventRecords();
     LOG(INFO) << "GOT " << view.size() << "times";
     int counter=0;
     for (auto& collrecord : view) {
@@ -59,7 +52,7 @@ DataProcessorSpec getCollisionTimePrinter(int channel) {
   return DataProcessorSpec {
 	  /*ID*/ "CollTimePrinter",
 	  /*INPUT CHANNELS*/ Inputs{
-		InputSpec{"input", "SIM", "EVENTTIMES", static_cast<SubSpecificationType>(channel), InputSpec::Timeframe}
+		InputSpec{"input", "SIM", "EVENTTIMES", static_cast<SubSpecificationType>(channel), Lifetime::Timeframe}
 	  },
 	  /*OUTPUT CHANNELS*/ Outputs{},
      /* ALGORITHM */

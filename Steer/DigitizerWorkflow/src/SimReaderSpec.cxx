@@ -13,6 +13,7 @@
 #include "Framework/DataProcessorSpec.h"
 #include "Framework/DataRefUtils.h"
 #include "Framework/ControlService.h"
+#include "Framework/Lifetime.h"
 #include "Headers/DataHeader.h"
 #include "Steer/HitProcessingManager.h"
 #include <FairMQLogger.h>
@@ -22,17 +23,7 @@
 #include <string>  // std::string
 #include <cassert>
 
-using DataProcessorSpec = o2::framework::DataProcessorSpec;
-using Inputs = o2::framework::Inputs;
-using Outputs = o2::framework::Outputs;
-using Options = o2::framework::Options;
-using InputSpec = o2::framework::InputSpec;
-using OutputSpec = o2::framework::OutputSpec;
-using AlgorithmSpec = o2::framework::AlgorithmSpec;
-using InitContext = o2::framework::InitContext;
-using ProcessingContext = o2::framework::ProcessingContext;
-using VariantType = o2::framework::VariantType;
-using ControlService = o2::framework::ControlService;
+using namespace o2::framework;
 using SubSpecificationType = o2::framework::DataAllocator::SubSpecificationType;
 namespace o2 {
 namespace steer {
@@ -40,14 +31,15 @@ DataProcessorSpec getSimReaderSpec(int fanoutsize) {
   auto doit = [fanoutsize](ProcessingContext& pc) {
     auto& mgr = steer::HitProcessingManager::instance();
     auto eventrecords = mgr.getRunContext().getEventRecords();
+    const auto& context = mgr.getRunContext();
 
-    LOG(INFO) << "SENDING " << eventrecords.size() << " records"; 
+    LOG(INFO) << "SENDING " << eventrecords.size() << " records";
     // send data via data allocator
     // for times a flat buffer
-    pc.allocator().snapshot(OutputSpec{ "SIM", "EVENTTIMES", 0, OutputSpec::Timeframe }, eventrecords);
+    // pc.outputs().snapshot(OutputSpec{ "SIM", "EVENTTIMES", 0, Lifetime::Timeframe }, context);
 
     for(int subchannel = 0; subchannel < fanoutsize; ++subchannel) {
-      pc.allocator().snapshot(OutputSpec{ "SIM", "EVENTTIMES",  static_cast<SubSpecificationType>(subchannel), OutputSpec::Timeframe }, eventrecords);
+      pc.outputs().snapshot(OutputSpec{ "SIM", "EVENTTIMES",  static_cast<SubSpecificationType>(subchannel), Lifetime::Timeframe }, context);
     }
 
     // do this only one
@@ -55,7 +47,7 @@ DataProcessorSpec getSimReaderSpec(int fanoutsize) {
 
     // conditionally load hits for TPC when TPC digitizer is part of the TPC workflow
 
-    // pc.allocator().adopt(OutputSpec{ "SIM", "TPCHITBRANCH", 0, OutputSpec::Timeframe }, );
+    // pc.outputs().adopt(OutputSpec{ "SIM", "TPCHITBRANCH", 0, Lifetime::Timeframe }, );
 
   };
 
@@ -72,7 +64,7 @@ DataProcessorSpec getSimReaderSpec(int fanoutsize) {
 
   std::vector<OutputSpec> outputs;
   for (int subchannel = 0; subchannel < fanoutsize; ++subchannel) {
-	outputs.push_back(OutputSpec{"SIM", "EVENTTIMES",  static_cast<SubSpecificationType>(subchannel), OutputSpec::Timeframe});
+	outputs.push_back(OutputSpec{"SIM", "EVENTTIMES",  static_cast<SubSpecificationType>(subchannel), Lifetime::Timeframe});
   }
 
   return DataProcessorSpec{

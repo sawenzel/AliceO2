@@ -18,19 +18,20 @@
 #include "Framework/ControlService.h"
 #include "Framework/DataProcessorSpec.h"
 #include "Framework/DataRefUtils.h"
+#include "Framework/Lifetime.h"
 #include "Headers/DataHeader.h"
 #include "Steer/HitProcessingManager.h"
-#include "TPCSimulation/Digitizer.h"
 #include <TPCSimulation/Digitizer.h>
 #include <TPCSimulation/DigitizerTask.h>
 #include <cassert>
 #include <functional>
 #include "ITSMFTSimulation/Hit.h"
 #include "TPCSimulation/Point.h"
-#include "TPCSimulation/SAMPAProcessing.h"
+#include "TPCSimulation/ElectronTransport.h"
 #include <sstream>
 #include <algorithm>
 
+using namespace o2::framework;
 using DataProcessorSpec = o2::framework::DataProcessorSpec;
 using Inputs = o2::framework::Inputs;
 using Outputs = o2::framework::Outputs;
@@ -81,7 +82,8 @@ void getHits(TChain& chain, const Collection& eventrecords, std::vector<std::vec
     int groupid = -1;
     auto groups = hitvectors[entry];
     for (auto& singlegroup : *groups) {
-      std::cout << "This Group is in sector " << o2::TPC::Sector::ToSector(singlegroup.getHit(0).getPos()) << "\n";
+      const auto& pos = singlegroup.getHit(0).getPos();
+      std::cout << "This Group is in sector " << o2::TPC::Sector::ToSector(pos.X(), pos.Y(), pos.Z()) << "\n";
       groupid++;
       auto zmax = singlegroup.mZAbsMax;
       auto zmin = singlegroup.mZAbsMin;
@@ -107,7 +109,7 @@ void getHits(TChain& chain, const Collection& eventrecords, std::vector<std::vec
 // TPC hit selection lambda
 auto fTPC = [](float tNS, float tof, float z) {
   // returns time in NS
-  return tNS + o2::TPC::SAMPAProcessing::getDriftTime(z) * 1000 + tof;
+  return tNS + o2::TPC::ElectronTransport::getDriftTime(z) * 1000 + tof;
 };
 
 DataProcessorSpec getTPCDriftTimeDigitizer(int sector, int channel, bool cachehits)
@@ -116,39 +118,83 @@ DataProcessorSpec getTPCDriftTimeDigitizer(int sector, int channel, bool cachehi
   std::stringstream branchnamestream;
   branchnamestream << "TPCHitsShiftedSector" << sector;
   std::string branchname = branchnamestream.str();
+  auto digitizer = std::make_shared<o2::TPC::Digitizer>();
+  auto digitizertask = std::make_shared<o2::TPC::DigitizerTask>();
+  digitizertask->Init2();
 
-  auto doit = [simChain, branchname, sector](ProcessingContext& pc) {
+  using digitType = std::vector<o2::TPC::Digit>;
+  using mcType = o2::dataformats::MCTruthContainer<o2::MCCompLabel>;
+  auto digitArray = std::make_shared<digitType>();
+  auto mcTruthArray = std::make_shared<mcType>();
+
+  // std::array<TBranch*, o2::TPC::Sector::MAXSECTOR> digitBranches;
+  // std::array<TBranch*, o2::TPC::Sector::MAXSECTOR> mcTruthBranches;
+
+  // for (int sector = 0; sector < o2::TPC::Sector::MAXSECTOR; ++sector) {
+  //   digitArrays[sector] = new digitType;
+  //   digitBranches[sector] = outtree.Branch(Form("TPCDigit_%i", sector), &digitArrays[sector]);
+
+  // Register MC Truth container
+  //  mcTruthArrays[sector] = new mcType;
+  //  mcTruthBranches[sector] = outtree.Branch(Form("TPCDigitMCTruth_%i", sector), &mcTruthArrays[sector]);
+  // }
+
+  auto doit = [simChain, branchname, sector, digitizer, digitizertask, digitArray, mcTruthArray](ProcessingContext& pc) {
     // have to do a loop over drift times
+	// TODO: avoid reallocation of these things --> move outside
     std::vector<std::vector<o2::TPC::HitGroup>*> hitvectors; // "TPCHitVector"
     std::vector<o2::TPC::TPCHitGroupID> hitids;              // "TPCHitIDs"
 
     // obtain collision times
     // access data
     auto dataref = pc.inputs().get("timeinput");
-    auto header = o2::header::get<const o2::header::DataHeader>(dataref.header);
+    auto header = o2::header::get<const o2::header::DataHeader*>(dataref.header);
     LOG(INFO) << "PAYLOAD SIZE " << header->payloadSize;
 
-    auto timesview = DataRefUtils::as<o2::MCInteractionRecord>(dataref);
+    auto context = pc.inputs().get<o2::steer::RunContext>("timeinput");
+    // auto timesview = DataRefUtils::as<o2::MCInteractionRecord>(dataref);
+    auto timesview = context->getEventRecords();
+    LOG(INFO) << "GOT " << timesview.size() << " TIMES\n";
+
+    if (timesview.size() == 0) {
+      return;
+    }
+
+    //bool br = true;
+    //while (br) {
+//      int i = 0;
+    //}
 
     // detect possible drift times
+    const auto TPCDRIFT = 100000;
     double maxtime = 0;
     for (auto e : timesview) {
       maxtime = std::max(maxtime, e.timeNS);
     }
-    auto ndrifts = 1 + (int) maxtime / 100000;
+    auto ndrifts = 1 + (int)maxtime / TPCDRIFT;
     LOG(INFO) << "NDRIFTS " << ndrifts << "\n";
 
-    for(int drift = 1; drift <= ndrifts; ++drift) {
+    digitizertask->setOutputData(digitArray.get(), mcTruthArray.get());
 
-    // load filtered hits
-    auto starttime = (drift-1) * 100000;
-	auto endtime = drift * 100000;
-    getHits(*simChain, timesview, hitvectors, hitids, branchname.c_str(), starttime, endtime, fTPC);
+    for (int drift = 1; drift <= ndrifts; ++drift) {
+      auto starttime = (drift - 1) * TPCDRIFT;
+      auto endtime = drift * TPCDRIFT;
+      digitizertask->setStartTime(starttime);
+      digitizertask->setEndTime(endtime);
 
-    LOG(INFO) << "DRIFTTIME " << drift << " SECTOR " << sector << " : SELECTED " << hitids.size() << " IDs\n ";
+      // load filtered hits
+      getHits(*simChain, timesview, hitvectors, hitids, branchname.c_str(), starttime, endtime, fTPC);
 
-    // perform digitization
-    // digitizer.Process(hitvectors, hitids);
+      LOG(INFO) << "DRIFTTIME " << drift << " SECTOR " << sector << " : SELECTED " << hitids.size() << " IDs\n ";
+      // TODO: treat left and right separately
+      digitizertask->setData(&hitvectors, &hitvectors, &hitids, &hitids, context.get());
+      // perform digitization
+      // digitizer->Process2(sector, hitvectors, hitids, *(context.get()));
+	  digitizertask->setupSector(sector);
+	  digitizertask->Exec2("");
+
+	  // access the digitits
+      LOG(INFO) << "HAVE " << digitArray->size() << " DIGITS\n";
     }
   };
 
@@ -166,7 +212,7 @@ DataProcessorSpec getTPCDriftTimeDigitizer(int sector, int channel, bool cachehi
   id << "TPCDigitizer" << sector;
   return DataProcessorSpec{
     id.str().c_str(), Inputs{ InputSpec{ "timeinput", "SIM", "EVENTTIMES", static_cast<SubSpecificationType>(channel),
-                                         InputSpec::Timeframe } },
+                                         Lifetime::Timeframe } },
     Outputs{
       // define channel by triple of (origin, type id of data to be sent on this channel, subspecification)
     },

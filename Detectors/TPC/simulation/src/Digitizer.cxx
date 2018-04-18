@@ -26,6 +26,8 @@
 
 #include "FairLogger.h"
 
+#include <iostream>
+
 ClassImp(o2::TPC::Digitizer)
 
   using namespace o2::TPC;
@@ -55,6 +57,8 @@ DigitContainer* Digitizer::Process2(const Sector& sector, const std::vector<std:
                                     const std::vector<o2::TPC::TPCHitGroupID>& hitids,
                                     const o2::steer::RunContext& context)
 {
+  LOG(INFO) << "DIGITIZING " << hitids.size() << "\n";
+
   const auto& interactRecords = context.getEventRecords();
 
   for (auto& id : hitids) {

@@ -635,7 +635,7 @@ int runStateMachine(DataProcessorSpecs const& workflow, DriverControl& driverCon
       case DriverState::RUNNING:
         // Calculate what we should do next and eventually
         // show the GUI
-        if (driverInfo.batch || guiQuitRequested || (checkIfCanExit(infos) == true)) {
+        if (/*driverInfo.batch ||*/ guiQuitRequested || (checkIfCanExit(infos) == true)) {
           // Something requested to quit. Let's update the GUI
           // one more time and then EXIT.
           LOG(INFO) << "Quitting";

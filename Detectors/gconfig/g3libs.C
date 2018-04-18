@@ -6,7 +6,9 @@
  *                  copied verbatim in the file "LICENSE"                       *
  ********************************************************************************/
 
-#include <iostream>
+#if !defined(__CLING__) || defined(__ROOTCLING__)
+//#include <iostream>
+#endif
 
 Bool_t isLibrary(const char* libName)
 {
@@ -18,7 +20,7 @@ Bool_t isLibrary(const char* libName)
 
 void g3libs()
 {
-  cout << "Loading Geant3 libraries ..." << endl;
+  //cout << "Loading Geant3 libraries ..." << endl;
 
   if (isLibrary("libdummies"))
      gSystem->Load("libdummies.so");
@@ -26,5 +28,5 @@ void g3libs()
 
   gSystem->Load("libgeant321");
 
-  cout << "Loading Geant3 libraries ... finished" << endl;
+  //cout << "Loading Geant3 libraries ... finished" << endl;
 }
