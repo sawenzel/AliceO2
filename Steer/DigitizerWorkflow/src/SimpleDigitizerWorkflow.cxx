@@ -30,12 +30,12 @@ void defineDataProcessing(WorkflowSpec &specs) {
   int fanoutsize = 0;
 
   //
-  specs.emplace_back(o2::steer::getCollisionTimePrinter(fanoutsize++));
+  // specs.emplace_back(o2::steer::getCollisionTimePrinter(fanoutsize++));
 
-
-  for(int s=0; s<1; ++s) {
-   // probably a parallel construct can be used here
-   // specs.emplace_back(o2::steer::getTPCDriftTimeDigitizer(s, fanoutsize++));
+  // parallely treating 4 sectors
+  for (int s = 6; s < 7; ++s) {
+    // probably a parallel construct can be used here
+    specs.emplace_back(o2::steer::getTPCDriftTimeDigitizer(s, fanoutsize++));
   }
 
   specs.emplace_back(o2::steer::getSimReaderSpec(fanoutsize));

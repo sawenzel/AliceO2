@@ -22,6 +22,8 @@
 #include <cstring> // memcpy
 #include <string>  // std::string
 #include <cassert>
+#include <chrono>
+#include <thread>
 
 using namespace o2::framework;
 using SubSpecificationType = o2::framework::DataAllocator::SubSpecificationType;
@@ -33,22 +35,21 @@ DataProcessorSpec getSimReaderSpec(int fanoutsize) {
     auto eventrecords = mgr.getRunContext().getEventRecords();
     const auto& context = mgr.getRunContext();
 
-    LOG(INFO) << "SENDING " << eventrecords.size() << " records";
-    // send data via data allocator
-    // for times a flat buffer
-    // pc.outputs().snapshot(OutputSpec{ "SIM", "EVENTTIMES", 0, Lifetime::Timeframe }, context);
+    // counter to make sure we are sending the data only once
+    static int counter = 0;
+    if (counter++ == 0) {
+      // sleep(10);
+      LOG(INFO) << "SENDING " << eventrecords.size() << " records";
 
-    for(int subchannel = 0; subchannel < fanoutsize; ++subchannel) {
-      pc.outputs().snapshot(OutputSpec{ "SIM", "EVENTTIMES",  static_cast<SubSpecificationType>(subchannel), Lifetime::Timeframe }, context);
+      for (int subchannel = 0; subchannel < fanoutsize; ++subchannel) {
+        pc.outputs().snapshot(
+          OutputSpec{ "SIM", "EVENTTIMES", static_cast<SubSpecificationType>(subchannel), Lifetime::Timeframe },
+          context);
+      }
+
+      // do this only one
+      pc.services().get<ControlService>().readyToQuit(false);
     }
-
-    // do this only one
-    // pc.services().get<ControlService>().readyToQuit(true);
-
-    // conditionally load hits for TPC when TPC digitizer is part of the TPC workflow
-
-    // pc.outputs().adopt(OutputSpec{ "SIM", "TPCHITBRANCH", 0, Lifetime::Timeframe }, );
-
   };
 
   // init function return a lambda taking a ProcessingContext

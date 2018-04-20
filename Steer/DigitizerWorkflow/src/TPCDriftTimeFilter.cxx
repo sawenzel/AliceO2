@@ -23,7 +23,6 @@
 #include "Steer/HitProcessingManager.h"
 #include <TPCSimulation/Digitizer.h>
 #include <TPCSimulation/DigitizerTask.h>
-#include <cassert>
 #include <functional>
 #include "ITSMFTSimulation/Hit.h"
 #include "TPCSimulation/Point.h"
@@ -32,20 +31,7 @@
 #include <algorithm>
 
 using namespace o2::framework;
-using DataProcessorSpec = o2::framework::DataProcessorSpec;
-using Inputs = o2::framework::Inputs;
-using Outputs = o2::framework::Outputs;
-using Options = o2::framework::Options;
-using InputSpec = o2::framework::InputSpec;
-using OutputSpec = o2::framework::OutputSpec;
-using AlgorithmSpec = o2::framework::AlgorithmSpec;
-using InitContext = o2::framework::InitContext;
-using ProcessingContext = o2::framework::ProcessingContext;
-using VariantType = o2::framework::VariantType;
-using ControlService = o2::framework::ControlService;
 using SubSpecificationType = o2::framework::DataAllocator::SubSpecificationType;
-using DataRefUtils = o2::framework::DataRefUtils;
-
 namespace o2
 {
 namespace steer
@@ -57,15 +43,14 @@ void getHits(TChain& chain, const Collection& eventrecords, std::vector<std::vec
              std::function<float(float, float, float)>&& f)
 {
   // f is some function taking event time + z of hit and returns final "digit" time
-  LOG(INFO) << "BR NAME " << branchname;
+  LOG(DEBUG) << "BR NAME " << branchname;
   auto br = chain.GetBranch(branchname);
   if (!br) {
-    std::cerr << "No branch found\n";
+    LOG(ERROR) << "No branch found";
     return;
   }
 
   auto nentries = br->GetEntries();
-  hitvectors.resize(nentries, nullptr);
 
   // do the filtering
   for (int entry = 0; entry < nentries; ++entry) {
@@ -76,28 +61,29 @@ void getHits(TChain& chain, const Collection& eventrecords, std::vector<std::vec
       break;
     }
 
-    br->SetAddress(&hitvectors[entry]);
-    br->GetEntry(entry);
+    // This needs to be done only once for any entry
+    if (hitvectors[entry] == nullptr) {
+      br->SetAddress(&hitvectors[entry]);
+      br->GetEntry(entry);
+    }
 
     int groupid = -1;
     auto groups = hitvectors[entry];
     for (auto& singlegroup : *groups) {
       const auto& pos = singlegroup.getHit(0).getPos();
-      std::cout << "This Group is in sector " << o2::TPC::Sector::ToSector(pos.X(), pos.Y(), pos.Z()) << "\n";
+      // std::cout << "This Group is in sector " << o2::TPC::Sector::ToSector(pos.X(), pos.Y(), pos.Z()) << "\n";
       groupid++;
       auto zmax = singlegroup.mZAbsMax;
       auto zmin = singlegroup.mZAbsMin;
       // in case of secondaries, the time ordering may be reversed
-      if (zmax < zmin)
+      if (zmax < zmin) {
         std::swap(zmax, zmin);
-      assert(zmin <= zmax);
+      }
       // auto tof = singlegroup.
       float tmaxtrack = f(eventrecords[entry].timeNS, 0., zmin);
       float tmintrack = f(eventrecords[entry].timeNS, 0., zmax);
-      std::cout << tmintrack << " & " << tmaxtrack << "\n";
-      assert(tmaxtrack >= tmintrack);
       if (tmin > tmaxtrack || tmax < tmintrack) {
-        std::cout << "DISCARDING " << groupid << " OF ENTRY " << entry << "\n";
+        // std::cout << "DISCARDING " << groupid << " OF ENTRY " << entry << "\n";
         continue;
       }
       // need to record index of the group
@@ -115,96 +101,106 @@ auto fTPC = [](float tNS, float tof, float z) {
 DataProcessorSpec getTPCDriftTimeDigitizer(int sector, int channel, bool cachehits)
 {
   TChain* simChain = new TChain("o2sim");
-  std::stringstream branchnamestream;
-  branchnamestream << "TPCHitsShiftedSector" << sector;
-  std::string branchname = branchnamestream.str();
+  std::stringstream branchnamestreamleft;
+  branchnamestreamleft << "TPCHitsShiftedSector" << int(o2::TPC::Sector::getLeft(o2::TPC::Sector(sector)));
+  std::string branchnameleft = branchnamestreamleft.str();
+  std::stringstream branchnamestreamright;
+  branchnamestreamright << "TPCHitsShiftedSector" << sector;
+  std::string branchnameright = branchnamestreamright.str();
+
   auto digitizer = std::make_shared<o2::TPC::Digitizer>();
   auto digitizertask = std::make_shared<o2::TPC::DigitizerTask>();
   digitizertask->Init2();
 
-  using digitType = std::vector<o2::TPC::Digit>;
-  using mcType = o2::dataformats::MCTruthContainer<o2::MCCompLabel>;
-  auto digitArray = std::make_shared<digitType>();
-  auto mcTruthArray = std::make_shared<mcType>();
+  auto digitArray = std::make_shared<std::vector<o2::TPC::Digit>>();
+  auto mcTruthArray = std::make_shared<o2::dataformats::MCTruthContainer<o2::MCCompLabel>>();
 
-  // std::array<TBranch*, o2::TPC::Sector::MAXSECTOR> digitBranches;
-  // std::array<TBranch*, o2::TPC::Sector::MAXSECTOR> mcTruthBranches;
+  auto doit = [simChain, branchnameleft, branchnameright,
+			   sector, digitizer, digitizertask, digitArray,
+			   mcTruthArray](ProcessingContext& pc) {
+    static int callcounter = 0;
+    callcounter++;
 
-  // for (int sector = 0; sector < o2::TPC::Sector::MAXSECTOR; ++sector) {
-  //   digitArrays[sector] = new digitType;
-  //   digitBranches[sector] = outtree.Branch(Form("TPCDigit_%i", sector), &digitArrays[sector]);
+    // ===| open file and register branches |=====================================
+    // this is done at the moment for each worker function invocation
+    // TODO: make this nicer or let the write service be handled outside
+    auto file = std::make_unique<TFile>(Form("tpc_digi_%i_instance%i.root", sector, callcounter), "recreate");
+    auto outtree = std::make_unique<TTree>("o2sim", "TPC digits");
+    outtree->SetDirectory(file.get());
+    auto digitArrayRaw = digitArray.get();
+    auto mcTruthArrayRaw = mcTruthArray.get();
+    auto digitBranch = outtree->Branch(Form("TPCDigit_%i", sector), &digitArrayRaw);
+    auto mcTruthBranch = outtree->Branch(Form("TPCDigitMCTruth_%i", sector), &mcTruthArrayRaw);
 
-  // Register MC Truth container
-  //  mcTruthArrays[sector] = new mcType;
-  //  mcTruthBranches[sector] = outtree.Branch(Form("TPCDigitMCTruth_%i", sector), &mcTruthArrays[sector]);
-  // }
-
-  auto doit = [simChain, branchname, sector, digitizer, digitizertask, digitArray, mcTruthArray](ProcessingContext& pc) {
-    // have to do a loop over drift times
-	// TODO: avoid reallocation of these things --> move outside
-    std::vector<std::vector<o2::TPC::HitGroup>*> hitvectors; // "TPCHitVector"
-    std::vector<o2::TPC::TPCHitGroupID> hitids;              // "TPCHitIDs"
-
-    // obtain collision times
-    // access data
+    // obtain collision contexts
     auto dataref = pc.inputs().get("timeinput");
     auto header = o2::header::get<const o2::header::DataHeader*>(dataref.header);
-    LOG(INFO) << "PAYLOAD SIZE " << header->payloadSize;
 
     auto context = pc.inputs().get<o2::steer::RunContext>("timeinput");
-    // auto timesview = DataRefUtils::as<o2::MCInteractionRecord>(dataref);
     auto timesview = context->getEventRecords();
-    LOG(INFO) << "GOT " << timesview.size() << " TIMES\n";
+    LOG(DEBUG) << "GOT " << timesview.size() << " COLLISSION TIMES";
 
+    // if there is nothing ... return
     if (timesview.size() == 0) {
       return;
     }
 
-    //bool br = true;
-    //while (br) {
-//      int i = 0;
-    //}
-
-    // detect possible drift times
+    // detect number of possible drift times (remember that a drift
+    // time is convenient unit for digit pileup), any multiple of this
+    // unit should also be ok
     const auto TPCDRIFT = 100000;
     double maxtime = 0;
     for (auto e : timesview) {
       maxtime = std::max(maxtime, e.timeNS);
     }
-    auto ndrifts = 1 + (int)maxtime / TPCDRIFT;
-    LOG(INFO) << "NDRIFTS " << ndrifts << "\n";
 
+    // minimum 2 drifts is a safe bet; an electron might
+    // need 1 full drift and might hence land in the second drift time
+    auto ndrifts = 2 + (int)(maxtime / TPCDRIFT);
     digitizertask->setOutputData(digitArray.get(), mcTruthArray.get());
 
+    std::vector<std::vector<o2::TPC::HitGroup>*> hitvectorsleft;  // "TPCHitVector"
+    std::vector<o2::TPC::TPCHitGroupID> hitidsleft;               // "TPCHitIDs"
+    std::vector<std::vector<o2::TPC::HitGroup>*> hitvectorsright; // "TPCHitVector"
+    std::vector<o2::TPC::TPCHitGroupID> hitidsright;              // "TPCHitIDs"
+    hitvectorsleft.resize(timesview.size(), nullptr);
+    hitvectorsright.resize(timesview.size(), nullptr);
+
+    // have to do a loop over drift times
     for (int drift = 1; drift <= ndrifts; ++drift) {
       auto starttime = (drift - 1) * TPCDRIFT;
       auto endtime = drift * TPCDRIFT;
+      LOG(DEBUG) << "STARTTIME " << starttime << " ENDTIME " << endtime;
       digitizertask->setStartTime(starttime);
       digitizertask->setEndTime(endtime);
 
-      // load filtered hits
-      getHits(*simChain, timesview, hitvectors, hitids, branchname.c_str(), starttime, endtime, fTPC);
+      // obtain candidate hit(ids) for this time range --> left
+      getHits(*simChain, timesview, hitvectorsleft, hitidsleft, branchnameleft.c_str(), starttime, endtime, fTPC);
+      // --> right
+      getHits(*simChain, timesview, hitvectorsright, hitidsright, branchnameright.c_str(), starttime, endtime, fTPC);
 
-      LOG(INFO) << "DRIFTTIME " << drift << " SECTOR " << sector << " : SELECTED " << hitids.size() << " IDs\n ";
-      // TODO: treat left and right separately
-      digitizertask->setData(&hitvectors, &hitvectors, &hitids, &hitids, context.get());
-      // perform digitization
-      // digitizer->Process2(sector, hitvectors, hitids, *(context.get()));
-	  digitizertask->setupSector(sector);
-	  digitizertask->Exec2("");
+      LOG(DEBUG) << "DRIFTTIME " << drift << " SECTOR " << sector << " : SELECTED LEFT " << hitidsleft.size() << " IDs"
+                 << " SELECTED RIGHT " << hitidsright.size();
 
-	  // access the digitits
-      LOG(INFO) << "HAVE " << digitArray->size() << " DIGITS\n";
+      // invoke digitizer if anything to digitize within this drift interval
+      if (hitidsleft.size() > 0 || hitidsright.size() > 0) {
+        digitizertask->setData(&hitvectorsleft, &hitvectorsright, &hitidsleft, &hitidsright, context.get());
+        digitizertask->setupSector(sector);
+        digitizertask->Exec2("");
+
+        // write digits + MC truth
+        outtree->Fill();
+      }
     }
+    outtree->SetDirectory(file.get());
+    file->Write();
+    pc.services().get<ControlService>().readyToQuit(true);
   };
 
   // init function return a lambda taking a ProcessingContext
   auto initIt = [simChain, doit](InitContext& ctx) {
     // setup the input chain
     simChain->AddFile("o2sim.root");
-
-    //digitizer.Init();
-    //digitizer.SetOutput("o2sim_digit_sector.root");
     return doit;
   };
 

@@ -16,6 +16,7 @@
 #include "Framework/DataRefUtils.h"
 #include "Headers/DataHeader.h"
 #include "Framework/Lifetime.h"
+#include "Framework/ControlService.h"
 #include "Steer/HitProcessingManager.h"
 #include <FairMQLogger.h>
 #include <TMessage.h> // object serialization
@@ -47,6 +48,7 @@ DataProcessorSpec getCollisionTimePrinter(int channel) {
     for (auto& collrecord : view) {
       LOG(INFO) << "TIME " << counter++ << " : " << collrecord.timeNS;
     }
+    pc.services().get<ControlService>().readyToQuit(false);
   };
 
   return DataProcessorSpec {
