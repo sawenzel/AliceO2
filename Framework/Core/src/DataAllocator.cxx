@@ -12,6 +12,7 @@
 #include "Framework/RootObjectContext.h"
 #include "Framework/DataSpecUtils.h"
 #include "Framework/DataProcessingHeader.h"
+#include "Framework/DataProcessor.h"
 #include <TClonesArray.h>
 
 namespace o2 {

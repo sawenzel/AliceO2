@@ -21,6 +21,7 @@
 #include "Framework/TMessageSerializer.h"
 #include "Framework/TypeTraits.h"
 #include "Framework/SerializationMethods.h"
+#include "Framework/DataProcessor.h"
 
 #include "fairmq/FairMQMessage.h"
 
@@ -329,6 +330,27 @@ public:
   auto snapshot(OutputRef const& ref, Args&&... args)
   {
     return snapshot(getOutputByBind(ref), std::forward<Args>(args)...);
+  }
+
+  // trigger a send of the current MessageContext
+  // the messageContext will be reinitialised using the same timeslice
+  void flush()
+  {
+    {
+      auto oldTimeSlice = mContext->timeslice();
+      DataProcessor::doSend(*mDevice, *mContext);
+      // this is resetting/clearing the context
+      mContext->prepareForTimeslice(oldTimeSlice);
+    }
+
+    {
+      auto oldTimeSlice = mRootContext->timeslice();
+      DataProcessor::doSend(*mDevice, *mRootContext);
+      // this is resetting/clearing the context
+      mRootContext->prepareForTimeslice(oldTimeSlice);
+    }
+    // NOTE: One should probably think about a flush restricted to
+    // a particular OutputSpec?
   }
 
  private:
