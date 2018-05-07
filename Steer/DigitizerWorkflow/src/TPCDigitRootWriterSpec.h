@@ -15,7 +15,7 @@
 
 namespace o2
 {
-namespace steer
+namespace TPC
 {
 o2::framework::DataProcessorSpec getTPCDigitRootWriterSpec();
 }

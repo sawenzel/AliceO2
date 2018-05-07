@@ -16,6 +16,7 @@
 
 // for TPC
 #include "TPCDriftTimeDigitizerSpec.h"
+#include "TPCDigitRootWriterSpec.h"
 #include "TPCBase/Sector.h"
 
 #include <cstdlib>
@@ -97,6 +98,9 @@ void defineDataProcessing(WorkflowSpec& specs)
     tpclanes->emplace_back(fanoutsize); // this records that TPC is "listening under this subchannel"
     fanoutsize++;
   }
+
+  // for writing digits to disc
+  specs.emplace_back(o2::TPC::getTPCDigitRootWriterSpec());
 
   specs.emplace_back(o2::steer::getSimReaderSpec(fanoutsize, tpcsectors, tpclanes));
 }

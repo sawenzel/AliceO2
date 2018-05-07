@@ -47,7 +47,7 @@ TBranch* getOrMakeBranch(TTree& tree, const char* basename, int sector, T* ptr)
 /// create the processor spec
 /// describing a processor aggregating digits for various TPC sectors and writing them to file
 /// MC truth information is also aggregated and written out
-DataProcessorSpec getTPCDigitRootFileWriterSpec()
+DataProcessorSpec getTPCDigitRootWriterSpec()
 {
   auto initFunction = [](InitContext& ic) {
     // get the option from the init context

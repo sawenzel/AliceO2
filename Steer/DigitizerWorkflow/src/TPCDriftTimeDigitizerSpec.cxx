@@ -201,6 +201,8 @@ DataProcessorSpec getTPCDriftTimeDigitizer(int channel, bool cachehits)
                                          static_cast<SubSpecificationType>(channel), Lifetime::Condition } },
     Outputs{
       // define channel by triple of (origin, type id of data to be sent on this channel, subspecification)
+      OutputSpec{ "TPC", "DIGITS", 0, Lifetime::Timeframe },
+	  OutputSpec{ "TPC", "SECTOR", 0, Lifetime::Timeframe }
     },
     AlgorithmSpec{ initIt },
     Options{ { "simFile", VariantType::String, "o2sim.root", { "Sim (background) input filename" } },
