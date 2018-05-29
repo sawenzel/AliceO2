@@ -23,18 +23,33 @@
 #include "FairSystemInfo.h"
 #include "TVirtualMC.h"
 #include <SimSetup/SimSetup.h>
+#include <Steer/O2RunSim.h>
+#include <unistd.h>
+#include <sstream>
 #endif
 
-void o2sim()
+FairRunSim* o2sim_init(bool asservice)
 {
   auto& confref = o2::conf::SimConfig::Instance();
   auto genconfig = confref.getGenerator();
 
-  auto run = new FairRunSim();
-  //run->SetImportTGeoToVMC(true); // geometry is created by TGeo and then fed to VMC
+  FairRunSim *run;
+  if(asservice) {
+    run = new o2::steer::O2RunSim();
+  }
+  else {
+    run = new FairRunSim();
+  }
   run->SetImportTGeoToVMC(false); // do not import TGeo to VMC since the latter is built together with TGeo
   run->SetSimSetup([confref]() { o2::SimSetup::setup(confref.getMCEngine().c_str()); });
-  std::string outputfilename = confref.getOutPrefix() + ".root";
+
+  auto pid = getpid();
+  std::stringstream s;
+  s << confref.getOutPrefix();
+  if (asservice){ s << "_" << pid; }
+  s << ".root";
+
+  std::string outputfilename = s.str();
   run->SetOutputFile(outputfilename.c_str());  // Output file
   run->SetName(confref.getMCEngine().c_str()); // Transport engine
   run->SetIsMT(confref.getIsMT());             // MT mode
@@ -106,15 +121,17 @@ void o2sim()
   bool kParameterMerged = true;
   auto rtdb = run->GetRuntimeDb();
   auto parOut = new FairParRootFileIo(kParameterMerged);
-  std::string parfilename = confref.getOutPrefix() + "_par.root";
+  
+  std::stringstream s2;
+  s2 << confref.getOutPrefix();
+  if (asservice) { s2 << "_" << pid; }
+  s2 << "_par.root";
+  std::string parfilename = s2.str();
   parOut->open(parfilename.c_str());
   rtdb->setOutput(parOut);
   rtdb->saveOutput();
   rtdb->print();
-
   o2::PDG::addParticlesToPdgDataBase(0);
-
-  run->Run(confref.getNEvents());
 
   {
     // store GRPobject
@@ -147,17 +164,38 @@ void o2sim()
       grp.setL3Current(currL3);
       grp.setDipoleCurrent(currDip);
     }
-    // todo: save beam information in the grp
-
     // save
     std::string grpfilename = confref.getOutPrefix() + "_grp.root";
     TFile grpF(grpfilename.c_str(), "recreate");
     grpF.WriteObjectAny(&grp, grp.Class(), "GRP");
   }
+  // todo: save beam information in the grp
 
-  // needed ... otherwise nothing flushed?
-  delete run;
+  timer.Stop();
+  Double_t rtime = timer.RealTime();
+  Double_t ctime = timer.CpuTime();
 
+  // extract max memory usage for init
+  FairSystemInfo sysinfo;
+  std::cout << "Init: Real time " << rtime << " s, CPU time " << ctime << "s\n";
+  std::cout << "Init: Memory used " << sysinfo.GetMaxMemory() << " MB\n";
+
+  return run;
+}
+
+
+// only called from the normal o2sim
+void o2sim_run(FairRunSim* run, bool asservice) {
+  TStopwatch timer;
+  timer.Start();
+
+  auto& confref = o2::conf::SimConfig::Instance();
+  if(!asservice) {
+    run->Run(confref.getNEvents());
+  } else {
+    run->Run(1);
+  }
+  
   // Finish
   timer.Stop();
   Double_t rtime = timer.RealTime();
@@ -170,4 +208,11 @@ void o2sim()
   std::cout << "Macro finished succesfully.\n";
   std::cout << "Real time " << rtime << " s, CPU time " << ctime << "s\n";
   std::cout << "Memory used " << sysinfo.GetMaxMemory() << " MB\n";
+}
+
+// asservice: in a parallel device-based context?
+void o2sim(bool asservice=false)
+{
+  auto run = o2sim_init(asservice);
+  o2sim_run(run, asservice);
 }

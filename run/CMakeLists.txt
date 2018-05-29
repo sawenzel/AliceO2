@@ -2,11 +2,19 @@
 Set(Exe_Names
   o2sim
   runTPC
+  O2SimDeviceRunner
+  O2PrimaryServerDeviceRunner
+  O2HitMergerRunner
+  O2RunSystem
 )
 
 Set(Exe_Source
   o2sim.cxx
   runTPC.cxx
+  O2SimDeviceRunner.cxx
+  O2PrimaryServerDeviceRunner.cxx
+  O2HitMergerRunner.cxx
+  O2RunSystem.cxx
 )
 
 set(BUCKET_NAME "run_bucket")

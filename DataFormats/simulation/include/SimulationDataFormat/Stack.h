@@ -93,6 +93,9 @@ class Stack : public FairGenericStack
   /// \param iTrack index of popped track (return)
   TParticle* PopNextTrack(Int_t& iTrack) override;
 
+    // similar function taking a particle
+    void PushTrack(Int_t toBeDone, TParticle const &);
+    
   /// Get primary particle by index for tracking from stack
   /// Declared in TVirtualMCStack
   /// Returns a pointer to the TParticle of the track
@@ -169,6 +172,19 @@ class Stack : public FairGenericStack
   // methods concerning track references
   void addTrackReference(const o2::TrackReference& p);
 
+   // get primaries
+    const std::vector<TParticle>& getPrimaries() const { return mPrimaryParticles; }
+
+    // initialize Stack from external vector containing primaries
+    void initFromPrimaries(std::vector<TParticle> const &primaries) {
+      Reset();
+      for(auto p : primaries) {
+        PushTrack(1, p);
+      }
+      mNumberOfPrimaryParticles = primaries.size();
+      mNumberOfEntriesInParticles = mNumberOfPrimaryParticles;
+    }
+
  private:
   /// STL stack (FILO) used to handle the TParticles for tracking
   /// stack entries refer to
@@ -196,6 +212,7 @@ class Stack : public FairGenericStack
   /// cache active O2 detectors
   std::vector<o2::Base::Detector*> mActiveDetectors; //!
 
+    
   /// Some indices and counters
   Int_t mIndexOfCurrentTrack;        //! Global index of current track
   Int_t mNumberOfPrimaryParticles;   //! Number of primary particles

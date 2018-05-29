@@ -474,6 +474,28 @@ o2_define_bucket(
 
 o2_define_bucket(
     NAME
+    steer_bucket
+
+    DEPENDENCIES
+    data_format_simulation_bucket
+    SimulationDataFormat
+    ITSMFTSimulation
+    RIO
+    Net
+
+    INCLUDE_DIRECTORIES
+    ${CMAKE_SOURCE_DIR}/Common/MathUtils/include
+    ${CMAKE_SOURCE_DIR}/Detectors/Base/include
+    ${CMAKE_SOURCE_DIR}/Detectors/TPC/simulation/include
+    ${CMAKE_SOURCE_DIR}/DataFormats/Detectors/Common/include
+    ${CMAKE_SOURCE_DIR}/DataFormats/simulation/include
+    ${MS_GSL_INCLUDE_DIR}
+    ${FAIRROOT_INCLUDE_DIR}/fairmq
+)
+
+
+o2_define_bucket(
+    NAME
     data_format_simulation_test_bucket
 
     DEPENDENCIES

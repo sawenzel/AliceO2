@@ -1,0 +1,128 @@
+{
+    "fairMQOptions":
+    {
+        "devices": [
+        {
+            "id": "worker",
+            "channels": [
+            {
+                "name": "primary-get",
+                "sockets": [
+                {
+                    "type": "req",
+                    "method": "connect",
+                    "address": "tcp://localhost:25005",
+                    "sndBufSize": "1000",
+                    "rcvBufSize": "1000",
+                    "rateLogging": "0"
+                }
+		]
+            },
+	    {
+                "name": "mctracks",
+                "sockets": [
+                {
+                    "type": "push",
+                    "method": "connect",
+                    "address": "tcp://localhost:25006",
+                    "sndBufSize": "1000",
+                    "rcvBufSize": "1000",
+                    "rateLogging": "0"
+                }
+		]
+            },
+            {
+	        "name": "itshits",
+		"sockets": [ 
+		{
+		    "type": "push",
+		    "method": "connect",
+		    "address": "tcp://localhost:25007",
+		    "sndBufSize": 1000,
+		    "rcvBufSize": 1000,
+		    "rateLogging": 0
+		}
+		]
+            },
+            {
+	        "name": "tpchits",
+		"sockets": [ 
+		{
+		    "type": "push",
+		    "method": "connect",
+		    "address": "tcp://localhost:25008",
+		    "sndBufSize": 1000,
+		    "rcvBufSize": 1000,
+		    "rateLogging": 0
+		}
+		]
+            }
+	  ]
+	},
+	{
+	    "id": "primary-server",
+	    "channels":
+	    [
+		{
+		    "name": "primary-get",
+		    "sockets": [ 
+			{
+			    "type": "rep",
+			    "method": "bind",
+			    "address": "tcp://*:25005",
+			    "sndBufSize": 1000,
+			    "rcvBufSize": 1000,
+			    "rateLogging": 0
+		        }
+		    ]
+	        }
+	    ]
+	},
+	{
+	    "id": "hitmerger",
+	    "channels": 
+            [
+		{
+		    "name": "mctracks",
+		    "sockets": [ 
+			{
+			    "type": "pull",
+			    "method": "bind",
+			    "address": "tcp://*:25006",
+			    "sndBufSize": 1000,
+			    "rcvBufSize": 1000,
+			    "rateLogging": 0
+		        }
+		    ]
+               },
+               {
+		    "name": "itshits",
+		    "sockets": [ 
+			{
+			    "type": "pull",
+			    "method": "bind",
+			    "address": "tcp://*:25007",
+			    "sndBufSize": 1000,
+			    "rcvBufSize": 1000,
+			    "rateLogging": 0
+		        }
+		    ]
+               },
+               {
+ 	            "name": "tpchits",
+		    "sockets": [ 
+		    {
+		      "type": "pull",
+    		      "method": "bind",
+		      "address": "tcp://*:25008",
+		      "sndBufSize": 1000,
+		      "rcvBufSize": 1000,
+		      "rateLogging": 0
+		    }
+		    ]
+               }
+	   ]
+	}
+      ]
+    }
+}
