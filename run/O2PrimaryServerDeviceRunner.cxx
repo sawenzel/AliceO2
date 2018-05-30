@@ -4,14 +4,15 @@
 
 #include "runFairMQDevice.h"
 #include "O2PrimaryServerDevice.h"
-
+#include <SimConfig/SimConfig.h>
 #include <string>
 
 namespace bpo = boost::program_options;
 
 void addCustomOptions(bpo::options_description& options)
 {
-
+  // append the same options here as used for SimConfig
+  o2::conf::SimConfig::initOptions(options);
 }
 
 FairMQDevice* getDevice(const FairMQProgOptions& config)

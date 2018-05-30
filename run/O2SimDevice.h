@@ -21,6 +21,7 @@
 #include <SimulationDataFormat/Stack.h>
 #include <SimulationDataFormat/PrimaryChunk.h>
 #include <TRandom.h>
+#include <SimConfig/SimConfig.h>
 
 namespace o2 {
 namespace devices {
@@ -51,17 +52,54 @@ class O2SimDevice : public FairMQDevice
   /// Overloads the InitTask() method of FairMQDevice
   void InitTask() final
   {
+     // nothing to do here (unless we could already send a message)
+  }
+
+  void initializeWorker()
+  {
+    long long c = 0xDEADBEEF;
+    FairMQMessagePtr request(NewSimpleMessage(&c));
+    FairMQMessagePtr reply(NewMessage());
+
+    // ask for the configuration object
+    LOG(INFO) << "Asking for configuration";
+    int timeoutinMS = 2000; // wait for 2s max
+    if (Send(request, "config-get", 0, timeoutinMS) >= 0) {
+      LOG(INFO) << "Waiting for answer " << FairLogger::endl;
+      if (Receive(reply, "config-get", 0, timeoutinMS) > 0) {
+        LOG(INFO) << "Answer received, containing " << reply->GetSize() << " bytes " << FairLogger::endl;
+
+        // the answer is a TMessage containing the Simulation Configuration
+        auto message = std::make_unique<TMessageWrapper>(reply->GetData(), reply->GetSize());
+        auto config = static_cast<o2::conf::SimConfigData*>(message.get()->ReadObjectAny(message.get()->GetClass()));
+
+        if(config) {
+          LOG(INFO) << "COMMUNICATED ENGINE " << config->mMCEngine;
+        }
+
+        auto& conf = o2::conf::SimConfig::Instance();
+        conf.resetFromConfigData(*config);
+      }
+    }
     LOG(INFO) << "Init SIM device " << FairLogger::endl;
     o2sim_init(true);
     FairSystemInfo sysinfo;
     LOG(INFO) << "TIME-STAMP " << mTimer.RealTime() << "\t";
     mTimer.Continue();
     LOG(INFO) << "MEM-STAMP " << sysinfo.GetCurrentMemory() / (1024. * 1024) << " " << sysinfo.GetMaxMemory() << " MB\n";
+    mIsInitialized = true;
   }
 
   /// Overloads the ConditionalRun() method of FairMQDevice
   bool ConditionalRun() final
   {
+    // we contact the server a first time to retrieve the configuration
+    // and to setup the simulation engine
+    if (!mIsInitialized) {
+      initializeWorker();
+      return true;
+    }
+
     long long c = 0xDEADBEEF;
     FairMQMessagePtr request(NewSimpleMessage(&c));
     FairMQMessagePtr reply(NewMessage());
@@ -115,6 +153,7 @@ class O2SimDevice : public FairMQDevice
   std::string mInChannelName = "";
   std::string mOutChannelName = "";
   TStopwatch mTimer;
+  bool mIsInitialized = false;
 };
 
 } // namespace devices

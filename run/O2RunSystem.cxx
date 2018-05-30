@@ -4,6 +4,7 @@
 #include <iostream>
 #include <cstdio>
 #include <fcntl.h>
+#include <SimConfig/SimConfig.h>
 #include <sys/wait.h>
 
 const char* serverlogname = "serverlog";
@@ -19,6 +20,11 @@ int main(int argc, char* argv[]) {
   std::stringstream configss;
   configss << home << "/alisw_new/O2/run/primary-server.json";
 
+  auto& conf = o2::conf::SimConfig::Instance();
+  if (!conf.resetFromArguments(argc, argv)) {
+    return 1;
+  }
+
   // the server
   int pid = fork();
   if (pid == 0) {
@@ -31,7 +37,7 @@ int main(int argc, char* argv[]) {
     const std::string name("O2PrimaryServerDeviceRunner");
     const std::string path = binpath + "/" + name;
     execl(path.c_str(), name.c_str(), "--control", "static", "--id", "primary-server", "--mq-config",
-          configss.str().c_str(), (char*)0);
+          configss.str().c_str(), argv, (char*)0);
     return 0;
   }
   else {
@@ -39,9 +45,6 @@ int main(int argc, char* argv[]) {
   }
 
   int nworkers = 1;
-  if (argc > 1) {
-    nworkers = atoi(argv[1]);
-  }
   for (int id = 0; id < nworkers; ++id) {
     // the workers
     std::stringstream workerlogss;

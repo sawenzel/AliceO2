@@ -38,6 +38,7 @@ class O2PrimaryServerDevice : public FairMQDevice
   {
     mStack.SetExternalMode(true);
     OnData("primary-get", &O2PrimaryServerDevice::HandleRequest);
+    OnData("config-get", &O2PrimaryServerDevice::HandleConfigRequest);
   }
 
   /// Default destructor
@@ -61,6 +62,29 @@ class O2PrimaryServerDevice : public FairMQDevice
     //      extGen->SetStartEvent(0);
     //      mPrimGen.AddGenerator(extGen);
     //      mPrimGen.SetEvent(&mEventHeader);
+  }
+
+  // method reacting to requests to get the simulation configuration
+  bool HandleConfigRequest(FairMQMessagePtr& request, int /*index*/)
+  {
+    // just sending the simulation configuration to anyone that wants it
+    auto& conf = o2::conf::SimConfig::Instance();
+    const auto& confdata = conf.getConfigData();
+
+    TMessage* tmsg = new TMessage(kMESS_OBJECT);
+    tmsg->WriteObjectAny((void*)&confdata, TClass::GetClass(typeid(confdata)));
+
+    auto free_tmessage = [](void* data, void* hint) { delete static_cast<TMessage*>(hint); };
+
+    std::unique_ptr<FairMQMessage> message(
+      fTransportFactory->CreateMessage(tmsg->Buffer(), tmsg->BufferSize(), free_tmessage, tmsg));
+
+    // send answer
+    if (Send(message, "config-get") > 0) {
+      LOG(INFO) << "config reply send ";
+      return true;
+    }
+    return true;
   }
 
   /// Overloads the ConditionalRun() method of FairMQDevice
