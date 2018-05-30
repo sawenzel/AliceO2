@@ -53,6 +53,7 @@ Stack::Stack(Int_t size)
     mMinHits(1),
     mEnergyCut(0.),
     mTrackRefs(new std::vector<o2::TrackReference>),
+	mIndexedTrackRefs(new typename std::remove_pointer<decltype(mIndexedTrackRefs)>::type),
     mIsG4Like(false)
 {
   auto vmc = TVirtualMC::GetMC();
@@ -427,7 +428,7 @@ void Stack::Reset()
   }
   mParticles.clear();
   mTracks->clear();
-  if (mPrimariesDone != mPrimaryParticles.size()) {
+  if (!mIsExternalMode && (mPrimariesDone != mPrimaryParticles.size())) {
     LOG(FATAL) << "Inconsistency in primary particles treated " << mPrimariesDone << " vs expected "
                << mPrimaryParticles.size() << "\n(This points to a flaw in the stack logic)" << FairLogger::endl;
   }
@@ -441,7 +442,6 @@ void Stack::Register()
 {
   FairRootManager::Instance()->RegisterAny("MCTrack", mTracks, kTRUE);
   FairRootManager::Instance()->RegisterAny("TrackRefs", mTrackRefs, kTRUE);
-  mIndexedTrackRefs = new typename std::remove_pointer<decltype(mIndexedTrackRefs)>::type;
   FairRootManager::Instance()->RegisterAny("IndexedTrackRefs", mIndexedTrackRefs, kTRUE);
 }
 

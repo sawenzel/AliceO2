@@ -185,81 +185,84 @@ class Stack : public FairGenericStack
       mNumberOfEntriesInParticles = mNumberOfPrimaryParticles;
     }
 
- private:
-  /// STL stack (FILO) used to handle the TParticles for tracking
-  /// stack entries refer to
-  std::stack<TParticle> mStack; //!
+    void SetExternalMode(bool m) { mIsExternalMode = m; }
 
-  /// Array of TParticles (contains all TParticles put into or created
-  /// by the transport)
-  std::vector<o2::MCTrack> mParticles; //!
-  std::vector<int> mTransportedIDs;    //! prim + sec trackIDs transported for "current" primary
-  std::vector<int> mIndexOfPrimaries;  //! index of primaries in mParticles
+   private:
+    /// STL stack (FILO) used to handle the TParticles for tracking
+    /// stack entries refer to
+    std::stack<TParticle> mStack; //!
 
-  /// the current TParticle object
-  TParticle mCurrentParticle;
+    /// Array of TParticles (contains all TParticles put into or created
+    /// by the transport)
+    std::vector<o2::MCTrack> mParticles; //!
+    std::vector<int> mTransportedIDs;    //! prim + sec trackIDs transported for "current" primary
+    std::vector<int> mIndexOfPrimaries;  //! index of primaries in mParticles
 
-  // keep primary particles in its original form
-  // (mainly for the PopPrimaryParticleInterface
-  std::vector<TParticle> mPrimaryParticles;
+    /// the current TParticle object
+    TParticle mCurrentParticle;
 
-  /// vector of reducded tracks written to the output
-  std::vector<o2::MCTrack>* mTracks;
+    // keep primary particles in its original form
+    // (mainly for the PopPrimaryParticleInterface
+    std::vector<TParticle> mPrimaryParticles;
 
-  /// STL map from particle index to persistent track index
-  std::map<Int_t, Int_t> mIndexMap; //!
+    /// vector of reducded tracks written to the output
+    std::vector<o2::MCTrack>* mTracks;
 
-  /// cache active O2 detectors
-  std::vector<o2::Base::Detector*> mActiveDetectors; //!
+    /// STL map from particle index to persistent track index
+    std::map<Int_t, Int_t> mIndexMap; //!
 
-    
-  /// Some indices and counters
-  Int_t mIndexOfCurrentTrack;        //! Global index of current track
-  Int_t mNumberOfPrimaryParticles;   //! Number of primary particles
-  Int_t mNumberOfEntriesInParticles; //! Number of entries in mParticles
-  Int_t mNumberOfEntriesInTracks;    //! Number of entries in mTracks
-  Int_t mIndex;                      //! Used for merging
+    /// cache active O2 detectors
+    std::vector<o2::Base::Detector*> mActiveDetectors; //!
 
-  /// Variables defining the criteria for output selection
-  Bool_t mStoreMothers;
-  Bool_t mStoreSecondaries;
-  Int_t mMinHits;
-  Double32_t mEnergyCut;
+    /// Some indices and counters
+    Int_t mIndexOfCurrentTrack;        //! Global index of current track
+    Int_t mNumberOfPrimaryParticles;   //! Number of primary particles
+    Int_t mNumberOfEntriesInParticles; //! Number of entries in mParticles
+    Int_t mNumberOfEntriesInTracks;    //! Number of entries in mTracks
+    Int_t mIndex;                      //! Used for merging
 
-  // variables for the cleanup / filtering procedure
-  Int_t mCleanupCounter = 0;   //!
-  Int_t mCleanupThreshold = 1; //! a cleanup is initiated every mCleanupThreshold primaries
-  Int_t mPrimariesDone = 0;    //!
-  Int_t mTracksDone = 0;       //! number of tracks already done
+    /// Variables defining the criteria for output selection
+    Bool_t mStoreMothers;
+    Bool_t mStoreSecondaries;
+    Int_t mMinHits;
+    Double32_t mEnergyCut;
 
-  bool mIsG4Like = false; //! flag indicating if the stack is used in a manner done by Geant4
+    // variables for the cleanup / filtering procedure
+    Int_t mCleanupCounter = 0;   //!
+    Int_t mCleanupThreshold = 1; //! a cleanup is initiated every mCleanupThreshold primaries
+    Int_t mPrimariesDone = 0;    //!
+    Int_t mTracksDone = 0;       //! number of tracks already done
 
-  // storage for track references
-  std::vector<o2::TrackReference>* mTrackRefs = nullptr; //!
+    bool mIsG4Like = false; //! flag indicating if the stack is used in a manner done by Geant4
 
-  o2::dataformats::MCTruthContainer<o2::TrackReference>* mIndexedTrackRefs = nullptr; //!
+    bool mIsExternalMode = false; // is stack as external factory or directly inside simulation?
 
-  /// Mark tracks for output using selection criteria
-  /// returns true if all available tracks are selected
-  /// returns false if some tracks are discarded
-  bool selectTracks();
+    // storage for track references
+    std::vector<o2::TrackReference>* mTrackRefs = nullptr; //!
 
-  Stack(const Stack&);
+    o2::dataformats::MCTruthContainer<o2::TrackReference>* mIndexedTrackRefs = nullptr; //!
 
-  Stack& operator=(const Stack&);
+    /// Mark tracks for output using selection criteria
+    /// returns true if all available tracks are selected
+    /// returns false if some tracks are discarded
+    bool selectTracks();
 
-  /// function called after each primary
-  /// and all its secondaries where transported
-  /// this allows applying selection criteria at a much finer granularity
-  /// than donw with FillTrackArray which is only called once per event
-  void finishCurrentPrimary();
+    Stack(const Stack&);
 
-  /// Increment number of hits for an arbitrary track in a given detector
-  /// \param iDet    Detector unique identifier
-  /// \param iTrack  Track number
-  void addHit(int iDet, Int_t iTrack);
+    Stack& operator=(const Stack&);
 
-  ClassDefOverride(Stack, 1)
+    /// function called after each primary
+    /// and all its secondaries where transported
+    /// this allows applying selection criteria at a much finer granularity
+    /// than donw with FillTrackArray which is only called once per event
+    void finishCurrentPrimary();
+
+    /// Increment number of hits for an arbitrary track in a given detector
+    /// \param iDet    Detector unique identifier
+    /// \param iTrack  Track number
+    void addHit(int iDet, Int_t iTrack);
+
+    ClassDefOverride(Stack, 1)
 };
 
 inline void Stack::addTrackReference(const o2::TrackReference& ref) { mTrackRefs->push_back(ref); }
