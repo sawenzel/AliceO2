@@ -62,6 +62,17 @@ class O2PrimaryServerDevice : public FairMQDevice
     //      extGen->SetStartEvent(0);
     //      mPrimGen.AddGenerator(extGen);
     //      mPrimGen.SetEvent(&mEventHeader);
+
+    // init sim config
+    auto& conf = o2::conf::SimConfig::Instance();
+    auto& vm = GetConfig()->GetVarMap();
+    conf.resetFromParsedMap(vm);
+    // output varmap
+    for (auto& keyvalue : vm) {
+      LOG(INFO) << "///// " << keyvalue.first << " " << keyvalue.second.value().type().name();
+    }
+    // MC ENGINE
+    LOG(INFO) << "ENGINE SET TO " << vm["mcEngine"].as<std::string>();
   }
 
   // method reacting to requests to get the simulation configuration

@@ -61,7 +61,10 @@ class SimConfig
   // returns true of correctly initialized and not --help called
   bool resetFromArguments(int argc, char* argv[]);
 
-  bool resetFromConfigData(SimConfigData const& data) { mConfigData = data; }
+  // initializes from existing parsed map
+  bool resetFromParsedMap(boost::program_options::variables_map const&);
+
+  void resetFromConfigData(SimConfigData const& data) { mConfigData = data; }
   SimConfigData const& getConfigData() const { return mConfigData; }
 
   // get MC engine
