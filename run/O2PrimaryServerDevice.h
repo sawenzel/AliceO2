@@ -12,9 +12,8 @@
 #define O2_DEVICES_PRIMSERVDEVICE_H_
 
 #include <FairMQDevice.h>
-#include <FairGenerator.h>
-#include <FairBoxGenerator.h>
 #include <FairPrimaryGenerator.h>
+#include <Generators/GeneratorFactory.h>
 #include <FairMQMessage.h>
 #include <SimulationDataFormat/Stack.h>
 #include <FairMCEventHeader.h>
@@ -49,21 +48,7 @@ class O2PrimaryServerDevice : public FairMQDevice
   {
     LOG(INFO) << "Init Server device ";
 
-    auto boxGen = new FairBoxGenerator(211, 1000); /*protons*/
-    boxGen->SetEtaRange(-0.9, 0.9);
-    boxGen->SetPRange(0.1, 5);
-    boxGen->SetPhiRange(0., 360.);
-    boxGen->SetDebug(kFALSE);
-    mPrimGen.AddGenerator(boxGen);
-    mPrimGen.SetEvent(&mEventHeader);
-
-    // auto extGen =  new o2::eventgen::GeneratorFromFile(confref.getExtKinematicsFileName().c_str());
-    //      auto extGen =  new o2::eventgen::GeneratorFromFile("~/Downloads/Kinematics_HijingCent1_N100.root");
-    //      extGen->SetStartEvent(0);
-    //      mPrimGen.AddGenerator(extGen);
-    //      mPrimGen.SetEvent(&mEventHeader);
-
-    // init sim config
+     // init sim config
     auto& conf = o2::conf::SimConfig::Instance();
     auto& vm = GetConfig()->GetVarMap();
     conf.resetFromParsedMap(vm);
@@ -73,6 +58,12 @@ class O2PrimaryServerDevice : public FairMQDevice
     }
     // MC ENGINE
     LOG(INFO) << "ENGINE SET TO " << vm["mcEngine"].as<std::string>();
+
+    mMaxEvents = conf.getNEvents();
+
+    o2::eventgen::GeneratorFactory::setPrimaryGenerator(conf, &mPrimGen);
+    mPrimGen.SetEvent(&mEventHeader);
+    mPrimGen.Init();
   }
 
   // method reacting to requests to get the simulation configuration

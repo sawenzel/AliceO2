@@ -10,11 +10,9 @@
 
 #include "build_geometry.C"
 #if !defined(__CLING__) || defined(__ROOTCLING__)
-#include <FairBoxGenerator.h>
 #include <FairPrimaryGenerator.h>
-#include <Generators/GeneratorFromFile.h>
-#include <Generators/Pythia8Generator.h>
-#include "Generators/PDG.h"
+#include <Generators/GeneratorFactory.h>
+#include <Generators/PDG.h>
 #include <SimConfig/SimConfig.h>
 #include <TStopwatch.h>
 #include <memory>
@@ -59,50 +57,8 @@ FairRunSim* o2sim_init(bool asservice)
 
   // setup generator
   auto primGen = new FairPrimaryGenerator();
-
-  if (genconfig.compare("boxgen") == 0) {
-    // a simple "box" generator
-    std::cout << "Init box generator\n";
-    auto boxGen = new FairBoxGenerator(211, 10); /*protons*/
-    boxGen->SetEtaRange(-0.9, 0.9);
-    boxGen->SetPRange(0.1, 5);
-    boxGen->SetPhiRange(0., 360.);
-    boxGen->SetDebug(kTRUE);
-    primGen->AddGenerator(boxGen);
-  } else if (genconfig.compare("extkin") == 0) {
-    // external kinematics
-    // needs precense of a kinematics file "Kinematics.root"
-    // TODO: make this configurable and check for presence
-    auto extGen = new o2::eventgen::GeneratorFromFile(confref.getExtKinematicsFileName().c_str());
-    extGen->SetStartEvent(confref.getStartEvent());
-    primGen->AddGenerator(extGen);
-    std::cout << "using external kinematics\n";
-  } else if (genconfig.compare("pythia8") == 0) {
-    // pythia8 pp
-    // configures pythia for min.bias pp collisions at 14 TeV
-    // TODO: make this configurable
-    auto py8Gen = new o2::eventgen::Pythia8Generator();
-    py8Gen->SetParameters("Beams:idA 2212");       // p
-    py8Gen->SetParameters("Beams:idB 2212");       // p
-    py8Gen->SetParameters("Beams:eCM 14000.");     // [GeV]
-    py8Gen->SetParameters("SoftQCD:inelastic on"); // all inelastic processes
-    primGen->AddGenerator(py8Gen);
-  } else if (genconfig.compare("pythia8hi") == 0) {
-    // pythia8 heavy-ion
-    // exploits pythia8 heavy-ion machinery (available from v8.230)
-    // configures pythia for min.bias Pb-Pb collisions at 5.52 TeV
-    // TODO: make this configurable
-    auto py8Gen = new o2::eventgen::Pythia8Generator();
-    py8Gen->SetParameters("Beams:idA 1000822080");                                      // Pb ion
-    py8Gen->SetParameters("Beams:idB 1000822080");                                      // Pb ion
-    py8Gen->SetParameters("Beams:eCM 5520.0");                                          // [GeV]
-    py8Gen->SetParameters("HeavyIon:SigFitNGen 0");                                     // valid for Pb-Pb 5520 only
-    py8Gen->SetParameters("HeavyIon:SigFitDefPar 14.82,1.82,0.25,0.0,0.0,0.0,0.0,0.0"); // valid for Pb-Pb 5520 only
-    py8Gen->SetParameters(
-      ("HeavyIon:bWidth " + std::to_string(confref.getBMax())).c_str()); // impact parameter from 0-x [fm]
-    primGen->AddGenerator(py8Gen);
-  } else {
-    LOG(FATAL) << "Invalid generator" << FairLogger::endl;
+  if (!asservice) {
+    o2::eventgen::GeneratorFactory::setPrimaryGenerator(confref, primGen);
   }
   run->SetGenerator(primGen);
 
@@ -113,7 +69,11 @@ FairRunSim* o2sim_init(bool asservice)
   // run init
   run->Init();
   finalize_geometry(run);
-  gGeoManager->Export("O2geometry.root");
+  std::stringstream geomss;
+  geomss << "O2geometry";
+  if (asservice) { geomss << "_" << pid; }
+  geomss << ".root";
+  gGeoManager->Export(geomss.str().c_str());
 
   std::time_t runStart = std::time(nullptr);
 

@@ -63,24 +63,34 @@ class O2SimDevice : public FairMQDevice
 
     // ask for the configuration object
     LOG(INFO) << "Asking for configuration";
-    int timeoutinMS = 2000; // wait for 2s max
+    int timeoutinMS = 100000; // wait for 100s max
     if (Send(request, "config-get", 0, timeoutinMS) >= 0) {
-      LOG(INFO) << "Waiting for answer " << FairLogger::endl;
+      LOG(INFO) << "Waiting for configuration answer " << FairLogger::endl;
       if (Receive(reply, "config-get", 0, timeoutinMS) > 0) {
-        LOG(INFO) << "Answer received, containing " << reply->GetSize() << " bytes " << FairLogger::endl;
+        LOG(INFO) << "Configuration answer received, containing " << reply->GetSize() << " bytes " << FairLogger::endl;
 
         // the answer is a TMessage containing the Simulation Configuration
         auto message = std::make_unique<TMessageWrapper>(reply->GetData(), reply->GetSize());
         auto config = static_cast<o2::conf::SimConfigData*>(message.get()->ReadObjectAny(message.get()->GetClass()));
 
-        if(config) {
+        if (config) {
           LOG(INFO) << "COMMUNICATED ENGINE " << config->mMCEngine;
         }
 
         auto& conf = o2::conf::SimConfig::Instance();
         conf.resetFromConfigData(*config);
+      } else {
+        LOG(WARNING) << "No configuration received within " << timeoutinMS << "ms\n";
+        return;
       }
+    } else {
+      LOG(WARNING) << "Could not send configuration request within " << timeoutinMS << "ms\n";
+      return;
     }
+
+    bool t=true;
+    while(t) {}
+
     LOG(INFO) << "Init SIM device " << FairLogger::endl;
     o2sim_init(true);
     FairSystemInfo sysinfo;
