@@ -39,19 +39,20 @@ int main(int argc, char* argv[]) {
 
     const std::string name("O2PrimaryServerDeviceRunner");
     const std::string path = binpath + "/" + name;
-
+    const std::string config = configss.str();
+    
     // copy all arguments into a common vector
-    const int Nargs = argc + 6;
+    const int Nargs = argc + 7;
     const char* arguments[Nargs];
     arguments[0] = name.c_str();
     arguments[1] = "--control"; arguments[2] = "static";
     arguments[3] = "--id"; arguments[4] = "primary-server";
     arguments[5] = "--mq-config";
-    arguments[6] = configss.str().c_str();
+    arguments[6] = config.c_str();
     for (int i = 1; i < argc; ++i) {
       arguments[6 + i] = argv[i];
     }
-    arguments[argc + 6] = nullptr;
+    arguments[Nargs-1] = nullptr;
     for (int i = 0; i < Nargs; ++i) {
       std::cerr << arguments[i] << "\n";
     }
