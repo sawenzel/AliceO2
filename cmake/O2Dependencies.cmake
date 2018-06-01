@@ -548,12 +548,14 @@ o2_define_bucket(
     ReconstructionDataFormats
     DataFormatsParameters
     Field
-
+    FairRoot::FairMQ
+    Net
     VMC # ROOT
     Geom
 
     INCLUDE_DIRECTORIES
     ${FAIRROOT_INCLUDE_DIR}
+    ${FAIRROOT_INCLUDE_DIR}/fairmq # temporary fix, until bucket system works with imported targets
     ${CMAKE_SOURCE_DIR}/Common/MathUtils/include
     ${CMAKE_SOURCE_DIR}/Common/Field/include
     ${CMAKE_SOURCE_DIR}/Common/Constants/include
@@ -850,6 +852,7 @@ o2_define_bucket(
     DEPENDENCIES
     tpc_base_bucket
     data_format_TPC_bucket
+    detectors_base_bucket
     Field
     DetectorsBase
     Generators
@@ -1208,6 +1211,7 @@ o2_define_bucket(
     Physics
     EMCALBase
     DetectorsBase
+    detectors_base_bucket
     SimulationDataFormat
 
     INCLUDE_DIRECTORIES
@@ -1223,6 +1227,7 @@ o2_define_bucket(
     DEPENDENCIES
     tof_base_bucket
     root_base_bucket
+    detectors_base_bucket
     fairroot_geom
     RIO
     Graf
@@ -1277,6 +1282,7 @@ o2_define_bucket(
     Physics
     FITBase
     DetectorsBase
+    detectors_base_bucket
     SimulationDataFormat
     Core Hist # ROOT
 
@@ -1297,6 +1303,7 @@ o2_define_bucket(
 
     DEPENDENCIES # library names
     root_base_bucket
+    detectors_base_bucket
     fairroot_geom
     RIO
     Graf
@@ -1348,6 +1355,7 @@ o2_define_bucket(
     phos_base_bucket
     root_base_bucket
     fairroot_geom
+    detectors_base_bucket
     RIO
     Graf
     Gpad
@@ -1401,6 +1409,7 @@ o2_define_bucket(
     Physics
     TRDBase
     DetectorsBase
+    detectors_base_bucket
     SimulationDataFormat
 
     INCLUDE_DIRECTORIES

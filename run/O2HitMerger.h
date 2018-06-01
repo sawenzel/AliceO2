@@ -53,6 +53,7 @@ class O2HitMerger : public FairMQDevice
     OnData("mctracks", &O2HitMerger::HandleMCTrackData);
     OnData("itshits", &O2HitMerger::HandleITSHits);
     OnData("tpchits", &O2HitMerger::HandleTPCHits);
+    OnData("simdata", &O2HitMerger::handleSimData);
     mTimer.Start();
   }
 
@@ -258,6 +259,11 @@ class O2HitMerger : public FairMQDevice
 
     mOutTree->SetEntries(eventid);
     // finally we can cleanup the map by removing this event
+  }
+
+  bool handleSimData(FairMQParts& data, int /*index*/) {
+    LOG(INFO) << "SIMDATA channel got " << data.Size() << " parts\n";
+    return true;
   }
 
   bool HandleTPCHits(FairMQParts& data, int /*index*/)

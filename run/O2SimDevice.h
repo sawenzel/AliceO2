@@ -22,7 +22,6 @@
 #include <SimulationDataFormat/PrimaryChunk.h>
 #include <TRandom.h>
 #include <SimConfig/SimConfig.h>
-#include "O2SimMessageIDs.h"
 
 namespace o2 {
 namespace devices {
@@ -65,7 +64,6 @@ class O2SimDevice : public FairMQDevice
       return false;
     }
 
-    //const short c = 1; // kCONFIGGETMESSAGE;
     auto text = new std::string("configrequest");
 
     // create message object with a pointer to the data buffer,
@@ -143,6 +141,7 @@ class O2SimDevice : public FairMQDevice
     app->setMCTrackChannel(&fChannels.at("mctracks").at(0));
     app->setITSChannel(&fChannels.at("itshits").at(0));
     app->setTPCChannel(&fChannels.at("tpchits").at(0));
+    app->setSimDataChannel(&fChannels.at("simdata").at(0));
 
     LOG(INFO) << "Trying to Send  " << FairLogger::endl;
     int timeoutinMS = 2000; // wait for 2s max

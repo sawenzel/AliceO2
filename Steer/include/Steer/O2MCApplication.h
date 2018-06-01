@@ -44,6 +44,10 @@ class O2MCApplication : public FairMCApplication
     /** Define actions at the end of run */
     void  FinishRun();
 
+    void attachSubEventInfo(FairMQParts&, o2::Data::SubEventInfo const& info) const;
+    void attachMCTracks(FairMQParts &) const;
+
+
     /** Generate primary particles */
     void  GeneratePrimaries() override {
       // ordinarily we would call the event generator ...
@@ -73,12 +77,16 @@ class O2MCApplication : public FairMCApplication
     void setMCTrackChannel(FairMQChannel* channel) { mMCTrackChannel = channel; }
     void setTPCChannel(FairMQChannel* channel) { mTPCChannel = channel; }
     void setITSChannel(FairMQChannel* channel) { mITSChannel = channel; }
+    void setSimDataChannel(FairMQChannel* channel) { mSimDataChannel = channel; }
+
     void setSubEventInfo(o2::Data::SubEventInfo &i) { mSubEventInfo = i; }
     
     std::vector<TParticle> mPrimaries;
     FairMQChannel*         mMCTrackChannel;
     FairMQChannel*         mTPCChannel; // avoid hard coded number
     FairMQChannel*         mITSChannel;
+
+    FairMQChannel*         mSimDataChannel; // generic channel on which to send sim data
     o2::Data::SubEventInfo mSubEventInfo; // what are we currently processing?
     
     ClassDefOverride(O2MCApplication,4)  //Interface to MonteCarlo application

@@ -22,7 +22,6 @@
 #include <SimulationDataFormat/PrimaryChunk.h>
 #include <Generators/GeneratorFromFile.h>
 #include <SimConfig/SimConfig.h>
-#include "O2SimMessageIDs.h"
 #include <typeinfo>
 
 namespace o2

@@ -9,6 +9,7 @@
 #include <TMessage.h>
 #include <sstream>
 #include <SimConfig/SimConfig.h>
+#include <DetectorsBase/Detector.h>
 
 namespace o2 {
 namespace steer {
@@ -89,6 +90,14 @@ namespace steer {
     return active;
   }
 
+  void O2MCApplication::attachMCTracks(FairMQParts &) const {
+
+  }
+  void O2MCApplication::attachSubEventInfo(FairMQParts& parts, o2::Data::SubEventInfo const& info) const
+  {
+    parts.AddPart(std::move(mSimDataChannel->NewSimpleMessage(info)));
+  }
+
   void O2MCApplication::SendData() {
     // Question do we delegate to detectors?
     // ... or iterate over FairRootMgr branch addresses
@@ -98,19 +107,29 @@ namespace steer {
     //
 
     // Send primaries + secondaries produced
-    TypedVectorSender<o2::MCTrack>("MCTrack", *mMCTrackChannel, mSubEventInfo);
-
-    if (isActivated("ITS")) {
-      TypedVectorSender<o2::ITSMFT::Hit>("ITSHit", *mITSChannel, mSubEventInfo);
-    }
-    // HOW TO LOOP OVER THE DETECTOR PRODUCTS -- it would be nice having a template vector
-    // CAN WE SEND IN PARALLEL ?
-    if (isActivated("TPC")) {
-      sendTPCData();
-    }
+//    TypedVectorSender<o2::MCTrack>("MCTrack", *mMCTrackChannel, mSubEventInfo);
+//
+//    if (isActivated("ITS")) {
+//      TypedVectorSender<o2::ITSMFT::Hit>("ITSHit", *mITSChannel, mSubEventInfo);
+//    }
+//    // HOW TO LOOP OVER THE DETECTOR PRODUCTS -- it would be nice having a template vector
+//    // CAN WE SEND IN PARALLEL ?
+//    if (isActivated("TPC")) {
+//      sendTPCData();
+//    }
 
     //TMessageVectorSender<o2::TPC::HitGroup>("TPCHitsSector0", *mTPCChannel, mSubEventInfo);
     //%sHitsSector%d
+    FairMQParts simdataparts;
+    // fill these parts ... the receiver has to unpack in same order ??
+    attachSubEventInfo(simdataparts, mSubEventInfo);
+    attachMCTracks(simdataparts);
+    // fillTrackReferences(simdataparts);
+    for (auto det : listActiveDetectors) {
+      ((o2::Base::Detector*)det)->attachHits(*mSimDataChannel, simdataparts);
+    }
+    LOG(INFO) << "sending message with " << simdataparts.Size() << " parts \n";
+    mSimDataChannel->Send(simdataparts);
   }
 
 }

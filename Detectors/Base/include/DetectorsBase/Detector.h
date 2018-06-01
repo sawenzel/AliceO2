@@ -26,6 +26,10 @@
 #include <typeinfo>
 #include <type_traits>
 #include <string>
+#include <FairMQChannel.h>
+#include <FairMQMessage.h>
+#include <FairMQParts.h>
+#include <TMessage.h>
 
 namespace o2 {
 namespace Base {
@@ -126,6 +130,8 @@ class Detector : public FairDetector
     // FIXME: make private friend of stack?
     virtual void updateHitTrackIndices(std::map<int, int> const&) = 0;
 
+    virtual void attachHits(FairMQChannel &, FairMQParts &) = 0;
+
     // The GetCollection interface is made final and deprecated since
     // we no longer support TClonesArrays
     [[deprecated("Use getHits API on concrete detectors!")]]
@@ -165,6 +171,17 @@ inline std::string demangle(const char* name)
   return (status == 0) ? res.get() : name;
 }
 
+template <typename Container>
+void attachTMessage(Container const& hits, FairMQChannel& channel, FairMQParts& parts)
+{
+  TMessage* tmsg = new TMessage();
+  tmsg->WriteObjectAny((void*)&hits, TClass::GetClass(typeid(hits)));
+  auto free_tmessage = [](void* data, void* hint) { delete static_cast<TMessage*>(hint); };
+
+  std::unique_ptr<FairMQMessage> message(channel.NewMessage(tmsg->Buffer(), tmsg->BufferSize(), free_tmessage, tmsg));
+  parts.AddPart(std::move(message));
+}
+
 // an implementation helper template which automatically implements
 // common functionality for deriving classes via the CRT pattern
 // (example: it implements the updateHitTrackIndices function and avoids
@@ -190,6 +207,15 @@ class DetImpl : public o2::Base::Detector
       }
     }
   }
+
+  void attachHits(FairMQChannel& channel, FairMQParts& parts) override
+  {
+    int probe = 0;
+    while (auto hits = static_cast<Det*>(this)->Det::getHits(probe++)) {
+      attachTMessage(*hits, channel, parts);
+    }
+  }
+
   ClassDefOverride(DetImpl, 0)
 };
 }

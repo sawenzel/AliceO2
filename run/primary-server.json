@@ -56,6 +56,19 @@
 		    "rateLogging": 0
 		}
 		]
+            },
+            {
+	        "name": "simdata",
+		"sockets": [ 
+		{
+		    "type": "push",
+		    "method": "connect",
+		    "address": "tcp://localhost:25009",
+		    "sndBufSize": 1000,
+		    "rcvBufSize": 1000,
+		    "rateLogging": 0
+		}
+		]
             }
 	  ]
 	},
@@ -115,6 +128,19 @@
 		      "type": "pull",
     		      "method": "bind",
 		      "address": "tcp://*:25008",
+		      "sndBufSize": 1000,
+		      "rcvBufSize": 1000,
+		      "rateLogging": 0
+		    }
+		    ]
+               },
+               {
+ 	            "name": "simdata",
+		    "sockets": [ 
+		    {
+		      "type": "pull",
+    		      "method": "bind",
+		      "address": "tcp://*:25009",
 		      "sndBufSize": 1000,
 		      "rcvBufSize": 1000,
 		      "rateLogging": 0
