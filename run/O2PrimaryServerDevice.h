@@ -94,7 +94,7 @@ class O2PrimaryServerDevice : public FairMQDevice
   {
     static int counter = 0;
     if (counter >= mMaxEvents && mNeedNewEvent) {
-      return false; // max 3 events for the moment
+      return false;
     }
 
     //bool t=true;

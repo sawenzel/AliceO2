@@ -8,6 +8,7 @@
 #include <SimulationDataFormat/PrimaryChunk.h>
 #include <TMessage.h>
 #include <sstream>
+#include <SimConfig/SimConfig.h>
 
 namespace o2 {
 namespace steer {
@@ -53,12 +54,12 @@ namespace steer {
 
   void O2MCApplication::assembleTPCSectors(FairMQParts& parts)
   {
-	parts.AddPart(std::move(mTPCChannel->NewSimpleMessage(mSubEventInfo)));
-	static auto mgr = FairRootManager::Instance();
+    parts.AddPart(std::move(mTPCChannel->NewSimpleMessage(mSubEventInfo)));
+    static auto mgr = FairRootManager::Instance();
 
-    for(int s=0;s<36;++s) {
+    for (int s = 0; s < 36; ++s) {
       std::stringstream name;
-      name << "TPCHitsSector" << s;
+      name << "TPCHitsShiftedSector" << s;
       auto vector = mgr->InitObjectAs<const std::vector<o2::TPC::HitGroup>*>(name.str().c_str());
 
       if (vector) {
@@ -69,14 +70,23 @@ namespace steer {
         std::unique_ptr<FairMQMessage> message(
           mTPCChannel->NewMessage(tmsg->Buffer(), tmsg->BufferSize(), free_tmessage, tmsg));
         parts.AddPart(std::move(message));
-     }
+      }
     }
   }
 
-  void O2MCApplication::sendTPCData() {
-	FairMQParts parts;
-	assembleTPCSectors(parts);
-	mTPCChannel->Send(parts);
+  void O2MCApplication::sendTPCData()
+  {
+    FairMQParts parts;
+    assembleTPCSectors(parts);
+    mTPCChannel->Send(parts);
+  }
+
+  bool isActivated(std::string s)
+  {
+    // access user configuration for list of wanted modules
+    auto& modulelist = o2::conf::SimConfig::Instance().getActiveDetectors();
+    auto active = std::find(modulelist.begin(), modulelist.end(), s) != modulelist.end();
+    return active;
   }
 
   void O2MCApplication::SendData() {
@@ -89,12 +99,16 @@ namespace steer {
 
     // Send primaries + secondaries produced
     TypedVectorSender<o2::MCTrack>("MCTrack", *mMCTrackChannel, mSubEventInfo);
-    
-    // TypedVectorSender<o2::ITSMFT::Hit>("ITSHit", *mITSChannel, mSubEventInfo);
+
+    if (isActivated("ITS")) {
+      TypedVectorSender<o2::ITSMFT::Hit>("ITSHit", *mITSChannel, mSubEventInfo);
+    }
     // HOW TO LOOP OVER THE DETECTOR PRODUCTS -- it would be nice having a template vector
     // CAN WE SEND IN PARALLEL ?
+    if (isActivated("TPC")) {
+      sendTPCData();
+    }
 
-    // sendTPCData();
     //TMessageVectorSender<o2::TPC::HitGroup>("TPCHitsSector0", *mTPCChannel, mSubEventInfo);
     //%sHitsSector%d
   }

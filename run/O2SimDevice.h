@@ -55,8 +55,15 @@ class O2SimDevice : public FairMQDevice
      // nothing to do here (unless we could already send a message)
   }
 
-  void initializeWorker()
+  bool initializeWorker()
   {
+	static int counter = 0;
+	// try at most 3 times
+    counter++;
+    if(counter >= 3) {
+      return false;
+    }
+
     long long c = 0xDEADBEEF;
     FairMQMessagePtr request(NewSimpleMessage(&c));
     FairMQMessagePtr reply(NewMessage());
@@ -81,15 +88,12 @@ class O2SimDevice : public FairMQDevice
         conf.resetFromConfigData(*config);
       } else {
         LOG(WARNING) << "No configuration received within " << timeoutinMS << "ms\n";
-        return;
+        return true;
       }
     } else {
       LOG(WARNING) << "Could not send configuration request within " << timeoutinMS << "ms\n";
-      return;
+      return true;
     }
-
-    bool t=true;
-    while(t) {}
 
     LOG(INFO) << "Init SIM device " << FairLogger::endl;
     o2sim_init(true);
@@ -98,6 +102,7 @@ class O2SimDevice : public FairMQDevice
     mTimer.Continue();
     LOG(INFO) << "MEM-STAMP " << sysinfo.GetCurrentMemory() / (1024. * 1024) << " " << sysinfo.GetMaxMemory() << " MB\n";
     mIsInitialized = true;
+    return true;
   }
 
   /// Overloads the ConditionalRun() method of FairMQDevice
@@ -106,8 +111,7 @@ class O2SimDevice : public FairMQDevice
     // we contact the server a first time to retrieve the configuration
     // and to setup the simulation engine
     if (!mIsInitialized) {
-      initializeWorker();
-      return true;
+      return initializeWorker();
     }
 
     long long c = 0xDEADBEEF;

@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <SimConfig/SimConfig.h>
 #include <sys/wait.h>
+#include <vector>
 
 const char* serverlogname = "serverlog";
 const char* workerlogname = "workerlog";
@@ -24,6 +25,8 @@ int main(int argc, char* argv[]) {
   if (!conf.resetFromArguments(argc, argv)) {
     return 1;
   }
+
+  std::vector<int> childpids;
 
   // the server
   int pid = fork();
@@ -60,10 +63,15 @@ int main(int argc, char* argv[]) {
     return 0;
   }
   else {
+	childpids.push_back(pid);
     std::cout << "Spawning particle server on PID " << pid << "; Redirect output to " << serverlogname << "\n";
   }
 
+  auto f = getenv("ALICE_NSIMWORKERS");
   int nworkers = 1;
+  if (f) {
+    nworkers = atoi(f);
+  }
   for (int id = 0; id < nworkers; ++id) {
     // the workers
     std::stringstream workerlogss;
@@ -83,6 +91,7 @@ int main(int argc, char* argv[]) {
             (char*)0);
       return 0;
     } else {
+      childpids.push_back(pid);
       std::cout << "Spawning sim worker " << id << " on PID " << pid << "; Redirect output to " << workerlogss.str() << "\n";
     }
   }
@@ -104,9 +113,15 @@ int main(int argc, char* argv[]) {
     return 0;
   } else {
     std::cout << "Spawning hit merger on PID " << pid << "; Redirect output to " << mergerlogname << "\n";
+	childpids.push_back(pid);
+  }
+
+  // wait on all children
+  for (auto p : childpids) {
     if ((cpid = wait(&status)) == pid) {
-      printf("Child %d returned\n", pid);
+      printf("Process %d returned\n", pid);
     }
   }
+
   return 0;
 }

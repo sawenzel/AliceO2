@@ -482,6 +482,7 @@ o2_define_bucket(
     ITSMFTSimulation
     RIO
     Net
+    SimConfig
 
     INCLUDE_DIRECTORIES
     ${CMAKE_SOURCE_DIR}/Common/MathUtils/include

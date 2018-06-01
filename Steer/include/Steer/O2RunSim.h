@@ -43,95 +43,97 @@ namespace steer {
 
 class O2RunSim : public FairRunSim
 {
-  public:
-    /// get access to singleton instance
-    using FairRunSim::FairRunSim;
-    ~O2RunSim() override = default;
+ public:
+  /// get access to singleton instance
+  using FairRunSim::FairRunSim;
+  ~O2RunSim() override = default;
 
-    void Init() final {
-      std::cout << "SPECIFIC INIT CALLED" << std::endl;
+  void Init() final
+  {
+    std::cout << "O2RUNSIM SPECIFIC INIT CALLED" << std::endl;
 
-      // original FairRunSim follows
-      FairGeoLoader* loader=new FairGeoLoader(fLoaderName->Data(), "Geo Loader");
-      FairGeoInterface* GeoInterFace=loader->getGeoInterface();
-      GeoInterFace->SetNoOfSets(ListOfModules->GetEntries());
-      GeoInterFace->setMediaFile(MatFname.Data());
-      GeoInterFace->readMedia();
+    // original FairRunSim follows
+    FairGeoLoader* loader = new FairGeoLoader(fLoaderName->Data(), "Geo Loader");
+    FairGeoInterface* GeoInterFace = loader->getGeoInterface();
+    GeoInterFace->SetNoOfSets(ListOfModules->GetEntries());
+    GeoInterFace->setMediaFile(MatFname.Data());
+    GeoInterFace->readMedia();
 
-      fApp= new O2MCApplication("Fair","The Fair VMC App",ListOfModules, MatFname);
-      fApp->SetGenerator(fGen);
+    fApp = new O2MCApplication("Fair", "The Fair VMC App", ListOfModules, MatFname);
+    fApp->SetGenerator(fGen);
 
-  // Add a Generated run ID to the FairRunTimeDb
-  FairRunIdGenerator genid;
-  // FairRuntimeDb *rtdb= GetRuntimeDb();
-  fRunId = genid.generateId();
-  fRtdb->addRun(fRunId);
+    // Add a Generated run ID to the FairRunTimeDb
+    FairRunIdGenerator genid;
+    // FairRuntimeDb *rtdb= GetRuntimeDb();
+    fRunId = genid.generateId();
+    fRtdb->addRun(fRunId);
 
-  fFileHeader->SetRunId(fRunId);
-  /** This call will create the container if it does not exist*/
-  FairBaseParSet* par=dynamic_cast<FairBaseParSet*>(fRtdb->getContainer("FairBaseParSet"));
-  if (par) {
-    par->SetDetList(GetListOfModules());
-    par->SetGen(GetPrimaryGenerator());
-    par->SetBeamMom(fBeamMom);
-  }
-
-  /** This call will create the container if it does not exist*/
-  FairGeoParSet* geopar=dynamic_cast<FairGeoParSet*>(fRtdb->getContainer("FairGeoParSet"));
-  if (geopar) {
-    geopar->SetGeometry(gGeoManager);
-  }
-
-  // Set global Parameter Info
-  if(fPythiaDecayer) {
-    fApp->SetPythiaDecayer(fPythiaDecayer);
-    if (fPythiaDecayerConfig) {
-      fApp->SetPythiaDecayerConfig(fPythiaDecayerConfig);
+    fFileHeader->SetRunId(fRunId);
+    /** This call will create the container if it does not exist*/
+    FairBaseParSet* par = dynamic_cast<FairBaseParSet*>(fRtdb->getContainer("FairBaseParSet"));
+    if (par) {
+      par->SetDetList(GetListOfModules());
+      par->SetGen(GetPrimaryGenerator());
+      par->SetBeamMom(fBeamMom);
     }
-  }
-  if(fUserDecay) {
-    fApp->SetUserDecay(fUserDecay);
-    if (fUserDecayConfig) {
-      fApp->SetUserDecayConfig(fUserDecayConfig);
+
+    /** This call will create the container if it does not exist*/
+    FairGeoParSet* geopar = dynamic_cast<FairGeoParSet*>(fRtdb->getContainer("FairGeoParSet"));
+    if (geopar) {
+      geopar->SetGeometry(gGeoManager);
     }
+
+    // Set global Parameter Info
+    if (fPythiaDecayer) {
+      fApp->SetPythiaDecayer(fPythiaDecayer);
+      if (fPythiaDecayerConfig) {
+        fApp->SetPythiaDecayerConfig(fPythiaDecayerConfig);
+      }
+    }
+    if (fUserDecay) {
+      fApp->SetUserDecay(fUserDecay);
+      if (fUserDecayConfig) {
+        fApp->SetUserDecayConfig(fUserDecayConfig);
+      }
+    }
+
+    if (fField) {
+      fField->Init();
+    }
+    fApp->SetField(fField);
+    SetFieldContainer();
+
+    TList* containerList = fRtdb->getListOfContainers();
+    TIter next(containerList);
+    FairParSet* cont;
+    TObjArray* ContList = new TObjArray();
+    while ((cont = dynamic_cast<FairParSet*>(next()))) {
+      ContList->Add(new TObjString(cont->GetName()));
+    }
+    if (par) {
+      par->SetContListStr(ContList);
+      par->SetRndSeed(gRandom->GetSeed());
+      par->setChanged();
+      par->setInputVersion(fRunId, 1);
+    }
+    if (geopar) {
+      geopar->setChanged();
+      geopar->setInputVersion(fRunId, 1);
+    }
+
+    fSimSetup();
+    fApp->InitMC("foo", "bar");
+    fRootManager->WriteFileHeader(fFileHeader);
   }
 
-  if(fField) { fField->Init(); }
-  fApp->SetField(fField);
-  SetFieldContainer();
-
-  TList* containerList=fRtdb->getListOfContainers();
-  TIter next(containerList);
-  FairParSet* cont;
-  TObjArray* ContList= new TObjArray();
-  while ((cont=dynamic_cast<FairParSet*>(next()))) {
-    ContList->Add(new TObjString(cont->GetName()));
-  }
-  if(par){
-     par->SetContListStr(ContList);
-     par->SetRndSeed(gRandom->GetSeed());
-     par->setChanged();
-     par->setInputVersion(fRunId,1);
-  }
-  if(geopar){
-     geopar->setChanged();
-     geopar->setInputVersion(fRunId,1);
+  void Run(int n = 0, int b = 0) final
+  {
+    std::cout << "SPECIFIC RUN CALLED" << std::endl;
+    FairRunSim::Run(n, b);
   }
 
-  fSimSetup();
-  fApp->InitMC("foo", "bar");
-  fRootManager->WriteFileHeader(fFileHeader);
- }
-
- void Run(int n=0, int b=0) final {
-   std::cout << "SPECIFIC RUN CALLED" << std::endl;
-   FairRunSim::Run(n, b);
- }
-    
- ClassDefOverride(O2RunSim, 0)
-
+  ClassDefOverride(O2RunSim, 0)
 };
-
 }
 }
  
