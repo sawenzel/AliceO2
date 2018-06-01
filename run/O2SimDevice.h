@@ -22,6 +22,7 @@
 #include <SimulationDataFormat/PrimaryChunk.h>
 #include <TRandom.h>
 #include <SimConfig/SimConfig.h>
+#include "O2SimMessageIDs.h"
 
 namespace o2 {
 namespace devices {
@@ -64,16 +65,27 @@ class O2SimDevice : public FairMQDevice
       return false;
     }
 
-    long long c = 0xDEADBEEF;
-    FairMQMessagePtr request(NewSimpleMessage(&c));
+    //const short c = 1; // kCONFIGGETMESSAGE;
+    auto text = new std::string("configrequest");
+
+    // create message object with a pointer to the data buffer,
+    // its size,
+    // custom deletion function (called when transfer is done),
+    // and pointer to the object managing the data buffer
+    FairMQMessagePtr request(NewMessage(const_cast<char*>(text->c_str()),                                               // data
+                                        text->length(),                                                                 // size
+                                        [](void* /*data*/, void* object) { delete static_cast<std::string*>(object); }, // deletion callback
+                                        text));                                                                         // object that manages the data
+
+    // FairMQMessagePtr request(NewSimpleMessage(&c));
     FairMQMessagePtr reply(NewMessage());
 
     // ask for the configuration object
-    LOG(INFO) << "Asking for configuration";
+    // LOG(INFO) << "Asking for configuration with message " << c;
     int timeoutinMS = 100000; // wait for 100s max
-    if (Send(request, "config-get", 0, timeoutinMS) >= 0) {
+    if (Send(request, "primary-get", 0, timeoutinMS) >= 0) {
       LOG(INFO) << "Waiting for configuration answer " << FairLogger::endl;
-      if (Receive(reply, "config-get", 0, timeoutinMS) > 0) {
+      if (Receive(reply, "primary-get", 0, timeoutinMS) > 0) {
         LOG(INFO) << "Configuration answer received, containing " << reply->GetSize() << " bytes " << FairLogger::endl;
 
         // the answer is a TMessage containing the Simulation Configuration
@@ -114,8 +126,16 @@ class O2SimDevice : public FairMQDevice
       return initializeWorker();
     }
 
-    long long c = 0xDEADBEEF;
-    FairMQMessagePtr request(NewSimpleMessage(&c));
+    auto text = new std::string("primrequest");
+
+    // create message object with a pointer to the data buffer,
+    // its size,
+    // custom deletion function (called when transfer is done),
+    // and pointer to the object managing the data buffer
+    FairMQMessagePtr request(NewMessage(const_cast<char*>(text->c_str()),                                               // data
+                                        text->length(),                                                                 // size
+                                        [](void* /*data*/, void* object) { delete static_cast<std::string*>(object); }, // deletion callback
+                                        text));
     FairMQMessagePtr reply(NewMessage());
 
     // we get the O2MCApplication and inject the primaries before each run

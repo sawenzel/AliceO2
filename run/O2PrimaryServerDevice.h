@@ -22,6 +22,7 @@
 #include <SimulationDataFormat/PrimaryChunk.h>
 #include <Generators/GeneratorFromFile.h>
 #include <SimConfig/SimConfig.h>
+#include "O2SimMessageIDs.h"
 #include <typeinfo>
 
 namespace o2
@@ -37,7 +38,6 @@ class O2PrimaryServerDevice : public FairMQDevice
   {
     mStack.SetExternalMode(true);
     OnData("primary-get", &O2PrimaryServerDevice::HandleRequest);
-    OnData("config-get", &O2PrimaryServerDevice::HandleConfigRequest);
   }
 
   /// Default destructor
@@ -67,8 +67,9 @@ class O2PrimaryServerDevice : public FairMQDevice
   }
 
   // method reacting to requests to get the simulation configuration
-  bool HandleConfigRequest(FairMQMessagePtr& request, int /*index*/)
+  bool HandleConfigRequest(FairMQMessagePtr& request)
   {
+	LOG(INFO) << "received config request";
     // just sending the simulation configuration to anyone that wants it
     auto& conf = o2::conf::SimConfig::Instance();
     const auto& confdata = conf.getConfigData();
@@ -82,7 +83,7 @@ class O2PrimaryServerDevice : public FairMQDevice
       fTransportFactory->CreateMessage(tmsg->Buffer(), tmsg->BufferSize(), free_tmessage, tmsg));
 
     // send answer
-    if (Send(message, "config-get") > 0) {
+    if (Send(message, "primary-get") > 0) {
       LOG(INFO) << "config reply send ";
       return true;
     }
@@ -92,6 +93,18 @@ class O2PrimaryServerDevice : public FairMQDevice
   /// Overloads the ConditionalRun() method of FairMQDevice
   bool HandleRequest(FairMQMessagePtr& request, int /*index*/)
   {
+	LOG(INFO) << "GOT A REQUEST WITH SIZE " << request->GetSize();
+    std::string requeststring(static_cast<char*>(request->GetData()), request->GetSize());
+
+    if (requeststring.compare("configrequest") == 0) {
+      return HandleConfigRequest(request);
+    }
+
+    else if (requeststring.compare("primrequest") != 0) {
+      LOG(INFO) << "unknown request\n";
+      return true;
+    }
+
     static int counter = 0;
     if (counter >= mMaxEvents && mNeedNewEvent) {
       return false;
