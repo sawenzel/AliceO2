@@ -37,6 +37,9 @@ int main(int argc, char* argv[]) {
                  // or perhaps send stderr to another file
     close(fd); // fd no longer needed - the dup'ed handles are sufficient
 
+   // bool t=true;
+   // while(t) {}
+
     const std::string name("O2PrimaryServerDeviceRunner");
     const std::string path = binpath + "/" + name;
     const std::string config = configss.str();
@@ -45,8 +48,10 @@ int main(int argc, char* argv[]) {
     const int Nargs = argc + 7;
     const char* arguments[Nargs];
     arguments[0] = name.c_str();
-    arguments[1] = "--control"; arguments[2] = "static";
-    arguments[3] = "--id"; arguments[4] = "primary-server";
+    arguments[1] = "--control";
+    arguments[2] = "static";
+    arguments[3] = "--id";
+    arguments[4] = "primary-server";
     arguments[5] = "--mq-config";
     arguments[6] = config.c_str();
     for (int i = 1; i < argc; ++i) {
@@ -54,7 +59,9 @@ int main(int argc, char* argv[]) {
     }
     arguments[Nargs-1] = nullptr;
     for (int i = 0; i < Nargs; ++i) {
-      std::cerr << arguments[i] << "\n";
+      if (arguments[i]) {
+        std::cerr << arguments[i] << "\n";
+      }
     }
     std::cerr << "$$$$";
 
@@ -78,6 +85,10 @@ int main(int argc, char* argv[]) {
     std::stringstream workerlogss;
     workerlogss << workerlogname << id;
 
+    // the workers
+    std::stringstream workerss;
+    workerss << "worker" << id;
+
 	pid = fork();
     if (pid == 0) {
       int fd = open(workerlogss.str().c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
@@ -88,7 +99,7 @@ int main(int argc, char* argv[]) {
 
       const std::string name("O2SimDeviceRunner");
       const std::string path = binpath + "/" + name;
-      execl(path.c_str(), name.c_str(), "--control", "static", "--id", "worker", "--mq-config", configss.str().c_str(),
+      execl(path.c_str(), name.c_str(), "--control", "static", "--id", workerss.str().c_str(), "--config-key", "worker", "--mq-config", configss.str().c_str(),
             (char*)0);
       return 0;
     } else {

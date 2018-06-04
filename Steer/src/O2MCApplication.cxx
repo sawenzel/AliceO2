@@ -31,6 +31,20 @@ namespace steer {
     }
   }
 
+  template <typename T>
+  void TypedVectorAttach(const char* name, FairMQChannel& channel, FairMQParts& parts)
+  {
+    static auto mgr = FairRootManager::Instance();
+    auto vector = mgr->InitObjectAs<const std::vector<T>*>(name);
+    if (vector) {
+      auto buffer = (char*)&(*vector)[0];
+      auto buffersize = vector->size() * sizeof(T);
+      FairMQMessagePtr message(channel.NewMessage(buffer, buffersize,
+                                                  [](void* data, void* hint) {}, buffer));
+      parts.AddPart(std::move(message));
+    }
+  }
+
   // sending std::vector as a TMessage (whenever this cannot be avoided)
   template<typename T>
   void TMessageVectorSender(const char* name, FairMQChannel& channel, const o2::Data::SubEventInfo& info) {
@@ -90,9 +104,11 @@ namespace steer {
     return active;
   }
 
-  void O2MCApplication::attachMCTracks(FairMQParts &) const {
-
+  void O2MCApplication::attachMCTracks(FairMQParts& parts) const
+  {
+    TypedVectorAttach<o2::MCTrack>("MCTrack", *mSimDataChannel, parts);
   }
+
   void O2MCApplication::attachSubEventInfo(FairMQParts& parts, o2::Data::SubEventInfo const& info) const
   {
     parts.AddPart(std::move(mSimDataChannel->NewSimpleMessage(info)));
@@ -126,8 +142,13 @@ namespace steer {
     attachMCTracks(simdataparts);
     // fillTrackReferences(simdataparts);
     for (auto det : listActiveDetectors) {
-      ((o2::Base::Detector*)det)->attachHits(*mSimDataChannel, simdataparts);
+      if (dynamic_cast<o2::Base::Detector*>(det)) {
+        ((o2::Base::Detector*)det)->attachHits(*mSimDataChannel, simdataparts);
+      }
     }
+
+    // TODO: alternative idea: send FairRootManager?
+
     LOG(INFO) << "sending message with " << simdataparts.Size() << " parts \n";
     mSimDataChannel->Send(simdataparts);
   }
