@@ -19,6 +19,7 @@
 #include "TVirtualMC.h"
 #include <SimulationDataFormat/Stack.h>
 #include <SimulationDataFormat/PrimaryChunk.h>
+#include <DetectorsCommonDataFormats/DetID.h>
 #include <gsl/gsl>
 #include "TFile.h"
 #include "TTree.h"
@@ -31,6 +32,18 @@
 #include <cassert>
 #include "FairSystemInfo.h"
 #include "Steer/InteractionSampler.h"
+
+#include "O2HitMerger.h"
+#include <DetectorsCommonDataFormats/DetID.h>
+#include <TPCSimulation/Detector.h>
+#include <ITSSimulation/Detector.h>
+#include <MFTSimulation/Detector.h>
+#include <EMCALSimulation/Detector.h>
+#include <TOFSimulation/Detector.h>
+#include <TRDSimulation/Detector.h>
+#include <FITSimulation/Detector.h>
+#include <HMPIDSimulation/Detector.h>
+#include <PHOSSimulation/Detector.h>
 
 namespace o2 {
 namespace devices {
@@ -49,6 +62,8 @@ class O2HitMerger : public FairMQDevice
   /// Default constructor
   O2HitMerger()
   {
+    initDetInstances();
+
     // ideally we have a specialized handler function per data channel
     OnData("mctracks", &O2HitMerger::HandleMCTrackData);
     OnData("itshits", &O2HitMerger::HandleITSHits);
@@ -61,8 +76,8 @@ class O2HitMerger : public FairMQDevice
   ~O2HitMerger()
   {
     FairSystemInfo sysinfo;
+    mOutTree->SetEntries(mEntries);
     mOutTree->Write();
-    // mOutFile->Write();
     mOutFile->Close();
     LOG(INFO) << "TIME-STAMP " << mTimer.RealTime() << "\t";
     mTimer.Continue();
@@ -78,14 +93,14 @@ class O2HitMerger : public FairMQDevice
     mOutTree = new TTree("o2sim", "o2sim");
 
     // make some branches
-    mOutTree->Branch("MCTracks", &mTracksPtr);
-    mOutTree->Branch("ITSHits", &mITSHits);
+    //mOutTree->Branch("MCTracks", &mTracksPtr);
+    //mOutTree->Branch("ITSHits", &mITSHits);
 
-    for (int s = 0; s < 36; ++s) {
-      std::stringstream sec;
-      sec << "TPCHitsShiftedSector" << s;
-      mOutTree->Branch(sec.str().c_str(), &mTPCHits);
-    }
+    //for (int s = 0; s < 36; ++s) {
+    //  std::stringstream sec;
+    //  sec << "TPCHitsShiftedSector" << s;
+    //  mOutTree->Branch(sec.str().c_str(), &mTPCHits);
+    //}
   }
 
   template <typename T, typename I>
@@ -261,8 +276,53 @@ class O2HitMerger : public FairMQDevice
     // finally we can cleanup the map by removing this event
   }
 
-  bool handleSimData(FairMQParts& data, int /*index*/) {
+  bool consumeHits(FairMQParts& data, int& index) {
+	auto detIDmessage = std::move(data.At(index++));
+    // this should be a detector ID
+    LOG(INFO) << detIDmessage->GetSize();
+    if (detIDmessage->GetSize() == 4) {
+      auto ptr = (int*)detIDmessage->GetData();
+      o2::detectors::DetID id(ptr[0]);
+      LOG(INFO) << "I1 " << ptr[0] << " NAME " << id.getName();
+
+      // get the detector than can interpret it
+      auto detector = mDetectorInstances[id].get();
+      detector->fillHitBranch(*mOutTree, data, index);
+    }
+    return true;
+  }
+
+  bool handleSimData(FairMQParts& data, int /*index*/)
+  {
     LOG(INFO) << "SIMDATA channel got " << data.Size() << " parts\n";
+
+    // extract the event info
+    auto infomessage = std::move(data.At(0));
+    o2::Data::SubEventInfo info;
+    // could actually avoid the copy
+    memcpy((void*)&info, infomessage->GetData(), infomessage->GetSize());
+
+    auto accum = insertAdd<uint32_t, uint32_t>(mITSPartsCheckSum, info.eventID, (uint32_t)info.part);
+    // auto totalsize = insertAdd<uint32_t, size_t>(mITSTotalSize, info.eventID, itshits.size());
+
+
+    // consumeMCTracks(data);
+    // consumeTrackReferences();
+    // indices 0 and 1 are MCData and TrackRef
+    int index = 2;
+    while (index < data.Size()) {
+      LOG(INFO) << "now consuming at " << index;
+      consumeHits(data, index);
+    }
+    mEntries++;
+
+    if (isDataComplete<uint32_t>(accum, info.nparts)) {
+      LOG(INFO) << "EVERYTHING IS HERE FOR EVENT " << info.eventID << "\n";
+      if (info.eventID == info.maxEvents) {
+        return false;
+      }
+    }
+
     return true;
   }
 
@@ -323,9 +383,70 @@ class O2HitMerger : public FairMQDevice
 
   TFile* mOutFile; //!
   TTree* mOutTree; //!
+  int mEntries = 0; //! counts the number of entries in the branches
   TStopwatch mTimer;
   steer::InteractionSampler mInteractionSampler;
+
+  //
+  std::vector<std::unique_ptr<o2::Base::Detector>> mDetectorInstances;
+
+  // init detector instances
+  void initDetInstances();
+
 };
+
+// init detector instances
+void O2HitMerger::initDetInstances()
+{
+  using o2::detectors::DetID;
+
+  mDetectorInstances.resize(DetID::Last);
+  // like a factory of detector objects
+
+  int counter = 0;
+  for (int i = DetID::First; i <= DetID::Last; ++i) {
+    if (i == DetID::TPC) {
+      mDetectorInstances[i] = std::move(std::make_unique<o2::TPC::Detector>(true));
+      counter++;
+    }
+    if (i == DetID::ITS) {
+      mDetectorInstances[i] = std::move(std::make_unique<o2::ITS::Detector>(true));
+      counter++;
+    }
+    if (i == DetID::MFT) {
+      mDetectorInstances[i] = std::move(std::make_unique<o2::MFT::Detector>());
+      counter++;
+    }
+    if (i == DetID::TRD) {
+      mDetectorInstances[i] = std::move(std::make_unique<o2::trd::Detector>(true));
+      counter++;
+    }
+    if (i == DetID::PHS) {
+      mDetectorInstances[i] = std::move(std::make_unique<o2::phos::Detector>(true));
+      counter++;
+    }
+    if (i == DetID::EMC) {
+      mDetectorInstances[i] = std::move(std::make_unique<o2::EMCAL::Detector>(true));
+      counter++;
+    }
+    if (i == DetID::HMP) {
+      mDetectorInstances[i] = std::move(std::make_unique<o2::hmpid::Detector>(true));
+      counter++;
+    }
+    if (i == DetID::TOF) {
+      mDetectorInstances[i] = std::move(std::make_unique<o2::tof::Detector>(true));
+      counter++;
+    }
+    if (i == DetID::FIT) {
+      mDetectorInstances[i] = std::move(std::make_unique<o2::fit::Detector>(true));
+      counter++;
+    }
+    if ( counter != DetID::Last ) {
+      LOG(WARNING) << " O2HitMerger: Some Detectors are potentially missing in this initialization ";
+    }
+  }
+}
+
 
 } // namespace devices
 } // namespace o2
