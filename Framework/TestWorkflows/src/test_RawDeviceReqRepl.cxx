@@ -7,7 +7,7 @@
 // In applying this license CERN does not waive the privileges and immunities
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
-#include "Framework/runDataProcessing.h"
+
 #include "Framework/ExternalFairMQDeviceProxy.h"
 #include "FairMQLogger.h"
 #include "Headers/HeartbeatFrame.h"
@@ -15,9 +15,22 @@
 #include "FairMQMessage.h"
 #include "FairMQChannel.h"
 #include "FairMQTransportFactory.h"
+#include "Framework/CompletionPolicy.h"
+#include "Framework/DeviceSpec.h"
 
 using namespace o2::framework;
 
+void customize(std::vector<CompletionPolicy> &policies) {
+  auto matcher = [](DeviceSpec const &device) -> bool {
+    return device.name == "Worker";
+  };
+  auto policy = [](gsl::span<PartRef const> const &inputs) -> CompletionPolicy::CompletionOp {
+    return CompletionPolicy::CompletionOp::Consume;
+  };
+  policies.push_back({CompletionPolicy{"process-any", matcher, policy}});
+}
+
+#include "Framework/runDataProcessing.h"
 
 using DataHeader = o2::header::DataHeader;
 using DataOrigin = o2::header::DataOrigin;
@@ -28,12 +41,19 @@ using DataOrigin = o2::header::DataOrigin;
 // whenever it wants
 WorkflowSpec defineDataProcessing(ConfigContext const&specs) {
 
+  auto outspecTask = OutputSpec{ "TSK", "TASKS", 0, Lifetime::Timeframe };
+  auto inspecTask = InputSpec{ "task", "TSK", "TASKS", 0, Lifetime::Timeframe };
+
   return WorkflowSpec{
+    specifyExternalFairMQDeviceProxy("TaskServer",
+                                     { outspecTask },
+                                     "type=req,method=connect,address=tcp://localhost:5450,rateLogging=0",
+                                     o2DataModelAdaptor(outspecTask, 0, 1)),
 
     // WORKER
     DataProcessorSpec{
       "Worker",
-      Inputs{ InputSpec{ "heartbeat", "BAR", "FOO" } }, // we get the heartbeat as well as task data
+      Inputs{ InputSpec{ "heartbeat", "BAR", "FOO" }, inspecTask }, // we get the heartbeat as well as task data
       {},
       AlgorithmSpec{
 
@@ -44,7 +64,13 @@ WorkflowSpec defineDataProcessing(ConfigContext const&specs) {
           channel->ValidateChannel();
 
           return [channel](ProcessingContext& ctx) {
-            LOG(INFO) << "INVOKED";
+            if (ctx.inputs().isValid("heartbeat")) {
+        	  LOG(INFO) << "INVOKED FROM HEARTBEAT";
+            }
+            if (ctx.inputs().isValid("task")) {
+        	  LOG(INFO) << "INVOKED FROM TASK";
+            }
+
             static int counter = 0;
             counter++;
             if (counter % 10 == 0) {
@@ -54,8 +80,8 @@ WorkflowSpec defineDataProcessing(ConfigContext const&specs) {
 
               FairMQMessagePtr reply(channel->NewMessage());
 
-              if (channel->Send(request, 2000)) {
-                if (channel->Receive(reply, 2000)) {
+              if (channel->Send(request, 2000) > 0) {
+                if (channel->Receive(reply, 2000) > 0) {
                   LOG(INFO) << "Received answer with " << reply->GetSize();
                 } else {
                   LOG(INFO) << "No answer";
