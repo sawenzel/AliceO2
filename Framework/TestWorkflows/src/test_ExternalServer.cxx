@@ -42,6 +42,10 @@ class ExtServer : public FairMQDevice
     std::string requeststring(static_cast<char*>(request->GetData()), request->GetSize());
 
 
+    int replysecret = -11;
+    FairMQMessagePtr reply(NewSimpleMessage(replysecret));
+    Send(reply, "requestchannel");
+
     return true;
   }
 };

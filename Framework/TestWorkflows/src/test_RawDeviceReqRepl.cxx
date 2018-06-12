@@ -7,7 +7,7 @@
 // In applying this license CERN does not waive the privileges and immunities
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
-
+#include "Framework/runDataProcessing.h"
 #include "Framework/ExternalFairMQDeviceProxy.h"
 #include "FairMQLogger.h"
 #include "Headers/HeartbeatFrame.h"
@@ -18,7 +18,6 @@
 
 using namespace o2::framework;
 
-#include "Framework/runDataProcessing.h"
 
 using DataHeader = o2::header::DataHeader;
 using DataOrigin = o2::header::DataOrigin;
@@ -28,48 +27,59 @@ using DataOrigin = o2::header::DataOrigin;
 // and fetching tasks/data from an external task server
 // whenever it wants
 WorkflowSpec defineDataProcessing(ConfigContext const&specs) {
-  auto outspecHB = OutputSpec{ {"hbout"}, o2::header::DataOrigin("SMPL"), o2::header::gDataDescriptionHeartbeatFrame, 0, Lifetime::Timeframe};
-
-  auto inspecHB = InputSpec{"heartbeat",
-                          o2::header::DataOrigin("SMPL"),
-                          o2::header::gDataDescriptionHeartbeatFrame, 0, Lifetime::Timeframe};
-
-  auto outspecTask = OutputSpec{ "TSK", "TASKS", 0, Lifetime::Timeframe };
-  auto inspecTask = InputSpec{ "task", "TSK", "TASKS", 0, Lifetime::Timeframe };
 
   return WorkflowSpec{
-
-    // TASKSERVER
-    specifyExternalFairMQDeviceProxy("TaskServer",
-                                     { outspecTask },
-                                     "type=req,method=connect,address=tcp://localhost:5450,rateLogging=0",
-                                     o2DataModelAdaptor(outspecTask, 0, 1)),
 
     // WORKER
     DataProcessorSpec{
       "Worker",
-      Inputs{ inspecHB, inspecTask }, // we get the heartbeat as well as task data
+      Inputs{ InputSpec{ "heartbeat", "BAR", "FOO" } }, // we get the heartbeat as well as task data
       {},
       AlgorithmSpec{
-        [](ProcessingContext& ctx) {
 
+        [](InitContext& ictx) {
           auto factory = FairMQTransportFactory::CreateTransportFactory("zeromq");
-          auto channel = FairMQChannel("", "req", factory);
-          channel.Connect("tcp://localhost:5450");
-          channel.ValidateChannel();
+          auto channel = std::make_shared<FairMQChannel>("requestchannel", "req", factory);
+          channel->Connect("tcp://localhost:5450");
+          channel->ValidateChannel();
 
-        } } },
+          return [channel](ProcessingContext& ctx) {
+            LOG(INFO) << "INVOKED";
+            static int counter = 0;
+            counter++;
+            if (counter % 10 == 0) {
+
+              int secret = 231;
+              FairMQMessagePtr request(channel->NewSimpleMessage(secret));
+
+              FairMQMessagePtr reply(channel->NewMessage());
+
+              if (channel->Send(request, 2000)) {
+                if (channel->Receive(reply, 2000)) {
+                  LOG(INFO) << "Received answer with " << reply->GetSize();
+                } else {
+                  LOG(INFO) << "No answer";
+                }
+              } else {
+                LOG(INFO) << "DID not send";
+              }
+            }
+          };
+        }
+
+      } },
 
     // HB
     DataProcessorSpec{
       "HeartBeat",
       Inputs{},
-      Outputs{ outspecHB },
+      Outputs{ OutputSpec{ { "label" }, "BAR", "FOO" } },
       AlgorithmSpec{
         [](ProcessingContext& ctx) {
           static int hbcounter = 0;
           hbcounter++;
-          ctx.outputs().snapshot(OutputRef{ "hbout" }, hbcounter);
+          ctx.outputs().snapshot( OutputRef{"label"}, hbcounter);
+
         } } }
   };
 }
