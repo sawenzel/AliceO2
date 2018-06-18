@@ -49,6 +49,9 @@ class ShmAllocator
 
   inline void construct(pointer p, const value_type& value) { new (p) value_type(value); }
 
+  template< class U, class... Args >
+  void construct( U* p, Args&&... args ) { }
+
   inline void destroy(pointer p) { p->~value_type(); }
 
   inline size_type max_size() const throw() { return size_type(-1) / sizeof(value_type); }

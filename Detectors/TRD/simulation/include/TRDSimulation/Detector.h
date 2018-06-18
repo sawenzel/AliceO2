@@ -95,10 +95,14 @@ void Detector::addHit(T x, T y, T z, T time, T energy, int trackId, int detId)
 } // end namespace trd
 } // end global namespace
 
-template <>
-struct o2::Base::UseShm<o2::trd::Detector>
+namespace o2
 {
+namespace Base
+{
+template <>
+struct UseShm<o2::trd::Detector> {
   static constexpr bool value = true;
 };
-
+}
+}
 #endif
