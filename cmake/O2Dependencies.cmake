@@ -600,6 +600,9 @@ o2_define_bucket(
     Net
     VMC # ROOT
     Geom
+    common_utils_bucket
+    CommonUtils
+    
 
     INCLUDE_DIRECTORIES
     ${FAIRROOT_INCLUDE_DIR}
@@ -607,6 +610,7 @@ o2_define_bucket(
     ${CMAKE_SOURCE_DIR}/Common/Field/include
     ${CMAKE_SOURCE_DIR}/Common/Constants/include
     ${CMAKE_SOURCE_DIR}/DataFormats/Parameters/include
+    ${CMAKE_SOURCE_DIR}/Common/Utils/include
 )
 
 o2_define_bucket(
@@ -1519,6 +1523,8 @@ o2_define_bucket(
     DetectorsBase
     detectors_base_bucket
     SimulationDataFormat
+    common_utils_bucket
+    CommonUtils
 
     INCLUDE_DIRECTORIES
     ${FAIRROOT_INCLUDE_DIR}
