@@ -31,6 +31,8 @@
 #include <FairMQMessage.h>
 #include <FairMQParts.h>
 #include <TMessage.h>
+#include "CommonUtils/ShmManager.h"
+#include <sys/shm.h>
 
 namespace o2 {
 namespace Base {
@@ -189,6 +191,33 @@ inline std::string demangle(const char* name)
 }
 
 template <typename Container>
+void attachShmMessage(Container const& hits, FairMQChannel& channel, FairMQParts& parts)
+{
+  LOG(INFO) << "-- SHM SEND --";
+  LOG(INFO) << "-- SENDING -- " << hits.size() << " HITS ";
+  auto& instance = o2::utils::ShmManager::Instance();
+  LOG(INFO) << " OFFSET IS " << instance.getPointerOffset((void*)&hits);
+  std::pair<int, size_t> shmid_offsetpair(instance.getShmID(), instance.getPointerOffset((void*)&hits));
+  std::unique_ptr<FairMQMessage> message(channel.NewSimpleMessage(shmid_offsetpair));
+  parts.AddPart(std::move(message));
+}
+
+template <typename T>
+T decodeShmMessage(FairMQParts& dataparts, int index)
+{
+  auto rawmessage = std::move(dataparts.At(index));
+  // should be just a pair with shmID and pointer
+  std::pair<int, size_t>* shmid_offsetpair = (std::pair<int, size_t>*) rawmessage->GetData();
+  LOG(INFO) << " GOT SHMID " << shmid_offsetpair->first;
+  LOG(INFO) << " GOT SHMID OFFSET " << shmid_offsetpair->second;
+
+  // we will put a secret message in form of an array
+  auto addr = shmat(shmid_offsetpair->first, nullptr, 0);
+  LOG(INFO) << " SHM ADDRESS " << addr;
+  return reinterpret_cast<T>((char*)addr + shmid_offsetpair->second);
+}
+
+template <typename Container>
 void attachTMessage(Container const& hits, FairMQChannel& channel, FairMQParts& parts)
 {
   TMessage* tmsg = new TMessage();
@@ -231,6 +260,12 @@ TBranch* getOrMakeBranch(TTree& tree, const char* brname, T* ptr)
   return tree.Branch(brname, ptr);
 }
 
+// a trait to determine if we should use shared mem or serialize using TMessage
+template <typename Det>
+struct UseShm {
+  static constexpr bool value = false;
+};
+
 // an implementation helper template which automatically implements
 // common functionality for deriving classes via the CRT pattern
 // (example: it implements the updateHitTrackIndices function and avoids
@@ -271,8 +306,15 @@ class DetImpl : public o2::Base::Detector
     int probe = 0;
     // std::cerr << "ATTACHING DETID " << GetDetId() << " NAME " << GetName() << "\n";
     attachMetaMessage(GetDetId(), channel, parts); // the DetId s are universal as they come from o2::detector::DetID
+
     while (auto hits = static_cast<Det*>(this)->Det::getHits(probe++)) {
-      attachTMessage(*hits, channel, parts);
+      if (!UseShm<Det>::value) {
+        attachTMessage(*hits, channel, parts);
+      } else {
+        // this is the shared mem variant
+        // we will just send the sharedmem ID and the offset inside
+        attachShmMessage(*hits, channel, parts);
+      }
     }
   }
 
@@ -282,14 +324,29 @@ class DetImpl : public o2::Base::Detector
     using Hit_t = decltype(static_cast<Det*>(this)->Det::getHits(probe));
     std::string name = static_cast<Det*>(this)->getHitBranchNames(probe++);
     while (name.size() > 0) {
-      // for each branch name we extract/decode hits from the message parts ...
-      auto hitsptr = decodeTMessage<Hit_t>(parts, index++);
+      if (!UseShm<Det>::value) {
 
-      // ... and fill the tree branch
-      auto br = getOrMakeBranch(tr, name.c_str(), hitsptr);
-      br->Fill();
-      br->ResetAddress();
+        // for each branch name we extract/decode hits from the message parts ...
+        auto hitsptr = decodeTMessage<Hit_t>(parts, index++);
 
+        // ... and fill the tree branch
+        auto br = getOrMakeBranch(tr, name.c_str(), hitsptr);
+        br->Fill();
+        br->ResetAddress();
+
+      } else {
+        // for each branch name we extract/decode hits from the message parts ...
+        auto hitsptr = decodeShmMessage<Hit_t>(parts, index++);
+        LOG(INFO) << "GOT " << hitsptr->size() << " HITS ";
+
+        // ... and fill the tree branch
+        auto br = getOrMakeBranch(tr, name.c_str(), hitsptr);
+        br->Fill();
+        br->ResetAddress();
+
+        // unfortunately we have to do the clear // or we communicate via special flag
+        hitsptr->clear();
+      }
       // next name
       name = static_cast<Det*>(this)->getHitBranchNames(probe++);
     }

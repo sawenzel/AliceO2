@@ -14,9 +14,17 @@
 #include <vector>
 #include "DetectorsBase/Detector.h"
 #include "SimulationDataFormat/BaseHits.h"
+#include "CommonUtils/ShmAllocator.h"
 
 class FairVolume;
 class TClonesArray;
+
+namespace std
+{
+template<> class allocator<o2::BasicXYZEHit<float>> : public o2::utils::ShmAllocator<o2::BasicXYZEHit<float>>
+{
+};
+}
 
 namespace o2
 {
@@ -86,4 +94,11 @@ void Detector::addHit(T x, T y, T z, T time, T energy, int trackId, int detId)
 
 } // end namespace trd
 } // end global namespace
+
+template <>
+struct o2::Base::UseShm<o2::trd::Detector>
+{
+  static constexpr bool value = true;
+};
+
 #endif
