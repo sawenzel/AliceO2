@@ -33,6 +33,7 @@
 #include <TMessage.h>
 #include "CommonUtils/ShmManager.h"
 #include <sys/shm.h>
+#include <type_traits>
 
 namespace o2 {
 namespace Base {
@@ -193,12 +194,19 @@ inline std::string demangle(const char* name)
 template <typename Container>
 void attachShmMessage(Container const& hits, FairMQChannel& channel, FairMQParts& parts)
 {
+  struct shminfo {
+    int id;
+    void* base_ptr;
+    void* object_ptr;
+  };
+
+  auto& instance = o2::utils::ShmManager::Instance();
+  shminfo info{instance.getShmID(), instance.getBasePtr(),(void*)&hits };
   LOG(INFO) << "-- SHM SEND --";
   LOG(INFO) << "-- SENDING -- " << hits.size() << " HITS ";
-  auto& instance = o2::utils::ShmManager::Instance();
   LOG(INFO) << " OFFSET IS " << instance.getPointerOffset((void*)&hits);
-  std::pair<int, size_t> shmid_offsetpair(instance.getShmID(), instance.getPointerOffset((void*)&hits));
-  std::unique_ptr<FairMQMessage> message(channel.NewSimpleMessage(shmid_offsetpair));
+ // std::pair<int, size_t> shmid_offsetpair(instance.getShmID(), instance.getPointerOffset((void*)&hits));
+  std::unique_ptr<FairMQMessage> message(channel.NewSimpleMessage(info));
   parts.AddPart(std::move(message));
 }
 
@@ -206,15 +214,46 @@ template <typename T>
 T decodeShmMessage(FairMQParts& dataparts, int index)
 {
   auto rawmessage = std::move(dataparts.At(index));
-  // should be just a pair with shmID and pointer
-  std::pair<int, size_t>* shmid_offsetpair = (std::pair<int, size_t>*) rawmessage->GetData();
-  LOG(INFO) << " GOT SHMID " << shmid_offsetpair->first;
-  LOG(INFO) << " GOT SHMID OFFSET " << shmid_offsetpair->second;
+  struct shminfo {
+    int id;
+    void* base_ptr;
+    void* object_ptr;
+  };
 
-  // we will put a secret message in form of an array
-  auto addr = shmat(shmid_offsetpair->first, nullptr, 0);
-  LOG(INFO) << " SHM ADDRESS " << addr;
-  return reinterpret_cast<T>((char*)addr + shmid_offsetpair->second);
+  shminfo* info = (shminfo*) rawmessage->GetData();
+
+  // should be just a pair with shmID and pointer
+  // std::pair<int, size_t>* shmid_offsetpair = (std::pair<int, size_t>*) rawmessage->GetData();
+  LOG(INFO) << " GOT SHMID " << info->id;
+  LOG(INFO) << " ADDRESS WANTED " << info->base_ptr;
+  LOG(INFO) << " GOT SHMID OFFSET " << info->object_ptr;
+
+  // we will try to map at the address provided
+  auto addr = shmat(info->id, info->base_ptr, 0);
+  LOG(INFO) << " SHM ADDRESS " << addr << " VS WANTED " << info->base_ptr;
+  if (addr != info->base_ptr) {
+    LOG(INFO) << " Trying a second time without constraint ";
+    addr = shmat(info->id, nullptr, 0);
+    LOG(INFO) << " SHM ADDRESS " << addr;
+  }
+  auto offset = (char*)addr - (char*)info->base_ptr;
+
+  // need to fix these to be correct in newly mapped space
+  // _M_start(0), _M_finish(0), _M_end_of_storage(0)
+  using valuepointer = typename std::remove_pointer<T>::type::value_type*;
+  struct Magic{
+     valuepointer start;
+     valuepointer finish;
+     valuepointer endstorage;
+  }* magic;
+  magic = reinterpret_cast<Magic*>((char*)info->object_ptr + offset);
+
+  // modify _M_start and later turn back
+  magic->finish = (valuepointer)((char*)magic->finish + offset);
+  magic->start = (valuepointer)((char*)magic->start + offset);
+  magic->endstorage = (valuepointer)((char*)magic->endstorage + offset);
+
+  return reinterpret_cast<T>(magic);
 }
 
 template <typename Container>

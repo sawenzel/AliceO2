@@ -9,15 +9,14 @@
 #define COMMON_UTILS_INCLUDE_COMMONUTILS_SHMMANAGER_H_
 
 #include <list>
+#include <stddef.h>
 
 namespace o2 {
 namespace utils {
-namespace {
 struct MemBlock {
   void* startptr;
   size_t bytes;
 };
-}
 
 constexpr size_t SHMPOOLSIZE = 1024*1024; // 1MB of shared memory
 
@@ -42,6 +41,7 @@ public:
  void release();
  int getShmID() const { return mShmID; }
  size_t getPointerOffset(void*ptr) const { return (size_t)((char*)ptr - (char*)mMappedPtr); }
+ void* getBasePtr() const { return mMappedPtr; }
 
  size_t getNumAllocedBlocks() const { return mAllocedBlocks.size(); }
  size_t getNumFreeBlocks() const { return mFreeBlocks.size(); }
