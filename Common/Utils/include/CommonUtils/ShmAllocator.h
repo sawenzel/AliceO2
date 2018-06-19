@@ -97,6 +97,20 @@ std::vector<T>* createSimVector()
   return new vector_t;
 #endif
 }
+
+template <typename T>
+void freeSimVector(std::vector<T>* ptr) {
+  using vector_t = std::vector<T>;
+#ifdef USESHM
+  auto& instance = o2::utils::ShmManager::Instance();
+  ptr->clear();
+  ptr->shrink_to_fit();
+  instance.freememblock(ptr);
+  // at this moment we have to trust that std::
+#else
+  delete ptr;
+#endif
+}
 }
 }
 

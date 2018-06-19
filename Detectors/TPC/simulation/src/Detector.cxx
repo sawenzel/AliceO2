@@ -85,7 +85,7 @@ Detector::~Detector()
 {
   for (int i = 0; i < Sector::MAXSECTOR; ++i) {
     mHitsPerSectorCollection[i]->clear();
-    delete mHitsPerSectorCollection[i];
+    o2::utils::freeSimVector(mHitsPerSectorCollection[i]);
   }
   std::cout << "Produced hits " << mHitCounter << "\n";
   std::cout << "Produced electrons " << mElectronCounter << "\n";
