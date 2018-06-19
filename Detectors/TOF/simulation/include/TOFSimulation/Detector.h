@@ -15,15 +15,34 @@
 #include "TOFBase/Geo.h"
 
 #include "SimulationDataFormat/BaseHits.h"
+#include "CommonUtils/ShmAllocator.h"
 
 class FairVolume;
 class TClonesArray;
+
+namespace o2 {
+namespace tof {
+class HitType : public o2::BasicXYZEHit<float> {
+public:
+	using BasicXYZEHit<float>::BasicXYZEHit;
+};
+}
+}
+
+#ifdef USESHM
+namespace std
+{
+template<> class allocator<o2::tof::HitType> : public o2::utils::ShmAllocator<o2::tof::HitType>
+{
+};
+}
+#endif
+
 
 namespace o2
 {
 namespace tof
 {
-using HitType = o2::BasicXYZEHit<float>;
 
 class Detector : public o2::Base::DetImpl<Detector>
 {
@@ -125,4 +144,18 @@ class Detector : public o2::Base::DetImpl<Detector>
 };
 }
 }
+
+#ifdef USESHM
+namespace o2
+{
+namespace Base
+{
+template <>
+struct UseShm<o2::tof::Detector> {
+  static constexpr bool value = true;
+};
+}
+}
+#endif
+
 #endif

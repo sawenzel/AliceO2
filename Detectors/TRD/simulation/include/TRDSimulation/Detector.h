@@ -19,12 +19,14 @@
 class FairVolume;
 class TClonesArray;
 
+#ifdef USESHM
 namespace std
 {
 template<> class allocator<o2::BasicXYZEHit<float>> : public o2::utils::ShmAllocator<o2::BasicXYZEHit<float>>
 {
 };
 }
+#endif
 
 namespace o2
 {
@@ -95,6 +97,7 @@ void Detector::addHit(T x, T y, T z, T time, T energy, int trackId, int detId)
 } // end namespace trd
 } // end global namespace
 
+#ifdef USESHM
 namespace o2
 {
 namespace Base
@@ -105,4 +108,5 @@ struct UseShm<o2::trd::Detector> {
 };
 }
 }
+#endif
 #endif

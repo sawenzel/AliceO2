@@ -26,7 +26,7 @@ namespace o2
 namespace mch
 {
 
-Stepper::Stepper() : mHits{ new std::vector<o2::mch::Hit>(20) } {}
+Stepper::Stepper() : mHits{ o2::utils::createSimVector<o2::mch::Hit>() } {}
 Stepper::~Stepper()
 {
   delete mHits;
@@ -76,7 +76,12 @@ void Stepper::resetStep()
   mTrackLength = 0.0;
 }
 
-void Stepper::resetHits() { mHits->clear(); }
+void Stepper::resetHits()
+{
+#ifndef USESHM
+  mHits->clear();
+#endif
+}
 
 } // namespace mch
 } // namespace o2

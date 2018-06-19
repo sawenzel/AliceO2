@@ -16,11 +16,22 @@
 #include "MathUtils/Cartesian3D.h"
 #include "RStringView.h"
 #include "Rtypes.h"
+#include "CommonUtils/ShmAllocator.h"
 
 #include <vector>
 
 class FairVolume;
 class TClonesArray;
+
+#ifdef USESHM
+namespace std
+{
+template<> class allocator<o2::EMCAL::Hit> : public o2::utils::ShmAllocator<o2::EMCAL::Hit>
+{
+};
+}
+#endif
+
 
 namespace o2
 {
@@ -198,4 +209,18 @@ class Detector : public o2::Base::DetImpl<Detector>
 };
 }
 }
+
+#ifdef USESHM
+namespace o2
+{
+namespace Base
+{
+template <>
+struct UseShm<o2::EMCAL::Detector> {
+  static constexpr bool value = true;
+};
+}
+}
+#endif
+
 #endif

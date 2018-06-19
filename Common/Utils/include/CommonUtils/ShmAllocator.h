@@ -9,6 +9,7 @@
 #define COMMON_UTILS_INCLUDE_COMMONUTILS_SHMALLOCATOR_H_
 
 #include "CommonUtils/ShmManager.h"
+#include <FairLogger.h>
 
 namespace o2 {
 namespace utils {
@@ -47,10 +48,17 @@ class ShmAllocator
   inline pointer allocate(size_type n) { return (pointer)ShmManager::Instance().getmemblock(sizeof(value_type) * n); }
   inline void deallocate(pointer p, size_type) { ShmManager::Instance().freememblock(p); }
 
-  inline void construct(pointer p, const value_type& value) { new (p) value_type(value); }
+  inline void construct(pointer p, const value_type& value) {
+	//LOG(FATAL) << " oka="
+	  new (p) value_type(value);
+  }
 
-  template< class U, class... Args >
-  void construct( U* p, Args&&... args ) { }
+  template <class U, class... Args>
+  void construct(U* p, Args&&... args)
+  {
+	// LOG(INFO) << "IS POINTER OK ? : " << ShmManager::Instance().isPointerOk((void*)p);
+    ::new ((void*)p) U(std::forward<Args>(args)...);
+  }
 
   inline void destroy(pointer p) { p->~value_type(); }
 
@@ -79,15 +87,15 @@ template <typename T>
 std::vector<T>* createSimVector()
 {
   using vector_t = std::vector<T>;
-//#ifdef SIMSHAREDMEM
+#ifdef USESHM
   auto& instance = o2::utils::ShmManager::Instance();
   auto placement = instance.getmemblock(sizeof(vector_t));
 
   // at this moment we have to trust that std::
   return new (placement) vector_t;
-//#else
-//  return new vector_t;
-//#endif
+#else
+  return new vector_t;
+#endif
 }
 }
 }
