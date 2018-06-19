@@ -635,6 +635,7 @@ o2_define_bucket(
     ${CMAKE_SOURCE_DIR}/DataFormats/common/include
     ${CMAKE_SOURCE_DIR}/Detectors/Base/include
     ${CMAKE_SOURCE_DIR}/Detectors/ITSMFT/Base/include
+    ${CMAKE_SOURCE_DIR}/Common/Utils/include
 )
 
 o2_define_bucket(
@@ -663,10 +664,12 @@ o2_define_bucket(
     DetectorsBase
     SimulationDataFormat
     ITSMFTBase
+    common_utils_bucket
 
     INCLUDE_DIRECTORIES
     ${CMAKE_SOURCE_DIR}/DataFormats/simulation/include
     ${CMAKE_SOURCE_DIR}/Common/MathUtils/include
+    ${CMAKE_SOURCE_DIR}/Common/Utils/include
     ${CMAKE_SOURCE_DIR}/Detectors/Base/include
     ${CMAKE_SOURCE_DIR}/Detectors/ITSMFT/common/base/include
 )
@@ -728,6 +731,7 @@ o2_define_bucket(
     ${CMAKE_SOURCE_DIR}/Detectors/ITSMFT/common/base/include
     ${CMAKE_SOURCE_DIR}/Detectors/ITSMFT/common/simulation/include
     ${CMAKE_SOURCE_DIR}/Detectors/ITSMFT/ITS/base/include
+    ${CMAKE_SOURCE_DIR}/Common/Utils/include
 )
 
 o2_define_bucket(
@@ -768,7 +772,8 @@ o2_define_bucket(
     ${CMAKE_SOURCE_DIR}/Detectors/ITSMFT/common/simulation/include
     ${CMAKE_SOURCE_DIR}/DataFormats/simulation/include
     ${CMAKE_SOURCE_DIR}/Common/MathUtils/include
-
+    ${CMAKE_SOURCE_DIR}/Common/Utils/include
+   
     SYSTEMINCLUDE_DIRECTORIES
     ${Boost_INCLUDE_DIR}
     )
@@ -1109,6 +1114,7 @@ o2_define_bucket(
     Graf
     Gpad
     XMLIO
+    common_utils_bucket
 
     INCLUDE_DIRECTORIES
     ${CMAKE_SOURCE_DIR}/Detectors/Base/include
@@ -1127,13 +1133,14 @@ o2_define_bucket(
     MFTBase
     DetectorsBase
     SimulationDataFormat
+    common_utils_bucket
 
     INCLUDE_DIRECTORIES
     ${CMAKE_SOURCE_DIR}/Detectors/Base/include
     ${CMAKE_SOURCE_DIR}/Detectors/ITSMFT/common/base/include
     ${CMAKE_SOURCE_DIR}/Detectors/ITSMFT/common/simulation/include
     ${CMAKE_SOURCE_DIR}/Detectors/ITSMFT/MFT/base/include
-
+    ${CMAKE_SOURCE_DIR}/Common/Utils/include
 )
 
 o2_define_bucket(
@@ -1427,7 +1434,7 @@ o2_define_bucket(
     ${CMAKE_SOURCE_DIR}/DataFormats/simulation/include
     ${CMAKE_SOURCE_DIR}/DataFormats/common/include
     ${CMAKE_SOURCE_DIR}/Common/MathUtils/include
-
+    ${CMAKE_SOURCE_DIR}/Common/Utils/include
 )
 
 o2_define_bucket(
@@ -1455,7 +1462,7 @@ o2_define_bucket(
     ${CMAKE_SOURCE_DIR}/DataFormats/simulation/include
     ${CMAKE_SOURCE_DIR}/Detectors/PHOS/base/include
     ${CMAKE_SOURCE_DIR}/Common/MathUtils/include
-
+   
 )
 
 o2_define_bucket(
