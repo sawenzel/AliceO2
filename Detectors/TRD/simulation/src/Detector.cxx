@@ -84,7 +84,12 @@ void Detector::Register()
 
 // this is very problematic; we should do round robin or the clear needs
 // to be done by the HitMerger
-void Detector::Reset() { /*mHits->clear();*/ }
+void Detector::Reset()
+{
+#ifndef USESHM
+  mHits->clear();
+#endif
+}
 
 void Detector::EndOfEvent() { Reset(); }
 

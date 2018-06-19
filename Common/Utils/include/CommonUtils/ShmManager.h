@@ -11,14 +11,17 @@
 #include <list>
 #include <stddef.h>
 
+#define USESHM 1
+
 namespace o2 {
 namespace utils {
+
 struct MemBlock {
   void* startptr;
   size_t bytes;
 };
 
-constexpr size_t SHMPOOLSIZE = 1024*1024; // 1MB of shared memory
+constexpr size_t SHMPOOLSIZE = 1024*1024*1024; // 1MB of shared memory
 
 // class creating a shared memory pool
 // and manges allocations within the ppol
@@ -42,6 +45,11 @@ public:
  int getShmID() const { return mShmID; }
  size_t getPointerOffset(void*ptr) const { return (size_t)((char*)ptr - (char*)mMappedPtr); }
  void* getBasePtr() const { return mMappedPtr; }
+
+ // returns if pointer is part of mapped shm region
+ bool isPointerOk(void*ptr) const {
+   return getPointerOffset(ptr) < SHMPOOLSIZE;
+ }
 
  size_t getNumAllocedBlocks() const { return mAllocedBlocks.size(); }
  size_t getNumFreeBlocks() const { return mFreeBlocks.size(); }

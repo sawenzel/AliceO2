@@ -27,7 +27,7 @@ using namespace o2::tof;
 ClassImp(Detector);
 
 Detector::Detector(Bool_t active)
-  : o2::Base::DetImpl<Detector>("TOF", active), mEventNr(0), mTOFHoles(kTRUE), mHits(new std::vector<HitType>)
+  : o2::Base::DetImpl<Detector>("TOF", active), mEventNr(0), mTOFHoles(kTRUE), mHits(o2::utils::createSimVector<HitType>())
 {
   for (Int_t i = 0; i < Geo::NSECTORS; i++)
     mTOFSectors[i] = 1;
@@ -37,7 +37,7 @@ Detector::Detector(const Detector& rhs)
   : o2::Base::DetImpl<Detector>(rhs),
     mEventNr(0),
     mTOFHoles(rhs.mTOFHoles),
-    mHits(new std::vector<HitType>)
+    mHits(o2::utils::createSimVector<HitType>())
 {
   for (Int_t i = 0; i < Geo::NSECTORS; i++)
     mTOFSectors[i] = rhs.mTOFSectors[i];
@@ -110,9 +110,12 @@ void Detector::Register()
 
 void Detector::Reset()
 {
+#ifndef USESHM
   mHits->clear();
+#endif
   mLastChannelID = -1;
 }
+
 void Detector::CreateMaterials()
 {
   Int_t isxfld = 2;

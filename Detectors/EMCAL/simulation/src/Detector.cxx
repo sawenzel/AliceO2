@@ -39,7 +39,7 @@ Detector::Detector(Bool_t active)
     mBirkC0(0),
     mBirkC1(0.),
     mBirkC2(0.),
-    mHits(new std::vector<Hit>),
+    mHits(o2::utils::createSimVector<Hit>()),
     mGeometry(nullptr),
     mCurrentTrackID(-1),
     mCurrentCellID(-1),
@@ -71,7 +71,7 @@ Detector::Detector(const Detector& rhs)
     mBirkC0(rhs.mBirkC0),
     mBirkC1(rhs.mBirkC1),
     mBirkC2(rhs.mBirkC2),
-    mHits(new std::vector<Hit>),
+    mHits(o2::utils::createSimVector<Hit>()),
     mGeometry(rhs.mGeometry),
     mCurrentTrackID(-1),
     mCurrentCellID(-1),
@@ -241,7 +241,9 @@ void Detector::Register()
 void Detector::Reset()
 {
   LOG(DEBUG) << "Cleaning EMCAL hits ...\n";
+#ifndef USESHM
   mHits->clear();
+#endif
   mCurrentTrackID = -1;
   mCurrentCellID = -1;
   mCurrentHit = nullptr;

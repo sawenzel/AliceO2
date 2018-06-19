@@ -63,7 +63,7 @@ Detector::Detector()
     */
     mNumberOfDetectors(-1),
     mModifyGeometry(kFALSE),
-    mHits(new std::vector<o2::ITSMFT::Hit>),
+    mHits(o2::utils::createSimVector<o2::ITSMFT::Hit>()),
     mStaveModelInnerBarrel(kIBModel0),
     mStaveModelOuterBarrel(kOBModel0)
 {
@@ -145,7 +145,7 @@ Detector::Detector(Bool_t active)
     */
     mNumberOfDetectors(-1),
     mModifyGeometry(kFALSE),
-    mHits(new std::vector<o2::ITSMFT::Hit>),
+    mHits(o2::utils::createSimVector<o2::ITSMFT::Hit>()),
     mStaveModelInnerBarrel(kIBModel0),
     mStaveModelOuterBarrel(kOBModel0)
 {
@@ -191,7 +191,7 @@ Detector::Detector(const Detector& rhs)
     mModifyGeometry(rhs.mModifyGeometry),
 
     /// Container for data points
-    mHits(new std::vector<o2::ITSMFT::Hit>),
+    mHits(o2::utils::createSimVector<o2::ITSMFT::Hit>()),
     mStaveModelInnerBarrel(rhs.mStaveModelInnerBarrel),
     mStaveModelOuterBarrel(rhs.mStaveModelOuterBarrel)
 {
@@ -537,7 +537,12 @@ void Detector::Register()
   }
 }
 
-void Detector::Reset() { mHits->clear(); }
+void Detector::Reset()
+{
+#ifndef USESHM
+  mHits->clear();
+#endif
+}
 
 void Detector::defineWrapperVolume(Int_t id, Double_t rmin, Double_t rmax, Double_t zspan)
 {

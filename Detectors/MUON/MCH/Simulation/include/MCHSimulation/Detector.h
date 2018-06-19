@@ -61,4 +61,18 @@ class Detector : public o2::Base::DetImpl<Detector>
 } // namespace mch
 } // namespace o2
 
+#ifdef USESHM
+namespace o2
+{
+namespace Base
+{
+template <>
+struct UseShm<o2::mch::Detector> {
+  static constexpr bool value = true;
+};
+}
+}
+#endif
+
+
 #endif

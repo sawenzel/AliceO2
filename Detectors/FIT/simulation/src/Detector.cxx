@@ -33,7 +33,7 @@ using o2::fit::Geometry;
 ClassImp(Detector);
 
 Detector::Detector(Bool_t Active)
-  : o2::Base::DetImpl<Detector>("FIT", Active), mIdSens1(0), mPMTeff(nullptr), mHits(new std::vector<o2::fit::HitType>)
+  : o2::Base::DetImpl<Detector>("FIT", Active), mIdSens1(0), mPMTeff(nullptr), mHits(o2::utils::createSimVector<HitType>())
 {
   // Gegeo  = GetGeometry() ;
 
@@ -41,7 +41,7 @@ Detector::Detector(Bool_t Active)
 }
 
 Detector::Detector(const Detector& rhs)
-  : o2::Base::DetImpl<Detector>(rhs), mIdSens1(rhs.mIdSens1), mPMTeff(nullptr), mHits(new std::vector<o2::fit::HitType>)
+  : o2::Base::DetImpl<Detector>(rhs), mIdSens1(rhs.mIdSens1), mPMTeff(nullptr), mHits(o2::utils::createSimVector<HitType>())
 {
 }
 
@@ -326,7 +326,11 @@ void Detector::Register()
   }
 }
 
-void Detector::Reset() { mHits->clear(); }
+void Detector::Reset() {
+#ifndef USESHM
+	mHits->clear();
+#endif
+}
 void Detector::CreateMaterials()
 {
   Int_t isxfld = 2;     // magneticField->Integ();

@@ -32,9 +32,12 @@
 #include <FairMQParts.h>
 #include <TMessage.h>
 #include "CommonUtils/ShmManager.h"
+#include "CommonUtils/ShmHelper.h"
 #include <sys/shm.h>
 #include <type_traits>
 #include <unistd.h>
+
+
 
 namespace o2 {
 namespace Base {
@@ -195,14 +198,14 @@ inline std::string demangle(const char* name)
 template <typename Container>
 void attachShmMessage(Container const& hits, FairMQChannel& channel, FairMQParts& parts)
 {
-  struct shminfo {
+  struct shmcontext {
     int id;
     void* base_ptr;
     void* object_ptr;
   };
 
   auto& instance = o2::utils::ShmManager::Instance();
-  shminfo info{instance.getShmID(), instance.getBasePtr(),(void*)&hits };
+  shmcontext info{instance.getShmID(), instance.getBasePtr(),(void*)&hits };
   LOG(INFO) << "-- SHM SEND --";
   LOG(INFO) << "-- SENDING -- " << hits.size() << " HITS ";
   LOG(INFO) << " OFFSET IS " << instance.getPointerOffset((void*)&hits);
@@ -231,13 +234,13 @@ template <typename T>
 T decodeShmMessage(FairMQParts& dataparts, int index, int offset)
 {
   auto rawmessage = std::move(dataparts.At(index));
-  struct shminfo {
+  struct shmcontext {
     int id;
     void* base_ptr;
     void* object_ptr;
   };
 
-  shminfo* info = (shminfo*) rawmessage->GetData();
+  shmcontext* info = (shmcontext*) rawmessage->GetData();
 
   // should be just a pair with shmID and pointer
   // std::pair<int, size_t>* shmid_offsetpair = (std::pair<int, size_t>*) rawmessage->GetData();
@@ -246,19 +249,20 @@ T decodeShmMessage(FairMQParts& dataparts, int index, int offset)
   LOG(INFO) << " GOT SHMID OFFSET " << info->object_ptr;
 
   // we will try to map at the address provided
-  auto addr = shmat(info->id, info->base_ptr, 0);
-  LOG(INFO) << " SHM ADDRESS " << addr << " VS WANTED " << info->base_ptr;
-  if (addr != info->base_ptr) {
-    LOG(INFO) << " Trying a second time without constraint ";
-    addr = shmat(info->id, nullptr, 0);
-    LOG(INFO) << " SHM ADDRESS " << addr;
-  }
-  offset = (int)((char*)addr - (char*)info->base_ptr);
+  // auto addr = shmat(info->id, info->base_ptr, 0);
+//  LOG(INFO) << " SHM ADDRESS " << addr << " VS WANTED " << info->base_ptr;
+//  if (addr != info->base_ptr) {
+//    LOG(INFO) << " Trying a second time without constraint ";
+//    addr = shmat(info->id, nullptr, 0);
+//    LOG(INFO) << " SHM ADDRESS " << addr;
+//  }
+//  offset = (int)((char*)addr - (char*)info->base_ptr);
+  auto address_offset = o2::utils::ShmHelper::Instance().attachOrGiveBack(info->id, info->base_ptr);
 
   // need to fix these to be correct in newly mapped space
   // _M_start(0), _M_finish(0), _M_end_of_storage(0)
 
-  fixVector<T>(info->object_ptr, offset);
+  fixVector<T>(info->object_ptr, address_offset.second);
 
   return reinterpret_cast<T>(info->object_ptr);
 }

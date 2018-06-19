@@ -17,12 +17,31 @@
 #include "SimulationDataFormat/BaseHits.h"
 #include "DetectorsBase/Detector.h" // for Detector
 #include "FITBase/Geometry.h"
+#include "CommonUtils/ShmAllocator.h"
 
 class FairModule;
 
 class FairVolume;
 class TGeoVolume;
 class TGraph;
+
+namespace o2 {
+namespace fit {
+class HitType : public o2::BasicXYZEHit<float> {
+public:
+	using BasicXYZEHit<float>::BasicXYZEHit;
+};
+}
+}
+
+#ifdef USESHM
+namespace std
+{
+template<> class allocator<o2::fit::HitType> : public o2::utils::ShmAllocator<o2::fit::HitType>
+{
+};
+}
+#endif
 
 namespace o2
 {
@@ -36,7 +55,7 @@ namespace o2
 {
 namespace fit
 {
-using HitType = o2::BasicXYZEHit<float>;
+// using HitType = o2::BasicXYZEHit<float>;
 class Geometry;
 class Detector : public o2::Base::DetImpl<Detector>
 {
@@ -145,5 +164,19 @@ std::ostream& operator<<(std::ostream& os, Detector& source);
 std::istream& operator>>(std::istream& os, Detector& source);
 } // namespace fit
 } // namespace o2
+
+#ifdef USESHM
+namespace o2
+{
+namespace Base
+{
+template <>
+struct UseShm<o2::fit::Detector> {
+  static constexpr bool value = true;
+};
+}
+}
+#endif
+
 
 #endif

@@ -44,7 +44,7 @@ Detector::Detector()
   : o2::Base::DetImpl<Detector>("MFT", kTRUE),
     mVersion(1),
     mDensitySupportOverSi(0.036),
-    mHits(new std::vector<o2::ITSMFT::Hit>),
+    mHits(o2::utils::createSimVector<o2::ITSMFT::Hit>()),
     mTrackData()
 {
 }
@@ -54,7 +54,7 @@ Detector::Detector(const Detector& src)
   : o2::Base::DetImpl<Detector>(src),
     mVersion(src.mVersion),
     mDensitySupportOverSi(src.mDensitySupportOverSi),
-    mHits(new std::vector<o2::ITSMFT::Hit>),
+    mHits(o2::utils::createSimVector<o2::ITSMFT::Hit>()),
     mTrackData()
 {
 }
@@ -485,4 +485,9 @@ void Detector::Register()
 }
 
 //_____________________________________________________________________________
-void Detector::Reset() { mHits->clear(); }
+void Detector::Reset()
+{
+#ifndef USESHM
+  mHits->clear();
+#endif
+}
