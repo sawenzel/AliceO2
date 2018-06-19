@@ -168,7 +168,7 @@ public:
 #ifdef HIT_AOS
   std::vector<o2::TPC::ElementalHit> mHits; // the hits for this group
 #else
- using vec_t = std::vector<float, o2::utils::ShmAllocator<o2::TPC::ElementalHit>>;
+ using vec_t = std::vector<float, o2::utils::ShmAllocator<float>>;
  vec_t mHitsXVctr;
  vec_t mHitsYVctr;
  vec_t mHitsZVctr;
