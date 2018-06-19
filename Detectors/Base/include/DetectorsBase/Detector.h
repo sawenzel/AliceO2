@@ -196,16 +196,17 @@ inline std::string demangle(const char* name)
 }
 
 template <typename Container>
-void attachShmMessage(Container const& hits, FairMQChannel& channel, FairMQParts& parts)
+void attachShmMessage(Container const& hits, FairMQChannel& channel, FairMQParts& parts, bool* busy_ptr)
 {
   struct shmcontext {
     int id;
     void* base_ptr;
     void* object_ptr;
+    bool* busy_ptr;
   };
 
   auto& instance = o2::utils::ShmManager::Instance();
-  shmcontext info{instance.getShmID(), instance.getBasePtr(),(void*)&hits };
+  shmcontext info{instance.getShmID(), instance.getBasePtr(),(void*)&hits, busy_ptr};
   LOG(INFO) << "-- SHM SEND --";
   LOG(INFO) << "-- SENDING -- " << hits.size() << " HITS ";
   LOG(INFO) << " OFFSET IS " << instance.getPointerOffset((void*)&hits);
@@ -217,6 +218,10 @@ void attachShmMessage(Container const& hits, FairMQChannel& channel, FairMQParts
 template <typename T>
 void fixVector(void* vecptr, int offset)
 {
+  LOG(INFO) << "FIXING VECTOR WITH OFFSET " << offset;
+  if (offset == 0) {
+    return;
+  }
   using valuepointer = typename std::remove_pointer<T>::type::value_type*;
   struct Magic {
     valuepointer start;
@@ -231,13 +236,14 @@ void fixVector(void* vecptr, int offset)
 }
 
 template <typename T>
-T decodeShmMessage(FairMQParts& dataparts, int index, int offset)
+T decodeShmMessage(FairMQParts& dataparts, int index, int& offset, bool*& busy)
 {
   auto rawmessage = std::move(dataparts.At(index));
   struct shmcontext {
     int id;
     void* base_ptr;
     void* object_ptr;
+    bool* busy_ptr;
   };
 
   shmcontext* info = (shmcontext*) rawmessage->GetData();
@@ -263,7 +269,8 @@ T decodeShmMessage(FairMQParts& dataparts, int index, int offset)
   // _M_start(0), _M_finish(0), _M_end_of_storage(0)
 
   fixVector<T>(info->object_ptr, address_offset.second);
-
+  offset = address_offset.second;
+  busy = info->busy_ptr;
   return reinterpret_cast<T>(info->object_ptr);
 }
 
@@ -363,7 +370,12 @@ class DetImpl : public o2::Base::Detector
       } else {
         // this is the shared mem variant
         // we will just send the sharedmem ID and the offset inside
-        attachShmMessage(*hits, channel, parts);
+        if(!mShmBusy)
+        {
+          mShmBusy = (bool*) o2::utils::ShmManager::Instance().getmemblock(sizeof(bool));
+        }
+        *mShmBusy = true;
+    	attachShmMessage(*hits, channel, parts, mShmBusy);
       }
     }
   }
@@ -386,20 +398,20 @@ class DetImpl : public o2::Base::Detector
 
       } else {
         // for each branch name we extract/decode hits from the message parts ...
-        int offset;
-    	auto hitsptr = decodeShmMessage<Hit_t>(parts, index++, offset);
+        int offset{0};
+        bool *busy;
+    	auto hitsptr = decodeShmMessage<Hit_t>(parts, index++, offset, busy);
         LOG(INFO) << "GOT " << hitsptr->size() << " HITS ";
         // ... and fill the tree branch
         auto br = getOrMakeBranch(tr, name.c_str(), hitsptr);
         br->Fill();
         br->ResetAddress();
 
-        // unfortunately we have to do the clear // or we communicate via special flag
+        // he we are done so unset the busy flag
+        *busy = false;
 
         // fix back the pointers
         fixVector<Hit_t>(hitsptr, -offset);
-        hitsptr->clear();
-        LOG(INFO) << " CLEARED DATA " << hitsptr->size() << " \n";
       }
       // next name
       name = static_cast<Det*>(this)->getHitBranchNames(probe++);
@@ -410,17 +422,19 @@ class DetImpl : public o2::Base::Detector
   void BeginEvent() override
   {
     if (UseShm<Det>::value) {
-      // wait until hits have been read an reset
+      while (mShmBusy!=nullptr && *mShmBusy) {
+        LOG(INFO) << " BUSY WAITING SIZE ";
+        sleep(1);
+      }
+      // now we have to clear the hits before writing again
       int probe = 0;
       while (auto hits = static_cast<Det*>(this)->Det::getHits(probe++)) {
-        while (hits->size() > 0) {
-          // spin lock ... I know its stupid
-          LOG(INFO) << " BUSY WAITING SIZE " << hits->size();
-          sleep(1);
-        }
+        hits->clear();
       }
     }
   }
+private:
+  bool* mShmBusy = nullptr; //! pointer to bool in shared mem indicating of IO busy
 
   ClassDefOverride(DetImpl, 0)
 };
