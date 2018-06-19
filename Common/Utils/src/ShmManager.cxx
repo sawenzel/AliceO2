@@ -66,6 +66,9 @@ void ShmManager::printSummary() const
 
 void* ShmManager::getmemblock(size_t size)
 {
+  if (size == 0) {
+    LOG(WARNING) << "someone asked for zero size block";
+  }
   // iterate through free blocks and see if we find one that is large enough
   // for the requested size ... then split it
   auto iter = std::find_if(mFreeBlocks.begin(), mFreeBlocks.end(),
@@ -81,6 +84,10 @@ void* ShmManager::getmemblock(size_t size)
   // change free block info to new information
   iter->startptr = (char*)iter->startptr + size;
   iter->bytes = iter->bytes - size;
+  // remove zero free blocks
+  if (iter->bytes == 0) {
+    mFreeBlocks.erase(iter);
+  }
   return addr;
 }
 
@@ -113,9 +120,11 @@ void ShmManager::freememblock(void* ptr)
     LOG(INFO) << "FREE CORRUPTED (did not find address: " << ptr << " was pointer ok? " << isPointerOk(ptr);
   } else {
     MemBlock memblock{ iter->startptr, iter->bytes };
-    auto cmp = [](MemBlock const& block1, MemBlock const& block2) { return block1.startptr < block2.startptr; };
-    auto insertpos = std::upper_bound(mFreeBlocks.begin(), mFreeBlocks.end(), memblock, cmp);
-    mFreeBlocks.insert(insertpos, memblock);
+    if (iter->bytes > 0) {
+      auto cmp = [](MemBlock const& block1, MemBlock const& block2) { return block1.startptr < block2.startptr; };
+      auto insertpos = std::upper_bound(mFreeBlocks.begin(), mFreeBlocks.end(), memblock, cmp);
+      mFreeBlocks.insert(insertpos, memblock);
+    }
     mAllocedBlocks.erase(iter);
 
     while (mergeFreeBlocks()) {
