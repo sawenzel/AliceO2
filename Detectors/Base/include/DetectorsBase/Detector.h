@@ -34,6 +34,7 @@
 #include "CommonUtils/ShmManager.h"
 #include <sys/shm.h>
 #include <type_traits>
+#include <unistd.h>
 
 namespace o2 {
 namespace Base {
@@ -211,7 +212,23 @@ void attachShmMessage(Container const& hits, FairMQChannel& channel, FairMQParts
 }
 
 template <typename T>
-T decodeShmMessage(FairMQParts& dataparts, int index)
+void fixVector(void* vecptr, int offset)
+{
+  using valuepointer = typename std::remove_pointer<T>::type::value_type*;
+  struct Magic {
+    valuepointer start;
+    valuepointer finish;
+    valuepointer endstorage;
+  } * magic;
+  vecptr = (char*)vecptr + offset;
+  magic = reinterpret_cast<Magic*>((char*)vecptr);
+  magic->finish = (valuepointer)((char*)magic->finish + offset);
+  magic->start = (valuepointer)((char*)magic->start + offset);
+  magic->endstorage = (valuepointer)((char*)magic->endstorage + offset);
+}
+
+template <typename T>
+T decodeShmMessage(FairMQParts& dataparts, int index, int offset)
 {
   auto rawmessage = std::move(dataparts.At(index));
   struct shminfo {
@@ -236,24 +253,14 @@ T decodeShmMessage(FairMQParts& dataparts, int index)
     addr = shmat(info->id, nullptr, 0);
     LOG(INFO) << " SHM ADDRESS " << addr;
   }
-  auto offset = (char*)addr - (char*)info->base_ptr;
+  offset = (int)((char*)addr - (char*)info->base_ptr);
 
   // need to fix these to be correct in newly mapped space
   // _M_start(0), _M_finish(0), _M_end_of_storage(0)
-  using valuepointer = typename std::remove_pointer<T>::type::value_type*;
-  struct Magic{
-     valuepointer start;
-     valuepointer finish;
-     valuepointer endstorage;
-  }* magic;
-  magic = reinterpret_cast<Magic*>((char*)info->object_ptr + offset);
 
-  // modify _M_start and later turn back
-  magic->finish = (valuepointer)((char*)magic->finish + offset);
-  magic->start = (valuepointer)((char*)magic->start + offset);
-  magic->endstorage = (valuepointer)((char*)magic->endstorage + offset);
+  fixVector<T>(info->object_ptr, offset);
 
-  return reinterpret_cast<T>(magic);
+  return reinterpret_cast<T>(info->object_ptr);
 }
 
 template <typename Container>
@@ -375,19 +382,39 @@ class DetImpl : public o2::Base::Detector
 
       } else {
         // for each branch name we extract/decode hits from the message parts ...
-        auto hitsptr = decodeShmMessage<Hit_t>(parts, index++);
+        int offset;
+    	auto hitsptr = decodeShmMessage<Hit_t>(parts, index++, offset);
         LOG(INFO) << "GOT " << hitsptr->size() << " HITS ";
-
         // ... and fill the tree branch
         auto br = getOrMakeBranch(tr, name.c_str(), hitsptr);
         br->Fill();
         br->ResetAddress();
 
         // unfortunately we have to do the clear // or we communicate via special flag
+
+        // fix back the pointers
+        fixVector<Hit_t>(hitsptr, -offset);
         hitsptr->clear();
+        LOG(INFO) << " CLEARED DATA " << hitsptr->size() << " \n";
       }
       // next name
       name = static_cast<Det*>(this)->getHitBranchNames(probe++);
+    }
+  }
+
+  // here temporarily to have some syncronization
+  void BeginEvent() override
+  {
+    if (UseShm<Det>::value) {
+      // wait until hits have been read an reset
+      int probe = 0;
+      while (auto hits = static_cast<Det*>(this)->Det::getHits(probe++)) {
+        while (hits->size() > 0) {
+          // spin lock ... I know its stupid
+          LOG(INFO) << " BUSY WAITING SIZE " << hits->size();
+          sleep(1);
+        }
+      }
     }
   }
 
