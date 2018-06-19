@@ -62,7 +62,7 @@ using namespace o2::TPC;
 Detector::Detector(Bool_t active) : o2::Base::DetImpl<Detector>("TPC", active), mGeoFileName()
 {
   for (int i = 0; i < Sector::MAXSECTOR; ++i) {
-    mHitsPerSectorCollection[i] = new std::vector<o2::TPC::HitGroup>;
+    mHitsPerSectorCollection[i] = o2::utils::createSimVector<o2::TPC::HitGroup>();//new std::vector<o2::TPC::HitGroup>;
   }
 }
 
@@ -77,7 +77,7 @@ Detector::Detector(const Detector& rhs)
     mGeoFileName(rhs.mGeoFileName)
 {
   for (int i = 0; i < Sector::MAXSECTOR; ++i) {
-    mHitsPerSectorCollection[i] = new std::vector<o2::TPC::HitGroup>;
+    mHitsPerSectorCollection[i] = o2::utils::createSimVector<o2::TPC::HitGroup>();//new std::vector<o2::TPC::HitGroup>;new std::vector<o2::TPC::HitGroup>;
   }
 }
 
@@ -296,9 +296,11 @@ Bool_t Detector::ProcessHits(FairVolume* vol)
 
 void Detector::EndOfEvent()
 {
+#ifndef USESHM
   for (int i = 0; i < Sector::MAXSECTOR; ++i) {
     mHitsPerSectorCollection[i]->clear();
   }
+#endif
 }
 
 void Detector::Register()

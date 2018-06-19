@@ -143,7 +143,6 @@ class Detector: public o2::Base::DetImpl<Detector> {
     void   BeginPrimary() override {;}
     void   PostTrack() override {;}
     void   PreTrack() override {;}
-    void   BeginEvent() override {;}
 
     void SetGeoFileName(const TString file) { mGeoFileName=file;   }
     const TString& GetGeoFileName() const   { return mGeoFileName; }
@@ -196,5 +195,19 @@ T Detector::BetheBlochAleph(T bg, T kp1, T kp2, T kp3, T kp4, T kp5){
 
 }
 }
+
+#ifdef USESHM
+namespace o2
+{
+namespace Base
+{
+template <>
+struct UseShm<o2::TPC::Detector> {
+  static constexpr bool value = true;
+};
+}
+}
+#endif
+
 
 #endif // AliceO2_TPC_Detector_H_
