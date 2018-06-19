@@ -110,7 +110,7 @@ void ShmManager::freememblock(void* ptr)
   // look for the ptr and add this block to the list of free blocks
   auto iter = std::find_if(mAllocedBlocks.begin(), mAllocedBlocks.end(), [ptr](MemBlock const& mem) { return mem.startptr == ptr; });
   if (iter == mAllocedBlocks.end()) {
-    LOG(INFO) << "FREE CORRUPTED\n";
+    LOG(INFO) << "FREE CORRUPTED (did not find address: " << ptr << " was pointer ok? " << isPointerOk(ptr);
   } else {
     MemBlock memblock{ iter->startptr, iter->bytes };
     auto cmp = [](MemBlock const& block1, MemBlock const& block2) { return block1.startptr < block2.startptr; };

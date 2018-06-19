@@ -11,7 +11,7 @@
 #include <list>
 #include <stddef.h>
 
-#define USESHM 1
+// #define USESHM 1
 
 namespace o2 {
 namespace utils {
