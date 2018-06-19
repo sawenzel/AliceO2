@@ -185,3 +185,55 @@ BOOST_AUTO_TEST_CASE(TreeShmManager_test4)
 }
 
 
+class Bar
+{
+ public:
+  Bar(int id) : mID{id}, mFOOs() {}
+  void addFoo(double x)
+  {
+    mFOOs.emplace_back(x);
+  }
+  int mID;
+  std::vector<Foo, o2::utils::ShmAllocator<Foo>> mFOOs;
+};
+
+// check std::allocator specialization
+BOOST_AUTO_TEST_CASE(TreeShmManager_test5)
+{
+  LOG(INFO) << "\n\n";
+  LOG(INFO) << "Starting test4 with specialized std::allocator";
+
+  auto& instance = ShmManager::Instance();
+  {
+    using vector_t = std::vector<Bar, o2::utils::ShmAllocator<Bar>>;
+    auto placement = instance.getmemblock(sizeof(vector_t));
+    vector_t* vptr = new (placement) vector_t;
+    for (int j = 0; j < 3; ++j) {
+      for (int i = 0; i < 10; ++i) {
+        vptr->emplace_back(i);
+
+        vptr->back().addFoo(0);
+        vptr->back().addFoo(1);
+        vptr->back().addFoo(2);
+        vptr->back().addFoo(3);
+        vptr->back().addFoo(4);
+        vptr->back().addFoo(4);
+        vptr->back().addFoo(4);
+
+      }
+      instance.printSummary();
+      vptr->clear();
+      instance.printSummary();
+    }
+    // complicated removal; how to do it better?
+    LOG(INFO) << " -- \n\n";
+    instance.printSummary();
+    vptr->shrink_to_fit();
+    instance.freememblock(vptr);
+  }
+  // here the vector is out of scope and should be freed
+  BOOST_CHECK(instance.getNumAllocedBlocks() == 0);
+  instance.printSummary();
+}
+
+
