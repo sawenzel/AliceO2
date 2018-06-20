@@ -29,7 +29,7 @@ namespace mch
 Stepper::Stepper() : mHits{ o2::utils::createSimVector<o2::mch::Hit>() } {}
 Stepper::~Stepper()
 {
-  delete mHits;
+  o2::utils::freeSimVector(mHits);
 }
 
 void Stepper::process(const TVirtualMC& vmc)

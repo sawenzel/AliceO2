@@ -205,7 +205,8 @@ Detector::~Detector()
 {
 
   if (mHits) {
-    delete mHits;
+    // delete mHits;
+    o2::utils::freeSimVector(mHits);
   }
 }
 

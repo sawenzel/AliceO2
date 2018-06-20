@@ -114,6 +114,8 @@ class O2SimDevice : public FairMQDevice
     if (!querySimConfig(channel)) {
       return false;
     }
+    // init the shared memory service
+    o2::utils::ShmManager::Instance().createSegment();
 
     LOG(INFO) << "Setting up the simulation ...";
     simptr = std::move(std::unique_ptr<FairRunSim>(o2sim_init(true)));
