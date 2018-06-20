@@ -26,126 +26,150 @@ namespace o2 {
 namespace TPC {
 
 class Detector: public o2::Base::DetImpl<Detector> {
+  friend class o2::Base::DetImpl<Detector>;
 
-  public:
-   /** Local material/media IDs for TPC */
-   enum EMedium {
-     kAir = 0,
-     kDriftGas1 = 1,
-     kDriftGas2 = 2,
-     kCO2 = 3,
-     kDriftGas3 = 20,
-     kAl = 4,
-     kKevlar = 5,
-     kNomex = 6,
-     kMakrolon = 7,
-     kMylar = 8,
-     kTedlar = 9,
-     kPrepreg1 = 10,
-     kPrepreg2 = 11,
-     kPrepreg3 = 12,
-     kEpoxy = 13,
-     kCu = 14,
-     kSi = 15,
-     kG10 = 16,
-     kPlexiglas = 17,
-     kSteel = 18,
-     kPeek = 19,
-     kAlumina = 21,
-     kWater = 22,
-     kBrass = 23,
-     kEpoxyfm = 24,
-     kEpoxy1 = 25,
-     kAlumina1 = 26
-   };
-   /**      Name :  Detector Name
+ public:
+  /** Local material/media IDs for TPC */
+  enum EMedium {
+    kAir = 0,
+    kDriftGas1 = 1,
+    kDriftGas2 = 2,
+    kCO2 = 3,
+    kDriftGas3 = 20,
+    kAl = 4,
+    kKevlar = 5,
+    kNomex = 6,
+    kMakrolon = 7,
+    kMylar = 8,
+    kTedlar = 9,
+    kPrepreg1 = 10,
+    kPrepreg2 = 11,
+    kPrepreg3 = 12,
+    kEpoxy = 13,
+    kCu = 14,
+    kSi = 15,
+    kG10 = 16,
+    kPlexiglas = 17,
+    kSteel = 18,
+    kPeek = 19,
+    kAlumina = 21,
+    kWater = 22,
+    kBrass = 23,
+    kEpoxyfm = 24,
+    kEpoxy1 = 25,
+    kAlumina1 = 26
+  };
+  /**      Name :  Detector Name
     *       Active: kTRUE for active detectors (ProcessHits() will be called)
     *               kFALSE for inactive detectors
     */
-   Detector(Bool_t Active);
+  Detector(Bool_t Active);
 
-   /**      default constructor    */
-   Detector();
+  /**      default constructor    */
+  Detector();
 
-   /**       destructor     */
-   ~Detector() override;
+  /**       destructor     */
+  ~Detector() override;
 
-   /**      Clone this object (used in MT mode only)    */
-   FairModule* CloneModule() const override;
+  /**      Clone this object (used in MT mode only)    */
+  FairModule* CloneModule() const override;
 
-   /**      Initialization of the detector is done here    */
-   void Initialize() override;
+  /**      Initialization of the detector is done here    */
+  void Initialize() override;
 
-   /**       this method is called for each step during simulation
+  /**       this method is called for each step during simulation
     *       (see FairMCApplication::Stepping())
     */
-   //     virtual Bool_t ProcessHitsOrig( FairVolume* v=0);
-   Bool_t ProcessHits(FairVolume* v = nullptr) override;
+  //     virtual Bool_t ProcessHitsOrig( FairVolume* v=0);
+  Bool_t ProcessHits(FairVolume* v = nullptr) override;
 
-   /**       Registers the produced collections in FAIRRootManager.     */
-   void Register() override;
+  /**       Registers the produced collections in FAIRRootManager.     */
+  void Register() override;
 
-   /** Get the produced hits */
-   std::vector<HitGroup>* getHits(Int_t iColl) const
-   {
-     if (iColl >= 0 && iColl < Sector::MAXSECTOR) {
-       return mHitsPerSectorCollection[iColl];
-     }
-     return nullptr;
+  /** Get the produced hits */
+  std::vector<HitGroup>* getHits(Int_t iColl) const
+  {
+    if (iColl >= 0 && iColl < Sector::MAXSECTOR) {
+      return mHitsPerSectorCollection[iColl];
+    }
+    return nullptr;
     }
 
-    /** tell the branch names corresponding to hits **/
-    std::string getHitBranchNames(int coll) const override;
+ private:
+   bool setHits(int i, std::vector<HitGroup>* ptr)
+   {
+     if (i >= 0 && i < Sector::MAXSECTOR) {
+       mHitsPerSectorCollection[i] = ptr;
+       return (i < Sector::MAXSECTOR-1)? true : false;
+     }
+     return false;
+   }
 
-    /**      has to be called after each event to reset the containers      */
-    void   Reset() override;
+   void createHitBuffers()
+   {
+     for (int buffer = 0; buffer < NHITBUFFERS; ++buffer) {
+       int probe = 0;
+       bool more{ false };
+       do {
+         auto ptr = o2::utils::createSimVector<HitGroup>();
+         more = setHits(probe, ptr);
+         mCachedPtr[buffer].emplace_back(ptr);
+         probe++;
+       } while (more);
+     }
+   }
 
-    /**      Create the detector geometry        */
-    void ConstructGeometry() override;
+  public:
+   /** tell the branch names corresponding to hits **/
+   std::string getHitBranchNames(int coll) const override;
 
-    /**      This method is an example of how to add your own point
+   /**      has to be called after each event to reset the containers      */
+   void Reset() override;
+
+   /**      Create the detector geometry        */
+   void ConstructGeometry() override;
+
+   /**      This method is an example of how to add your own point
      *       of type DetectorPoint to the clones array
     */
-    Point* addHit(float x, float y, float z, float time, float nElectrons, float trackID, float detID);
-    
+   Point* addHit(float x, float y, float z, float time, float nElectrons, float trackID, float detID);
 
-    /// Copied from AliRoot - should go to someplace else
-    
-    /// Empirical ALEPH parameterization of the Bethe-Bloch formula, normalized to 1 at the minimum.
-    /// @param bg Beta*Gamma of the incident particle
-    /// @param kp* Parameters for the ALICE TPC
-    /// @return Bethe-Bloch value in MIP units
-    template <typename T>
-    T BetheBlochAleph(T bg, T kp1, T kp2, T kp3, T kp4, T kp5);
+   /// Copied from AliRoot - should go to someplace else
 
-    /// Copied from AliRoot - should go to someplace else
-    /// Function to generate random numbers according to Gamma function 
-    /// From Hisashi Tanizaki:
-    /// http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.158.3866&rep=rep1&type=pdf
-    /// Implemented by A. Morsch 14/01/2014    
-    /// @k is the mean and variance
-    Double_t Gamma(Double_t k);
+   /// Empirical ALEPH parameterization of the Bethe-Bloch formula, normalized to 1 at the minimum.
+   /// @param bg Beta*Gamma of the incident particle
+   /// @param kp* Parameters for the ALICE TPC
+   /// @return Bethe-Bloch value in MIP units
+   template <typename T>
+   T BetheBlochAleph(T bg, T kp1, T kp2, T kp3, T kp4, T kp5);
 
-    
-    /** The following methods can be implemented if you need to make
+   /// Copied from AliRoot - should go to someplace else
+   /// Function to generate random numbers according to Gamma function
+   /// From Hisashi Tanizaki:
+   /// http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.158.3866&rep=rep1&type=pdf
+   /// Implemented by A. Morsch 14/01/2014
+   /// @k is the mean and variance
+   Double_t Gamma(Double_t k);
+
+   /** The following methods can be implemented if you need to make
      *  any optional action in your detector during the transport.
     */
 
-    /// Special Geant3? limits and definitions
-    /// \todo Check how to deal with this in O2 compared to AliRoot
-    /// \todo Discuss in a wider scope
-    /// \todo Check correctness of the implementation
-    void   SetSpecialPhysicsCuts() override;
+   /// Special Geant3? limits and definitions
+   /// \todo Check how to deal with this in O2 compared to AliRoot
+   /// \todo Discuss in a wider scope
+   /// \todo Check correctness of the implementation
+   void SetSpecialPhysicsCuts() override;
 
-    void   EndOfEvent() override;
-    void   FinishPrimary() override {;}
-    void   FinishRun() override {;}
-    void   BeginPrimary() override {;}
-    void   PostTrack() override {;}
-    void   PreTrack() override {;}
+   void EndOfEvent() override;
+   void FinishPrimary() override { ; }
+   void FinishRun() override { ; }
+   void BeginPrimary() override { ; }
+   void PostTrack() override { ; }
+   void PreTrack() override { ; }
 
-    void SetGeoFileName(const TString file) { mGeoFileName=file;   }
-    const TString& GetGeoFileName() const   { return mGeoFileName; }
+   void SetGeoFileName(const TString file) { mGeoFileName = file; }
+   const TString& GetGeoFileName() const { return mGeoFileName; }
 
   private:
     int mHitCounter = 0;

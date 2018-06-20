@@ -59,6 +59,7 @@ namespace fit
 class Geometry;
 class Detector : public o2::Base::DetImpl<Detector>
 {
+  friend class o2::Base::DetImpl<Detector>;
  public:
   enum constants {
     kAir = 1,
@@ -78,6 +79,9 @@ class Detector : public o2::Base::DetImpl<Detector>
 
   /// Default constructor
   Detector() = default;
+
+  /// Destructor
+  ~Detector();
 
   /// Clone this object (used in MT mode only)
   FairModule* CloneModule() const override;
@@ -99,62 +103,88 @@ class Detector : public o2::Base::DetImpl<Detector>
     return nullptr;
   }
 
-  void Reset() override;
-
-  /// Base class to create the detector geometry
-  void CreateMaterials();
-  void ConstructGeometry() override;
-  void SetOneMCP(TGeoVolume* stl);
-
-  // Optical properties reader: e-Energy, abs-AbsorptionLength[cm], n-refractive index
-  void DefineOpticalProperties();
-  Int_t ReadOptProperties(const std::string inputFilePath);
-  void FillOtherOptProperties();
-  Bool_t RegisterPhotoE(float energy);
-
-  //  Geometry* GetGeometry();
-
-  /// Prints out the content of this class in ASCII format
-  /// \param ostream *os The output stream
-  void Print(std::ostream* os) const;
-
-  /// Reads in the content of this class in the format of Print
-  /// \param istream *is The input stream
-  void Read(std::istream* is);
-
  private:
-  /// copy constructor (used in MT)
-  Detector(const Detector& rhs);
+   bool setHits(int i, std::vector<HitType>* ptr)
+   {
+     if (i == 0) {
+       mHits = ptr;
+       return false;
+     }
+     return false;
+   }
 
-  Int_t mIdSens1;            // Sensetive volume  in T0
-  TGraph* mPMTeff = nullptr; // pmt registration effeicincy
+   void createHitBuffers()
+   {
+     using Hit_t = decltype(getHits(0));
+     for (int buffer = 0; buffer < NHITBUFFERS; ++buffer) {
+       int probe = 0;
+       bool more{ false };
+       do {
+         auto ptr = o2::utils::createSimVector<HitType>();
+         more = setHits(probe, ptr);
+         mCachedPtr[buffer].emplace_back(ptr);
+         probe++;
+       } while (more);
+     }
+   }
 
-  // Optical properties to be extracted from file
-  std::vector<Double_t> mPhotonEnergyD;
-  std::vector<Double_t> mAbsorptionLength;
-  std::vector<Double_t> mRefractionIndex;
-  std::vector<Double_t> mQuantumEfficiency;
+  public:
+   void Reset() override;
 
-  // Optical properties to be set to constants
-  std::vector<Double_t> mEfficAll;
-  std::vector<Float_t> mRindexAir;
-  std::vector<Float_t> mAbsorAir;
-  std::vector<Float_t> mRindexCathodeNext;
-  std::vector<Float_t> mAbsorbCathodeNext;
-  std::vector<Double_t> mEfficMet;
-  std::vector<Double_t> mReflMet;
+   /// Base class to create the detector geometry
+   void CreateMaterials();
+   void ConstructGeometry() override;
+   void SetOneMCP(TGeoVolume* stl);
 
-  /// Container for data points
-  std::vector<HitType>* mHits = nullptr;
+   // Optical properties reader: e-Energy, abs-AbsorptionLength[cm], n-refractive index
+   void DefineOpticalProperties();
+   Int_t ReadOptProperties(const std::string inputFilePath);
+   void FillOtherOptProperties();
+   Bool_t RegisterPhotoE(float energy);
 
-  /// Define the sensitive volumes of the geometry
-  void defineSensitiveVolumes();
+   //  Geometry* GetGeometry();
 
-  Detector& operator=(const Detector&);
+   /// Prints out the content of this class in ASCII format
+   /// \param ostream *os The output stream
+   void Print(std::ostream* os) const;
 
-  Geometry* mGeometry = nullptr; //! Geometry
+   /// Reads in the content of this class in the format of Print
+   /// \param istream *is The input stream
+   void Read(std::istream* is);
 
-  ClassDefOverride(Detector, 1)
+  private:
+   /// copy constructor (used in MT)
+   Detector(const Detector& rhs);
+
+   Int_t mIdSens1;            // Sensetive volume  in T0
+   TGraph* mPMTeff = nullptr; // pmt registration effeicincy
+
+   // Optical properties to be extracted from file
+   std::vector<Double_t> mPhotonEnergyD;
+   std::vector<Double_t> mAbsorptionLength;
+   std::vector<Double_t> mRefractionIndex;
+   std::vector<Double_t> mQuantumEfficiency;
+
+   // Optical properties to be set to constants
+   std::vector<Double_t> mEfficAll;
+   std::vector<Float_t> mRindexAir;
+   std::vector<Float_t> mAbsorAir;
+   std::vector<Float_t> mRindexCathodeNext;
+   std::vector<Float_t> mAbsorbCathodeNext;
+   std::vector<Double_t> mEfficMet;
+   std::vector<Double_t> mReflMet;
+
+   /// Container for data points
+   std::vector<HitType>* mHits = nullptr;
+
+   /// Define the sensitive volumes of the geometry
+   void defineSensitiveVolumes();
+
+   Detector& operator=(const Detector&);
+
+   Geometry* mGeometry = nullptr; //! Geometry
+
+   ClassDefOverride(Detector, 1)
 };
 
 // Input and output function for standard C++ input/output.

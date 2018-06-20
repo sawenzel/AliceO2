@@ -169,6 +169,9 @@ class O2SimDevice : public FairMQDevice
         LOG(INFO) << "Processing " << chunk->mParticles.size() << FairLogger::endl;
         gRandom->SetSeed(chunk->mEventIDs[0].seed);
 
+        //bool b = true;
+        //while(b) {}
+
         mVMC->ProcessRun(1);
         FairSystemInfo sysinfo;
         LOG(INFO) << "TIME-STAMP " << mTimer.RealTime() << "\t";

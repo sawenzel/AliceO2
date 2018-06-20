@@ -25,6 +25,8 @@ class Stepper;
 
 class Detector : public o2::Base::DetImpl<Detector>
 {
+  friend class o2::Base::DetImpl<Detector>;
+
  public:
   Detector(bool active = true);
 
@@ -44,18 +46,36 @@ class Detector : public o2::Base::DetImpl<Detector>
 
   std::vector<o2::mch::Hit>* getHits(int);
 
-  void EndOfEvent() override;
-
  private:
-  /// copy constructor (used in MT)
-  Detector(const Detector& rhs);
+   bool setHits(int i, std::vector<o2::mch::Hit>* ptr);
 
-  void defineSensitiveVolumes();
+   void createHitBuffers()
+   {
+     for (int buffer = 0; buffer < NHITBUFFERS; ++buffer) {
+       int probe = 0;
+       bool more{ false };
+       do {
+         auto ptr = o2::utils::createSimVector<o2::mch::Hit>();
+         more = setHits(probe, ptr);
+         mCachedPtr[buffer].emplace_back(ptr);
+         probe++;
+       } while (more);
+     }
+   }
 
- private:
-  o2::mch::Stepper* mStepper{ nullptr }; //!
+  public:
+   void EndOfEvent() override;
 
-  ClassDefOverride(Detector, 1);
+  private:
+   /// copy constructor (used in MT)
+   Detector(const Detector& rhs);
+
+   void defineSensitiveVolumes();
+
+  private:
+   o2::mch::Stepper* mStepper{ nullptr }; //!
+
+   ClassDefOverride(Detector, 1);
 };
 
 } // namespace mch

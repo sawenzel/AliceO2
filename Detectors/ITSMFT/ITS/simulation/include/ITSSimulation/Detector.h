@@ -65,6 +65,8 @@ class V3Layer;
 
 class Detector : public o2::Base::DetImpl<Detector>
 {
+  friend class o2::Base::DetImpl<Detector>;
+
  public:
   enum Model {
     kIBModelDummy = 0,
@@ -113,159 +115,185 @@ class Detector : public o2::Base::DetImpl<Detector>
     return nullptr;
   }
 
-  /// Has to be called after each event to reset the containers
-  void Reset() override;
-
-  /// Base class to create the detector geometry
-  void ConstructGeometry() override;
-
-  /// Creates the Service Barrel (as a simple cylinder) for IB and OB
-  /// \param innerBarrel if true, build IB service barrel, otherwise for OB
-  /// \param dest the mother volume holding the service barrel
-  /// \param mgr  the gGeoManager pointer (used to get the material)
-  void createServiceBarrel(const Bool_t innerBarrel, TGeoVolume* dest, const TGeoManager* mgr = gGeoManager);
-
-  /// Sets the layer parameters
-  /// \param nlay layer number
-  /// \param phi0 layer phi0
-  /// \param r layer radius
-  /// \param nstav number of staves
-  /// \param nunit IB: number of chips per stave
-  /// \param OB: number of modules per half stave
-  /// \param lthick stave thickness (if omitted, defaults to 0)
-  /// \param dthick detector thickness (if omitted, defaults to 0)
-  /// \param dettypeID ??
-  /// \param buildLevel (if 0, all geometry is build, used for material budget studies)
-  void defineLayer(Int_t nlay, Double_t phi0, Double_t r, Int_t nladd, Int_t nmod, Double_t lthick = 0.,
-                   Double_t dthick = 0., UInt_t detType = 0, Int_t buildFlag = 0) override;
-
-  /// Sets the layer parameters for a "turbo" layer
-  /// (i.e. a layer whose staves overlap in phi)
-  /// \param nlay layer number
-  /// \param phi0 phi of 1st stave
-  /// \param r layer radius
-  /// \param nstav number of staves
-  /// \param nunit IB: number of chips per stave
-  /// \param OB: number of modules per half stave
-  /// \param width stave width
-  /// \param tilt layer tilt angle (degrees)
-  /// \param lthick stave thickness (if omitted, defaults to 0)
-  /// \param dthick detector thickness (if omitted, defaults to 0)
-  /// \param dettypeID ??
-  /// \param buildLevel (if 0, all geometry is build, used for material budget studies)
-  void defineLayerTurbo(Int_t nlay, Double_t phi0, Double_t r, Int_t nladd, Int_t nmod, Double_t width, Double_t tilt,
-                        Double_t lthick = 0., Double_t dthick = 0., UInt_t detType = 0, Int_t buildFlag = 0) override;
-
-  /// Gets the layer parameters
-  /// \param nlay layer number
-  /// \param phi0 phi of 1st stave
-  /// \param r layer radius
-  /// \param nstav number of staves
-  /// \param nmod IB: number of chips per stave
-  /// \param OB: number of modules per half stave
-  /// \param width stave width
-  /// \param tilt stave tilt angle
-  /// \param lthick stave thickness
-  /// \param dthick detector thickness
-  /// \param dettype detector type
-  virtual void getLayerParameters(Int_t nlay, Double_t& phi0, Double_t& r, Int_t& nladd, Int_t& nmod, Double_t& width,
-                                  Double_t& tilt, Double_t& lthick, Double_t& mthick, UInt_t& dettype) const;
-
-  /// This method is an example of how to add your own point of type Hit to the clones array
-  o2::ITSMFT::Hit* addHit(int trackID, int detID, const TVector3& startPos, const TVector3& endPos,
-                          const TVector3& startMom, double startE, double endTime, double eLoss,
-                          unsigned char startStatus, unsigned char endStatus);
-
-  /// Set per wrapper volume parameters
-  void defineWrapperVolume(Int_t id, Double_t rmin, Double_t rmax, Double_t zspan) override;
-
-  /// Add alignable top volumes
-  void addAlignableVolumes() const override;
-
-  /// Add alignable Layer volumes
-  /// \param lr layer number
-  /// \param parent path of the parent volume
-  /// \param lastUID on output, UID of the last volume
-  void addAlignableVolumesLayer(Int_t lr, TString& parent, Int_t& lastUID) const;
-
-  /// Add alignable Stave volumes
-  /// \param lr layer number
-  /// \param st stave number
-  /// \param parent path of the parent volume
-  /// \param lastUID on output, UID of the last volume
-  void addAlignableVolumesStave(Int_t lr, Int_t st, TString& parent, Int_t& lastUID) const;
-
-  /// Add alignable HalfStave volumes
-  /// \param lr layer number
-  /// \param st stave number
-  /// \param hst half stave number
-  /// \param parent path of the parent volume
-  /// \param lastUID on output, UID of the last volume
-  void addAlignableVolumesHalfStave(Int_t lr, Int_t st, Int_t hst, TString& parent, Int_t& lastUID) const;
-
-  /// Add alignable Module volumes
-  /// \param lr layer number
-  /// \param st stave number
-  /// \param hst half stave number
-  /// \param md module number
-  /// \param parent path of the parent volume
-  /// \param lastUID on output, UID of the last volume
-  void addAlignableVolumesModule(Int_t lr, Int_t st, Int_t hst, Int_t md, TString& parent, Int_t& lastUID) const;
-
-  /// Add alignable Chip volumes
-  /// \param lr layer number
-  /// \param st stave number
-  /// \param hst half stave number
-  /// \param md module number
-  /// \param ch chip number
-  /// \param parent path of the parent volume
-  /// \param lastUID on output, UID of the last volume
-  void addAlignableVolumesChip(Int_t lr, Int_t st, Int_t hst, Int_t md, Int_t ch, TString& parent,
-                               Int_t& lastUID) const;
-
-  /// Return Chip Volume UID
-  /// \param id volume id
-  Int_t chipVolUID(Int_t id) const { return o2::Base::GeometryManager::getSensID(o2::detectors::DetID::ITS, id); }
-
-  void SetSpecialPhysicsCuts() override { ; }
-  void EndOfEvent() override;
-
-  void FinishPrimary() override { ; }
-  virtual void finishRun() { ; }
-  void BeginPrimary() override { ; }
-  void PostTrack() override { ; }
-  void PreTrack() override { ; }
-  /// Prints out the content of this class in ASCII format
-  /// \param ostream *os The output stream
-  void Print(std::ostream* os) const;
-
-  /// Reads in the content of this class in the format of Print
-  /// \param istream *is The input stream
-  void Read(std::istream* is);
-
-  /// Returns the number of layers
-  Int_t getNumberOfLayers() const { return sNumberLayers; }
-  virtual void setStaveModelIB(Model model) { mStaveModelInnerBarrel = model; }
-  virtual void setStaveModelOB(Model model) { mStaveModelOuterBarrel = model; }
-  virtual Model getStaveModelIB() const { return mStaveModelInnerBarrel; }
-  virtual Model getStaveModelOB() const { return mStaveModelOuterBarrel; }
-  /// Clone this object (used in MT mode only)
-  FairModule* CloneModule() const override;
-
-  GeometryTGeo* mGeometryTGeo; //! access to geometry details
-
- protected:
-  Int_t mLayerID[sNumberLayers];     //! [sNumberLayers] layer identifier
-  TString mLayerName[sNumberLayers]; //! [sNumberLayers] layer identifier
-
  private:
-  /// this is transient data about track passing the sensor
-  struct TrackData {               // this is transient
-    bool mHitStarted;              //! hit creation started
-    unsigned char mTrkStatusStart; //! track status flag
-    TLorentzVector mPositionStart; //! position at entrance
-    TLorentzVector mMomentumStart; //! momentum
-    double mEnergyLoss;            //! energy loss
+   bool setHits(int i, std::vector<o2::ITSMFT::Hit>* ptr)
+   {
+     if (i == 0) {
+       mHits = ptr;
+       return false;
+     }
+     return false;
+   }
+
+   void createHitBuffers()
+   {
+     using Hit_t = decltype(getHits(0));
+     for (int buffer = 0; buffer < NHITBUFFERS; ++buffer) {
+       int probe = 0;
+       bool more{ false };
+       do {
+         auto ptr = o2::utils::createSimVector<o2::ITSMFT::Hit>();
+         more = setHits(probe, ptr);
+         mCachedPtr[buffer].emplace_back(ptr);
+         probe++;
+       } while (more);
+     }
+   }
+
+  public:
+   /// Has to be called after each event to reset the containers
+   void Reset() override;
+
+   /// Base class to create the detector geometry
+   void ConstructGeometry() override;
+
+   /// Creates the Service Barrel (as a simple cylinder) for IB and OB
+   /// \param innerBarrel if true, build IB service barrel, otherwise for OB
+   /// \param dest the mother volume holding the service barrel
+   /// \param mgr  the gGeoManager pointer (used to get the material)
+   void createServiceBarrel(const Bool_t innerBarrel, TGeoVolume* dest, const TGeoManager* mgr = gGeoManager);
+
+   /// Sets the layer parameters
+   /// \param nlay layer number
+   /// \param phi0 layer phi0
+   /// \param r layer radius
+   /// \param nstav number of staves
+   /// \param nunit IB: number of chips per stave
+   /// \param OB: number of modules per half stave
+   /// \param lthick stave thickness (if omitted, defaults to 0)
+   /// \param dthick detector thickness (if omitted, defaults to 0)
+   /// \param dettypeID ??
+   /// \param buildLevel (if 0, all geometry is build, used for material budget studies)
+   void defineLayer(Int_t nlay, Double_t phi0, Double_t r, Int_t nladd, Int_t nmod, Double_t lthick = 0.,
+                    Double_t dthick = 0., UInt_t detType = 0, Int_t buildFlag = 0) override;
+
+   /// Sets the layer parameters for a "turbo" layer
+   /// (i.e. a layer whose staves overlap in phi)
+   /// \param nlay layer number
+   /// \param phi0 phi of 1st stave
+   /// \param r layer radius
+   /// \param nstav number of staves
+   /// \param nunit IB: number of chips per stave
+   /// \param OB: number of modules per half stave
+   /// \param width stave width
+   /// \param tilt layer tilt angle (degrees)
+   /// \param lthick stave thickness (if omitted, defaults to 0)
+   /// \param dthick detector thickness (if omitted, defaults to 0)
+   /// \param dettypeID ??
+   /// \param buildLevel (if 0, all geometry is build, used for material budget studies)
+   void defineLayerTurbo(Int_t nlay, Double_t phi0, Double_t r, Int_t nladd, Int_t nmod, Double_t width, Double_t tilt,
+                         Double_t lthick = 0., Double_t dthick = 0., UInt_t detType = 0, Int_t buildFlag = 0) override;
+
+   /// Gets the layer parameters
+   /// \param nlay layer number
+   /// \param phi0 phi of 1st stave
+   /// \param r layer radius
+   /// \param nstav number of staves
+   /// \param nmod IB: number of chips per stave
+   /// \param OB: number of modules per half stave
+   /// \param width stave width
+   /// \param tilt stave tilt angle
+   /// \param lthick stave thickness
+   /// \param dthick detector thickness
+   /// \param dettype detector type
+   virtual void getLayerParameters(Int_t nlay, Double_t& phi0, Double_t& r, Int_t& nladd, Int_t& nmod, Double_t& width,
+                                   Double_t& tilt, Double_t& lthick, Double_t& mthick, UInt_t& dettype) const;
+
+   /// This method is an example of how to add your own point of type Hit to the clones array
+   o2::ITSMFT::Hit* addHit(int trackID, int detID, const TVector3& startPos, const TVector3& endPos,
+                           const TVector3& startMom, double startE, double endTime, double eLoss,
+                           unsigned char startStatus, unsigned char endStatus);
+
+   /// Set per wrapper volume parameters
+   void defineWrapperVolume(Int_t id, Double_t rmin, Double_t rmax, Double_t zspan) override;
+
+   /// Add alignable top volumes
+   void addAlignableVolumes() const override;
+
+   /// Add alignable Layer volumes
+   /// \param lr layer number
+   /// \param parent path of the parent volume
+   /// \param lastUID on output, UID of the last volume
+   void addAlignableVolumesLayer(Int_t lr, TString& parent, Int_t& lastUID) const;
+
+   /// Add alignable Stave volumes
+   /// \param lr layer number
+   /// \param st stave number
+   /// \param parent path of the parent volume
+   /// \param lastUID on output, UID of the last volume
+   void addAlignableVolumesStave(Int_t lr, Int_t st, TString& parent, Int_t& lastUID) const;
+
+   /// Add alignable HalfStave volumes
+   /// \param lr layer number
+   /// \param st stave number
+   /// \param hst half stave number
+   /// \param parent path of the parent volume
+   /// \param lastUID on output, UID of the last volume
+   void addAlignableVolumesHalfStave(Int_t lr, Int_t st, Int_t hst, TString& parent, Int_t& lastUID) const;
+
+   /// Add alignable Module volumes
+   /// \param lr layer number
+   /// \param st stave number
+   /// \param hst half stave number
+   /// \param md module number
+   /// \param parent path of the parent volume
+   /// \param lastUID on output, UID of the last volume
+   void addAlignableVolumesModule(Int_t lr, Int_t st, Int_t hst, Int_t md, TString& parent, Int_t& lastUID) const;
+
+   /// Add alignable Chip volumes
+   /// \param lr layer number
+   /// \param st stave number
+   /// \param hst half stave number
+   /// \param md module number
+   /// \param ch chip number
+   /// \param parent path of the parent volume
+   /// \param lastUID on output, UID of the last volume
+   void addAlignableVolumesChip(Int_t lr, Int_t st, Int_t hst, Int_t md, Int_t ch, TString& parent,
+                                Int_t& lastUID) const;
+
+   /// Return Chip Volume UID
+   /// \param id volume id
+   Int_t chipVolUID(Int_t id) const { return o2::Base::GeometryManager::getSensID(o2::detectors::DetID::ITS, id); }
+
+   void SetSpecialPhysicsCuts() override { ; }
+   void EndOfEvent() override;
+
+   void FinishPrimary() override { ; }
+   virtual void finishRun() { ; }
+   void BeginPrimary() override { ; }
+   void PostTrack() override { ; }
+   void PreTrack() override { ; }
+   /// Prints out the content of this class in ASCII format
+   /// \param ostream *os The output stream
+   void Print(std::ostream* os) const;
+
+   /// Reads in the content of this class in the format of Print
+   /// \param istream *is The input stream
+   void Read(std::istream* is);
+
+   /// Returns the number of layers
+   Int_t getNumberOfLayers() const { return sNumberLayers; }
+   virtual void setStaveModelIB(Model model) { mStaveModelInnerBarrel = model; }
+   virtual void setStaveModelOB(Model model) { mStaveModelOuterBarrel = model; }
+   virtual Model getStaveModelIB() const { return mStaveModelInnerBarrel; }
+   virtual Model getStaveModelOB() const { return mStaveModelOuterBarrel; }
+   /// Clone this object (used in MT mode only)
+   FairModule* CloneModule() const override;
+
+   GeometryTGeo* mGeometryTGeo; //! access to geometry details
+
+  protected:
+   Int_t mLayerID[sNumberLayers];     //! [sNumberLayers] layer identifier
+   TString mLayerName[sNumberLayers]; //! [sNumberLayers] layer identifier
+
+  private:
+   /// this is transient data about track passing the sensor
+   struct TrackData {               // this is transient
+     bool mHitStarted;              //! hit creation started
+     unsigned char mTrkStatusStart; //! track status flag
+     TLorentzVector mPositionStart; //! position at entrance
+     TLorentzVector mMomentumStart; //! momentum
+     double mEnergyLoss;            //! energy loss
   } mTrackData;                    //!
 
   Int_t mNumberOfDetectors;

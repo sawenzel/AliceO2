@@ -39,10 +39,12 @@ using HitType = o2::BasicXYZEHit<float>;
 
 class Detector : public o2::Base::DetImpl<Detector>
 {
+  friend class o2::Base::DetImpl<Detector>;
+
  public:
   Detector(Bool_t active=true);
 
-  ~Detector() override = default;
+  ~Detector() override;
 
   FairModule* CloneModule() const override;
 
@@ -60,32 +62,57 @@ class Detector : public o2::Base::DetImpl<Detector>
     return nullptr;
   }
 
-  void Reset() override;
-  void EndOfEvent() override;
-
-  void createMaterials();
-  void ConstructGeometry() override;
-
  private:
-  /// copy constructor (used in MT)
-  Detector(const Detector& rhs);
+   bool setHits(int i, std::vector<HitType>* ptr)
+   {
+     if (i == 0) {
+       mHits = ptr;
+       return false;
+     }
+     return false;
+   }
 
-  // defines/sets-up the sensitive volumes
-  void defineSensitiveVolumes();
+   void createHitBuffers()
+   {
+     for (int buffer = 0; buffer < NHITBUFFERS; ++buffer) {
+       int probe = 0;
+       bool more{ false };
+       do {
+         auto ptr = o2::utils::createSimVector<HitType>();
+         more = setHits(probe, ptr);
+         mCachedPtr[buffer].emplace_back(ptr);
+         probe++;
+       } while (more);
+     }
+   }
 
-  // addHit
-  template <typename T>
-  void addHit(T x, T y, T z, T time, T energy, int trackId, int detId);
+  public:
+   void Reset() override;
+   void EndOfEvent() override;
 
-  std::vector<HitType>* mHits = nullptr; ///!< Collection of TRD hits
+   void createMaterials();
+   void ConstructGeometry() override;
 
-  float mFoilDensity;
-  float mGasNobleFraction;
-  float mGasDensity;
+  private:
+   /// copy constructor (used in MT)
+   Detector(const Detector& rhs);
 
-  TRDGeometry* mGeom = nullptr;
+   // defines/sets-up the sensitive volumes
+   void defineSensitiveVolumes();
 
-  ClassDefOverride(Detector, 1)
+   // addHit
+   template <typename T>
+   void addHit(T x, T y, T z, T time, T energy, int trackId, int detId);
+
+   std::vector<HitType>* mHits = nullptr; ///!< Collection of TRD hits
+
+   float mFoilDensity;
+   float mGasNobleFraction;
+   float mGasDensity;
+
+   TRDGeometry* mGeom = nullptr;
+
+   ClassDefOverride(Detector, 1)
 };
 
 template <typename T>

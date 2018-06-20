@@ -38,6 +38,11 @@ Detector::Detector(const Detector& rhs)
 {
 }
 
+Detector::~Detector()
+{
+  o2::utils::freeSimVector(mHits);
+}
+
 FairModule* Detector::CloneModule() const
 {
   return new Detector(*this);

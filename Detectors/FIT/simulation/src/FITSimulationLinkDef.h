@@ -17,7 +17,8 @@
 #pragma link C++ class o2::fit::Detector+;
 #pragma link C++ class o2::fit::Digitizer + ;
 #pragma link C++ class o2::fit::DigitizerTask + ;
-
+#pragma link C++ class o2::fit::HitType+;
+#pragma link C++ class vector<o2::fit::HitType>+;
 #pragma link C++ class o2::Base::DetImpl<o2::fit::Detector>+;
 
 #endif

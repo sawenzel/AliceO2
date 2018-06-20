@@ -49,6 +49,7 @@ class Geometry;
 /// EMCAL detector up to hit generation
 class Detector : public o2::Base::DetImpl<Detector>
 {
+  friend class o2::Base::DetImpl<Detector>;
  public:
   enum { ID_AIR = 0, ID_PB = 1, ID_SC = 2, ID_AL = 3, ID_STEEL = 4, ID_PAPER = 5 };
 
@@ -67,7 +68,7 @@ class Detector : public o2::Base::DetImpl<Detector>
   ///
   /// Destructor
   ///
-  ~Detector() override = default;
+  ~Detector() override;
 
   ///
   /// Clone this object (used in MT mode only)
@@ -118,6 +119,32 @@ class Detector : public o2::Base::DetImpl<Detector>
     return nullptr;
   }
 
+private:
+  bool setHits(int i, std::vector<Hit>* ptr)
+  {
+    if (i == 0) {
+      mHits = ptr;
+      return false;
+    }
+    return false;
+  }
+
+  void createHitBuffers()
+  {
+    using Hit_t = decltype(getHits(0));
+    for (int buffer = 0; buffer < NHITBUFFERS; ++buffer) {
+      int probe = 0;
+      bool more{ false };
+      do {
+        auto ptr = o2::utils::createSimVector<Hit>();
+        more = setHits(probe, ptr);
+        mCachedPtr[buffer].emplace_back(ptr);
+        probe++;
+      } while (more);
+    }
+  }
+
+ public:
   ///
   /// Reset
   /// Clean point collection

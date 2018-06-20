@@ -43,6 +43,11 @@ Detector::Detector(const Detector& rhs)
     mTOFSectors[i] = rhs.mTOFSectors[i];
 }
 
+Detector::~Detector()
+{
+  o2::utils::freeSimVector(mHits);
+}
+
 FairModule* Detector::CloneModule() const
 {
   return new Detector(*this);

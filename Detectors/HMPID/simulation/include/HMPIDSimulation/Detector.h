@@ -27,6 +27,7 @@ using HitType = o2::BasicXYZEHit<float>;
 
 class Detector : public o2::Base::DetImpl<Detector>
 {
+  friend class o2::Base::DetImpl<Detector>;
  public:
   Detector(Bool_t active = true);
   ~Detector() override = default;
@@ -39,41 +40,66 @@ class Detector : public o2::Base::DetImpl<Detector>
     return nullptr;
   }
 
-  bool ProcessHits(FairVolume* v) override;
-  void Register() override;
-  void Reset() override;
-  void Initialize() override;
-  // void AddAlignableVolumes() const;
-  void IdealPosition(int iCh, TGeoHMatrix* pMatrix);
-  void IdealPositionCradle(int iCh, TGeoHMatrix* pMatrix);
-  void createMaterials();
-  void ConstructGeometry() override;
-  void defineSensitiveVolumes();
-  void DefineOpticalProperties();
-  void EndOfEvent() override { Reset(); }
-
-  // for the geometry sub-parts
-  TGeoVolume* createChamber(int number);
-  TGeoVolume* CreateCradle();
-  TGeoVolume* CradleBaseVolume(TGeoMedium* med, Double_t l[7], const char* name);
-
  private:
-  std::vector<HitType>* mHits = nullptr; ///!< Collection of HMPID hits
-  enum EMedia {
-    kAir = 1,
-    kRoha = 2,
-    kSiO2 = 3,
-    kC6F14 = 4,
-    kCH4 = 5,
-    kCsI = 6,
-    kAl = 7,
-    kCu = 8,
-    kW = 9,
-    kNeo = 10,
-    kAr = 11
-  };
+   bool setHits(int i, std::vector<HitType>* ptr)
+   {
+     if (i == 0) {
+       mHits = ptr;
+       return false;
+     }
+     return false;
+   }
+   void createHitBuffers()
+   {
+     using Hit_t = decltype(getHits(0));
+     for (int buffer = 0; buffer < NHITBUFFERS; ++buffer) {
+       int probe = 0;
+       bool more{ false };
+       do {
+         auto ptr = o2::utils::createSimVector<HitType>();
+         more = setHits(probe, ptr);
+         mCachedPtr[buffer].emplace_back(ptr);
+         probe++;
+       } while (more);
+     }
+   }
 
-  ClassDefOverride(Detector, 1);
+  public:
+   bool ProcessHits(FairVolume* v) override;
+   void Register() override;
+   void Reset() override;
+   void Initialize() override;
+   // void AddAlignableVolumes() const;
+   void IdealPosition(int iCh, TGeoHMatrix* pMatrix);
+   void IdealPositionCradle(int iCh, TGeoHMatrix* pMatrix);
+   void createMaterials();
+   void ConstructGeometry() override;
+   void defineSensitiveVolumes();
+   void DefineOpticalProperties();
+   void EndOfEvent() override { Reset(); }
+
+   // for the geometry sub-parts
+   TGeoVolume* createChamber(int number);
+   TGeoVolume* CreateCradle();
+   TGeoVolume* CradleBaseVolume(TGeoMedium* med, Double_t l[7], const char* name);
+
+  private:
+   std::vector<HitType>* mHits = nullptr; ///!< Collection of HMPID hits
+   enum EMedia {
+     kAir = 1,
+     kRoha = 2,
+     kSiO2 = 3,
+     kC6F14 = 4,
+     kCH4 = 5,
+     kCsI = 6,
+     kAl = 7,
+     kCu = 8,
+     kW = 9,
+     kNeo = 10,
+     kAr = 11
+   };
+
+   ClassDefOverride(Detector, 1);
 };
 
 } // end namespace hmpid

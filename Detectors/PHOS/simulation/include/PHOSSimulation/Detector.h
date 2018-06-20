@@ -39,6 +39,7 @@ class GeometryParams;
 /// PHOS detector up to hit generation
 class Detector : public o2::Base::DetImpl<Detector>
 {
+  friend class o2::Base::DetImpl<Detector>;
  public:
   // PHOS materials/media
   enum {
@@ -70,7 +71,7 @@ class Detector : public o2::Base::DetImpl<Detector>
   ///
   /// Destructor
   ///
-  ~Detector() override = default;
+  ~Detector() override;
 
   ///
   ///  Clone this object (used in MT mode only)
@@ -119,49 +120,73 @@ class Detector : public o2::Base::DetImpl<Detector>
       return nullptr;
   }
 
-  ///
-  /// Reset
-  /// Clean Hits collection
-  ///
-  void Reset() final;
+ private:
+   bool setHits(int i, std::vector<Hit>* ptr)
+   {
+     if (i == 0) {
+       mHits = ptr;
+       return false;
+     }
+     return false;
+   }
+   void createHitBuffers()
+   {
+     for (int buffer = 0; buffer < NHITBUFFERS; ++buffer) {
+       int probe = 0;
+       bool more{ false };
+       do {
+         auto ptr = o2::utils::createSimVector<Hit>();
+         more = setHits(probe, ptr);
+         mCachedPtr[buffer].emplace_back(ptr);
+         probe++;
+       } while (more);
+     }
+   }
 
-  /// Sort final hist
-  void FinishEvent() final;
+  public:
+   ///
+   /// Reset
+   /// Clean Hits collection
+   ///
+   void Reset() final;
 
-  ///
-  /// Steps to be carried out at the end of the event
-  /// For PHOS cleaning the hit collection and the lookup table
-  ///
-  void EndOfEvent() final;
+   /// Sort final hist
+   void FinishEvent() final;
 
-  ///
-  /// Get the PHOS geometry desciption
-  /// Will be created the first time the function is called
-  /// \return Access to the PHOS Geometry description
-  ///
-  Geometry* GetGeometry();
+   ///
+   /// Steps to be carried out at the end of the event
+   /// For PHOS cleaning the hit collection and the lookup table
+   ///
+   void EndOfEvent() final;
 
- protected:
-  ///
-  /// Creating detector materials for the PHOS detector and space frame
-  ///
-  void CreateMaterials();
+   ///
+   /// Get the PHOS geometry desciption
+   /// Will be created the first time the function is called
+   /// \return Access to the PHOS Geometry description
+   ///
+   Geometry* GetGeometry();
 
-  ///
-  /// Creating PHOS description for Geant
-  ///
-  void ConstructGeometry() override;
+  protected:
+   ///
+   /// Creating detector materials for the PHOS detector and space frame
+   ///
+   void CreateMaterials();
 
-  /// Creating PHOS/support description for Geant
-  void ConstructSupportGeometry();
+   ///
+   /// Creating PHOS description for Geant
+   ///
+   void ConstructGeometry() override;
 
-  /// Creating PHOS/calorimeter part description for Geant
-  void ConstructEMCGeometry();
+   /// Creating PHOS/support description for Geant
+   void ConstructSupportGeometry();
 
-  /// Creating PHOS/CPV description for Geant
-  void ConstructCPVGeometry();
+   /// Creating PHOS/calorimeter part description for Geant
+   void ConstructEMCGeometry();
 
-  /*
+   /// Creating PHOS/CPV description for Geant
+   void ConstructCPVGeometry();
+
+   /*
 
     ///
     /// TODO: Calculate the amount of light seen by the APD for a given track segment (charged particles only)
@@ -173,25 +198,25 @@ class Detector : public o2::Base::DetImpl<Detector>
     ///
     Double_t CalculateLightYield(Double_t energydeposit, Double_t tracklength, Int_t charge) const;
   */
- private:
-  /// copy constructor (used in MT)
-  Detector(const Detector& rhs);
-  Detector& operator=(const Detector&);
+  private:
+   /// copy constructor (used in MT)
+   Detector(const Detector& rhs);
+   Detector& operator=(const Detector&);
 
-  // Geometry parameters
-  Bool_t mCreateHalfMod;   // Should we create  1/2 filled module
-  Bool_t mActiveModule[6]; // list of modules to create
+   // Geometry parameters
+   Bool_t mCreateHalfMod;   // Should we create  1/2 filled module
+   Bool_t mActiveModule[6]; // list of modules to create
 
-  // Simulation
-  Geometry* mGeom;                  //!
-  std::map<int, int> mSuperParents; //! map of current tracks to SuperParents: entered PHOS active volumes particles
-  std::vector<Hit>* mHits;          //! Collection of PHOS hits
-  Int_t mCurrentTrackID;            //! current track Id
-  Int_t mCurrentCellID;             //! current cell Id
-  Int_t mCurentSuperParent;         //! current SuperParent ID: particle entered PHOS
-  Hit* mCurrentHit;                 //! current Hit
+   // Simulation
+   Geometry* mGeom;                  //!
+   std::map<int, int> mSuperParents; //! map of current tracks to SuperParents: entered PHOS active volumes particles
+   std::vector<Hit>* mHits;          //! Collection of PHOS hits
+   Int_t mCurrentTrackID;            //! current track Id
+   Int_t mCurrentCellID;             //! current cell Id
+   Int_t mCurentSuperParent;         //! current SuperParent ID: particle entered PHOS
+   Hit* mCurrentHit;                 //! current Hit
 
-  ClassDefOverride(Detector, 1)
+   ClassDefOverride(Detector, 1)
 };
 }
 }

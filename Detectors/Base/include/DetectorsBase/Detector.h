@@ -33,6 +33,7 @@
 #include <TMessage.h>
 #include "CommonUtils/ShmManager.h"
 #include "CommonUtils/ShmHelper.h"
+#include "CommonUtils/ShmAllocator.h"
 #include <sys/shm.h>
 #include <type_traits>
 #include <unistd.h>
@@ -370,15 +371,13 @@ class DetImpl : public o2::Base::Detector
       } else {
         // this is the shared mem variant
         // we will just send the sharedmem ID and the offset inside
-        if(!mShmBusy)
-        {
-          mShmBusy = (bool*) o2::utils::ShmManager::Instance().getmemblock(sizeof(bool));
-        }
-        *mShmBusy = true;
-    	attachShmMessage(*hits, channel, parts, mShmBusy);
+        *mShmBusy[mCurrentBuffer] = true;
+    	attachShmMessage(*hits, channel, parts, mShmBusy[mCurrentBuffer]);
       }
     }
   }
+
+public:
 
   void fillHitBranch(TTree& tr, FairMQParts& parts, int& index) override
   {
@@ -393,6 +392,7 @@ class DetImpl : public o2::Base::Detector
 
         // ... and fill the tree branch
         auto br = getOrMakeBranch(tr, name.c_str(), hitsptr);
+        br->SetAddress(static_cast<void*>(&hitsptr));
         br->Fill();
         br->ResetAddress();
 
@@ -404,6 +404,7 @@ class DetImpl : public o2::Base::Detector
         LOG(INFO) << "GOT " << hitsptr->size() << " HITS ";
         // ... and fill the tree branch
         auto br = getOrMakeBranch(tr, name.c_str(), hitsptr);
+        br->SetAddress(static_cast<void*>(&hitsptr));
         br->Fill();
         br->ResetAddress();
 
@@ -418,25 +419,78 @@ class DetImpl : public o2::Base::Detector
     }
   }
 
-  // here temporarily to have some syncronization
-  void BeginEvent() override
+  void freeHitBuffers()
   {
+    using Hit_t = decltype(static_cast<Det*>(this)->Det::getHits(0));
     if (UseShm<Det>::value) {
-      while (mShmBusy!=nullptr && *mShmBusy) {
-        LOG(INFO) << " BUSY WAITING SIZE ";
-        sleep(1);
-      }
-      // now we have to clear the hits before writing again
-      int probe = 0;
-      while (auto hits = static_cast<Det*>(this)->Det::getHits(probe++)) {
-        hits->clear();
+      for (int buffer = 0; buffer < NHITBUFFERS; ++buffer) {
+        for (auto ptr : mCachedPtr[buffer]) {
+          o2::utils::freeSimVector(static_cast<Hit_t>(ptr));
+        }
       }
     }
   }
-private:
-  bool* mShmBusy = nullptr; //! pointer to bool in shared mem indicating of IO busy
 
-  ClassDefOverride(DetImpl, 0)
+  void BeginEvent() override final
+  {
+    if (UseShm<Det>::value) {
+      if (!mInitialized) {
+        static_cast<Det*>(this)->Det::createHitBuffers();
+        for (int b = 0; b < NHITBUFFERS; ++b) {
+          auto& instance = o2::utils::ShmManager::Instance();
+          mShmBusy[b] = instance.hasSegment() ? (bool*)instance.getmemblock(sizeof(bool)) : new bool;
+          *mShmBusy[b] = false;
+        }
+        mInitialized = true;
+        mCurrentBuffer = 0;
+      } else {
+        mCurrentBuffer = (mCurrentBuffer + 1) % NHITBUFFERS;
+      }
+      while (mShmBusy[mCurrentBuffer] != nullptr && *mShmBusy[mCurrentBuffer]) {
+        // this should ideally never happen
+        LOG(INFO) << " BUSY WAITING SIZE ";
+        sleep(1);
+      }
+
+      using Hit_t = decltype(static_cast<Det*>(this)->Det::getHits(0));
+
+      // now we have to clear the hits before writing again
+      int probe = 0;
+      for (auto bareptr : mCachedPtr[mCurrentBuffer]) {
+        auto hits = static_cast<Hit_t>(bareptr);
+        // assign ..
+        static_cast<Det*>(this)->Det::setHits(probe, hits);
+        hits->clear();
+        probe++;
+      }
+    }
+  }
+
+  ~DetImpl() override
+  {
+    for (int i = 0; i < NHITBUFFERS; ++i) {
+      if (mShmBusy[i]) {
+        auto& instance = o2::utils::ShmManager::Instance();
+        if (instance.hasSegment()) {
+          instance.freememblock(mShmBusy[i]);
+        } else {
+          delete mShmBusy[i];
+        }
+      }
+    }
+    freeHitBuffers();
+  }
+
+ protected:
+
+  static constexpr int NHITBUFFERS = 3; // number of buffers for hits in order to allow async processing
+                                        // in the hit merger without blocking nor copying the data
+                                        // (like done in typical data aquisition systems)
+  bool* mShmBusy[NHITBUFFERS] = {nullptr}; //! pointer to bool in shared mem indicating of IO busy
+  std::vector<void*> mCachedPtr[NHITBUFFERS];
+  int mCurrentBuffer = 0; // holding the current buffer information
+  int mInitialized = false;
+  ClassDefOverride(DetImpl, 0);
 };
 }
 }

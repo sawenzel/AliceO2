@@ -80,6 +80,16 @@ std::vector<o2::mch::Hit>* Detector::getHits(int i)
   return nullptr;
 }
 
+bool Detector::setHits(int i, std::vector<o2::mch::Hit>* ptr)
+{
+  if (i == 0) {
+    mStepper->setHits(ptr);
+    return false;
+  }
+  return false;
+}
+
+
 void Detector::Register()
 {
   // TODO : get another way to do I/O (i.e. separate concerns)
