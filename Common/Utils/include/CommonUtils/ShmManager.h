@@ -33,6 +33,9 @@ public:
    return instance;
  }
 
+ // create the segment
+ void createSegment();
+
  // the equivalent of malloc
  void* getmemblock(size_t size);
  // the equivalent of free
@@ -43,6 +46,7 @@ public:
  void printSummary() const;
  void release();
  int getShmID() const { return mShmID; }
+ bool hasSegment() const { return mShmID != -1; }
  size_t getPointerOffset(void*ptr) const { return (size_t)((char*)ptr - (char*)mMappedPtr); }
  void* getBasePtr() const { return mMappedPtr; }
 

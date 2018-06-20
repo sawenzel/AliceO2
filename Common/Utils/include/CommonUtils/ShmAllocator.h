@@ -45,8 +45,23 @@ class ShmAllocator
   inline const_pointer adress(const_reference r) const { return &r; }
 
   // the actually important functions:
-  inline pointer allocate(size_type n) { return (pointer)ShmManager::Instance().getmemblock(sizeof(value_type) * n); }
-  inline void deallocate(pointer p, size_type) { ShmManager::Instance().freememblock(p); }
+  inline pointer allocate(size_type n)
+  {
+    auto & instance = ShmManager::Instance();
+    if (instance.hasSegment()) {
+      return (pointer)ShmManager::Instance().getmemblock(sizeof(value_type) * n);
+    }
+    return (pointer)malloc(sizeof(value_type) * n);
+  }
+  inline void deallocate(pointer p, size_type)
+  {
+    auto& instance = ShmManager::Instance();
+    if (instance.hasSegment()) {
+      ShmManager::Instance().freememblock(p);
+    } else {
+      free(p);
+    }
+  }
 
   inline void construct(pointer p, const value_type& value) {
 	//LOG(FATAL) << " oka="
@@ -89,9 +104,7 @@ std::vector<T>* createSimVector()
   using vector_t = std::vector<T>;
 #ifdef USESHM
   auto& instance = o2::utils::ShmManager::Instance();
-  auto placement = instance.getmemblock(sizeof(vector_t));
-
-  // at this moment we have to trust that std::
+  auto placement = instance.hasSegment() ? instance.getmemblock(sizeof(vector_t)) : malloc(sizeof(vector_t));
   return new (placement) vector_t;
 #else
   return new vector_t;
@@ -99,19 +112,24 @@ std::vector<T>* createSimVector()
 }
 
 template <typename T>
-void freeSimVector(std::vector<T>* ptr) {
+void freeSimVector(std::vector<T>* ptr)
+{
   using vector_t = std::vector<T>;
 #ifdef USESHM
   auto& instance = o2::utils::ShmManager::Instance();
   ptr->clear();
   ptr->shrink_to_fit();
-  instance.freememblock(ptr);
-  // at this moment we have to trust that std::
+  if (instance.hasSegment()) {
+    instance.freememblock(ptr);
+  } else {
+    free(ptr);
+  }
+// at this moment we have to trust that std::
 #else
   delete ptr;
 #endif
 }
-}
-}
 
+} // end namespace utils
+} // end namespace o2
 #endif /* COMMON_UTILS_INCLUDE_COMMONUTILS_SHMALLOCATOR_H_ */

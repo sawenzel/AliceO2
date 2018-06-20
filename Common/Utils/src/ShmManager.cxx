@@ -14,7 +14,9 @@
 namespace o2 {
 namespace utils {
 
-ShmManager::ShmManager()
+ShmManager::ShmManager() { }
+
+void ShmManager::createSegment()
 {
   if ((mShmID = shmget(IPC_PRIVATE, SHMPOOLSIZE, IPC_CREAT | 0666)) == -1) {
     perror("shmget: shmget failed");
@@ -31,8 +33,7 @@ ShmManager::ShmManager()
 
 ShmManager::~ShmManager()
 {
-  LOG(INFO) << "REMOVING SHARED MEM SEGMENT ID" << mShmID;
-  shmctl(mShmID, IPC_RMID, nullptr);
+  release();
 }
 
 void ShmManager::printBlocks(std::list<MemBlock> const& blocks) const
@@ -135,8 +136,10 @@ void ShmManager::freememblock(void* ptr)
 void ShmManager::release()
 {
   LOG(INFO) << "REMOVING SHARED MEM SEGMENT ID" << mShmID;
-  shmctl(mShmID, IPC_RMID, nullptr);
-  mShmID = -1;
+  if (mShmID != -1) {
+    shmctl(mShmID, IPC_RMID, nullptr);
+    mShmID = -1;
+  }
   mAllocedBlocks.clear();
   mFreeBlocks.clear();
 }
