@@ -33,6 +33,8 @@ void ShmManager::createSegment()
 
 ShmManager::~ShmManager()
 {
+  LOG(INFO) << "SHARED MEMORY ALLOCATION SUMMARY AT SHUTDOWN";
+  printSummary();
   release();
 }
 
