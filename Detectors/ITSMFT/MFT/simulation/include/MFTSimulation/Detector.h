@@ -48,6 +48,8 @@ namespace MFT
 {
 class Detector : public o2::Base::DetImpl<Detector>
 {
+  friend class o2::Base::DetImpl<Detector>;
+
  public:
   /// Default constructor
   Detector();
@@ -76,58 +78,83 @@ class Detector : public o2::Base::DetImpl<Detector>
     return nullptr;
   }
 
-  void EndOfEvent() override;
+ private:
+   bool setHits(int i, std::vector<o2::ITSMFT::Hit>* ptr)
+   {
+     if (i == 0) {
+       mHits = ptr;
+       return false;
+     }
+     return false;
+   }
 
-  void CopyClones(TClonesArray* cl1, TClonesArray* cl2, Int_t offset) override { ; }
-  void FinishPrimary() override { ; }
-  void FinishRun() override { ; }
-  void BeginPrimary() override { ; }
-  void PostTrack() override { ; }
-  void PreTrack() override { ; }
-  void SetSpecialPhysicsCuts() override { ; }
-  void ConstructGeometry() override; // inherited from FairModule
+   void createHitBuffers()
+   {
+     for (int buffer = 0; buffer < NHITBUFFERS; ++buffer) {
+       int probe = 0;
+       bool more{ false };
+       do {
+         auto ptr = o2::utils::createSimVector<o2::ITSMFT::Hit>();
+         more = setHits(probe, ptr);
+         mCachedPtr[buffer].emplace_back(ptr);
+         probe++;
+       } while (more);
+     }
+   }
 
-  //
+  public:
+   void EndOfEvent() override;
 
-  Int_t isVersion() const { return mVersion; }
-  /// Creating materials for the detector
+   void CopyClones(TClonesArray* cl1, TClonesArray* cl2, Int_t offset) override { ; }
+   void FinishPrimary() override { ; }
+   void FinishRun() override { ; }
+   void BeginPrimary() override { ; }
+   void PostTrack() override { ; }
+   void PreTrack() override { ; }
+   void SetSpecialPhysicsCuts() override { ; }
+   void ConstructGeometry() override; // inherited from FairModule
 
-  void createMaterials();
+   //
 
-  enum EMedia {
-    Zero,
-    Air,
-    Vacuum,
-    Si,
-    Readout,
-    Support,
-    Carbon,
-    Be,
-    Alu,
-    Water,
-    SiO2,
-    Inox,
-    Kapton,
-    Epoxy,
-    CarbonFiber,
-    CarbonEpoxy,
-    Rohacell,
-    Polyimide,
-    PEEK,
-    FR4,
-    Cu,
-    X7R,
-    X7Rw,
-    CarbonFleece,
-    SE4445
-  }; // media IDs used in CreateMaterials
+   Int_t isVersion() const { return mVersion; }
+   /// Creating materials for the detector
 
-  void setDensitySupportOverSi(Double_t density)
-  {
-    if (density > 1e-6)
-      mDensitySupportOverSi = density;
-    else
-      mDensitySupportOverSi = 1e-6;
+   void createMaterials();
+
+   enum EMedia {
+     Zero,
+     Air,
+     Vacuum,
+     Si,
+     Readout,
+     Support,
+     Carbon,
+     Be,
+     Alu,
+     Water,
+     SiO2,
+     Inox,
+     Kapton,
+     Epoxy,
+     CarbonFiber,
+     CarbonEpoxy,
+     Rohacell,
+     Polyimide,
+     PEEK,
+     FR4,
+     Cu,
+     X7R,
+     X7Rw,
+     CarbonFleece,
+     SE4445
+   }; // media IDs used in CreateMaterials
+
+   void setDensitySupportOverSi(Double_t density)
+   {
+     if (density > 1e-6)
+       mDensitySupportOverSi = density;
+     else
+       mDensitySupportOverSi = 1e-6;
   }
 
   void createGeometry();

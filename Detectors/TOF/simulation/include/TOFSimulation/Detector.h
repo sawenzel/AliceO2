@@ -46,6 +46,8 @@ namespace tof
 
 class Detector : public o2::Base::DetImpl<Detector>
 {
+  friend class o2::Base::DetImpl<Detector>;
+
  public:
   enum TOFMaterial {
     kAir = 1,
@@ -70,7 +72,7 @@ class Detector : public o2::Base::DetImpl<Detector>
 
   Detector(Bool_t active);
 
-  ~Detector() override = default;
+  ~Detector() override;
 
   FairModule* CloneModule() const override;
 
@@ -88,48 +90,72 @@ class Detector : public o2::Base::DetImpl<Detector>
     return nullptr;
   }
 
-  void Reset() final;
-  void EndOfEvent() final;
-
-  void CreateMaterials();
-  void ConstructGeometry() final;
-  void addAlignableVolumes() const override;
-
-  void setTOFholes(Bool_t flag = kTRUE) { mTOFHoles = flag; }
- protected:
-  virtual void DefineGeometry(Float_t xtof, Float_t ytof, Float_t zlenA) final;
-  virtual void MaterialMixer(Float_t* p, const Float_t* const a, const Float_t* const m, Int_t n) const final;
-
  private:
-  /// copy constructor (used in MT)
-  Detector(const Detector& rhs);
+   bool setHits(int i, std::vector<HitType>* ptr)
+   {
+     if (i == 0) {
+       mHits = ptr;
+       return false;
+     }
+     return false;
+   }
+   void createHitBuffers()
+   {
+     for (int buffer = 0; buffer < NHITBUFFERS; ++buffer) {
+       int probe = 0;
+       bool more{ false };
+       do {
+         auto ptr = o2::utils::createSimVector<HitType>();
+         more = setHits(probe, ptr);
+         mCachedPtr[buffer].emplace_back(ptr);
+         probe++;
+       } while (more);
+     }
+   }
 
-  void createModules(Float_t xtof, Float_t ytof, Float_t zlenA, Float_t xFLT, Float_t yFLT, Float_t zFLTA) const;
-  void makeStripsInModules(Float_t ytof, Float_t zlenA) const;
-  void createModuleCovers(Float_t xtof, Float_t zlenA) const;
-  void createBackZone(Float_t xtof, Float_t ytof, Float_t zlenA) const;
-  void makeFrontEndElectronics(Float_t xtof) const;
-  void makeFEACooling(Float_t xtof) const;
-  void makeNinoMask(Float_t xtof) const;
-  void makeSuperModuleCooling(Float_t xtof, Float_t ytof, Float_t zlenA) const;
-  void makeSuperModuleServices(Float_t xtof, Float_t ytof, Float_t zlenA) const;
-  void makeReadoutCrates(Float_t ytof) const;
+  public:
+   void Reset() final;
+   void EndOfEvent() final;
 
-  void makeModulesInBTOFvolumes(Float_t ytof, Float_t zlenA) const;
-  void makeCoversInBTOFvolumes() const;
-  void makeBackInBTOFvolumes(Float_t ytof) const;
+   void CreateMaterials();
+   void ConstructGeometry() final;
+   void addAlignableVolumes() const override;
 
-  bool isMergable(HitType hit1, HitType hit2)
-  {
-    if (hit1.GetTrackID() != hit2.GetTrackID()) {
-      return false;
-    }
+   void setTOFholes(Bool_t flag = kTRUE) { mTOFHoles = flag; }
+  protected:
+   virtual void DefineGeometry(Float_t xtof, Float_t ytof, Float_t zlenA) final;
+   virtual void MaterialMixer(Float_t* p, const Float_t* const a, const Float_t* const m, Int_t n) const final;
 
-    if (std::abs(hit1.GetTime() - hit2.GetTime()) > 1.0 /*1 ns*/) {
-      return false;
-    }
+  private:
+   /// copy constructor (used in MT)
+   Detector(const Detector& rhs);
 
-    return true;
+   void createModules(Float_t xtof, Float_t ytof, Float_t zlenA, Float_t xFLT, Float_t yFLT, Float_t zFLTA) const;
+   void makeStripsInModules(Float_t ytof, Float_t zlenA) const;
+   void createModuleCovers(Float_t xtof, Float_t zlenA) const;
+   void createBackZone(Float_t xtof, Float_t ytof, Float_t zlenA) const;
+   void makeFrontEndElectronics(Float_t xtof) const;
+   void makeFEACooling(Float_t xtof) const;
+   void makeNinoMask(Float_t xtof) const;
+   void makeSuperModuleCooling(Float_t xtof, Float_t ytof, Float_t zlenA) const;
+   void makeSuperModuleServices(Float_t xtof, Float_t ytof, Float_t zlenA) const;
+   void makeReadoutCrates(Float_t ytof) const;
+
+   void makeModulesInBTOFvolumes(Float_t ytof, Float_t zlenA) const;
+   void makeCoversInBTOFvolumes() const;
+   void makeBackInBTOFvolumes(Float_t ytof) const;
+
+   bool isMergable(HitType hit1, HitType hit2)
+   {
+     if (hit1.GetTrackID() != hit2.GetTrackID()) {
+       return false;
+     }
+
+     if (std::abs(hit1.GetTime() - hit2.GetTime()) > 1.0 /*1 ns*/) {
+       return false;
+     }
+
+     return true;
   }
 
   Int_t mEventNr; // event count

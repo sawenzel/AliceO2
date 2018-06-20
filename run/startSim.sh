@@ -10,7 +10,9 @@ killall -9 O2HitMergerRunner
 topologyfile=${O2_ROOT}/share/config/o2simtopology.json
 
 # we have one primary distributor 
-xterm -geometry 80x25+0+0 -e "O2PrimaryServerDeviceRunner --control static --id primary-server --mq-config ${topologyfile} -n 10 -m EMC TRD ITS FIT MFT MCH PHS TOF -g pythia8 -e TGeant3 | tee serverlog;bash" &
+#xterm -geometry 80x25+0+0 -e "O2PrimaryServerDeviceRunner --control static --id primary-server --mq-config ${topologyfile} -n 10 -m EMC TRD ITS FIT MFT MCH PHS TOF TPC -g pythia8 -e TGeant3 | tee serverlog;bash" &
+xterm -geometry 80x25+0+0 -e "O2PrimaryServerDeviceRunner --control static --id primary-server --mq-config ${topologyfile} -n 10 -g pythia8 -e TGeant3 | tee serverlog;bash" &
+# xterm -geometry 80x25+0+0 -e "O2PrimaryServerDeviceRunner --control static --id primary-server --mq-config ${topologyfile} -n 2 -m PIPE ITS TPC FIT -g pythia8 -e TGeant3 | tee serverlog;bash" &
 
 for i in `seq 1 ${NSIMWORKERS}`; do
   xterm -geometry 80x25+500+0 -e "O2SimDeviceRunner --control static --id worker${i} --config-key worker --mq-config ${topologyfile} --severity info  | tee simlog${i};bash" &
