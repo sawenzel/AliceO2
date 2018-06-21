@@ -20,6 +20,7 @@
 #include <sstream>
 #include <SimConfig/SimConfig.h>
 #include <DetectorsBase/Detector.h>
+#include <CommonUtils/ShmManager.h>
 
 namespace o2
 {
@@ -73,6 +74,7 @@ void O2MCApplication::SendData()
     }
   }
   LOG(INFO) << "sending message with " << simdataparts.Size() << " parts";
+  LOG(INFO) << "Usage of SHM at this stage " << o2::utils::ShmManager::Instance().getAllocedSize()/1024./1024. << " MB";
   mSimDataChannel->Send(simdataparts);
 }
 }
