@@ -395,7 +395,7 @@ public:
         br->SetAddress(static_cast<void*>(&hitsptr));
         br->Fill();
         br->ResetAddress();
-
+        delete hitsptr;
       } else {
         // for each branch name we extract/decode hits from the message parts ...
         int offset{0};
