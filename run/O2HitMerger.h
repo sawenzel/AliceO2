@@ -143,6 +143,7 @@ class O2HitMerger : public FairMQDevice
     br->SetAddress(&decodeddata);
     br->Fill();
     br->ResetAddress();
+    delete decodeddata;
     index++;
   }
 
