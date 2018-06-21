@@ -21,7 +21,7 @@ struct MemBlock {
   size_t bytes;
 };
 
-constexpr size_t SHMPOOLSIZE = 1024*1024*1024; // 1MB of shared memory
+constexpr size_t SHMPOOLSIZE = 1024*1024*1024;
 
 // class creating a shared memory pool
 // and manges allocations within the ppol
