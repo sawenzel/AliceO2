@@ -77,7 +77,12 @@ class O2PrimaryServerDevice : public FairMQDevice
     // lunch initialization of particle generator asynchronously
     // so that we reach the RUNNING state of the server quickly
     // and do not block here
-    mGeneratorInitThread = std::thread(&O2PrimaryServerDevice::initGenerator, this);
+    // for the moment this only works for pythia8
+    if (conf.getGenerator().compare("pythia8")==0) {
+      mGeneratorInitThread = std::thread(&O2PrimaryServerDevice::initGenerator, this);
+    } else {
+      initGenerator();
+    }
   }
 
   // method reacting to requests to get the simulation configuration
