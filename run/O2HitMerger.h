@@ -158,7 +158,6 @@ class O2HitMerger : public FairMQDevice
     memcpy((void*)&info, infomessage->GetData(), infomessage->GetSize());
 
     auto accum = insertAdd<uint32_t, uint32_t>(mPartsCheckSum, info.eventID, (uint32_t)info.part);
-    // auto totalsize = insertAdd<uint32_t, size_t>(mITSTotalSize, info.eventID, itshits.size());
 
     int index = 1;
     consumeData<std::vector<o2::MCTrack>>("MCTrack", data, index);
@@ -181,7 +180,6 @@ class O2HitMerger : public FairMQDevice
   }
 
   std::map<uint32_t, uint32_t> mPartsCheckSum; //! mapping event id -> part checksum used to detect when all info
-  std::map<uint32_t, size_t> mITSTotalSize;    //! total number of tracks for a given event
 
   TFile* mOutFile;  //!
   TTree* mOutTree;  //!

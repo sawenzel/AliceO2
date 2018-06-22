@@ -18,6 +18,7 @@ ShmManager::ShmManager() { }
 
 void ShmManager::createSegment()
 {
+#ifdef USE_SHM
   if ((mShmID = shmget(IPC_PRIVATE, SHMPOOLSIZE, IPC_CREAT | 0666)) == -1) {
     perror("shmget: shmget failed");
   } else {
@@ -29,6 +30,7 @@ void ShmManager::createSegment()
     mMappedPtr = addr;
   }
   LOG(INFO) << "SHARED MEM INITIALIZED AT ID " << mShmID;
+#endif
 }
 
 ShmManager::~ShmManager()
@@ -137,11 +139,13 @@ void ShmManager::freememblock(void* ptr)
 
 void ShmManager::release()
 {
+#ifdef USE_SHM
   LOG(INFO) << "REMOVING SHARED MEM SEGMENT ID" << mShmID;
   if (mShmID != -1) {
     shmctl(mShmID, IPC_RMID, nullptr);
     mShmID = -1;
   }
+#endif
   mAllocedBlocks.clear();
   mFreeBlocks.clear();
 }
