@@ -97,6 +97,7 @@ class O2SimDevice : public FairMQDevice
         LOG(INFO) << "COMMUNICATED ENGINE " << config->mMCEngine;
         auto& conf = o2::conf::SimConfig::Instance();
         conf.resetFromConfigData(*config);
+        delete config;
       } else {
         LOG(ERROR) << "No configuration received within " << timeoutinMS << "ms\n";
         return false;
@@ -169,9 +170,6 @@ class O2SimDevice : public FairMQDevice
         LOG(INFO) << "Processing " << chunk->mParticles.size() << FairLogger::endl;
         gRandom->SetSeed(chunk->mEventIDs[0].seed);
 
-        //bool b = true;
-        //while(b) {}
-
         mVMC->ProcessRun(1);
         FairSystemInfo sysinfo;
         LOG(INFO) << "TIME-STAMP " << mTimer.RealTime() << "\t";
@@ -179,6 +177,7 @@ class O2SimDevice : public FairMQDevice
         LOG(INFO) << "MEM-STAMP " << sysinfo.GetCurrentMemory() / (1024. * 1024) << " "
                   << sysinfo.GetMaxMemory() << " MB\n";
         delete message;
+        delete chunk;
       } else {
         return false;
       }
