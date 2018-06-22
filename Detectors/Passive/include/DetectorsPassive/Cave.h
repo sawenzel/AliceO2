@@ -59,6 +59,8 @@ class Cave : public FairDetector
     TClonesArray* GetCollection(Int_t iColl) const override { return nullptr; }
     void   Reset() override {}
 
+    void   BeginEvent() override;
+    void   BeginPrimary() override;
     void   FinishPrimary() override;
     void   addFinishPrimaryHook(std::function<void()>&& hook) { mFinishPrimaryHooks.emplace_back(hook); } 
 

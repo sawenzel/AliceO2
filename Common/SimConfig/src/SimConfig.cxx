@@ -31,7 +31,9 @@ void SimConfig::initOptions(boost::program_options::options_description& options
     "isMT", bpo::value<bool>()->default_value(false), "multi-threaded mode (Geant4 only")(
     "outPrefix,o", bpo::value<std::string>()->default_value("o2sim"), "prefix of output files")(
 	"chunkSize", bpo::value<unsigned int>()->default_value(10000),
-	  "max size of primary chunk (subevent) distributed by server");
+	  "max size of primary chunk (subevent) distributed by server")(
+	"chunkSizeI", bpo::value<int>()->default_value(-1),
+	  "internalChunkSize");
 }
 
 bool SimConfig::resetFromParsedMap(boost::program_options::variables_map const& vm)
@@ -53,6 +55,7 @@ bool SimConfig::resetFromParsedMap(boost::program_options::variables_map const& 
   mConfigData.mIsMT = vm["isMT"].as<bool>();
   mConfigData.mOutputPrefix = vm["outPrefix"].as<std::string>();
   mConfigData.mPrimaryChunkSize = vm["chunkSize"].as<unsigned int>();
+  mConfigData.mInternalChunkSize = vm["chunkSizeI"].as<int>();
   return true;
 }
 

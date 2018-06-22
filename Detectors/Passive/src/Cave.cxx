@@ -24,6 +24,8 @@
 #include "DetectorsBase/MaterialManager.h"
 #include "DetectorsBase/Detector.h"
 #include "DetectorsPassive/Cave.h"
+#include "SimConfig/SimConfig.h"
+#include <TRandom.h>
 #include "FairLogger.h"
 #include "TGeoManager.h"
 #include "TGeoVolume.h"
@@ -86,6 +88,27 @@ void Cave::FinishPrimary()
   for (auto& f : mFinishPrimaryHooks) {
     f();
   }
+}
+
+void Cave::BeginEvent() {
+  LOG(INFO) << " CAVE: BEGIN EVENT ";
+}
+
+void Cave::BeginPrimary()
+{
+  static int counter = 1;
+  static int primcounter = 0;
+
+  auto& conf = o2::conf::SimConfig::Instance();
+  auto chunks = conf.getInternalChunkSize();
+  if (chunks != -1) {
+    if (primcounter % chunks == 0) {
+      auto seed = counter + 10;
+      gRandom->SetSeed(seed);
+      counter++;
+    }
+  }
+  primcounter++;
 }
 
 bool Cave::ProcessHits(FairVolume*)
