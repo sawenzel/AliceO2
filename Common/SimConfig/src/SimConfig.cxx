@@ -29,7 +29,9 @@ void SimConfig::initOptions(boost::program_options::options_description& options
     "name of kinematics file for event generator from file (when applicable)")(
     "bMax,b", bpo::value<float>()->default_value(0.), "maximum value for impact parameter sampling (when applicable)")(
     "isMT", bpo::value<bool>()->default_value(false), "multi-threaded mode (Geant4 only")(
-    "outPrefix,o", bpo::value<std::string>()->default_value("o2sim"), "prefix of output files");
+    "outPrefix,o", bpo::value<std::string>()->default_value("o2sim"), "prefix of output files")(
+	"chunkSize", bpo::value<unsigned int>()->default_value(10000),
+	  "max size of primary chunk (subevent) distributed by server");
 }
 
 bool SimConfig::resetFromParsedMap(boost::program_options::variables_map const& vm)
@@ -50,6 +52,7 @@ bool SimConfig::resetFromParsedMap(boost::program_options::variables_map const& 
   mConfigData.mBMax = vm["bMax"].as<float>();
   mConfigData.mIsMT = vm["isMT"].as<bool>();
   mConfigData.mOutputPrefix = vm["outPrefix"].as<std::string>();
+  mConfigData.mPrimaryChunkSize = vm["chunkSize"].as<unsigned int>();
   return true;
 }
 
