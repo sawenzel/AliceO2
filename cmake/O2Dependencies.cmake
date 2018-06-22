@@ -1248,6 +1248,7 @@ o2_define_bucket(
     fairroot_geom
     Field
     DetectorsBase
+    SimConfig
 
     INCLUDE_DIRECTORIES
     ${CMAKE_SOURCE_DIR}/Common/Field/include

@@ -31,6 +31,7 @@ struct SimConfigData {
   bool mIsMT;                                // chosen MT mode (Geant4 only)
   std::string mOutputPrefix;                 // prefix to be used for output files
   int mPrimaryChunkSize;                     // defining max granularity for input primaries of a sim job
+  int mInternalChunkSize;
   ClassDefNV(SimConfigData, 1);
 };
 
@@ -82,6 +83,7 @@ class SimConfig
   bool getIsMT() const { return mConfigData.mIsMT; }
   std::string getOutPrefix() const { return mConfigData.mOutputPrefix; }
   int getPrimChunkSize() const { return mConfigData.mPrimaryChunkSize; }
+  int getInternalChunkSize() const { return mConfigData.mInternalChunkSize; }
 
  private:
   SimConfigData mConfigData; //!
