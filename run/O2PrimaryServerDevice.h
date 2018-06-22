@@ -68,6 +68,9 @@ class O2PrimaryServerDevice : public FairMQDevice
     }
     // MC ENGINE
     LOG(INFO) << "ENGINE SET TO " << vm["mcEngine"].as<std::string>();
+    // CHUNK SIZE
+    mChunkGranularity = vm["chunkSize"].as<unsigned int>();
+    LOG(INFO) << "CHUNK SIZE SET TO " << mChunkGranularity;
 
     mMaxEvents = conf.getNEvents();
 

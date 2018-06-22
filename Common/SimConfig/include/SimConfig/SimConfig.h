@@ -30,6 +30,7 @@ struct SimConfigData {
   float mBMax;                               // maximum for impact parameter sampling
   bool mIsMT;                                // chosen MT mode (Geant4 only)
   std::string mOutputPrefix;                 // prefix to be used for output files
+  int mPrimaryChunkSize;                     // defining max granularity for input primaries of a sim job
   ClassDefNV(SimConfigData, 1);
 };
 
@@ -80,6 +81,7 @@ class SimConfig
   float getBMax() const { return mConfigData.mBMax; }
   bool getIsMT() const { return mConfigData.mIsMT; }
   std::string getOutPrefix() const { return mConfigData.mOutputPrefix; }
+  int getPrimChunkSize() const { return mConfigData.mPrimaryChunkSize; }
 
  private:
   SimConfigData mConfigData; //!
