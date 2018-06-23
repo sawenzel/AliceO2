@@ -11,7 +11,10 @@
 #include <list>
 #include <stddef.h>
 
-// #define USESHM 1
+#include <boost/interprocess/managed_external_buffer.hpp>
+#include <boost/interprocess/allocators/allocator.hpp>
+
+#define USESHM 1
 
 namespace o2 {
 namespace utils {
@@ -21,7 +24,7 @@ struct MemBlock {
   size_t bytes;
 };
 
-constexpr size_t SHMPOOLSIZE = 1024*1024*1024;
+constexpr size_t SHMPOOLSIZE = 1024*1024*2;
 
 // class creating a shared memory pool
 // and manges allocations within the ppol
@@ -39,7 +42,7 @@ public:
  // the equivalent of malloc
  void* getmemblock(size_t size);
  // the equivalent of free
- void freememblock(void*);
+ void freememblock(void*, std::size_t = 1);
 
  void printAllocedBlocks() const;
  void printFreeBlocks() const;
@@ -86,6 +89,11 @@ private:
 
  std::list<MemBlock> mAllocedBlocks; // allocedblocks
  std::list<MemBlock> mFreeBlocks;    // free blocks
+
+ boost::interprocess::wmanaged_external_buffer* boostmanagedbuffer;
+ boost::interprocess::allocator<char, boost::interprocess::wmanaged_external_buffer::segment_manager>* boostallocator;
+
+
 };
 
 }

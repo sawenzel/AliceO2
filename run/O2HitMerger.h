@@ -127,7 +127,7 @@ class O2HitMerger : public FairMQDevice
     if (detIDmessage->GetSize() == 4) {
       auto ptr = (int*)detIDmessage->GetData();
       o2::detectors::DetID id(ptr[0]);
-      LOG(INFO) << "I1 " << ptr[0] << " NAME " << id.getName();
+      LOG(INFO) << "I1 " << ptr[0] << " NAME " << id.getName() << " MB " << data.At(index)->GetSize() / 1024. / 1024.;
 
       // get the detector than can interpret it
       auto detector = mDetectorInstances[id].get();
