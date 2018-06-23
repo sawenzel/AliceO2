@@ -11,6 +11,11 @@
 #include <sys/ipc.h>
 #include <algorithm>
 
+#include <boost/interprocess/managed_external_buffer.hpp>
+#include <boost/interprocess/allocators/allocator.hpp>
+
+using namespace boost::interprocess;
+
 namespace o2 {
 namespace utils {
 
@@ -18,11 +23,15 @@ ShmManager::ShmManager() { }
 
 void ShmManager::createSegment()
 {
+#ifdef USESHM
   if ((mShmID = shmget(IPC_PRIVATE, SHMPOOLSIZE, IPC_CREAT | 0666)) == -1) {
     perror("shmget: shmget failed");
   } else {
     // we will put a secret message in form of an array
     auto addr = shmat(mShmID, nullptr, 0);
+
+    boostmanagedbuffer = new boost::interprocess::wmanaged_external_buffer(create_only, addr, SHMPOOLSIZE);
+    boostallocator = new boost::interprocess::allocator<char, wmanaged_external_buffer::segment_manager>(boostmanagedbuffer->get_segment_manager());
 
     // insert the initial free block
     mFreeBlocks.push_back({ addr, SHMPOOLSIZE });
@@ -69,29 +78,30 @@ void ShmManager::printSummary() const
 
 void* ShmManager::getmemblock(size_t size)
 {
-  if (size == 0) {
-    LOG(WARNING) << "someone asked for zero size block";
-  }
-  // iterate through free blocks and see if we find one that is large enough
-  // for the requested size ... then split it
-  auto iter = std::find_if(mFreeBlocks.begin(), mFreeBlocks.end(),
-                           [size](MemBlock const& mem) { return size <= mem.bytes; });
-  if (iter == mAllocedBlocks.end()) {
-    LOG(INFO) << "DID NOT FIND LARGE ENOUGH MEMORY BLOCK";
-    return nullptr;
-  }
-  auto addr = iter->startptr;
-  // add taken block to allocated blocks
-  mAllocedBlocks.push_back({ addr, size });
-
-  // change free block info to new information
-  iter->startptr = (char*)iter->startptr + size;
-  iter->bytes = iter->bytes - size;
-  // remove zero free blocks
-  if (iter->bytes == 0) {
-    mFreeBlocks.erase(iter);
-  }
-  return addr;
+//  if (size == 0) {
+//    LOG(WARNING) << "someone asked for zero size block";
+//  }
+//  // iterate through free blocks and see if we find one that is large enough
+//  // for the requested size ... then split it
+//  auto iter = std::find_if(mFreeBlocks.begin(), mFreeBlocks.end(),
+//                           [size](MemBlock const& mem) { return size <= mem.bytes; });
+//  if (iter == mAllocedBlocks.end()) {
+//    LOG(INFO) << "DID NOT FIND LARGE ENOUGH MEMORY BLOCK";
+//    return nullptr;
+//  }
+//  auto addr = iter->startptr;
+//  // add taken block to allocated blocks
+//  mAllocedBlocks.push_back({ addr, size });
+//
+//  // change free block info to new information
+//  iter->startptr = (char*)iter->startptr + size;
+//  iter->bytes = iter->bytes - size;
+//  // remove zero free blocks
+//  if (iter->bytes == 0) {
+//    mFreeBlocks.erase(iter);
+//  }
+//  return addr;
+  return (void*)boostallocator->allocate(size).get();
 }
 
 // brute force merge sweep
@@ -115,28 +125,30 @@ bool ShmManager::mergeFreeBlocks()
   return false;
 }
 
-void ShmManager::freememblock(void* ptr)
+void ShmManager::freememblock(void* ptr, size_t s)
 {
-  // look for the ptr and add this block to the list of free blocks
-  auto iter = std::find_if(mAllocedBlocks.begin(), mAllocedBlocks.end(), [ptr](MemBlock const& mem) { return mem.startptr == ptr; });
-  if (iter == mAllocedBlocks.end()) {
-    LOG(INFO) << "FREE CORRUPTED (did not find address: " << ptr << " was pointer ok? " << isPointerOk(ptr);
-  } else {
-    MemBlock memblock{ iter->startptr, iter->bytes };
-    if (iter->bytes > 0) {
-      auto cmp = [](MemBlock const& block1, MemBlock const& block2) { return block1.startptr < block2.startptr; };
-      auto insertpos = std::upper_bound(mFreeBlocks.begin(), mFreeBlocks.end(), memblock, cmp);
-      mFreeBlocks.insert(insertpos, memblock);
-    }
-    mAllocedBlocks.erase(iter);
-
-    while (mergeFreeBlocks()) {
-    }
-  }
+  //  // look for the ptr and add this block to the list of free blocks
+  //  auto iter = std::find_if(mAllocedBlocks.begin(), mAllocedBlocks.end(), [ptr](MemBlock const& mem) { return mem.startptr == ptr; });
+  //  if (iter == mAllocedBlocks.end()) {
+  //    LOG(INFO) << "FREE CORRUPTED (did not find address: " << ptr << " was pointer ok? " << isPointerOk(ptr);
+  //  } else {
+  //    MemBlock memblock{ iter->startptr, iter->bytes };
+  //    if (iter->bytes > 0) {
+  //      auto cmp = [](MemBlock const& block1, MemBlock const& block2) { return block1.startptr < block2.startptr; };
+  //      auto insertpos = std::upper_bound(mFreeBlocks.begin(), mFreeBlocks.end(), memblock, cmp);
+  //      mFreeBlocks.insert(insertpos, memblock);
+  //    }
+  //    mAllocedBlocks.erase(iter);
+  //
+  //    while (mergeFreeBlocks()) {
+  //    }
+  //  }
+  boostallocator->deallocate((char*)ptr, s);
 }
 
 void ShmManager::release()
 {
+#ifdef USESHM
   LOG(INFO) << "REMOVING SHARED MEM SEGMENT ID" << mShmID;
   if (mShmID != -1) {
     shmctl(mShmID, IPC_RMID, nullptr);

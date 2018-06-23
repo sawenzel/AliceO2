@@ -9,7 +9,7 @@
 #define COMMON_UTILS_INCLUDE_COMMONUTILS_SHMALLOCATOR_H_
 
 #include "CommonUtils/ShmManager.h"
-#include <FairLogger.h>
+// #include <FairLogger.h>
 
 namespace o2 {
 namespace utils {
@@ -53,11 +53,11 @@ class ShmAllocator
     }
     return (pointer)malloc(sizeof(value_type) * n);
   }
-  inline void deallocate(pointer p, size_type)
+  inline void deallocate(pointer p, size_type s)
   {
     auto& instance = ShmManager::Instance();
     if (instance.hasSegment()) {
-      ShmManager::Instance().freememblock(p);
+      ShmManager::Instance().freememblock(p, s);
     } else {
       free(p);
     }
