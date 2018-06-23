@@ -46,15 +46,24 @@ bool SimConfig::resetFromParsedMap(boost::program_options::variables_map const& 
   mConfigData.mMCEngine = vm["mcEngine"].as<string>();
   mConfigData.mActiveDetectors = vm["modules"].as<vector<string>>();
   auto& disabled = vm["disable"].as<vector<string>>();
-  if (mConfigData.mActiveDetectors.size() == 1 && mConfigData.mActiveDetectors[0] == "all") {
-    mConfigData.mActiveDetectors.clear();
+  auto& active = mConfigData.mActiveDetectors;
+  if (active.size() == 1 && active[0] == "all") {
+    active.clear();
     for (int d = DetID::First; d <= DetID::Last; ++d) {
-      mConfigData.mActiveDetectors.push_back(DetID::getName(d));
+      active.push_back(DetID::getName(d));
     }
   }
+  // add passive components (make a PassiveDetID for them!)
+  active.emplace_back("HALL");
+  active.emplace_back("MAG");
+  active.emplace_back("DIPO");
+  active.emplace_back("PIPE");
+  active.emplace_back("ABSO");
+  active.emplace_back("SHIL");
+
   // take out deactivated modules
   for (auto& m : disabled) {
-    auto& active = mConfigData.mActiveDetectors;
+
     auto iter = std::find(active.begin(), active.end(), m);
     if (iter != active.end()) {
       active.erase(iter);
