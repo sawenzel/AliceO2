@@ -14,7 +14,7 @@
 #include <boost/interprocess/managed_external_buffer.hpp>
 #include <boost/interprocess/allocators/allocator.hpp>
 
-#define USESHM 1
+// #define USESHM 1
 
 namespace o2 {
 namespace utils {
