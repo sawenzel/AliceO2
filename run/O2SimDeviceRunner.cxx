@@ -153,17 +153,19 @@ int main(int argc, char* argv[])
     for (int i = 0; i < nworkers; ++i) {
       auto pid = fork();
       if (pid == 0) {
+	// each creates a possible shared mem area
+        o2::utils::ShmManager::Instance().createSegment();
         runSim("zeromq", serveraddress, mergeraddress);
-        return 0;
+        _exit(0);
       }
     }
     int status;
     wait(&status); /* only the parent waits */
-    return 0;
+    _exit(0);
   } else {
     // This the solution where we setup an ordinary FairMQDevice
     // (each if which will setup its own simulation). Parallelism
     // is achieved outside by instantiating multiple device processes.
-    return initAndRunDevice(argc, argv);
+    _exit(initAndRunDevice(argc, argv));
   }
 }

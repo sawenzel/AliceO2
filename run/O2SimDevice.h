@@ -115,9 +115,11 @@ class O2SimDevice : public FairMQDevice
     if (!querySimConfig(channel)) {
       return false;
     }
-    // init the shared memory service
+#ifndef ALICE_SIMFORKINTERNAL
+    // init the shared memory service (only in non forked mode) here
     o2::utils::ShmManager::Instance().createSegment();
-
+#endif
+    
     LOG(INFO) << "Setting up the simulation ...";
     simptr = std::move(std::unique_ptr<FairRunSim>(o2sim_init(true)));
     FairSystemInfo sysinfo;
