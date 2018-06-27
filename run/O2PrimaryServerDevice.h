@@ -26,6 +26,7 @@
 #include <SimConfig/SimConfig.h>
 #include <typeinfo>
 #include <thread>
+#include <TROOT.h>
 
 namespace o2
 {
@@ -74,15 +75,13 @@ class O2PrimaryServerDevice : public FairMQDevice
 
     mMaxEvents = conf.getNEvents();
 
+    // need to make ROOT thread-safe since we use ROOT services in all places
+    ROOT::EnableThreadSafety();
+
     // lunch initialization of particle generator asynchronously
     // so that we reach the RUNNING state of the server quickly
     // and do not block here
-    // for the moment this only works for pythia8
-    if (conf.getGenerator().compare("pythia8")==0) {
-      mGeneratorInitThread = std::thread(&O2PrimaryServerDevice::initGenerator, this);
-    } else {
-      initGenerator();
-    }
+    mGeneratorInitThread = std::thread(&O2PrimaryServerDevice::initGenerator, this);
   }
 
   // method reacting to requests to get the simulation configuration
