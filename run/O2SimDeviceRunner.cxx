@@ -21,6 +21,7 @@
 #include <FairMQTransportFactory.h>
 #include <TStopwatch.h>
 #include <sys/wait.h>
+#include <pthread.h>  // to set cpu affinity
 
 namespace bpo = boost::program_options;
 
@@ -112,6 +113,37 @@ int runSim(std::string transport, std::string primaddress, std::string mergeradd
   return 0;
 }
 
+void pinToCPU(int cpuid)
+{
+  auto affinity = getenv("ALICE_CPUAFFINITY");
+  if (affinity) {
+    pthread_t thread;
+
+    thread = pthread_self();
+
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(cpuid, &cpuset);
+
+    auto s = pthread_setaffinity_np(thread, sizeof(cpu_set_t), &cpuset);
+    if (s != 0) {
+      LOG(WARNING) << "FAILED TO SET PTHREAD AFFINITY";
+    }
+
+    /* Check the actual affinity mask assigned to the thread */
+    s = pthread_getaffinity_np(thread, sizeof(cpu_set_t), &cpuset);
+    if (s != 0) {
+      LOG(WARNING) << "FAILED TO GET PTHREAD AFFINITY";
+    }
+
+    for (int j = 0; j < CPU_SETSIZE; j++) {
+      if (CPU_ISSET(j, &cpuset)) {
+        LOG(INFO) << "ENABLED CPU " << j;
+      }
+    }
+  }
+}
+
 int main(int argc, char* argv[])
 {
   auto internalfork = getenv("ALICE_SIMFORKINTERNAL");
@@ -153,8 +185,13 @@ int main(int argc, char* argv[])
     for (int i = 0; i < nworkers; ++i) {
       auto pid = fork();
       if (pid == 0) {
-	// each creates a possible shared mem area
+        // each creates a possible shared mem area
         o2::utils::ShmManager::Instance().createSegment();
+
+        // we will try to pin each worker to a particular CPU
+        // this can be made configurable via enviroment variables??
+        pinToCPU(i);
+
         runSim("zeromq", serveraddress, mergeraddress);
         _exit(0);
       }
