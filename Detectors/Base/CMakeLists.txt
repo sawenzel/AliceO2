@@ -14,6 +14,7 @@ Set(HEADERS
   include/${MODULE_NAME}/GeometryManager.h
   include/${MODULE_NAME}/MaterialManager.h
   include/${MODULE_NAME}/Propagator.h
+  include/${MODULE_NAME}/VMCUtilities.h
 )
 
 Set(LINKDEF src/DetectorsBaseLinkDef.h)

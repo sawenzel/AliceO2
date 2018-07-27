@@ -267,6 +267,15 @@ class Stack : public FairGenericStack
 };
 
 inline void Stack::addTrackReference(const o2::TrackReference& ref) { mTrackRefs->push_back(ref); }
+
+inline void Stack::addHit(int iDet) { addHit(iDet, mParticles.size() - 1); }
+inline void Stack::addHit(int iDet, Int_t iTrack)
+{
+  auto& part = mParticles[iTrack];
+  part.setHit(iDet);
+}
+
+
 }
 }
 

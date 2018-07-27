@@ -15,9 +15,8 @@
 #include "TOFBase/Geo.h"
 
 #include "SimulationDataFormat/BaseHits.h"
-
-class FairVolume;
-class TClonesArray;
+#include "DetectorsBase/VMCUtilities.h"
+#include "FairVolume.h"
 
 namespace o2
 {
@@ -55,7 +54,7 @@ class Detector : public o2::Base::DetImpl<Detector>
 
   void Initialize() final;
 
-  Bool_t ProcessHits(FairVolume* v = nullptr) final;
+  // Bool_t ProcessHits(FairVolume* v = nullptr) final;
 
   void Register() override;
 
@@ -110,6 +109,50 @@ class Detector : public o2::Base::DetImpl<Detector>
 
     return true;
   }
+
+  template<typename E>
+  Bool_t ProcessHitsKernel(FairVolume* v)
+  {
+    using namespace vmc_helpers;
+    // This method is called from the MC stepping for the sensitive volume only
+    if (static_cast<int>(TrackCharge<E>(fMC)) == 0) {
+      // set a very large step size for neutral particles
+      return kFALSE; // take only charged particles
+    }
+
+//    float pos2x, pos2y, pos2z;
+ //   fMC->TrackPosition(pos2x, pos2y, pos2z);
+  //  Float_t radius = std::sqrt(pos2x * pos2x + pos2y * pos2y);
+  //  LOG(DEBUG) << "Process hit in TOF volume ar R=" << radius << " - Z=" << pos2z;
+
+    Float_t enDep = Edep<E>(fMC);
+    if (enDep < 1E-8) {
+      return kFALSE; // wo se need a threshold?
+    }
+
+    // ADD HIT
+    float posx, posy, posz;
+    TrackPosition<E>(fMC, posx, posy, posz);
+    float time = TrackTime<E>(fMC) * 1.0e09;
+    int trackID = mO2Stack->GetCurrentTrackNumber();
+    int sensID = v->getMCid();
+    Int_t det[5];
+    Float_t pos[3] = { posx, posy, posz };
+    Float_t delta[3];
+    Geo::getPadDxDyDz(pos, det, delta);
+    auto channel = Geo::getIndex(det);
+    HitType newhit(posx, posy, posz, time, enDep, trackID, sensID);
+    if (channel != mLastChannelID || !isMergable(newhit, mHits->back())) {
+      mHits->push_back(newhit);
+    } else {
+      mHits->back().SetEnergyLoss(mHits->back().GetEnergyLoss() + newhit.GetEnergyLoss());
+      // LOG(INFO)<<"Merging hit "<<"\n";
+      //  <<mHits->back().GetId()<<"with new hit "<<newhit.GetId()<<"\n";
+    }
+    mLastChannelID = channel;
+    return kTRUE;
+  }
+
 
   Int_t mEventNr; // event count
   Int_t mTOFSectors[o2::tof::Geo::NSECTORS];

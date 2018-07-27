@@ -148,149 +148,149 @@ void Detector::SetSpecialPhysicsCuts()
   }
 }
 
-Bool_t Detector::ProcessHits(FairVolume* vol)
-{
-  mStepCounter++;
-  const static ParameterGas& gasParam = ParameterGas::defaultInstance();
-
-  /* This method is called from the MC stepping for the sensitive volume only */
-  //   LOG(INFO) << "TPC::ProcessHits" << FairLogger::endl;
-  const double trackCharge = fMC->TrackCharge();
-  if (static_cast<int>(trackCharge) == 0) {
-
-    // set a very large step size for neutral particles
-    fMC->SetMaxStep(1.e10);
-    return kFALSE; // take only charged particles
-  }
-
-  // ===| SET THE LENGTH OF THE NEXT ENERGY LOSS STEP |=========================
-  // (We do this first so we can skip out of the method in the following
-  // Eloss->Ionization part.)
-  //
-  // In all cases we have multiple collisions and we use 2mm (+ some
-  // random shift to avoid binning effects), which was tuned for GEANT4, see
-  // https://indico.cern.ch/event/316891/contributions/732168/
-
-  const double rnd = fMC->GetRandom()->Rndm();
-  fMC->SetMaxStep(0.2 + (2. * rnd - 1.) * 0.05); // 2 mm +- rndm*0.5mm step
-
-  // ===| check active sector |=================================================
-  //
-  // Get the sector ID and check if the sector is active
-  static thread_local TLorentzVector position;
-  fMC->TrackPosition(position);
-  // for processing reasons in the digitizer, the sectors are shifted by -10deg, so sector 0 will be
-  //   from -10 - +10 deg instead of 0-20 and so on
-  const int sectorID = static_cast<int>(Sector::ToShiftedSector(position.X(), position.Y(), position.Z()));
-  // const int sectorID = static_cast<int>(Sector::ToSector(position.X(), position.Y(), position.Z()));
-  // TODO: Temporary hack to process only one sector
-  // if (sectorID != 0) return kFALSE;
-
-  // ---| momentum and beta gamma |---
-  static TLorentzVector momentum; // static to make avoid creation/deletion of this expensive object
-  fMC->TrackMomentum(momentum);
-
-  const float time = fMC->TrackTime() * 1.0e9;
-  const int trackID = fMC->GetStack()->GetCurrentTrackNumber();
-  const int detID = vol->getMCid();
-  o2::Data::Stack* stack = (o2::Data::Stack*)fMC->GetStack();
-  if (fMC->IsTrackEntering() || fMC->IsTrackExiting()) {
-    stack->addTrackReference(o2::TrackReference(position.X(), position.Y(), position.Z(), momentum.X(), momentum.Y(),
-                                                momentum.Z(), fMC->TrackLength(), time, trackID, GetDetId()));
-  }
-
-  // ===| CONVERT THE ENERGY LOSS TO IONIZATION ELECTRONS |=====================
-  //
-  // The energy loss is implemented directly below and taken GEANT3,
-  // ILOSS model 5 (in gfluct.F), which gives
-  // the energy loss in a single collision (NA49 model).
-  // TODO: Add discussion about drawback
-
-  Int_t numberOfElectrons = 0;
-  // I.H. - the type expected in addHit is short
-
-  // ---| Stepsize in cm |---
-  const double stepSize = fMC->TrackStep();
-
-  double betaGamma = momentum.P() / fMC->TrackMass();
-  betaGamma = TMath::Max(betaGamma, 7.e-3); // protection against too small bg
-
-  // ---| number of primary ionisations per cm |---
-  const double primaryElectronsPerCM =
-    gasParam.getNprim() * BetheBlochAleph(static_cast<float>(betaGamma), gasParam.getBetheBlochParam(0),
-                                          gasParam.getBetheBlochParam(1), gasParam.getBetheBlochParam(2),
-                                          gasParam.getBetheBlochParam(3), gasParam.getBetheBlochParam(4));
-
-  // ---| mean number of collisions and random for this event |---
-  const double meanNcoll = stepSize * trackCharge * trackCharge * primaryElectronsPerCM;
-  const int nColl = static_cast<int>(fMC->GetRandom()->Poisson(meanNcoll));
-
-  // Variables needed to generate random powerlaw distributed energy loss
-  const double alpha_p1 = 1. - gasParam.getExp(); // NA49/G3 value
-  const double oneOverAlpha_p1 = 1. / alpha_p1;
-  const double eMin = gasParam.getIpot();
-  const double eMax = gasParam.getEend();
-  const double kMin = TMath::Power(eMin, alpha_p1);
-  const double kMax = TMath::Power(eMax, alpha_p1);
-  const double wIon = gasParam.getWion();
-
-  for (Int_t n = 0; n < nColl; n++) {
-    // Use GEANT3 / NA49 expression:
-    // P(eDep) ~ k * edep^-gasParam.getExp()
-    // eMin(~I) < eDep < eMax(300 electrons)
-    // k fixed so that Int_Emin^EMax P(Edep) = 1.
-    const double rndm = fMC->GetRandom()->Rndm();
-    const double eDep = TMath::Power((kMax - kMin) * rndm + kMin, oneOverAlpha_p1);
-    int nel_step = static_cast<int>(((eDep - eMin) / wIon) + 1);
-    nel_step = TMath::Min(nel_step, 300); // 300 electrons corresponds to 10 keV
-    numberOfElectrons += nel_step;
-  }
-
-  // LOG(INFO) << "TPC::AddHit" << FairLogger::endl << "Eloss: "
-  //<< fMC->Edep() << ", Nelectrons: "
-  //<< numberOfElectrons << FairLogger::endl;
-
-  if (numberOfElectrons <= 0) // Could maybe be smaller than 0 due to the Gamma function
-    return kFALSE;
-
-  // ADD HIT
-  static thread_local int oldTrackId = trackID;
-  static thread_local int oldDetId = detID;
-  static thread_local int groupCounter = 0;
-  static thread_local int oldSectorId = sectorID;
-
-  //  a new group is starting -> put it into the container
-  static thread_local HitGroup* currentgroup = nullptr;
-  if (groupCounter == 0) {
-    mHitsPerSectorCollection[sectorID]->emplace_back(trackID);
-    currentgroup = &(mHitsPerSectorCollection[sectorID]->back());
-  }
-  if (trackID == oldTrackId && oldSectorId == sectorID) {
-    groupCounter++;
-    mHitCounter++;
-    mElectronCounter += numberOfElectrons;
-    currentgroup->addHit(position.X(), position.Y(), position.Z(), time, numberOfElectrons);
-  }
-  // finish group
-  else {
-    oldTrackId = trackID;
-    oldSectorId = sectorID;
-    groupCounter = 0;
-  }
-
-  // LOG(INFO) << "TPC::AddHit" << FairLogger::endl
-  //<< "   -- " << trackNumberID <<","  << volumeID << " " << vol->GetName()
-  //<< ", Pos: (" << position.X() << ", "  << position.Y() <<", "<<  position.Z()<< ", " << r << ") "
-  //<< ", Mom: (" << momentum.Px() << ", " << momentum.Py() << ", "  <<  momentum.Pz() << ") "
-  //<< " Time: "<<  time <<", Len: " << length << ", Nelectrons: " <<
-  // numberOfElectrons << FairLogger::endl;
-  // I.H. - the code above does not compile if uncommented
-
-  // Increment number of Detector det points in TParticle
-  stack->addHit(GetDetId());
-
-  return kTRUE;
-}
+//Bool_t Detector::ProcessHits(FairVolume* vol)
+//{
+//  mStepCounter++;
+//  const static ParameterGas& gasParam = ParameterGas::defaultInstance();
+//
+//  /* This method is called from the MC stepping for the sensitive volume only */
+//  //   LOG(INFO) << "TPC::ProcessHits" << FairLogger::endl;
+//  const double trackCharge = fMC->TrackCharge();
+//  if (static_cast<int>(trackCharge) == 0) {
+//
+//    // set a very large step size for neutral particles
+//    fMC->SetMaxStep(1.e10);
+//    return kFALSE; // take only charged particles
+//  }
+//
+//  // ===| SET THE LENGTH OF THE NEXT ENERGY LOSS STEP |=========================
+//  // (We do this first so we can skip out of the method in the following
+//  // Eloss->Ionization part.)
+//  //
+//  // In all cases we have multiple collisions and we use 2mm (+ some
+//  // random shift to avoid binning effects), which was tuned for GEANT4, see
+//  // https://indico.cern.ch/event/316891/contributions/732168/
+//
+//  const double rnd = fMC->GetRandom()->Rndm();
+//  fMC->SetMaxStep(0.2 + (2. * rnd - 1.) * 0.05); // 2 mm +- rndm*0.5mm step
+//
+//  // ===| check active sector |=================================================
+//  //
+//  // Get the sector ID and check if the sector is active
+//  static thread_local TLorentzVector position;
+//  fMC->TrackPosition(position);
+//  // for processing reasons in the digitizer, the sectors are shifted by -10deg, so sector 0 will be
+//  //   from -10 - +10 deg instead of 0-20 and so on
+//  const int sectorID = static_cast<int>(Sector::ToShiftedSector(position.X(), position.Y(), position.Z()));
+//  // const int sectorID = static_cast<int>(Sector::ToSector(position.X(), position.Y(), position.Z()));
+//  // TODO: Temporary hack to process only one sector
+//  // if (sectorID != 0) return kFALSE;
+//
+//  // ---| momentum and beta gamma |---
+//  static TLorentzVector momentum; // static to make avoid creation/deletion of this expensive object
+//  fMC->TrackMomentum(momentum);
+//
+//  const float time = fMC->TrackTime() * 1.0e9;
+//  const int trackID = fMC->GetStack()->GetCurrentTrackNumber();
+//  const int detID = vol->getMCid();
+//  o2::Data::Stack* stack = (o2::Data::Stack*)fMC->GetStack();
+//  if (fMC->IsTrackEntering() || fMC->IsTrackExiting()) {
+//    stack->addTrackReference(o2::TrackReference(position.X(), position.Y(), position.Z(), momentum.X(), momentum.Y(),
+//                                                momentum.Z(), fMC->TrackLength(), time, trackID, GetDetId()));
+//  }
+//
+//  // ===| CONVERT THE ENERGY LOSS TO IONIZATION ELECTRONS |=====================
+//  //
+//  // The energy loss is implemented directly below and taken GEANT3,
+//  // ILOSS model 5 (in gfluct.F), which gives
+//  // the energy loss in a single collision (NA49 model).
+//  // TODO: Add discussion about drawback
+//
+//  Int_t numberOfElectrons = 0;
+//  // I.H. - the type expected in addHit is short
+//
+//  // ---| Stepsize in cm |---
+//  const double stepSize = fMC->TrackStep();
+//
+//  double betaGamma = momentum.P() / fMC->TrackMass();
+//  betaGamma = TMath::Max(betaGamma, 7.e-3); // protection against too small bg
+//
+//  // ---| number of primary ionisations per cm |---
+//  const double primaryElectronsPerCM =
+//    gasParam.getNprim() * BetheBlochAleph(static_cast<float>(betaGamma), gasParam.getBetheBlochParam(0),
+//                                          gasParam.getBetheBlochParam(1), gasParam.getBetheBlochParam(2),
+//                                          gasParam.getBetheBlochParam(3), gasParam.getBetheBlochParam(4));
+//
+//  // ---| mean number of collisions and random for this event |---
+//  const double meanNcoll = stepSize * trackCharge * trackCharge * primaryElectronsPerCM;
+//  const int nColl = static_cast<int>(fMC->GetRandom()->Poisson(meanNcoll));
+//
+//  // Variables needed to generate random powerlaw distributed energy loss
+//  const double alpha_p1 = 1. - gasParam.getExp(); // NA49/G3 value
+//  const double oneOverAlpha_p1 = 1. / alpha_p1;
+//  const double eMin = gasParam.getIpot();
+//  const double eMax = gasParam.getEend();
+//  const double kMin = TMath::Power(eMin, alpha_p1);
+//  const double kMax = TMath::Power(eMax, alpha_p1);
+//  const double wIon = gasParam.getWion();
+//
+//  for (Int_t n = 0; n < nColl; n++) {
+//    // Use GEANT3 / NA49 expression:
+//    // P(eDep) ~ k * edep^-gasParam.getExp()
+//    // eMin(~I) < eDep < eMax(300 electrons)
+//    // k fixed so that Int_Emin^EMax P(Edep) = 1.
+//    const double rndm = fMC->GetRandom()->Rndm();
+//    const double eDep = TMath::Power((kMax - kMin) * rndm + kMin, oneOverAlpha_p1);
+//    int nel_step = static_cast<int>(((eDep - eMin) / wIon) + 1);
+//    nel_step = TMath::Min(nel_step, 300); // 300 electrons corresponds to 10 keV
+//    numberOfElectrons += nel_step;
+//  }
+//
+//  // LOG(INFO) << "TPC::AddHit" << FairLogger::endl << "Eloss: "
+//  //<< fMC->Edep() << ", Nelectrons: "
+//  //<< numberOfElectrons << FairLogger::endl;
+//
+//  if (numberOfElectrons <= 0) // Could maybe be smaller than 0 due to the Gamma function
+//    return kFALSE;
+//
+//  // ADD HIT
+//  static thread_local int oldTrackId = trackID;
+//  static thread_local int oldDetId = detID;
+//  static thread_local int groupCounter = 0;
+//  static thread_local int oldSectorId = sectorID;
+//
+//  //  a new group is starting -> put it into the container
+//  static thread_local HitGroup* currentgroup = nullptr;
+//  if (groupCounter == 0) {
+//    mHitsPerSectorCollection[sectorID]->emplace_back(trackID);
+//    currentgroup = &(mHitsPerSectorCollection[sectorID]->back());
+//  }
+//  if (trackID == oldTrackId && oldSectorId == sectorID) {
+//    groupCounter++;
+//    mHitCounter++;
+//    mElectronCounter += numberOfElectrons;
+//    currentgroup->addHit(position.X(), position.Y(), position.Z(), time, numberOfElectrons);
+//  }
+//  // finish group
+//  else {
+//    oldTrackId = trackID;
+//    oldSectorId = sectorID;
+//    groupCounter = 0;
+//  }
+//
+//  // LOG(INFO) << "TPC::AddHit" << FairLogger::endl
+//  //<< "   -- " << trackNumberID <<","  << volumeID << " " << vol->GetName()
+//  //<< ", Pos: (" << position.X() << ", "  << position.Y() <<", "<<  position.Z()<< ", " << r << ") "
+//  //<< ", Mom: (" << momentum.Px() << ", " << momentum.Py() << ", "  <<  momentum.Pz() << ") "
+//  //<< " Time: "<<  time <<", Len: " << length << ", Nelectrons: " <<
+//  // numberOfElectrons << FairLogger::endl;
+//  // I.H. - the code above does not compile if uncommented
+//
+//  // Increment number of Detector det points in TParticle
+//  stack->addHit(GetDetId());
+//
+//  return kTRUE;
+//}
 
 void Detector::EndOfEvent()
 {

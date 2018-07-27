@@ -55,48 +55,48 @@ void Detector::Initialize()
   o2::Base::Detector::Initialize();
 }
 
-Bool_t Detector::ProcessHits(FairVolume* v)
-{
-  // This method is called from the MC stepping for the sensitive volume only
-  if (static_cast<int>(fMC->TrackCharge()) == 0) {
-    // set a very large step size for neutral particles
-    return kFALSE; // take only charged particles
-  }
-
-  float pos2x, pos2y, pos2z;
-  fMC->TrackPosition(pos2x, pos2y, pos2z);
-  Float_t radius = std::sqrt(pos2x * pos2x + pos2y * pos2y);
-  LOG(DEBUG) << "Process hit in TOF volume ar R=" << radius << " - Z=" << pos2z;
-
-  Float_t enDep = fMC->Edep();
-  if (enDep < 1E-8)
-    return kFALSE; // wo se need a threshold?
-
-  // ADD HIT
-  float posx, posy, posz;
-  fMC->TrackPosition(posx, posy, posz);
-  float time = fMC->TrackTime() * 1.0e09;
-  auto stack = static_cast<o2::Data::Stack*>(fMC->GetStack());
-  int trackID = stack->GetCurrentTrackNumber();
-  int sensID = v->getMCid();
-  Int_t det[5];
-  Float_t pos[3] = { posx, posy, posz };
-  Float_t delta[3];
-  Geo::getPadDxDyDz(pos, det, delta);
-  auto channel = Geo::getIndex(det);
-  HitType newhit(posx, posy, posz, time, enDep, trackID, sensID);
-  if (channel != mLastChannelID || !isMergable(newhit, mHits->back())) {
-    mHits->push_back(newhit);
-    stack->addHit(GetDetId());
-  } else {
-    mHits->back().SetEnergyLoss(mHits->back().GetEnergyLoss() + newhit.GetEnergyLoss());
-    // LOG(INFO)<<"Merging hit "<<"\n";
-    //  <<mHits->back().GetId()<<"with new hit "<<newhit.GetId()<<"\n";
-  }
-  mLastChannelID = channel;
-
-  return kTRUE;
-}
+//Bool_t Detector::ProcessHits(FairVolume* v)
+//{
+//  // This method is called from the MC stepping for the sensitive volume only
+//  if (static_cast<int>(fMC->TrackCharge()) == 0) {
+//    // set a very large step size for neutral particles
+//    return kFALSE; // take only charged particles
+//  }
+//
+//  float pos2x, pos2y, pos2z;
+//  fMC->TrackPosition(pos2x, pos2y, pos2z);
+//  Float_t radius = std::sqrt(pos2x * pos2x + pos2y * pos2y);
+//  LOG(DEBUG) << "Process hit in TOF volume ar R=" << radius << " - Z=" << pos2z;
+//
+//  Float_t enDep = fMC->Edep();
+//  if (enDep < 1E-8)
+//    return kFALSE; // wo se need a threshold?
+//
+//  // ADD HIT
+//  float posx, posy, posz;
+//  fMC->TrackPosition(posx, posy, posz);
+//  float time = fMC->TrackTime() * 1.0e09;
+//  auto stack = static_cast<o2::Data::Stack*>(fMC->GetStack());
+//  int trackID = stack->GetCurrentTrackNumber();
+//  int sensID = v->getMCid();
+//  Int_t det[5];
+//  Float_t pos[3] = { posx, posy, posz };
+//  Float_t delta[3];
+//  Geo::getPadDxDyDz(pos, det, delta);
+//  auto channel = Geo::getIndex(det);
+//  HitType newhit(posx, posy, posz, time, enDep, trackID, sensID);
+//  if (channel != mLastChannelID || !isMergable(newhit, mHits->back())) {
+//    mHits->push_back(newhit);
+//    stack->addHit(GetDetId());
+//  } else {
+//    mHits->back().SetEnergyLoss(mHits->back().GetEnergyLoss() + newhit.GetEnergyLoss());
+//    // LOG(INFO)<<"Merging hit "<<"\n";
+//    //  <<mHits->back().GetId()<<"with new hit "<<newhit.GetId()<<"\n";
+//  }
+//  mLastChannelID = channel;
+//
+//  return kTRUE;
+//}
 
 void Detector::Register()
 {

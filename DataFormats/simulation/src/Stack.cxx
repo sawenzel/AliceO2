@@ -467,13 +467,6 @@ void Stack::Print(Option_t* option) const
   Print(verbose);
 }
 
-void Stack::addHit(int iDet) { addHit(iDet, mParticles.size() - 1); }
-void Stack::addHit(int iDet, Int_t iTrack)
-{
-  auto& part = mParticles[iTrack];
-  part.setHit(iDet);
-}
-
 Int_t Stack::GetCurrentParentTrackNumber() const
 {
   TParticle* currentPart = GetCurrentTrack();

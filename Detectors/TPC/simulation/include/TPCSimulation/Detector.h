@@ -13,14 +13,17 @@
 #define AliceO2_TPC_Detector_H_
 
 #include "DetectorsBase/Detector.h"   // for Detector
+#include "DetectorsBase/VMCUtilities.h"
 #include "Rtypes.h"          // for Int_t, Double32_t, Double_t, Bool_t, etc
 #include "TLorentzVector.h"  // for TLorentzVector
 #include "TString.h"
 
 #include "TPCSimulation/Point.h"
 #include "TPCBase/Sector.h"
+#include "TPCBase/ParameterGas.h"
+#include "FairVolume.h"
 
-class FairVolume;  // lines 10-10
+//class FairVolume;  // lines 10-10
 
 namespace o2 {
 namespace TPC {
@@ -77,7 +80,10 @@ class Detector: public o2::Base::DetImpl<Detector> {
     *       (see FairMCApplication::Stepping())
     */
    //     virtual Bool_t ProcessHitsOrig( FairVolume* v=0);
-   Bool_t ProcessHits(FairVolume* v = nullptr) override;
+   // Bool_t ProcessHits(FairVolume* v = nullptr) override;
+
+   template <typename VMCEngine = TVirtualMC>
+   bool ProcessHitsKernel(FairVolume* v = nullptr);
 
    /**       Registers the produced collections in FAIRRootManager.     */
    void Register() override;
@@ -191,6 +197,133 @@ T Detector::BetheBlochAleph(T bg, T kp1, T kp2, T kp3, T kp4, T kp5){
   bb=std::log(kp3+bb);
 
   return (kp2-aa-bb)*kp1/aa;
+}
+
+template<typename VMCEngine>
+inline
+bool Detector::ProcessHitsKernel(FairVolume *vol) {
+  // This method is called from the MC stepping for the sensitive volume only
+  using namespace vmc_helpers;
+  mStepCounter++;
+  const static ParameterGas& gasParam = ParameterGas::defaultInstance();
+
+  const double trackCharge = TrackCharge<VMCEngine>(fMC);
+  if (static_cast<int>(trackCharge) == 0) {
+    // set a very large step size for neutral particles
+    fMC->SetMaxStep(1.e10);
+    return false; // take only charged particles
+  }
+
+  // ===| SET THE LENGTH OF THE NEXT ENERGY LOSS STEP |=========================
+  // (We do this first so we can skip out of the method in the following
+  // Eloss->Ionization part.)
+  //
+  // In all cases we have multiple collisions and we use 2mm (+ some
+  // random shift to avoid binning effects), which was tuned for GEANT4, see
+  // https://indico.cern.ch/event/316891/contributions/732168/
+
+  const double rnd = fMC->GetRandom()->Rndm();
+  fMC->SetMaxStep(0.2 + (2. * rnd - 1.) * 0.05); // 2 mm +- rndm*0.5mm step
+
+
+  // ===| check active sector |=================================================
+  //
+  // Get the sector ID and check if the sector is active
+  static thread_local TLorentzVector position;
+  TrackPosition<VMCEngine>(fMC, position);
+  // for processing reasons in the digitizer, the sectors are shifted by -10deg, so sector 0 will be
+  //   from -10 - +10 deg instead of 0-20 and so on
+  const int sectorID = static_cast<int>(Sector::ToShiftedSector(position.X(), position.Y(), position.Z()));
+  // const int sectorID = static_cast<int>(Sector::ToSector(position.X(), position.Y(), position.Z()));
+  // TODO: Temporary hack to process only one sector
+  // if (sectorID != 0) return kFALSE;
+
+  // ---| momentum and beta gamma |---
+  static TLorentzVector momentum; // static to make avoid creation/deletion of this expensive object
+  TrackMomentum<VMCEngine>(fMC, momentum);
+
+  const float time = TrackTime<VMCEngine>(fMC) * 1.0e9;
+  const int trackID = mO2Stack->GetCurrentTrackNumber();
+  const int detID = vol->getMCid();
+  if (IsTrackEntering<VMCEngine>(fMC) || IsTrackExiting<VMCEngine>(fMC)) {
+     mO2Stack->addTrackReference(
+	 o2::TrackReference(position.X(), position.Y(), position.Z(), momentum.X(), momentum.Y(),
+	 momentum.Z(), TrackLength<VMCEngine>(fMC), time, trackID, GetDetId()));
+  }
+
+  // ===| CONVERT THE ENERGY LOSS TO IONIZATION ELECTRONS |=====================
+  //
+  // The energy loss is implemented directly below and taken GEANT3,
+  // ILOSS model 5 (in gfluct.F), which gives
+  // the energy loss in a single collision (NA49 model).
+  // TODO: Add discussion about drawback
+
+  Int_t numberOfElectrons = 0;
+  // ---| Stepsize in cm |---
+  const double stepSize = TrackStep<VMCEngine>(fMC);
+  double betaGamma = momentum.P() / TrackMass<VMCEngine>(fMC);
+  betaGamma = TMath::Max(betaGamma, 7.e-3); // protection against too small bg
+  // ---| number of primary ionisations per cm |---
+  const double primaryElectronsPerCM =
+      gasParam.getNprim() * BetheBlochAleph(static_cast<float>(betaGamma), gasParam.getBetheBlochParam(0),
+                                            gasParam.getBetheBlochParam(1), gasParam.getBetheBlochParam(2),
+                                            gasParam.getBetheBlochParam(3), gasParam.getBetheBlochParam(4));
+
+  // ---| mean number of collisions and random for this event |---
+  const double meanNcoll = stepSize * trackCharge * trackCharge * primaryElectronsPerCM;
+  const int nColl = static_cast<int>(fMC->GetRandom()->Poisson(meanNcoll));
+
+  // Variables needed to generate random powerlaw distributed energy loss
+  const double alpha_p1 = 1. - gasParam.getExp(); // NA49/G3 value
+  const double oneOverAlpha_p1 = 1. / alpha_p1;
+  const double eMin = gasParam.getIpot();
+  const double eMax = gasParam.getEend();
+  const double kMin = TMath::Power(eMin, alpha_p1);
+  const double kMax = TMath::Power(eMax, alpha_p1);
+  const double wIon = gasParam.getWion();
+
+  for (Int_t n = 0; n < nColl; n++) {
+     // Use GEANT3 / NA49 expression:
+     // P(eDep) ~ k * edep^-gasParam.getExp()
+     // eMin(~I) < eDep < eMax(300 electrons)
+     // k fixed so that Int_Emin^EMax P(Edep) = 1.
+    const double rndm = fMC->GetRandom()->Rndm();
+    const double eDep = TMath::Power((kMax - kMin) * rndm + kMin, oneOverAlpha_p1);
+    int nel_step = static_cast<int>(((eDep - eMin) / wIon) + 1);
+    nel_step = TMath::Min(nel_step, 300); // 300 electrons corresponds to 10 keV
+    numberOfElectrons += nel_step;
+  }
+
+  if (numberOfElectrons <= 0) {
+	// Could maybe be smaller than 0 due to the Gamma function
+    return false;
+  }
+
+  // ADD HIT
+  static thread_local int oldTrackId = trackID;
+  static thread_local int oldDetId = detID;
+  static thread_local int groupCounter = 0;
+  static thread_local int oldSectorId = sectorID;
+
+  //  a new group is starting -> put it into the container
+  static thread_local HitGroup* currentgroup = nullptr;
+  if (groupCounter == 0) {
+    mHitsPerSectorCollection[sectorID]->emplace_back(trackID);
+    currentgroup = &(mHitsPerSectorCollection[sectorID]->back());
+  }
+  if (trackID == oldTrackId && oldSectorId == sectorID) {
+    groupCounter++;
+    mHitCounter++;
+    mElectronCounter += numberOfElectrons;
+    currentgroup->addHit(position.X(), position.Y(), position.Z(), time, numberOfElectrons);
+  }
+  // finish group
+  else {
+   oldTrackId = trackID;
+   oldSectorId = sectorID;
+   groupCounter = 0;
+  }
+  return true;
 }
 
 }

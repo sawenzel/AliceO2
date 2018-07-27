@@ -30,12 +30,16 @@ using namespace o2::detectors;
 Float_t Detector::mDensityFactor = 1.0;
 
 Detector::Detector() : FairDetector(), mMapMaterial(), mMapMedium() {}
-Detector::Detector(const char* name, Bool_t Active)
-  : FairDetector(name, Active, DetID(name)), mMapMaterial(), mMapMedium()
+
+Detector::Detector(const char* name, Bool_t Active) : FairDetector(name, Active, DetID(name)),
+                                                      mMapMaterial(),
+                                                      mMapMedium()
 {
 }
 
-Detector::Detector(const Detector& rhs) : FairDetector(rhs), mMapMaterial(rhs.mMapMaterial), mMapMedium(rhs.mMapMedium)
+Detector::Detector(const Detector& rhs) : FairDetector(rhs),
+                                          mMapMaterial(rhs.mMapMaterial),
+                                          mMapMedium(rhs.mMapMedium)
 {
 }
 

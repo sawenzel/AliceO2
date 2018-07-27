@@ -603,6 +603,8 @@ o2_define_bucket(
     Net
     VMC # ROOT
     Geom
+    ${Geant4_LIBRARIES}
+    ${Geant4VMC_LIBRARIES}
 
     INCLUDE_DIRECTORIES
     ${FAIRROOT_INCLUDE_DIR}
@@ -610,6 +612,10 @@ o2_define_bucket(
     ${CMAKE_SOURCE_DIR}/Common/Field/include
     ${CMAKE_SOURCE_DIR}/Common/Constants/include
     ${CMAKE_SOURCE_DIR}/DataFormats/Parameters/include
+    ${CMAKE_SOURCE_DIR}/DataFormats/simulation/include
+    ${Geant4VMC_INCLUDE_DIRS}
+    ${Geant4_INCLUDE_DIRS}
+    ${Geant3_INCLUDE_DIRS} 
 )
 
 o2_define_bucket(

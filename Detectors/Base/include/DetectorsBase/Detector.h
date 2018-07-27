@@ -31,6 +31,11 @@
 #include <FairMQMessage.h>
 #include <FairMQParts.h>
 #include <TMessage.h>
+#include "SimulationDataFormat/Stack.h"
+
+// it is time to include G3, G4
+#include "TGeant3.h"
+#include "TGeant4.h"
 
 namespace o2 {
 namespace Base {
@@ -48,6 +53,23 @@ class Detector : public FairDetector
 
     /// Default Destructor
     ~Detector() override;
+
+    void Initialize() override
+    {
+      FairDetector::Initialize();
+      // initialize common generic stuff
+      mO2Stack = static_cast<o2::Data::Stack*>(fMC->GetStack());
+      auto name = fMC->GetName();
+      if (strcmp(name, "TGeant3") == 0 || strcmp(name, "TGeant3TGeo") == 0) {
+        mMcVersion = kG3;
+      } else if (strcmp(name, "TGeant4") == 0) {
+        mMcVersion = kG4;
+      } else if (strcmp(name, "TFluka") == 0) {
+        mMcVersion = kFluka;
+      } else {
+        mMcVersion = kUndefined;
+      }
+    }
 
     // Module composition
     void Material(Int_t imat, const char *name, Float_t a, Float_t z, Float_t dens, Float_t radl, Float_t absl,
@@ -163,6 +185,12 @@ class Detector : public FairDetector
     Detector(const Detector &origin);
 
     Detector &operator=(const Detector &);
+
+    // we keep a pointer to our own stack
+    // in order to avoid having to query it from VMC all the time
+    o2::Data::Stack* mO2Stack = nullptr; //!
+    enum VMCType { kUndefined, kG3, kG4, kFluka };
+    VMCType mMcVersion = kUndefined;
 
   private:
     /// Mapping of the ALICE internal material number to the one
@@ -302,9 +330,54 @@ class DetImpl : public o2::Base::Detector
     return new Det(static_cast<const Det&>(*this));
   }
 
+  // a fake kernel ... just until every detector has this as well
+  template <typename VMC = TVirtualMC>
+  bool ProcessHitsKernel(FairVolume* v = nullptr) const
+  {
+    return false;
+  }
+
+  // Implement the sensitive volume functions in terms of a detector provide kernel
+  // This is done in order to automatically make sure that certain other functions
+  // are triggered.
+  // We can also avoid virtual functions inside the sensitive volume treatment
+  // by calling VMC engine specific template instantiations.
+  bool ProcessHits(FairVolume* v = nullptr) override /* should be final */
+  {
+	// we are dispatching to the actual ProcessHitsKernel
+	// if it returns true ... a hit was created which requires notifying our stack
+	// so that it can correctly keep the right tracks after pruning
+
+	// it is also the right moment of dispatching to template specialized versions
+	// to avoid repeated virtual function calls inside the sensitive actions
+	bool hitcreated = false;
+	if (mMcVersion == kG3) {
+      hitcreated = static_cast<Det*>(this)->Det::template ProcessHitsKernel<TGeant3>(v);
+	}
+	else if (mMcVersion == kG4) {
+      hitcreated = static_cast<Det*>(this)->Det::template ProcessHitsKernel<TGeant4>(v);
+	}
+	else {
+      hitcreated = static_cast<Det*>(this)->Det::template ProcessHitsKernel<TVirtualMC>(v);
+	}
+	if (hitcreated) {
+	  mO2Stack->addHit(GetDetId());
+	}
+	return hitcreated;
+  }
+
+  void InitializeKernel() {}
+  void Initialize() override {
+    // initialize common generic stuff
+    mO2Stack = static_cast<o2::Data::Stack*>(fMC->GetStack());
+	// initialize Det stuff
+	// static_cast<Det*>(this)->Det::InitializeKernel();
+  }
+
   ClassDefOverride(DetImpl, 0)
 };
-}
-}
+
+} // end namespace
+} // end namespace
 
 #endif
