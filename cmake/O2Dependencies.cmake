@@ -1740,6 +1740,7 @@ o2_define_bucket(
     ITSMFTBase
     TOFSimulation
     TOFReconstruction
+    DPLUtils
 )
 
 o2_define_bucket(
