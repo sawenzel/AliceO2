@@ -55,13 +55,13 @@ class ConfigurableParamHelper : virtual public ConfigurableParam
     return P::sInstance;
   }
 
-  std::string getName() const final
+  std::string getName() const override
   {
     return P::sKey;
   }
 
   // one of the key methods, using introspection to print itself
-  void printKeyValues(bool showprov) const final
+  void printKeyValues(bool showprov) const override
   {
     // just a helper line to make sure P::sInstance is looked-up
     // and that compiler complains about missing static sInstance of type P
@@ -79,7 +79,7 @@ class ConfigurableParamHelper : virtual public ConfigurableParam
   }
 
   // fills the data structures with the initial default values
-  void putKeyValues(boost::property_tree::ptree* tree) final
+  void putKeyValues(boost::property_tree::ptree* tree) override
   {
     auto cl = TClass::GetClass(typeid(P));
     if (!cl) {
@@ -89,7 +89,7 @@ class ConfigurableParamHelper : virtual public ConfigurableParam
     _ParamHelper::fillKeyValuesImpl(getName(), cl, (void*)this, tree, sKeyToStorageMap);
   }
 
-  void initFrom(TFile* file) final
+  void initFrom(TFile* file) override
   {
     // switch off auto registering since the readback object is
     // only a "temporary" singleton
@@ -104,7 +104,7 @@ class ConfigurableParamHelper : virtual public ConfigurableParam
     setRegisterMode(true);
   }
 
-  void serializeTo(TFile* file) const final
+  void serializeTo(TFile* file) const override
   {
     file->WriteObjectAny((void*)this, TClass::GetClass(typeid(P)), getName().c_str());
   }

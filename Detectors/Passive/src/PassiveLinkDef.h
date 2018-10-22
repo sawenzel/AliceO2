@@ -39,5 +39,15 @@
 #pragma link C++ class  o2::conf::ConfigurableParam+;
 #pragma link C++ class  o2::passive::HallSimParam+;
 #pragma link C++ class  o2::conf::ConfigurableParamHelper<o2::passive::HallSimParam>+;
+
+#pragma link C++ class  o2::passive::Base+;
+#pragma link C++ class  o2::passive::Base2+;
+#pragma link C++ class  o2::passive::FooParam+;
+#pragma link C++ class  o2::conf::ConfigurableParamHelper<o2::passive::FooParam>+;
+#pragma link C++ class  o2::passive::BarParam+;
+#pragma link C++ class  o2::conf::ConfigurableParamHelper<o2::passive::BarParam>+;
+#pragma link C++ class  o2::passive::Bar2Param+;
+#pragma link C++ class  o2::conf::ConfigurableParamHelper<o2::passive::Bar2Param>+;
+
 #endif
 

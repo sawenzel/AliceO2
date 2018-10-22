@@ -29,6 +29,34 @@ struct HallSimParam : public o2::conf::ConfigurableParamHelper<HallSimParam> {
   O2ParamDef(HallSimParam, "HallSim");
 };
 
+// common description
+struct Base {
+  double x = 0.;
+  float y = 1.;
+  Base() = default;
+};
+
+struct Base2 : public Base {
+  float z = 110.;
+};
+
+struct FooParam : virtual public Base,
+                  public o2::conf::ConfigurableParamHelper<FooParam>
+{
+  float k = -1;
+
+  O2ParamDef(FooParam, "Foo");
+};
+
+struct BarParam : virtual public Base2,
+                  public o2::conf::ConfigurableParamHelper<BarParam>
+{
+  float k = -100;
+
+  O2ParamDef(BarParam, "Bar");
+};
+
+
 } // namespace passive
 } // namespace o2
 

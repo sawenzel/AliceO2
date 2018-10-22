@@ -10,3 +10,6 @@
 
 #include "DetectorsPassive/HallSimParam.h"
 O2ParamImpl(o2::passive::HallSimParam);
+O2ParamImpl(o2::passive::FooParam);
+O2ParamImpl(o2::passive::BarParam);
+O2ParamImpl(o2::passive::Bar2Param);

@@ -207,6 +207,18 @@ class ConfigurableParam
   template <typename T>                          \
   friend class o2::conf::ConfigurableParamHelper;
 
+// a helper macro for boilerplate code in parameter classes
+// version that does not define Ctr
+#define O2ParamDefNoCtr(classname, key)          \
+ public:                                         \
+  classname(TRootIOCtor*) {}                     \
+ private:                                        \
+  static constexpr char const* const sKey = key; \
+  static classname sInstance;                    \
+  template <typename T>                          \
+  friend class o2::conf::ConfigurableParamHelper;
+
+
 // a helper macro to implement necessary symbols in source
 #define O2ParamImpl(classname) classname classname::sInstance;
 

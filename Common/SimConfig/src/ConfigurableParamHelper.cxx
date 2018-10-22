@@ -13,6 +13,7 @@
 #include "SimConfig/ConfigurableParamHelper.h"
 #include "SimConfig/ConfigurableParam.h"
 #include <TClass.h>
+#include <TBaseClass.h>
 #include <TDataMember.h>
 #include <TDataType.h>
 #include <TIterator.h>
@@ -29,11 +30,25 @@ bool isString(TDataMember const& dm)
   return strcmp(dm.GetTrueTypeName(), "string") == 0;
 }
 
-// a generic looper of data members of a TClass; calling a callback
+// a generic looper of data members of a TClass and its base classes; calling a callback
 // reused in various functions below
 void loopOverMembers(TClass* cl, void* obj,
                      std::function<void(const TDataMember*, int, int)>&& callback)
 {
+  auto baselist = cl->GetListOfBases();
+  if(baselist && baselist->GetEntries() > 0) {
+	for(int i=0; i < baselist->GetEntries(); ++i) {
+      auto base = static_cast<TBaseClass*>(baselist->At(i));
+      if(base) {
+        auto f = [&callback](const TDataMember* dm, int index, int size) {
+          callback(dm, index, size);
+        };
+        loopOverMembers(base->GetClassPointer(), obj, f);
+      }
+    }
+  }
+
+
   auto memberlist = cl->GetListOfDataMembers();
   for (int i = 0; i < memberlist->GetEntries(); ++i) {
     auto dm = (TDataMember*)memberlist->At(i);
