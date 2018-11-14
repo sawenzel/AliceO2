@@ -8,14 +8,23 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-#ifdef __CLING__
+#include "HMPIDSimulation/HMPIDDigitizer.h"
 
-#pragma link off all globals;
-#pragma link off all classes;
-#pragma link off all functions;
+using namespace o2::hmpid;
 
-#pragma link C++ class o2::hmpid::Detector+;
-#pragma link C++ class o2::Base::DetImpl<o2::hmpid::Detector>+;
-#pragma link C++ class o2::hmpid::HMPIDDigitizer+;
+ClassImp(HMPIDDigitizer);
 
-#endif
+
+// this will process hits and fill the digit vector with digits which are finalized
+void HMPIDDigitizer::process(std::vector<o2::hmpid::HitType> const& hits, std::vector<o2::hmpid::Digit>& digit)
+{
+
+  // loop over hits
+  for(auto& hit : hits) {
+
+
+
+
+  }
+
+}
