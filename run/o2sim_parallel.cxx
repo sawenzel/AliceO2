@@ -26,6 +26,7 @@
 #include "CommonUtils/ShmManager.h"
 #include "TFile.h"
 #include "TTree.h"
+#include <regex>
 
 const char* serverlogname = "serverlog";
 const char* workerlogname = "workerlog";
@@ -66,6 +67,45 @@ void sighandler(int signal)
     cleanup();
     exit(0);
   }
+}
+
+// IO thread analyzing server pipe
+void launchServerIOThread(int pipefd, int fd, std::vector<std::thread>& iothreads)
+{
+  auto printCurrentEvent = [](const char* line) {
+    LOG(INFO) << "LOOKING AT " << line;
+	const std::regex regex(".*[:cntrl:]*.*reply send.*\n");
+    auto m = std::regex_match(line, regex);
+    LOG(INFO) << m;
+    return m;
+  };
+
+  auto lambda = [pipefd, fd, &printCurrentEvent]() {
+    char buffer[4096];
+    while (1) {
+      ssize_t count = read(pipefd, buffer, sizeof(buffer));
+      if (count == -1) {
+        if (errno == EINTR) {
+          continue;
+        } else {
+          return;
+        }
+      } else if (count == 0) {
+        break;
+      } else {
+        buffer[count] = 0; // null terminate string
+        if (printCurrentEvent(buffer)) {
+          LOG(INFO) << buffer;
+        }
+        write(fd, buffer, count);
+      }
+    };
+  };
+
+  const char* s = "foo treating ev 9 part 1 out of 1";
+  LOG(INFO) << "TEST " << printCurrentEvent(s);
+
+  iothreads.push_back(std::thread(lambda));
 }
 
 // helper executable to launch all the devices/processes
@@ -109,14 +149,18 @@ int main(int argc, char* argv[])
 
   std::vector<int> childpids;
 
+  // create a pipe in order to be able to communicate back from server to this mother process
+  int serverpipefd[2];
+  // filedesc[1] is ENTRANCE
+  // filedesc[0] is EXIT
+  pipe(serverpipefd);
+
   // the server
   int pid = fork();
   if (pid == 0) {
-    int fd = open(serverlogname, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
-    dup2(fd, 1); // make stdout go to file
-    dup2(fd, 2); // make stderr go to file - you may choose to not do this
-                 // or perhaps send stderr to another file
-    close(fd);   // fd no longer needed - the dup'ed handles are sufficient
+    close(serverpipefd[0]); // close exit of pipe
+    dup2(serverpipefd[1], 1);
+    dup2(serverpipefd[1], 2);
 
     const std::string name("O2PrimaryServerDeviceRunner");
     const std::string path = installpath + "/" + name;
@@ -147,6 +191,8 @@ int main(int argc, char* argv[])
   } else {
     childpids.push_back(pid);
     std::cout << "Spawning particle server on PID " << pid << "; Redirect output to " << serverlogname << "\n";
+    close(serverpipefd[1]);
+
   }
 
   auto internalfork = getenv("ALICE_SIMFORKINTERNAL");
@@ -205,6 +251,13 @@ int main(int argc, char* argv[])
 
   // wait on merger (which when exiting completes the workflow)
   auto mergerpid = childpids.back();
+
+  std::vector<std::thread> iothreads;
+  int serverfd = open(serverlogname, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+  launchServerIOThread(serverpipefd[0], serverfd, iothreads);
+  for (auto& t : iothreads) {
+    t.detach();
+  }
 
   // wait just blocks and waits until any child returns; but we make sure to wait until merger is here
   while ((cpid = wait(&status)) != mergerpid) {
