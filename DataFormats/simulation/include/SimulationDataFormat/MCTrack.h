@@ -32,7 +32,7 @@ namespace o2
 /// secondary one produced by the transport through decay or interaction.
 /// This is a light weight particle class that is saved to disk
 /// instead of saving the TParticle class. It is also used for filtering the stack
-template <class T>
+template <class Type>
 class MCTrackT
 {
  public:
@@ -65,6 +65,15 @@ class MCTrackT
   Double_t GetStartVertexCoordinatesY() const { return mStartVertexCoordinatesY; }
   Double_t GetStartVertexCoordinatesZ() const { return mStartVertexCoordinatesZ; }
   Double_t GetStartVertexCoordinatesT() const { return mStartVertexCoordinatesT; }
+  // short hand notation
+  Double_t X() const { return mStartVertexCoordinatesX; }
+  Double_t Y() const { return mStartVertexCoordinatesY; }
+  Double_t Z() const { return mStartVertexCoordinatesZ; }
+  Double_t T() const { return mStartVertexCoordinatesT; }
+  Double_t PX() const { return mStartVertexMomentumX; }
+  Double_t PY() const { return mStartVertexMomentumY; }
+  Double_t PZ() const { return mStartVertexMomentumZ; }
+
   Double_t GetMass() const;
 
   Double_t GetEnergy() const;
@@ -139,12 +148,16 @@ class MCTrackT
     mProp = prop.i;
   }
   int getProcess() const { return ((PropEncoding)mProp).process; }
+
+  void setVolumeID(int id) { mOriginatingVol = id; }
+  int getVolumeID() const { return mOriginatingVol; }
+
  private:
   /// Momentum components at start vertex [GeV]
-  T mStartVertexMomentumX, mStartVertexMomentumY, mStartVertexMomentumZ;
+  Type mStartVertexMomentumX, mStartVertexMomentumY, mStartVertexMomentumZ;
 
   /// Coordinates of start vertex [cm, ns]
-  T mStartVertexCoordinatesX, mStartVertexCoordinatesY, mStartVertexCoordinatesZ, mStartVertexCoordinatesT;
+  Type mStartVertexCoordinatesX, mStartVertexCoordinatesY, mStartVertexCoordinatesZ, mStartVertexCoordinatesT;
 
   ///  PDG particle code
   Int_t mPdgCode;
@@ -168,6 +181,8 @@ class MCTrackT
       int hitmask : 25; // encoding hits per detector
     };
   };
+
+  int mOriginatingVol = -1; // The volume where this track was produced (-1 for primary)
 
   ClassDefNV(MCTrackT, 1);
 };

@@ -26,6 +26,7 @@
 #include "TParticle.h"      // for TParticle
 #include "TRefArray.h"      // for TRefArray
 #include "TVirtualMC.h"     // for VMC
+#include "TGeoManager.h"
 
 #include <algorithm>
 #include <cassert>
@@ -270,6 +271,13 @@ TParticle* Stack::PopNextTrack(Int_t& iTrack)
     mIndexOfPrimaries.emplace_back(mParticles.size());
   }
   mParticles.emplace_back(mCurrentParticle);
+
+  // put information about origin -- need to use navigator
+  auto& part = mParticles.back();
+  const auto node = gGeoManager->FindNode(mCurrentParticle.Vx(), mCurrentParticle.Vy(), mCurrentParticle.Vz());
+  const auto volume = node->GetVolume();
+  part.setVolumeID(volume->GetNumber());
+
   mTransportedIDs.emplace_back(mCurrentParticle.GetStatusCode());
   insertInVector(mTrackIDtoParticlesEntry, mCurrentParticle.GetStatusCode(), (int)(mParticles.size() - 1));
 
