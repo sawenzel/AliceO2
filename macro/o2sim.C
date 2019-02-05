@@ -20,13 +20,73 @@
 #include <TStopwatch.h>
 #include <memory>
 #include "DataFormatsParameters/GRPObject.h"
+#include "MathUtils/VoxelContainer.h"
 #include "FairParRootFileIo.h"
 #include "FairSystemInfo.h"
 #include <SimSetup/SimSetup.h>
 #include <Steer/O2RunSim.h>
+#include "TGeoBBox.h"
+#include "TGeoShape.h"
 #include <unistd.h>
 #include <sstream>
 #endif
+
+// transforms bounding box to bounding box within cave
+void transformBoundingBox(TGeoVolume const& vol, double* lowerc, double* upperc)
+{
+  // idea: take the 8 corners of the bounding box in the reference frame of pvol
+  // transform those corners and keep track of minimum and maximum extent
+
+  auto box = static_cast<TGeoBBox const*>(vol.GetShape());
+  auto dx = box->GetDX();
+  auto dy = box->GetDY();
+  auto dz = box->GetDZ();
+  auto origin = box->GetOrigin();
+  double lower[3] = { origin[0] - dx, origin[1] - dy, origin[2] - dz };
+  double upper[3] = { origin[0] + dx, origin[1] + dy, origin[2] + dz };
+
+  double delta[3] = { upper[0] - lower[0], upper[1] - lower[1], upper[2] - lower[2] };
+  double minx, miny, minz, maxx, maxy, maxz;
+  const double big = 1.E20;
+  minx = big;
+  miny = big;
+  minz = big;
+  maxx = -big;
+  maxy = -big;
+  maxz = -big;
+
+  // use TGeoHMatrix here
+  auto transf = gGeoManager->GetCurrentMatrix();
+
+  // iterate over all 8 corners
+  for (int x = 0; x <= 1; ++x)
+    for (int y = 0; y <= 1; ++y)
+      for (int z = 0; z <= 1; ++z) {
+        double corner[3];
+        corner[0] = lower[0] + x * delta[0];
+        corner[1] = lower[1] + y * delta[1];
+        corner[2] = lower[2] + z * delta[2];
+
+        double transformedcorner[3];
+        transf->LocalToMaster(corner, transformedcorner);
+
+        minx = std::min(minx, transformedcorner[0]);
+        miny = std::min(miny, transformedcorner[1]);
+        minz = std::min(minz, transformedcorner[2]);
+        maxx = std::max(maxx, transformedcorner[0]);
+        maxy = std::max(maxy, transformedcorner[1]);
+        maxz = std::max(maxz, transformedcorner[2]);
+      }
+  // put some margin around these boxes
+  lowerc[0] = minx - 1E-3;
+  lowerc[1] = miny - 1E-3;
+  lowerc[2] = minz - 1E-3;
+  upperc[0] = maxx + 1E-3;
+  upperc[1] = maxy + 1E-3;
+  upperc[2] = maxz + 1E-3;
+  std::cerr << " LOWER " << lowerc[0] << " " << lowerc[1] << " " << lowerc[2] << "\n";
+  std::cerr << " UPPER " << upperc[0] << " " << upperc[1] << " " << upperc[2] << "\n";
+}
 
 FairRunSim* o2sim_init(bool asservice)
 {
@@ -89,6 +149,7 @@ FairRunSim* o2sim_init(bool asservice)
   // run init
   run->Init();
   finalize_geometry(run);
+
   std::stringstream geomss;
   geomss << "O2geometry";
   if (asservice) {
@@ -105,6 +166,53 @@ FairRunSim* o2sim_init(bool asservice)
     }
   }
   std::time_t runStart = std::time(nullptr);
+
+  o2::VoxelContainer<int> cont;
+  // size according to cave dimensions
+  cont.init(100, 100, 1000, 2.*2500, 2.*2500, 2.*15000);
+  auto hook = [&cont]() {
+    std::cout << "FOUND " << gGeoManager->GetPath() << "\n";
+    //gGeoManager->GetCurrentMatrix();
+    //auto box = static_cast<TGeoBBox*>(gGeoManager->GetCurrentVolume()->GetShape());
+    //box->GetOrigin();
+    double lowerc[3];
+    double upperc[3];
+    transformBoundingBox(*(gGeoManager->GetCurrentVolume()), lowerc, upperc);
+
+    // retrieve bins for lower and upper corners and mark occupied everything
+    // within these boundaries
+    int lbinx = cont.getBinX(lowerc[0]);
+    int lbiny = cont.getBinY(lowerc[1]);
+    int lbinz = cont.getBinZ(lowerc[2]);
+    int ubinx = cont.getBinX(upperc[0]);
+    int ubiny = cont.getBinY(upperc[1]);
+    int ubinz = cont.getBinZ(upperc[2]);
+    LOG(INFO) << lbinx << " " << lbiny << " " << lbinz << " " << ubinx << " " << ubiny << " " << ubinz;
+    for (int bz = lbinz; bz <= ubinz; ++bz) {
+      for (int by = lbiny; by <= ubiny; ++by) {
+        for (int bx = lbinz; bx <= ubinz; ++bx) {
+          cont.getVoxelContentByBin(bx, by, bz) = 1;
+        }
+      }
+    }
+  };
+
+  visitTGeoLeaveNodes(gGeoManager->GetTopNode(), hook);
+
+  int occupied = 0;
+  int empty = 0;
+  auto counter = [&occupied, &empty, &cont](int binx, int biny, int binz) {
+    if (cont.getVoxelContentByBin(binx, biny, binz)) {
+      occupied++;
+    } else {
+      empty++;
+    }
+  };
+
+  // simple counter of occupied voxels
+  cont.visitAllVoxels(counter);
+  LOG(INFO) << " EMPTY VOXELS " << empty;
+  LOG(INFO) << " OCCUPIED VOXELS " << occupied;
 
   // runtime database
   bool kParameterMerged = true;

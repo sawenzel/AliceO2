@@ -1414,6 +1414,7 @@ o2_define_bucket(
     fairroot_geom
     Field
     DetectorsBase
+    SimulationDataFormat
     SimConfig
 
     INCLUDE_DIRECTORIES

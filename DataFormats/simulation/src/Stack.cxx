@@ -275,8 +275,13 @@ TParticle* Stack::PopNextTrack(Int_t& iTrack)
   // put information about origin -- need to use navigator
   auto& part = mParticles.back();
   const auto node = gGeoManager->FindNode(mCurrentParticle.Vx(), mCurrentParticle.Vy(), mCurrentParticle.Vz());
-  const auto volume = node->GetVolume();
-  part.setVolumeID(volume->GetNumber());
+  if (node) {
+    const auto volume = node->GetVolume();
+    part.setVolumeID(volume->GetNumber());
+  }
+  else {
+    part.setVolumeID(-1);
+  }
 
   mTransportedIDs.emplace_back(mCurrentParticle.GetStatusCode());
   insertInVector(mTrackIDtoParticlesEntry, mCurrentParticle.GetStatusCode(), (int)(mParticles.size() - 1));

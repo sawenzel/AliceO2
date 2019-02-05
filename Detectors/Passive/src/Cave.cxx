@@ -25,12 +25,30 @@
 #include "DetectorsBase/Detector.h"
 #include "DetectorsPassive/Cave.h"
 #include "SimConfig/SimConfig.h"
+#include "TVirtualMC.h"
+#include "SimulationDataFormat/MCTrack.h"
+#include "SimulationDataFormat/StackParam.h"
 #include <TRandom.h>
 #include "FairLogger.h"
 #include "TGeoManager.h"
 #include "TGeoVolume.h"
+#include "TDatabasePDG.h"
+#include <dlfcn.h>
 
 using namespace o2::Passive;
+
+bool Cave::initScorer() {
+  auto libhandle = dlopen("predictor.so", 0x00002);
+  if (!libhandle) {
+    return false;
+  }
+  void* symbolAddress = dlsym(libhandle, "predict");
+  if (!symbolAddress) {
+    return false;
+  }
+  mSecondaryScorer = (Predict_func)symbolAddress;
+  return true;
+}
 
 void Cave::createMaterials()
 {
@@ -74,10 +92,13 @@ void Cave::ConstructGeometry()
   gGeoManager->SetTopVolume(cavevol);
 }
 
-Cave::Cave() : FairDetector() {}
-Cave::~Cave() = default;
-Cave::Cave(const char* name, const char* Title) : FairDetector(name, Title, -1) {}
-Cave::Cave(const Cave& rhs) : FairDetector(rhs) {}
+Cave::Cave() : FairDetector() { initScorer(); }
+Cave::~Cave()
+{
+  LOG(INFO) << "PASSED " << mPassCounter << " KILLED " << mKillCounter;
+}
+Cave::Cave(const char* name, const char* Title) : FairDetector(name, Title, -1) { initScorer(); }
+Cave::Cave(const Cave& rhs) : FairDetector(rhs) { initScorer(); }
 Cave& Cave::operator=(const Cave& rhs)
 {
   // self assignment
@@ -86,6 +107,7 @@ Cave& Cave::operator=(const Cave& rhs)
 
   // base class assignment
   FairModule::operator=(rhs);
+  initScorer();
   return *this;
 }
 
@@ -116,6 +138,72 @@ void Cave::BeginPrimary()
     }
   }
   primcounter++;
+}
+
+void Cave::PreTrack()
+{
+  auto& p = o2::sim::StackParam::Instance();
+  if (!p.trackFilter) {
+    return;
+  }
+  auto particle = fMC->GetStack()->GetCurrentTrack();
+  o2::MCTrack track(*particle);
+
+  if (track.getMotherTrackId() == -1) {
+    mPassCounter++;
+	return;
+  }
+
+  float x = track.X();
+  float y = track.Y();
+  float z = track.Z();
+  float t = track.T();
+  float px = track.PX();
+  float py = track.PY();
+  float pz = track.PZ();
+  auto pdg = track.GetPdgCode();
+  auto db = TDatabasePDG::Instance();
+  auto pdgpart = db->GetParticle(pdg);
+  if (!pdgpart) {
+    mPassCounter++;
+    return;
+  }
+  float charge = std::abs(pdgpart->Charge() / 3.);
+  float emparticle;
+  // emparticle
+  if (pdg == 22 || std::abs(pdg) == 11) {
+    emparticle = 1.;
+  } else {
+    emparticle = 0.;
+  }
+  float muon;
+  // muon
+  if (std::abs(pdg) == 13) {
+    muon = 1.;
+  } else {
+    muon = 0.;
+  }
+  float neutron;
+  if (pdg == 2112) {
+    neutron = 1.;
+  } else {
+    neutron = 0.;
+  }
+  float pt = track.GetPt();
+  float e = track.GetEnergy();
+  float eta = track.GetRapidity();
+  int copyEta;
+  float vol = fMC->CurrentVolID(copyEta);
+
+  Entry predictargs[15] = { x, y, z, t, px, py, pz, pt, charge, emparticle, muon, neutron, e, vol, eta };
+  // call the predictor
+  // auto score = mSecondaryScorer(predictargs, 0);
+  if (z < -10) {
+    fMC->StopTrack();
+    mKillCounter++;
+  } else {
+    mPassCounter++;
+  }
 }
 
 bool Cave::ProcessHits(FairVolume*)

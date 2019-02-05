@@ -54,6 +54,36 @@ bool isActivated(std::string s)
   return active;
 }
 
+
+// iterates over all TGeo nodes and executes a hook when on a leave node
+// note that this function (likely) changes the state of the TGeoNavigator !
+void visitTGeoLeaveNodes(TGeoNode const* node, std::function<void()> hook)
+{
+  // auto nav = gGeoManager->GetCurrentNavigator();
+  if (node == nullptr) {
+    return;
+  }
+  if (node == gGeoManager->GetTopNode()) {
+    // initialize the navigator
+    gGeoManager->CdTop();
+  }
+  // we have reached a leave
+  if (node->GetNdaughters() == 0) {
+    // execute some function on leave node
+    hook();
+  } else {
+    for (int i = 0; i < node->GetNdaughters(); ++i) {
+      auto daughter = node->GetDaughter(i);
+      // go down in geometry hierarchy
+      gGeoManager->CdDown(i);
+      visitTGeoLeaveNodes(daughter, hook);
+    }
+  }
+  // go up in geometry hierarchy
+  gGeoManager->CdUp();
+  return;
+}
+
 // a "factory" like macro to instantiate the O2 geometry
 void build_geometry(FairRunSim* run = nullptr)
 {

@@ -68,9 +68,23 @@ class Cave : public FairDetector
 
   void BeginPrimary() override;
 
+  void PreTrack() override;
+
  private:
+  bool initScorer();
+
   Cave(const Cave& orig);
-  Cave& operator=(const Cave&);
+  Cave& operator=(const Cave&);// declare the input format
+
+  union Entry {
+    float fvalue;
+    int missing;
+    int qvalue;
+  };
+  typedef float(*Predict_func)(union Entry*, int);
+  Predict_func mSecondaryScorer = nullptr; //! scores secondaries according to their usefulness
+  int mKillCounter = 0;
+  int mPassCounter = 0;
 
   std::vector<std::function<void()>> mFinishPrimaryHooks; //!
 

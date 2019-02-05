@@ -30,10 +30,16 @@ void flatKinematicsForML(std::string filename = "o2sim.root")
   float px; outTree->Branch("px", &px);
   float py; outTree->Branch("py", &py);
   float pz; outTree->Branch("pz", &pz);
+  float pt; outTree->Branch("pt", &pt);
 
   float pdg; outTree->Branch("pdg", &pdg);
-  float pt; outTree->Branch("pt", &pt);
-  float e; outTree->Branch("e", &e);
+  float charge; outTree->Branch("q", &charge);
+  float emparticle; outTree->Branch("em", &emparticle); // whether particle is of em nature (photons, electrons, positron)
+  float muon; outTree->Branch("muon", &muon); // whether particle is muon
+  float neutron; outTree->Branch("neutron", &muon); // whether particle is muon
+  float other; outTree->Branch("other", &other); // all other particles
+
+  float e; outTree->Branch("energy", &e);
   float mass; outTree->Branch("mass", &e);
   float vol; outTree->Branch("vol", &vol); // volume where created
   float eta; outTree->Branch("eta", &eta);
@@ -50,10 +56,17 @@ void flatKinematicsForML(std::string filename = "o2sim.root")
   auto br = intree->GetBranch("MCTrack");
   br->SetAddress(&mctracks);
 
+  auto db = TDatabasePDG::Instance();
+
   for (int i = 0; i < br->GetEntries(); ++i) {
     br->GetEntry(i);
     std::cout << "adding " << mctracks->size() << " tracks \n";
     for (auto& track : *mctracks) {
+      // omit primaries
+      if (track.getMotherTrackId() == -1) {
+        continue;
+      }
+
       x = track.X();
       y = track.Y();
       z = track.Z();
@@ -62,6 +75,35 @@ void flatKinematicsForML(std::string filename = "o2sim.root")
       py = track.PY();
       pz = track.PZ();
       pdg = track.GetPdgCode();
+      auto pdgpart = db->GetParticle(pdg);
+      if (!pdgpart) {
+    	continue;
+      }
+      charge = std::abs(pdgpart->Charge()/3.);
+
+      // emparticle
+      if (pdg == 22 || std::abs(pdg) == 11) {
+        emparticle = 1.;
+      } else {
+        emparticle = 0.;
+      }
+      // muon
+      if (std::abs(pdg) == 13) {
+        muon = 1.;
+      } else {
+        muon = 0.;
+      }
+      if (pdg == 2112) {
+        neutron = 1.;
+      } else {
+        neutron = 0.;
+      }
+      if (emparticle == 0. && muon == 0. && neutron == 0.) {
+        other = 1.;
+      } else {
+        other = 0.;
+      }
+
       pt = track.GetPt();
       e = track.GetEnergy();
       mass = track.GetMass();

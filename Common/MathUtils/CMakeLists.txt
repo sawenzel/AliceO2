@@ -31,6 +31,7 @@ O2_GENERATE_LIBRARY()
 set(TEST_SRCS
   test/testCartesian3D.cxx
   test/testCachingTF1.cxx
+  test/testVoxelContainer.cxx
 )
 
 O2_GENERATE_TESTS(

@@ -23,6 +23,7 @@ namespace sim
 struct StackParam : public o2::conf::ConfigurableParamHelper<StackParam> {
   bool storeSecondaries = true;
   bool pruneKine = true;
+  bool trackFilter = false;
 
   // boilerplate stuff + make principal key "Stack"
   O2ParamDef(StackParam, "Stack");
