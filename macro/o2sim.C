@@ -29,6 +29,7 @@
 #include "TGeoShape.h"
 #include <unistd.h>
 #include <sstream>
+#include <cmath>
 #endif
 
 // transforms bounding box to bounding box within cave
@@ -170,7 +171,13 @@ FairRunSim* o2sim_init(bool asservice)
   o2::VoxelContainer<int> cont;
   // size according to cave dimensions
   cont.init(100, 100, 1000, 2.*2500, 2.*2500, 2.*15000);
-  auto hook = [&cont]() {
+  double lowx = 1E20;
+  double lowy = 1E20;
+  double lowz = 1E20;
+  double upx = -1E20;
+  double upy = -1E20;
+  double upz = -1E20;
+  auto hook = [&cont, &lowx, &lowy, &lowz, &upx, &upy, &upz]() {
     std::cout << "FOUND " << gGeoManager->GetPath() << "\n";
     //gGeoManager->GetCurrentMatrix();
     //auto box = static_cast<TGeoBBox*>(gGeoManager->GetCurrentVolume()->GetShape());
@@ -178,6 +185,12 @@ FairRunSim* o2sim_init(bool asservice)
     double lowerc[3];
     double upperc[3];
     transformBoundingBox(*(gGeoManager->GetCurrentVolume()), lowerc, upperc);
+    lowx = std::min(lowx, lowerc[0]);
+    lowy = std::min(lowy, lowerc[1]);
+    lowz = std::min(lowz, lowerc[2]);
+    upx = std::max(upx, upperc[0]);
+    upy = std::max(upy, upperc[1]);
+    upz = std::max(upz, upperc[2]);
 
     // retrieve bins for lower and upper corners and mark occupied everything
     // within these boundaries
@@ -213,6 +226,8 @@ FairRunSim* o2sim_init(bool asservice)
   cont.visitAllVoxels(counter);
   LOG(INFO) << " EMPTY VOXELS " << empty;
   LOG(INFO) << " OCCUPIED VOXELS " << occupied;
+  LOG(INFO) << " LOWER LIMIT: " << lowx << " " << lowy << " " << lowz;
+  LOG(INFO) << " UPPER LIMIT: " << upx << " " << upy << " " << upz;
 
   // runtime database
   bool kParameterMerged = true;
