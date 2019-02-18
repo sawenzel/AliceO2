@@ -18,8 +18,9 @@
 #ifndef STEER_INCLUDE_STEER_O2MCAPPLICATIONBASE_H_
 #define STEER_INCLUDE_STEER_O2MCAPPLICATIONBASE_H_
 
-#include "FairMCApplication.h"
+#include <FairMCApplication.h>
 #include "Rtypes.h" // for Int_t, Bool_t, Double_t, etc
+#include <TVirtualMC.h>
 
 namespace o2
 {
@@ -34,6 +35,16 @@ class O2MCApplicationBase : public FairMCApplication
  public:
   using FairMCApplication::FairMCApplication;
   ~O2MCApplicationBase() override = default;
+
+  void Stepping() override
+  {
+    FairMCApplication::Stepping();
+    float x,y,z;
+    TVirtualMC::GetMC()->TrackPosition(x,y,z);
+    if (z>0 || ((x*x + y*y) > 360000)) {
+    	  TVirtualMC::GetMC()->StopTrack();
+    }
+  }
 
   // specific implementation of our hard geometry limits
   double TrackingRmax() const override { return 1E20; }
