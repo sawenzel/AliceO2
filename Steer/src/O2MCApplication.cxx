@@ -43,12 +43,61 @@ void TypedVectorAttach(const char* name, FairMQChannel& channel, FairMQParts& pa
   }
 }
 
+// calculates a hash based on particle properties
+// hash may serve as seed for this track
+ULong_t getHash(TParticle const& p)
+{
+  auto asLong = [](double x) {
+    return (ULong_t) * (reinterpret_cast<ULong_t*>(&x));
+  };
+
+  ULong_t hash;
+  o2::MCTrackT<double> track(p);
+
+  hash = asLong(track.GetStartVertexCoordinatesX());
+  hash ^= asLong(track.GetStartVertexCoordinatesY());
+  hash ^= asLong(track.GetStartVertexCoordinatesZ());
+  hash ^= asLong(track.GetStartVertexCoordinatesT());
+  hash ^= asLong(track.GetStartVertexMomentumX());
+  hash ^= asLong(track.GetStartVertexMomentumY());
+  hash ^= asLong(track.GetStartVertexMomentumZ());
+  hash ^= (ULong_t)track.GetPdgCode();
+  return hash;
+}
+
 void O2MCApplicationBase::Stepping()
 {
+  // now the right place to put our specific step/filtering criteria:
+  auto id = TVirtualMC::GetMC()->GetStack()->GetCurrentTrackNumber();
+
+  if (mCutParams.kill) {
+    // kill the first particle
+    if (id == 9) {
+      LOG(INFO) << "KILL TRACK";
+      TVirtualMC::GetMC()->StopTrack();
+      return;
+    }
+  }
+
   // dispatch first to stepping function in FairRoot
   FairMCApplication::Stepping();
+}
+
+void O2MCApplicationBase::PreTrack()
+{
+  // dispatch first to function in FairRoot
+  FairMCApplication::PreTrack();
+
+  auto id = TVirtualMC::GetMC()->GetStack()->GetCurrentTrackNumber();
+  LOG(INFO) << "BEGIN TRACK " << id;
 
   // now the right place to put our specific step/filtering criteria:
+  auto particle = TVirtualMC::GetMC()->GetStack()->GetCurrentTrack();
+  auto hash = getHash(*particle);
+  LOG(INFO) << hash;
+
+  // init seed per track
+  // gRandom->SetSeed(hash);
 }
 
 void O2MCApplication::initLate()

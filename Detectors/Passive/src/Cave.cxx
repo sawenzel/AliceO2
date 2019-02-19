@@ -103,6 +103,7 @@ void Cave::FinishPrimary()
 // setting
 void Cave::BeginPrimary()
 {
+  LOG(INFO) << "Begin primary";
   static int primcounter = 0;
 
   auto& conf = o2::conf::SimConfig::Instance();
@@ -111,7 +112,7 @@ void Cave::BeginPrimary()
     if (primcounter % chunks == 0) {
       static int counter = 1;
       auto seed = counter + 10;
-      gRandom->SetSeed(seed);
+      // gRandom->SetSeed(seed);
       counter++;
     }
   }

@@ -22,6 +22,7 @@ namespace conf
 // (mostly used in O2MCApplication stepping)
 struct SimCutParams : public o2::conf::ConfigurableParamHelper<SimCutParams> {
   bool stepFiltering = true; // if we activate the step filtering in O2BaseMCApplication
+  bool kill = false;
 
   double maxRTracking = 1E20;    // max R tracking cut in cm (in the VMC sense) -- applied in addition to cutting in the stepping function
   double maxAbsZTracking = 1E20; // max |Z| tracking cut in cm (in the VMC sense) -- applied in addition to cutting in the stepping function

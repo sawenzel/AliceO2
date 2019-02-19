@@ -146,6 +146,7 @@ void Stack::PushTrack(Int_t toBeDone, Int_t parentId, Int_t pdgCode, Double_t px
 {
   // Create new TParticle and add it to the TParticle array
   Int_t trackId = mNumberOfEntriesInParticles;
+  LOG(INFO) << "NEW TRACK PUSHED " << trackId;
   // Set track variable
   ntr = trackId;
 
@@ -245,6 +246,28 @@ void Stack::notifyFinishPrimary()
   }
 }
 
+// calculates a hash based on particle properties
+// hash may serve as seed for this track
+ULong_t getHash(TParticle const& p)
+{
+  auto asLong = [](double x) {
+    return (ULong_t) * (reinterpret_cast<ULong_t*>(&x));
+  };
+
+  ULong_t hash;
+  o2::MCTrackT<double> track(p);
+
+  hash = asLong(track.GetStartVertexCoordinatesX());
+  hash ^= asLong(track.GetStartVertexCoordinatesY());
+  hash ^= asLong(track.GetStartVertexCoordinatesZ());
+  hash ^= asLong(track.GetStartVertexCoordinatesT());
+  hash ^= asLong(track.GetStartVertexMomentumX());
+  hash ^= asLong(track.GetStartVertexMomentumY());
+  hash ^= asLong(track.GetStartVertexMomentumZ());
+  hash ^= (ULong_t)track.GetPdgCode();
+  return hash;
+}
+
 TParticle* Stack::PopNextTrack(Int_t& iTrack)
 {
   // This functions is mainly used by Geant3?
@@ -275,6 +298,12 @@ TParticle* Stack::PopNextTrack(Int_t& iTrack)
 
   mIndexOfCurrentTrack = mCurrentParticle.GetStatusCode();
   iTrack = mIndexOfCurrentTrack;
+
+  auto hash = getHash(mCurrentParticle);
+  LOG(INFO) << hash;
+  // init seed per track
+  gRandom->SetSeed(hash);
+
 
   // LOG(INFO) << "transporting ID " << mIndexOfCurrentTrack << "\n";
   return &mCurrentParticle;
