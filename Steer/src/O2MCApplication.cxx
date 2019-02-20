@@ -43,38 +43,19 @@ void TypedVectorAttach(const char* name, FairMQChannel& channel, FairMQParts& pa
   }
 }
 
-// calculates a hash based on particle properties
-// hash may serve as seed for this track
-ULong_t getHash(TParticle const& p)
-{
-  auto asLong = [](double x) {
-    return (ULong_t) * (reinterpret_cast<ULong_t*>(&x));
-  };
-
-  ULong_t hash;
-  o2::MCTrackT<double> track(p);
-
-  hash = asLong(track.GetStartVertexCoordinatesX());
-  hash ^= asLong(track.GetStartVertexCoordinatesY());
-  hash ^= asLong(track.GetStartVertexCoordinatesZ());
-  hash ^= asLong(track.GetStartVertexCoordinatesT());
-  hash ^= asLong(track.GetStartVertexMomentumX());
-  hash ^= asLong(track.GetStartVertexMomentumY());
-  hash ^= asLong(track.GetStartVertexMomentumZ());
-  hash ^= (ULong_t)track.GetPdgCode();
-  return hash;
-}
-
 void O2MCApplicationBase::Stepping()
 {
-  // now the right place to put our specific step/filtering criteria:
-  auto id = TVirtualMC::GetMC()->GetStack()->GetCurrentTrackNumber();
+  mStepCounter++;
+  if (mCutParams.stepFiltering) {
+    float x, y, z;
+    fMC->TrackPosition(x, y, z);
 
-  if (mCutParams.kill) {
-    // kill the first particle
-    if (id == 9) {
-      LOG(INFO) << "KILL TRACK";
-      TVirtualMC::GetMC()->StopTrack();
+    if (z > mCutParams.ZmaxA) {
+    	fMC->StopTrack();
+        return;
+    }
+    if (-z > mCutParams.ZmaxC) {
+      fMC->StopTrack();
       return;
     }
   }
@@ -87,18 +68,23 @@ void O2MCApplicationBase::PreTrack()
 {
   // dispatch first to function in FairRoot
   FairMCApplication::PreTrack();
-
-  auto id = TVirtualMC::GetMC()->GetStack()->GetCurrentTrackNumber();
-  LOG(INFO) << "BEGIN TRACK " << id;
-
-  // now the right place to put our specific step/filtering criteria:
-  auto particle = TVirtualMC::GetMC()->GetStack()->GetCurrentTrack();
-  auto hash = getHash(*particle);
-  LOG(INFO) << hash;
-
-  // init seed per track
-  // gRandom->SetSeed(hash);
 }
+
+void O2MCApplicationBase::FinishEvent()
+{
+  // dispatch first to function in FairRoot
+  FairMCApplication::FinishEvent();
+  LOG(INFO) << "This event/chunk did " << mStepCounter << " steps";
+}
+
+void O2MCApplicationBase::BeginEvent()
+{
+  // dispatch first to function in FairRoot
+  FairMCApplication::BeginEvent();
+  mStepCounter=0;
+}
+
+
 
 void O2MCApplication::initLate()
 {

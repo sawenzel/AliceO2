@@ -1,11 +1,17 @@
 #if !defined(__CLING__) || defined(__ROOTCLING__)
 #include "TFile.h"
 #include "TTree.h"
+#include "TString.h"
 #include "ITSMFTSimulation/Hit.h"
 #include "TOFSimulation/Detector.h"
 #include "EMCALBase/Hit.h"
-#include "TRDSimulation/Detector.h"
+#include "TRDSimulation/Detector.h" // For TRD Hit
+#include "FITSimulation/Detector.h" // for Fit Hit
+#include "HMPIDBase/Hit.h"
+#include "TPCSimulation/Point.h"
 #endif
+
+TString gPrefix("");
 
 template <typename Hit, typename Accumulator>
 Accumulator analyse(TTree* tr, const char* brname)
@@ -158,55 +164,191 @@ struct ITSHitStats {
   }
 }; // end struct
 
+struct TPCHitStats {
+  int NHits = 0;
+  double XAvg = 0.; // avg 1st moment
+  double YAvg = 0.;
+  double ZAvg = 0.;
+  double X2Avg = 0.; // avg 2nd moment
+  double Y2Avg = 0.;
+  double Z2Avg = 0.;
+  double EAvg = 0.; // average total energy
+  double E2Avg = 0.;
+  double TAvg = 0.;  // average T
+  double T2Avg = 0.; // average T^2
+
+  void print() const
+  {
+    std::cout << NHits << " "
+              << XAvg << " "
+              << YAvg << " "
+              << ZAvg << " "
+              << X2Avg << " "
+              << Y2Avg << " "
+              << Z2Avg << " "
+              << EAvg << " "
+              << E2Avg << " "
+              << TAvg << " "
+              << T2Avg << "\n";
+  }
+
+  // adds a hit to the statistics
+  void addHit(o2::TPC::HitGroup const& hitgroup)
+  {
+    for (int i = 0; i < hitgroup.getSize(); ++i) {
+      auto hit = hitgroup.getHit(i);
+      NHits++;
+      auto x = hit.GetX();
+      XAvg += x;
+      X2Avg += x * x;
+      auto y = hit.GetY();
+      YAvg += y;
+      Y2Avg += y * y;
+      auto z = hit.GetZ();
+      ZAvg += z;
+      Z2Avg += z * z;
+      auto e = hit.GetEnergyLoss();
+      EAvg += e;
+      E2Avg += e * e;
+      auto t = hit.GetTime();
+      TAvg += t;
+      T2Avg += t * t;
+    }
+  }
+
+  void normalize()
+  {
+    XAvg /= NHits;
+    YAvg /= NHits;
+    ZAvg /= NHits;
+    X2Avg /= NHits;
+    Y2Avg /= NHits;
+    Z2Avg /= NHits;
+    EAvg /= NHits;
+    E2Avg /= NHits;
+    TAvg /= NHits;
+    T2Avg /= NHits;
+  }
+}; // end struct
+
+// need a special version for TPC since loop over sectors
+TPCHitStats analyseTPC(TTree* tr)
+{
+  TPCHitStats prop;
+  for (int sector = 0; sector < 35; ++sector) {
+    std::stringstream brnamestr;
+    brnamestr << "TPCHitsShiftedSector" << sector;
+    auto br = tr->GetBranch(brnamestr.str().c_str());
+    if (!br) {
+      return prop;
+    }
+    auto entries = br->GetEntries();
+    std::vector<o2::TPC::HitGroup>* hitvector = nullptr;
+    br->SetAddress(&hitvector);
+
+    for (int i = 0; i < entries; ++i) {
+      br->GetEntry(i);
+      for (auto& hit : *hitvector) {
+        prop.addHit(hit);
+      }
+    }
+  }
+  prop.normalize();
+  return prop;
+};
+
 // do comparison for ITS
-void checkITS(TTree* reftree, TTree* testtree)
+void checkITS(TTree* reftree)
 {
   auto refresult = analyse<o2::ITSMFT::Hit, ITSHitStats>(reftree, "ITSHit");
+  std::cout << gPrefix << " ITS ";
   refresult.print();
-  auto testresult = analyse<o2::ITSMFT::Hit, ITSHitStats>(testtree, "ITSHit");
-  testresult.print();
 }
 
 // do comparison for TOF
-void checkTOF(TTree* reftree, TTree* testtree)
+void checkTOF(TTree* reftree)
 {
   auto refresult = analyse<o2::tof::HitType, HitStats<o2::tof::HitType>>(reftree, "TOFHit");
+  std::cout << gPrefix << " TOF ";
   refresult.print();
-  auto testresult = analyse<o2::tof::HitType, HitStats<o2::tof::HitType>>(testtree, "TOFHit");
-  testresult.print();
 }
 
 // do comparison for EMC
-void checkEMC(TTree* reftree, TTree* testtree)
+void checkEMC(TTree* reftree)
 {
   auto refresult = analyse<o2::EMCAL::Hit, HitStats<o2::EMCAL::Hit>>(reftree, "EMCHit");
+  std::cout << gPrefix << " EMC ";
   refresult.print();
-  auto testresult = analyse<o2::EMCAL::Hit, HitStats<o2::EMCAL::Hit>>(testtree, "EMCHit");
-  testresult.print();
 }
 
 // do comparison for TRD
-void checkTRD(TTree* reftree, TTree* testtree)
+void checkTRD(TTree* reftree)
 {
   auto refresult = analyse<o2::trd::HitType, HitStats<o2::trd::HitType>>(reftree, "TRDHit");
+  std::cout << gPrefix << " TRD ";
   refresult.print();
-  auto testresult = analyse<o2::trd::HitType, HitStats<o2::trd::HitType>>(testtree, "TRDHit");
-  testresult.print();
 }
+
+// do comparison for PHS
+void checkPHS(TTree* reftree)
+{
+  auto refresult = analyse<o2::phos::Hit, HitStats<o2::phos::Hit>>(reftree, "PHSHit");
+  std::cout << gPrefix << " PHS ";
+  refresult.print();
+}
+
+void checkFIT(TTree* reftree)
+{
+  auto refresult = analyse<o2::fit::HitType, HitStats<o2::fit::HitType>>(reftree, "FITHit");
+  std::cout << gPrefix << " FIT ";
+  refresult.print();
+}
+
+void checkHMP(TTree* reftree)
+{
+  auto refresult = analyse<o2::hmpid::HitType, HitStats<o2::hmpid::HitType>>(reftree, "HMPHit");
+  std::cout << gPrefix << " HMPID ";
+  refresult.print();
+}
+
+void checkMFT(TTree* reftree)
+{
+  auto refresult = analyse<o2::ITSMFT::Hit, ITSHitStats>(reftree, "MFTHit");
+  std::cout << gPrefix << " MFT ";
+  refresult.print();
+}
+
+void checkTPC(TTree* reftree)
+{
+  // need to loop over sectors
+  auto refresult = analyseTPC(reftree);
+  std::cout << gPrefix << " TPC ";
+  refresult.print();
+}
+
+
 
 // Simple macro to compare properties of simulated hits
 // of two runs (for example reference run and test run).
 // Used for instance to validate MC optimizations or to study
 // the effect on the physics at the lowest level.
-void compareHits(const char* reffilename = "o2sim.root", const char* testfilename = "o2sim.root")
+//
+// A prefix (such as a parameter) can be given which will be  prepended before each line of printout.
+// This could be useful for plotting
+//
+void checkHits(const char* filename = "o2sim.root", const char* prefix = "")
 {
-  TFile rf(reffilename, "OPEN");
-  TFile tf(testfilename, "OPEN");
+  TFile rf(filename, "OPEN");
   auto reftree = (TTree*)rf.Get("o2sim");
-  auto testtree = (TTree*)tf.Get("o2sim");
 
-  checkITS(reftree, testtree);
-  checkTOF(reftree, testtree);
-  checkEMC(reftree, testtree);
-  checkTRD(reftree, testtree);
+  gPrefix = prefix;
+  checkITS(reftree);
+  checkTPC(reftree);
+  checkMFT(reftree);
+  checkTOF(reftree);
+  checkEMC(reftree);
+  checkTRD(reftree);
+  checkPHS(reftree);
+  checkFIT(reftree);
+  checkHMP(reftree);
 }

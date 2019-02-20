@@ -103,7 +103,7 @@ void Cave::FinishPrimary()
 // setting
 void Cave::BeginPrimary()
 {
-  LOG(INFO) << "Begin primary";
+  // LOG(INFO) << "Begin primary";
   static int primcounter = 0;
 
   auto& conf = o2::conf::SimConfig::Instance();

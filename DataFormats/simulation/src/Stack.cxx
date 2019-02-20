@@ -16,6 +16,7 @@
 #include "DetectorsBase/Detector.h"
 #include "DetectorsCommonDataFormats/DetID.h"
 #include "SimulationDataFormat/MCTrack.h"
+#include "SimConfig/SimCutParams.h"
 
 #include "FairDetector.h" // for FairDetector
 #include "FairLogger.h"   // for FairLogger
@@ -146,7 +147,6 @@ void Stack::PushTrack(Int_t toBeDone, Int_t parentId, Int_t pdgCode, Double_t px
 {
   // Create new TParticle and add it to the TParticle array
   Int_t trackId = mNumberOfEntriesInParticles;
-  LOG(INFO) << "NEW TRACK PUSHED " << trackId;
   // Set track variable
   ntr = trackId;
 
@@ -264,7 +264,7 @@ ULong_t getHash(TParticle const& p)
   hash ^= asLong(track.GetStartVertexMomentumX());
   hash ^= asLong(track.GetStartVertexMomentumY());
   hash ^= asLong(track.GetStartVertexMomentumZ());
-  hash ^= (ULong_t)track.GetPdgCode();
+  hash += (ULong_t)track.GetPdgCode();
   return hash;
 }
 
@@ -299,11 +299,15 @@ TParticle* Stack::PopNextTrack(Int_t& iTrack)
   mIndexOfCurrentTrack = mCurrentParticle.GetStatusCode();
   iTrack = mIndexOfCurrentTrack;
 
-  auto hash = getHash(mCurrentParticle);
-  LOG(INFO) << hash;
-  // init seed per track
-  gRandom->SetSeed(hash);
+  if (o2::conf::SimCutParams::Instance().trackSeed) {
+    auto hash = getHash(mCurrentParticle);
+    // LOG(INFO) << "SEEDING NEW TRACK USING HASH" << hash;
+    // init seed per track
+    gRandom->SetSeed(hash);
 
+    // NOTE: THE BETTER PLACE WOULD BE IN PRETRACK HOOK BUT THIS DOES NOT SEEM TO WORK
+    // WORKS ONLY WITH G3 SINCE G4 DOES NOT CALL THIS FUNCTION
+  }
 
   // LOG(INFO) << "transporting ID " << mIndexOfCurrentTrack << "\n";
   return &mCurrentParticle;
