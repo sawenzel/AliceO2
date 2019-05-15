@@ -102,6 +102,7 @@ void Detector::InitializeO2Detector()
   if (aliceO2env)
     inputDir = std::string(aliceO2env);
   inputDir += "/share/Detectors/ZDC/simulation/data/";
+  std::cout << " READING LIGHT TABLES FROM " << inputDir << std::endl;
   //ZN case
   loadLightTable(mLightTableZN, 0, ZNRADIUSBINS, inputDir + "light22620362207s");
   loadLightTable(mLightTableZN, 1, ZNRADIUSBINS, inputDir + "light22620362208s");
@@ -177,6 +178,7 @@ Bool_t Detector::ProcessHits(FairVolume* v)
 {
   // Method called from MC stepping for the sensitive volumes
   TString volname = fMC->CurrentVolName();
+  //std::cout << "Volume " << volname << std::endl;
   Float_t x[3] = { 0., 0., 0. }, xDet[3] = { 0., 0., 0. }, p[3] = { 0., 0., 0. }, energy = 0.;
   fMC->TrackPosition(x[0], x[1], x[2]);
   fMC->TrackMomentum(p[0], p[1], p[2], energy);
@@ -223,9 +225,11 @@ Bool_t Detector::ProcessHits(FairVolume* v)
     else if (x[2] < 0)
       cZDCdetID[0] = 5; //ZPC (NB -> DIFFERENT FROM AliRoot!!!)
                         //
-    if (cZDCdetID[0] == 2) {
+    if (cZDCdetID[0] == 2) { //ZPA
       for (int i = 0; i < 3; i++)
         xDet[i] = x[i] - Geometry::ZPAPOSITION[i];
+      if(xDet[0]>=Geometry::ZPDIMENSION[0])  xDet[0]=Geometry::ZPDIMENSION[0]-0.01;
+      if(xDet[0]<=-Geometry::ZPDIMENSION[0]) xDet[0]=-Geometry::ZPDIMENSION[0]+0.01;
       float xTow = xDet[0] / (Geometry::ZPDIMENSION[0] / 2.);
       for (int i = 1; i <= 4; i++) {
         if (xTow >= (i - 3) && xTow < (i - 2)) {
@@ -233,9 +237,11 @@ Bool_t Detector::ProcessHits(FairVolume* v)
           break;
         }
       }
-    } else if (cZDCdetID[0] == 5) {
+    } else if (cZDCdetID[0] == 5) { //ZPC
       for (int i = 0; i < 3; i++)
         xDet[i] = x[i] - Geometry::ZPCPOSITION[i];
+      if(xDet[0]>=Geometry::ZPDIMENSION[0])  xDet[0]=Geometry::ZPDIMENSION[0]-0.01;
+      if(xDet[0]<=-Geometry::ZPDIMENSION[0]) xDet[0]=-Geometry::ZPDIMENSION[0]+0.01;
       float xTow = xDet[0] / (Geometry::ZPDIMENSION[0] / 2.);
       for (int i = 1; i <= 4; i++) {
         if (xTow >= (i - 3) && xTow < (i - 2)) {
@@ -249,10 +255,15 @@ Bool_t Detector::ProcessHits(FairVolume* v)
     for (int i = 0; i < 3; i++)
       xDet[i] = x[i] - Geometry::ZEMPOSITION[i];
     if (x[0] > 0.)
-      cZDCdetID[1] = 1;
+      cZDCdetID[1] = 0;
     else
-      cZDCdetID[1] = 2;
+      cZDCdetID[1] = 1;
   }
+  if((cZDCdetID[1]!=1) && (cZDCdetID[1]!=2) && (cZDCdetID[1]!=3) && (cZDCdetID[1]!=4)){
+    LOG(FATAL) << " WRONG tower for det " << cZDCdetID[0] << " tow " << cZDCdetID[1] <<
+    " xdet = " << xDet[0] << ", " << xDet[1] << std::endl;
+  }
+
 
   Vector3D<float> xImp(xDet[0], xDet[1], xDet[2]);
 
@@ -277,25 +288,33 @@ Bool_t Detector::ProcessHits(FairVolume* v)
   auto currentMediumid = fMC->CurrentMedium();
   int ibeta = 99, iangle = 99, iradius = 99, nphe = 0;
   if ((currentMediumid == mMediumPMCid) || (currentMediumid == mMediumPMQid)) {
-    calculateTableIndexes(ibeta, iangle, iradius);
-    if (ibeta != 99 && iangle != 99 && iangle != 99) {
+    if (eDep>0) {
+      Bool_t isLightProduced = calculateTableIndexes(ibeta, iangle, iradius);
+      if(isLightProduced==kFALSE)
+        return false;
       int charge = 0;
       if (pdgCode < 10000)
         charge = fMC->TrackCharge();
       else
         charge = TMath::Abs(pdgCode / 10000 - 100000);
+      charge = TMath::Abs(charge);
+      std::cout << " pc charge " << charge;
+      std::cout << " table indexes: " << ibeta << " " << iangle << " " << iradius;
       //look into the light tables
-      if (mZDCdetectorID == 1 || mZDCdetectorID == 4) {
+      if (mZDCdetectorID == 1 || mZDCdetectorID == 4) { // ZNs
         if (iradius > Geometry::ZNFIBREDIAMETER)
           iradius = Geometry::ZNFIBREDIAMETER;
         lightoutput = charge * charge * mLightTableZN[ibeta][iangle][iradius];
-      } else {
+        std::cout << " ZN table entry " << mLightTableZN[ibeta][iangle][iradius] << " -> light output: " << lightoutput << std::endl;
+      } else { // ZPs and ZEMs
         if (iradius > Geometry::ZPFIBREDIAMETER)
           iradius = Geometry::ZPFIBREDIAMETER;
         lightoutput = charge * charge * mLightTableZP[ibeta][iangle][iradius];
+        std::cout << " ZP table entry " << mLightTableZP[ibeta][iangle][iradius] << " -> light output: " << lightoutput << std::endl;
       }
       if (lightoutput > 0)
         nphe = gRandom->Poisson(lightoutput);
+      std::cout << " nphe " << nphe << std::endl;
     }
   }
 
@@ -308,18 +327,28 @@ Bool_t Detector::ProcessHits(FairVolume* v)
     mTrackTOF = 1.e09 * fMC->TrackTime(); //TOF in ns
     mPcMother = stack->GetCurrentTrack()->GetMother(0);
 
-    if (stack->getCurrentPrimaryIndex() != trackn)
+    if (stack->getCurrentPrimaryIndex() != trackn) ///verify since it is always 1
       mSecondaryFlag = kTRUE;
-    mTotDepEnergy = eDep;
+    if(eDep>0)
+      mTotDepEnergy = eDep;
+    else
+      mTotDepEnergy = 0.;
 
-    if (currentMediumid == mMediumPMCid) {
-      mTotLightPMC = nphe;
-    } else if (currentMediumid == mMediumPMQid) {
-      mTotLightPMQ = nphe;
+    if(nphe>0){
+      if (currentMediumid == mMediumPMCid) {
+        mTotLightPMC = nphe;
+      } else if (currentMediumid == mMediumPMQid) {
+        mTotLightPMQ = nphe;
+      }
+    } else{
+      mTotLightPMC = 0.;
+      mTotLightPMQ = 0.;
     }
 
     Vector3D<float> pos(x[0], x[1], x[2]);
     Vector3D<float> mom(p[0], p[1], p[2]);
+    std::cout << " +++ Creating new hit for track " << trackn << " in det. " <<  mZDCdetectorID << " sec. " << mZDCsectorID << std::endl;
+    std::cout << "     with: Edep " << mTotDepEnergy << " LightPMC " << mTotLightPMC << " LightPMQ " << mTotLightPMQ << std::endl;
     mCurrentHit = addHit(trackn, trackparent, mSecondaryFlag, energy, mZDCdetectorID, mZDCsectorID,
                          pos, mom, mTrackTOF, xDet, mTotDepEnergy, mTotLightPMC, mTotLightPMQ);
     stack->addHit(GetDetId());
@@ -331,18 +360,26 @@ Bool_t Detector::ProcessHits(FairVolume* v)
 
     return true;
 
-  } else {
+  } else if(eDep>0 || nphe>0){
     // summing varibles that needs to be updated (Eloss and light yield)
     mCurrentHit->setNoNumContributingSteps(mCurrentHit->getNumContributingSteps() + 1);
-    mTotDepEnergy += eDep;
-    if (currentMediumid == mMediumPMCid) {
-      mTotLightPMC += nphe;
-    } else if (currentMediumid == mMediumPMQid) {
-      mTotLightPMQ += nphe;
+    if(eDep>0){
+      mTotDepEnergy += eDep;
+      mCurrentHit->SetEnergyLoss(mTotDepEnergy);
+      std::cout << " \tUpdating existing hit (track " << trackn << " det. " <<  mZDCdetectorID << " sec. " << mZDCsectorID;
+      std::cout << ")    Edep " << mTotDepEnergy  << std::endl;
     }
-    mCurrentHit->SetEnergyLoss(mTotDepEnergy);
-    mCurrentHit->setPMCLightYield(mTotLightPMC);
-    mCurrentHit->setPMQLightYield(mTotLightPMQ);
+    if(nphe>0){
+      if (currentMediumid == mMediumPMCid) {
+        mTotLightPMC += nphe;
+      } else if (currentMediumid == mMediumPMQid) {
+        mTotLightPMQ += nphe;
+      }
+      mCurrentHit->setPMCLightYield(mTotLightPMC);
+      mCurrentHit->setPMQLightYield(mTotLightPMQ);
+      std::cout << " \tUpdating existing hit (track "  << trackn << " det. " <<  mZDCdetectorID << " sec. " << mZDCsectorID;
+      std::cout << " )   LightPMC " << mTotLightPMC << " LightPMQ " << mTotLightPMQ << std::endl;
+    }
     return true;
   }
   return false;
@@ -440,17 +477,16 @@ void Detector::createMaterials()
 
   // field intergration 0 no field -1 user in guswim 1 Runge Kutta 2 helix 3 const field along z
   Int_t inofld = 0;
-  Int_t ifld = 3; //TODO: ????CHECK!!!! secondo me va -1!!!!!
+  Int_t ifld = 2; //TODO: ????CHECK!!!! secondo me va -1!!!!!
   Float_t nofieldm = 0.;
-
   Float_t maxnofld = 0.; // max field value
   Float_t maxfld = 45.;  // max field value
   Float_t tmaxnofd = 0.; // max deflection angle due to magnetic field in one step
-  Float_t tmaxfd = 0.1;  // max deflection angle due to magnetic field in one step
+  Float_t tmaxfd = 0.;  // max deflection angle due to magnetic field in one step
   Float_t deemax = -1.;  // maximum fractional energy loss in one step 0<deemax<=1
-  Float_t epsil = 0.001; // tracking precision [cm]
+  Float_t epsil = 0.01; // tracking precision [cm]
   Float_t stemax = 1.;   // max step allowed [cm] ????CHECK!!!!
-  Float_t stmin = -0.1;  // minimum step due to continuous processes [cm] (negative value: choose it automatically) ????CHECK!!!! 0.01 in aliroot
+  Float_t stmin = 0.01;  // minimum step due to continuous processes [cm] (negative value: choose it automatically) ????CHECK!!!! 0.01 in aliroot
 
   // ******** MATERIAL DEFINITION ********
   Mixture(0, "Walloy$", aW, zW, dW, 3, wW);
@@ -475,7 +511,7 @@ void Detector::createMaterials()
   Medium(kAl, "Aluminum$", 6, notactiveMed, inofld, nofieldm, tmaxnofd, stemax, deemax, epsil, stmin);
   Medium(kGraphite, "Graphite$", 7, notactiveMed, inofld, nofieldm, tmaxnofd, stemax, deemax, epsil, stmin);
   Medium(kVoidNoField, "VoidNoField$", 8, notactiveMed, inofld, nofieldm, tmaxnofd, stemax, deemax, epsil, stmin);
-  Medium(kVoidwField, "VoidwField$", 8, notactiveMed, ifld, nofieldm, tmaxnofd, stemax, deemax, epsil, stmin);
+  Medium(kVoidwField, "VoidwField$", 8, notactiveMed, ifld, maxfld, tmaxnofd, stemax, deemax, epsil, stmin);
   Medium(kAir, "Air$", 9, sensMed, inofld, nofieldm, tmaxnofd, stemax, deemax, epsil, stmin);
 }
 
@@ -2152,7 +2188,7 @@ void Detector::createDetectors()
 }
 
 //_____________________________________________________________________________
-void Detector::calculateTableIndexes(int& ibeta, int& iangle, int& iradius)
+Bool_t Detector::calculateTableIndexes(int& ibeta, int& iangle, int& iradius)
 {
   double x[3] = { 0., 0., 0. }, xDet[3] = { 0., 0., 0. }, p[3] = { 0., 0., 0. }, energy = 0.;
   fMC->TrackPosition(x[0], x[1], x[2]);
@@ -2163,6 +2199,8 @@ void Detector::calculateTableIndexes(int& ibeta, int& iangle, int& iradius)
   float beta = 0.;
   if (energy > 0.)
     beta = ptot / energy;
+  else
+    return kFALSE;
   if (beta >= 0.67) {
     if (beta <= 0.75)
       ibeta = 0;
@@ -2173,7 +2211,8 @@ void Detector::calculateTableIndexes(int& ibeta, int& iangle, int& iradius)
     else if (beta > 0.95)
       ibeta = 3;
   } else
-    beta = 99;
+    return kFALSE;
+  std::cout << " pc beta " << beta << std::endl;
   //track angle wrt fibre axis (||LHC axis)
   double umom[3] = { 0., 0., 0. }, udet[3] = { 0., 0., 0. };
   umom[0] = p[0] / ptot;
@@ -2183,9 +2222,10 @@ void Detector::calculateTableIndexes(int& ibeta, int& iangle, int& iradius)
   double angleRad = TMath::ACos(udet[2]);
   double angleDeg = angleRad * kRaddeg;
   if (angleDeg < 110.)
-    iangle = int(0.5 + angleDeg / 2.);
+    iangle = int(1. + angleDeg / 2.);
   else
-    iangle = 99;
+    return kFALSE;
+  std::cout << " angle " << angleDeg << std::endl;
   //radius from fibre axis
   fMC->Gmtod(x, xDet, 1);
   float radius = 0.;
@@ -2195,6 +2235,8 @@ void Detector::calculateTableIndexes(int& ibeta, int& iangle, int& iradius)
   } else
     radius = TMath::Abs(udet[0]);
   iradius = int(radius * 1000. + 1.);
+  std::cout << " radius " << radius << std::endl;
+  return kTRUE;
 }
 
 //_____________________________________________________________________________

@@ -90,7 +90,7 @@ class Detector : public o2::base::DetImpl<Detector>
   void defineSensitiveVolumes();
 
   // Methods to calculate the light outpu
-  void calculateTableIndexes(int& ibeta, int& iangle, int& iradius);
+  Bool_t calculateTableIndexes(int& ibeta, int& iangle, int& iradius);
 
   Int_t mZDCdetectorID; //detector in ZDC
   Int_t mZDCsectorID;   //tower in ZDC
@@ -120,8 +120,8 @@ class Detector : public o2::base::DetImpl<Detector>
   static constexpr int ZPRADIUSBINS = 28;
   static constexpr int ANGLEBINS = 90;
 
-  float mLightTableZN[4][ZNRADIUSBINS][ANGLEBINS] = { 1. }; //!
-  float mLightTableZP[4][ZPRADIUSBINS][ANGLEBINS] = { 1. }; //!
+  float mLightTableZN[4][ANGLEBINS][ZNRADIUSBINS] = { 1. }; //!
+  float mLightTableZP[4][ANGLEBINS][ZPRADIUSBINS] = { 1. }; //!
 
   template <typename Det>
   friend class o2::base::DetImpl;
