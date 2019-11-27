@@ -20,6 +20,8 @@
 #include "TRDBase/PadResponse.h"
 
 #include "TRDSimulation/Digitizer.h"
+#include <future>
+#include <thread>
 
 using namespace o2::trd;
 
@@ -60,12 +62,17 @@ void Digitizer::process(std::vector<HitType> const& hits, DigitContainer_t& digi
   // const int nTimeBins = mCalib->GetNumberOfTimeBinsDCS(); PLEASE FIX ME when CCDB is ready
 
   SignalContainer_t adcMapCont;
+  std::array<SignalContainer_t, kNdet> adcs;
+
 
   // Get the a hit container for all the hits in a given detector then call convertHits for a given detector (0 - 539)
   std::array<std::vector<HitType>, kNdet> hitsPerDetector;
   getHitContainerPerDetector(hits, hitsPerDetector);
 
   // Loop over all TRD detectors
+
+  std::vector<std::future<void>> tasks;
+
   for (int det = 0; det < kNdet; ++det) {
     // Jump to the next detector if the detector is
     // switched off, not installed, etc
@@ -82,24 +89,54 @@ void Digitizer::process(std::vector<HitType> const& hits, DigitContainer_t& digi
       continue;
     }
 
-    if (!convertHits(det, hitsPerDetector[det], adcMapCont, labels)) {
-      LOG(WARN) << "TRD conversion of hits failed for detector " << det;
-      continue; // go to the next chamber
-    }
+    auto& adc = adcs[det];
+    // TODO: we need to be careful about the label treatment : Needs to be split according to detector
+    auto task = std::async([this, det, &adc, &hitsPerDetector, &labels]() {
+      if (!convertHits(det, hitsPerDetector[det], adc, labels)) {
+        LOG(WARN) << "TRD conversion of hits failed for detector " << det;
+        return; // go to the next chamber
+      }
 
-    // O2-790
-    if (adcMapCont.size() == 0) {
-      continue; // go to the next chamber
-    }
+      // O2-790
+      if (adc.size() == 0) {
+        return; // go to the next chamber
+      }
 
-    if (!convertSignalsToDigits(det, adcMapCont)) {
-      LOG(WARN) << "TRD conversion of signals to digits failed for detector " << det;
-      continue; // go to the next chamber
+      if (!convertSignalsToDigits(det, adc)) {
+        LOG(WARN) << "TRD conversion of signals to digits failed for detector " << det;
+        return; // go to the next chamber
+      }
+      LOG(INFO) << " DET " << det << " DONE ";
+    });
+    tasks.push_back(std::move(task));
+    LOG(INFO) << " task size " << tasks.size();
+    // task.wait();
+  } // end loop over detectors
+
+  // scheduler for tasks/futures?
+  // wait on these tasks
+  std::for_each(tasks.begin(), tasks.end(), [](std::future<void> &t) { t.wait(); });
+
+  // see if any keys overlap in the adc counts
+  std::unordered_map<int, int> keycounter;
+  for (int det = 0; det < kNdet; ++det) {
+    for (auto k : adcs[det]) {
+      auto iter = keycounter.find(k.first);
+      if (iter == keycounter.end()) {
+        keycounter[k.first] = 1;
+      }
+      else {
+        keycounter[k.first] = keycounter[k.first] + 1;
+        LOG(INFO) << "MULTIPLE ENTRIES FOR KEY " << k.first;
+      }
     }
   }
 
   // Finalize
-  Digit::convertMapToVectors(adcMapCont, digitCont);
+  // digitCont.clear();
+  for (int det = 0; det < kNdet; ++det) {
+    Digit::convertMapToVectors(adcs[det], digitCont);
+  }
 }
 
 void Digitizer::getHitContainerPerDetector(const std::vector<HitType>& hits, std::array<std::vector<HitType>, kNdet>& hitsPerDetector)
@@ -165,7 +202,7 @@ bool Digitizer::convertHits(const int det, const std::vector<HitType>& hits, Sig
   // Loop over hits
   for (const auto& hit : hits) {
     bool isDigit = false;
-    size_t labelIndex = labels.getIndexedSize();
+    size_t labelIndex = 0;// labels.getIndexedSize();
     const int qTotal = hit.GetCharge();
     /*
       Now the real local coordinate system of the ROC
@@ -361,7 +398,7 @@ bool Digitizer::convertHits(const int det, const std::vector<HitType>& hits, Sig
     }     // end of loop over electrons
     if (isDigit) {
       MCLabel label(hit.GetTrackID(), mEventID, mSrcID); // add one label is the at least one digit is created
-      labels.addElement(labelIndex, label);
+      // labels.addElement(labelIndex, label);
     }
   } // end of loop over hits
   return true;
