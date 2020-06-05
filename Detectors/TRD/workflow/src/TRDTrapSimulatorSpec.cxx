@@ -585,7 +585,7 @@ o2::framework::DataProcessorSpec getTRDTrapSimulatorSpec()
                              {"trd-printtrapconfig", VariantType::Bool, false, {"Name of the trap config from the CCDB"}},
                              {"trd-drawtracklets", VariantType::Int, 0, {"Bitpattern of input to TrapSimulator Draw method (be very careful) one file per track"}},
                              {"trd-printtracklets", VariantType::Int, 0, {"Bitpattern of input to TrapSimulator print method"}},
-                             {"trd-fixtrigrecord", VariantType::Bool, false, {"Fix trigger record alignment, temporary, hence false by default"}},
+                             {"trd-fixtriggerrecord", VariantType::Bool, false, {"Fix trigger record alignment, temporary, hence false by default"}},
                              {"trd-onlinegaincorrection", VariantType::Bool, false, {"Apply online gain calibrations, mostly for back checking to run2 by setting FGBY to 0"}},
                              {"trd-onlinegaintable", VariantType::String, "Krypton_2015-02", {"Online gain table to be use, names found in CCDB, obviously trd-onlinegaincorrection must be set as well."}},
                              {"trd-debugrejectedtracklets", VariantType::Bool, false, {"Output all MCM where tracklets were not identified"}},
