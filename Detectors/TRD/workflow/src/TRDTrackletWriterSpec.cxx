@@ -52,9 +52,9 @@ o2::framework::DataProcessorSpec getTRDTrackletWriterSpec()
                                 "trdtracklets.root",
                                 "o2sim",
                                 1,
-                                BranchDefinition<std::vector<o2::trd::Tracklet>>{InputSpec{"tracklets", "TRD", "TRACKLETS"}, "Tracklet"},
+                                BranchDefinition<std::vector<o2::trd::Tracklet>>{InputSpec{"tracklets", "TRD", "TRACKLETS"}, "Tracklet"}/*,*/
                                 //BranchDefinition<o2::dataformats::MCTruthContainer<o2::trd::MCLabel>>{InputSpec{"trklabels", "TRD", "TRKLABELS"}, "TRKLabels"},
-                                BranchDefinition<std::vector<o2::trd::TriggerRecord>>{InputSpec{"tracklettrigs", "TRD", "TRKTRGRD"}, "TrackTrg"})();
+                                /*BranchDefinition<std::vector<o2::trd::TriggerRecord>>{InputSpec{"tracklettrigs", "TRD", "TRKTRGRD"}, "TrackTrg"}*/)();
 };
 
 } // end namespace trd
