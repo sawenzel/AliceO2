@@ -34,6 +34,7 @@
 #include <string>
 #include <vector>
 #include <utility>
+#include <cmath>
 
 using namespace o2::framework;
 using namespace o2::header;
@@ -56,27 +57,30 @@ DataProcessorSpec getTPCDigitRootWriterSpec(std::vector<int> const& laneConfigur
   // the callback to be set as hook for custom action when the writer is closed
   auto finishWriting = [](TFile* outputfile, TTree* outputtree) {
     // check/verify number of entries (it should be same in all branches)
-
+    LOG(INFO) << "START FINISH WRITING";
     // will return a TObjArray
     const auto brlist = outputtree->GetListOfBranches();
     int entries = -1; // init to -1 (as unitialized)
     for (TObject* entry : *brlist) {
       auto br = static_cast<TBranch*>(entry);
+      // ideally remove TMP branches
+      // if (TString(br->GetName()).Contains("_TMP")) {
+      //  br->DeleteBaskets("all");
+      //  brlist->Remove(br);
+      //  continue;
+      // }
       int brentries = br->GetEntries();
-      if (entries == -1) {
-        entries = brentries;
-      } else {
-        if (brentries != entries && !TString(br->GetName()).Contains("CommonMode")) {
-          LOG(WARNING) << "INCONSISTENT NUMBER OF ENTRIES IN BRANCH " << br->GetName() << ": " << entries << " vs " << brentries;
-        }
+      entries = std::max(entries, brentries);
+      if (brentries != entries && !TString(br->GetName()).Contains("CommonMode")) {
+        LOG(WARNING) << "INCONSISTENT NUMBER OF ENTRIES IN BRANCH " << br->GetName() << ": " << entries << " vs " << brentries;
       }
     }
+
     if (entries > 0) {
+      LOG(INFO) << "Setting entries to " << entries;
       outputtree->SetEntries(entries);
+      outputfile->Close();
     }
-    // outputtree->Write();
-    outputfile->Write();
-    outputfile->Close();
   };
 
   //branch definitions for RootTreeWriter spec
@@ -158,6 +162,7 @@ DataProcessorSpec getTPCDigitRootWriterSpec(std::vector<int> const& laneConfigur
     if (sector >= 0) {
       LOG(INFO) << "DIGIT SIZE " << digiData.size();
       const auto& trigS = (*trigP2Sect.get())[sector];
+      int entries = 0;
       if (!trigS.size()) {
         std::runtime_error("Digits for sector " + std::to_string(sector) + " are received w/o info on grouping in triggers");
       } else { // check consistency of Ndigits with that of expected from the trigger
@@ -173,6 +178,7 @@ DataProcessorSpec getTPCDigitRootWriterSpec(std::vector<int> const& laneConfigur
           auto ptr = &digiData;
           branch.SetAddress(&ptr);
           branch.Fill();
+          entries++;
           branch.ResetAddress();
         } else {                                // triggered mode (>1 entries will be written)
           std::vector<o2::tpc::Digit> digGroup; // group of digits related to single trigger
@@ -184,10 +190,14 @@ DataProcessorSpec getTPCDigitRootWriterSpec(std::vector<int> const& laneConfigur
               digGroup.emplace_back(digiData[group.getFirstEntry() + i]); // fetch digits of given trigger
             }
             branch.Fill();
+            entries++;
           }
           branch.ResetAddress();
         }
       }
+      auto tree = branch.GetTree();
+      tree->SetEntries(entries);
+      tree->Write("", TObject::kOverwrite);
     }
   };
 
@@ -198,17 +208,13 @@ DataProcessorSpec getTPCDigitRootWriterSpec(std::vector<int> const& laneConfigur
     o2::dataformats::IOMCTruthContainerView outputcontainer;
     // first of all redefine the output format (special to labels)
     auto tree = branch.GetTree();
-    auto name = branch.GetName();
-    // we need to make something ugly since the original branch is already registered with a different type
-    // (communicated by Philippe Canal / ROOT team)
-    branch.DeleteBaskets("all");
-    // remove the existing branch and make a new one with the correct type
-    tree->GetListOfBranches()->Remove(&branch);
-    auto br = tree->Branch(name, &outputcontainer);
-
     auto sector = extractSector(ref);
+    std::stringstream str; str << "TPCDigitMCTruth_" << sector;
+    auto br = tree->Branch(str.str().c_str(), &outputcontainer);
+
     auto const* dh = DataRefUtils::getHeader<DataHeader*>(ref);
     LOG(INFO) << "HAVE LABEL DATA FOR SECTOR " << sector << " ON CHANNEL " << dh->subSpecification;
+    int entries = 0;
     if (sector >= 0) {
       LOG(INFO) << "MCTRUTH ELEMENTS " << labeldata.getIndexedSize()
                 << " WITH " << labeldata.getNElements() << " LABELS";
@@ -228,6 +234,7 @@ DataProcessorSpec getTPCDigitRootWriterSpec(std::vector<int> const& laneConfigur
           outputcontainer.adopt(labeldata);
           br->Fill();
           br->ResetAddress();
+          entries = 1;
         } else {
           o2::dataformats::MCTruthContainer<o2::MCCompLabel> lblGroup; // labels for group of digits related to single trigger
           for (auto const& group : trigS) {
@@ -241,10 +248,13 @@ DataProcessorSpec getTPCDigitRootWriterSpec(std::vector<int> const& laneConfigur
 	    lblGroup.flatten_to(flatbuffer);
 	    outputcontainer.adopt(flatbuffer);
             br->Fill();
+            entries++;
           }
           br->ResetAddress();
         }
       }
+      tree->SetEntries(entries);
+      tree->Write("", TObject::kOverwrite);
     }
   };
 
@@ -264,7 +274,7 @@ DataProcessorSpec getTPCDigitRootWriterSpec(std::vector<int> const& laneConfigur
                                                       getName};
 
   auto labelsdef = BranchDefinition<MCLabelContainer>{InputSpec{"labelinput", ConcreteDataTypeMatcher{"TPC", "DIGITSMCTR"}},
-                                                      "TPCDigitMCTruth", "labels-branch-name",
+                                                      "TPCDigitMCTruth_TMP", "labels-branch-name",
                                                       // this branch definition is disabled if MC labels are not processed
                                                       (mctruth ? laneConfiguration.size() : 0),
                                                       fillLabels,
