@@ -49,6 +49,7 @@
 #include "DataFormatsParameters/GRPObject.h"
 #include "TPCBase/Sector.h"
 #include "SimulationDataFormat/MCTruthContainer.h"
+#include "SimulationDataFormat/ConstMCTruthContainer.h"
 #include "SimulationDataFormat/MCCompLabel.h"
 #include "Algorithm/Parser.h"
 #include <memory> // for make_shared
@@ -66,6 +67,8 @@ using namespace o2::framework;
 using namespace o2::header;
 using namespace o2::gpu;
 using namespace o2::base;
+
+using ConstMCLabelContainer = o2::dataformats::ConstMCTruthContainer<o2::MCCompLabel>;
 
 namespace o2
 {
@@ -247,8 +250,8 @@ DataProcessorSpec getCATrackerSpec(ca::Config const& specconfig, std::vector<int
       auto& verbosity = processAttributes->verbosity;
       // FIXME cleanup almost duplicated code
       auto& validMcInputs = processAttributes->validMcInputs;
-      using CachedMCLabelContainer = decltype(std::declval<InputRecord>().get<MCLabelContainer*>(DataRef{nullptr, nullptr, nullptr}));
-      std::vector<CachedMCLabelContainer> mcInputs;
+      using CachedConstMCLabelContainer = decltype(std::declval<InputRecord>().get<ConstMCLabelContainer>(DataRef{nullptr, nullptr, nullptr}));
+      std::vector<CachedConstMCLabelContainer*> mcInputs;
       std::vector<gsl::span<const char>> inputs;
       struct InputRef {
         DataRef data;
@@ -265,8 +268,8 @@ DataProcessorSpec getCATrackerSpec(ca::Config const& specconfig, std::vector<int
       const void** tpcZSmetaPointers2[GPUTrackingInOutZS::NSLICES][GPUTrackingInOutZS::NENDPOINTS];
       const unsigned int* tpcZSmetaSizes2[GPUTrackingInOutZS::NSLICES][GPUTrackingInOutZS::NENDPOINTS];
       std::array<gsl::span<const o2::tpc::Digit>, NSectors> inputDigits;
-      std::vector<CachedMCLabelContainer> inputDigitsMC;
-      std::array<const MCLabelContainer*, constants::MAXSECTOR> inputDigitsMCPtrs;
+      std::vector<CachedConstMCLabelContainer> inputDigitsMC;
+      std::array<const ConstMCLabelContainer*, constants::MAXSECTOR> inputDigitsMCPtrs;
       std::array<unsigned int, NEndpoints * NSectors> tpcZSonTheFlySizes;
       gsl::span<const ZeroSuppressedContainer8kb> inputZS;
 
@@ -296,8 +299,8 @@ DataProcessorSpec getCATrackerSpec(ca::Config const& specconfig, std::vector<int
           }
           inputrefs[sector].labels = ref;
           if (specconfig.caClusterer) {
-            inputDigitsMC.emplace_back(pc.inputs().get<const MCLabelContainer*>(ref));
-            inputDigitsMCPtrs[sector] = inputDigitsMC.back().get();
+            inputDigitsMC.emplace_back(pc.inputs().get<const ConstMCLabelContainer>(ref));
+            inputDigitsMCPtrs[sector] = &inputDigitsMC.back();
           }
           validMcInputs |= sectorMask;
           activeSectors |= sectorHeader->activeSectors;
@@ -493,7 +496,8 @@ DataProcessorSpec getCATrackerSpec(ca::Config const& specconfig, std::vector<int
             continue;
           }
           if (refentry.second.labels.header != nullptr && refentry.second.labels.payload != nullptr) {
-            mcInputs.emplace_back(pc.inputs().get<const MCLabelContainer*>(refentry.second.labels));
+            auto& labels = pc.inputs().get<const ConstMCLabelContainer>(refentry.second.labels);
+            mcInputs.emplace_back(&labels);
           }
           inputs.emplace_back(gsl::span(ref.payload, DataRefUtils::getPayloadSize(ref)));
           printInputLog(ref, "received", sector);

@@ -28,6 +28,8 @@ namespace dataformats
 {
 template <typename TruthElement>
 class MCTruthContainer;
+template <typename TruthElement>
+class ConstMCTruthContainer;
 } // namespace dataformats
 
 namespace tpc
@@ -109,7 +111,7 @@ class GPUTPCClusterFinder : public GPUProcessor
   int* mPbuf = nullptr;
   Memory* mPmemory = nullptr;
 
-  o2::dataformats::MCTruthContainer<o2::MCCompLabel> const* mPinputLabels = nullptr;
+  o2::dataformats::ConstMCTruthContainer<o2::MCCompLabel> const* mPinputLabels = nullptr;
   uint* mPlabelsInRow = nullptr;
   uint mPlabelsHeaderGlobalOffset = 0;
   uint mPlabelsDataGlobalOffset = 0;

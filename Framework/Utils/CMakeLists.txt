@@ -17,7 +17,7 @@ o2_add_library(DPLUtils
                        src/RawParser.cxx
                        test/DPLBroadcasterMerger.cxx
                        test/DPLOutputTest.cxx
-               PUBLIC_LINK_LIBRARIES O2::Framework)
+               PUBLIC_LINK_LIBRARIES O2::Framework O2::SimulationDataFormat)
 
 o2_add_executable(raw-proxy
                   COMPONENT_NAME dpl

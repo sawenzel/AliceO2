@@ -31,6 +31,10 @@
 #include <memory>     // std::make_unique
 #include <functional> // std::function
 #include <utility>    // std::forward
+#include <typeinfo>
+#include "SimulationDataFormat/IOMCTruthContainerView.h"
+#include "SimulationDataFormat/ConstMCTruthContainer.h"
+#include "SimulationDataFormat/MCCompLabel.h"
 
 namespace o2
 {
@@ -285,14 +289,34 @@ class GenericRootTreeReader
         PrevT::process(context, entry, stackcreator);
       }
 
-      auto snapshot = [&context, &stackcreator](const KeyType& key, const auto& object) {
+      auto snapshot = [this, &context, &stackcreator](const KeyType& key, const auto& object) {
+        LOG(INFO) << "PUBLISHING " << mName << " " << typeid(object).name() << " origin " << key.origin.str << " description " << key.description.str;
         context.outputs().snapshot(Output{key.origin, key.description, key.subSpec, key.lifetime, std::move(stackcreator())}, object);
+      };
+
+      // this could be given by the user and called based on some filtering argument
+      auto specialpublish = [&context](const KeyType& key, std::function<o2::header::Stack()>& stackcreator, o2::dataformats::IOMCTruthContainerView const& labels) {
+        // try first of all the flat container
+	o2::dataformats::ConstMCTruthContainer<o2::MCCompLabel> flatlabels;
+        labels.copyandflatten(flatlabels);
+	// context.outputs().make<o2::dataformats::ConstMCTruthContainer<o2::MCCompLabel>>()
+        LOG(INFO) << "PUBLISHING CONST LABELS " << flatlabels.getNElements();
+        context.outputs().snapshot(Output{key.origin, key.description, key.subSpec, key.lifetime, std::move(stackcreator())}, flatlabels);
       };
 
       char* data = nullptr;
       mBranch->SetAddress(&data);
       mBranch->GetEntry(entry);
+
+      // try to figureout when we need to do something special
+      if(TString(mClassInfo->GetName()).Contains("IOMCTruth")) {
+        // we are reading a special TruthContainer
+        LOG(INFO) << "READING IOTRuthContainer"; 
+        specialpublish(mKey, stackcreator, *reinterpret_cast<o2::dataformats::IOMCTruthContainerView*>(data));      
+      }
+      else {
       if (mSizeBranch != nullptr) {
+        LOG(INFO) << "inside SizeBranch";
         size_t datasize = 0;
         mSizeBranch->SetAddress(&datasize);
         mSizeBranch->GetEntry(entry);
@@ -307,6 +331,7 @@ class GenericRootTreeReader
           snapshot(mKey, empty);
         }
       } else {
+        LOG(INFO) << "inside OtherBranch";
         if constexpr (std::is_void<value_type>::value == true) {
           // the default branch configuration publishes the object ROOT serialized
           snapshot(mKey, std::move(ROOTSerializedByClass(*data, mClassInfo)));
@@ -315,6 +340,7 @@ class GenericRootTreeReader
           // upon serialization
           snapshot(mKey, *reinterpret_cast<value_type*>(data));
         }
+      }
       }
       auto* delfunc = mClassInfo->GetDelete();
       if (delfunc) {

@@ -17,6 +17,7 @@
 #include "ReconstructionDataFormats/Track.h"
 #include "SimulationDataFormat/MCCompLabel.h"
 #include "SimulationDataFormat/MCTruthContainer.h"
+#include "SimulationDataFormat/ConstMCTruthContainer.h"
 #include "TChain.h"
 #include "TClonesArray.h"
 #include "TPCBase/Mapper.h"
@@ -86,7 +87,7 @@ int GPUCATracking::runTracking(GPUO2InterfaceIOPtrs* data, GPUInterfaceOutputs* 
   Mapper& mapper = Mapper::instance();
 
   std::vector<o2::tpc::Digit> gpuDigits[Sector::MAXSECTOR];
-  o2::dataformats::MCTruthContainer<o2::MCCompLabel> gpuDigitsMC[Sector::MAXSECTOR];
+  o2::dataformats::ConstMCTruthContainer<o2::MCCompLabel> gpuDigitsMC[Sector::MAXSECTOR];
 
   GPUTrackingInOutDigits gpuDigitsMap;
   GPUTPCDigitsMCInput gpuDigitsMapMC;
