@@ -251,7 +251,7 @@ DataProcessorSpec getCATrackerSpec(ca::Config const& specconfig, std::vector<int
       // FIXME cleanup almost duplicated code
       auto& validMcInputs = processAttributes->validMcInputs;
       using CachedConstMCLabelContainer = decltype(std::declval<InputRecord>().get<ConstMCLabelContainer>(DataRef{nullptr, nullptr, nullptr}));
-      std::vector<CachedConstMCLabelContainer*> mcInputs;
+      std::vector<const CachedConstMCLabelContainer*> mcInputs;
       std::vector<gsl::span<const char>> inputs;
       struct InputRef {
         DataRef data;

@@ -1323,7 +1323,10 @@ int GPUChainTracking::RunTPCClusterizer(bool synchronizeOutput)
   assert(propagateMCLabels ? mcLinearLabels.data.size() >= nClsTotal : true);
 
   mcLabels.setFrom(mcLinearLabels.header, mcLinearLabels.data);
-
+  // TODO: make mcLabels directly Const
+  static o2::dataformats::ConstMCTruthContainer<o2::MCCompLabel> mcLabelsConst;
+  mcLabels.flatten_to(mcLabelsConst);
+  
   if (buildNativeHost && buildNativeGPU && GetProcessingSettings().delayedOutput) {
     mInputsHost->mNClusterNative = mInputsShadow->mNClusterNative = nClsTotal;
     AllocateRegisteredMemory(mInputsHost->mResourceClusterNativeOutput, mOutputClustersNative);
@@ -1334,7 +1337,7 @@ int GPUChainTracking::RunTPCClusterizer(bool synchronizeOutput)
 
   if (buildNativeHost) {
     tmpNative->clustersLinear = mInputsHost->mPclusterNativeOutput;
-    tmpNative->clustersMCTruth = propagateMCLabels ? &mcLabels : nullptr;
+    tmpNative->clustersMCTruth = propagateMCLabels ? &mcLabelsConst : nullptr;
     tmpNative->setOffsetPtrs();
     mIOPtrs.clustersNative = tmpNative;
   }
