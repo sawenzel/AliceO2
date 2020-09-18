@@ -47,13 +47,15 @@ class MCTruthWriterTask : public o2::framework::Task
     LOG(INFO) << "Running MCTruth consumer " << mID;
     TString labelfilename;
     if (mNew) {
-      auto labels = pc.inputs().get<o2::dataformats::ConstMCTruthContainer<o2::MCCompLabel>>(mID >= 0 ? "labels" : "labels2");
-      LOG(INFO) << "GOT " << labels.getNElements() << " labels";
+      auto labelbuffer = pc.inputs().get<gsl::span<char>>(mID >= 0 ? "labels" : "labels2");
+      o2::dataformats::ConstMCTruthContainerView<o2::MCCompLabel> labels(labelbuffer); // = pc.inputs().get<const o2::dataformats::ConstMCTruthContainer<o2::MCCompLabel>>(mID >= 0 ? "labels" : "labels2");
+      LOG(INFO) << "GOT " << labels.getNElements() << " labels " << labels.getLabels(labels.getIndexedSize() - 1)[1];
 
-      sleep(1);
+      sleep(10);
+      LOG(INFO) << "2ND CHECK GOT " << labels.getNElements() << " labels " << labels.getLabels(labels.getIndexedSize() - 1)[1];
 
       if (mIO) {
-        dataformats::IOMCTruthContainerView io(labels);
+        dataformats::IOMCTruthContainerView io(labelbuffer);
         labelfilename = "labels_new.root";
         TFile f(labelfilename.Data(), "RECREATE");
         TTree tree("o2sim", "o2sim");
@@ -65,7 +67,7 @@ class MCTruthWriterTask : public o2::framework::Task
 
       sleep(1);
     } else {
-      auto labels = pc.inputs().get<o2::dataformats::MCTruthContainer<o2::MCCompLabel>*>(mID >= 0 ? "labels" : "labels2");
+      auto labels = pc.inputs().get<const o2::dataformats::MCTruthContainer<o2::MCCompLabel>*>(mID >= 0 ? "labels" : "labels2");
       LOG(INFO) << "GOT " << labels->getNElements() << " labels";
 
       sleep(1);
@@ -86,6 +88,15 @@ class MCTruthWriterTask : public o2::framework::Task
       // this triggers the reader process
       pc.outputs().snapshot({"TST", "TRIGGERREAD", 0, Lifetime::Timeframe}, labelfilename);
     }
+
+    // checking the shared mem buffer
+    auto c = pc.inputs().get<const char*>("buffer");
+    LOG(INFO) << "GOT BUFFER ADDRESS " << (void*)c << " OF TYPE " << typeid(c).name() << " FIRST ELEMENT " << (int)c[0];
+    LOG(INFO) << "SLEEPING A BIT";
+    sleep(3);
+    LOG(INFO) << "GOT BUFFER ADDRESS " << (void*)c << " OF TYPE " << typeid(c).name() << " FIRST ELEMENT " << (int)c[0];
+    sleep(3);
+    LOG(INFO) << "GOT BUFFER ADDRESS " << (void*)c << " OF TYPE " << typeid(c).name() << " FIRST ELEMENT " << (int)c[0];
 
     // we should be only called once; tell DPL that this process is ready to exit
     pc.services().get<ControlService>().readyToQuit(QuitRequest::Me);
@@ -108,6 +119,7 @@ o2::framework::DataProcessorSpec getMCTruthWriterSpec(int id, bool doio, bool ne
     inputs.emplace_back("labels2", "TST", "LABELS2", 0, Lifetime::Timeframe);
   } else {
     inputs.emplace_back("labels", "TST", "LABELS", 0, Lifetime::Timeframe);
+    inputs.emplace_back("buffer", "TST", "SHM", 0, Lifetime::Timeframe);
   }
   std::stringstream str;
   str << "MCTruthWriter" << id;

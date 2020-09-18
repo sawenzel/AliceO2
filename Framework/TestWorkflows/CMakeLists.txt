@@ -15,6 +15,10 @@
 # set(HEADERS src/o2_sim_its_ALP3.h src/o2_sim_tpc.h )
 #
 
+o2_add_dpl_workflow(shm-workflow
+                  SOURCES src/test_SharedMemWorkflow.cxx
+                  COMPONENT_NAME TestWorkflows)
+
 o2_add_dpl_workflow(dummy-workflow
                   SOURCES src/o2DummyWorkflow.cxx
                   COMPONENT_NAME TestWorkflows)

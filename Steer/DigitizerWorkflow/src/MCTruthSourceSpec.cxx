@@ -29,6 +29,9 @@ class MCTruthSourceTask : public o2::framework::Task
  public:
   MCTruthSourceTask(bool newmctruth) : mNew{newmctruth} {}
 
+  using TruthElement = o2::MCCompLabel;
+  using Container = o2::dataformats::MCTruthContainer<TruthElement>;
+
   void init(framework::InitContext& ic) override
   {
     LOG(INFO) << "Initializing MCTruth source";
@@ -38,33 +41,60 @@ class MCTruthSourceTask : public o2::framework::Task
   void run(framework::ProcessingContext& pc) override
   {
     if (mFinished) {
+      // modify the buffer a bit
+      sleep(2);
+      LOG(INFO) << "MODIFYING BUFFER";
+      mBuffer[0] = -112;
+      if (mBuffer2Addr) {
+        // trying to modify the labels in shared memory
+        TruthElement* element = (TruthElement*)mBuffer2Addr;
+        TruthElement e(-111, -111, -111);
+        LOG(INFO) << "WRITING NEW LABEL " << e;
+        std::memcpy(element, &e, sizeof(TruthElement));
+      }
+      sleep(5);
       return;
     }
     LOG(INFO) << "Creating MCTruth container";
 
-    using TruthElement = o2::MCCompLabel;
-    using Container = dataformats::MCTruthContainer<TruthElement>;
-    Container container;
     // create a very large container and stream it to TTree
     for (int i = 0; i < mSize; ++i) {
-      container.addElement(i, TruthElement(i, i, i));
-      container.addElement(i, TruthElement(i + 1, i, i));
+      mLabels1.addElement(i, TruthElement(i, i, i));
+      mLabels1.addElement(i, TruthElement(i + 1, i, i));
+      mLabels2.addElement(i, TruthElement(-i, -i, -i));
+      mLabels2.addElement(i, TruthElement(-i - 1, -i, -i));
     }
 
     if (mNew) {
       LOG(INFO) << "New serialization";
       // we need to flatten it and write to managed shared memory container
-      auto& sharedlabels = pc.outputs().make<o2::dataformats::ConstMCTruthContainer<o2::MCCompLabel>>(Output{"TST", "LABELS", 0, Lifetime::Timeframe});
-      container.flatten_to(sharedlabels);
+      auto& sharedlabels = pc.outputs().make<o2::dataformats::ConstMCTruthContainer<TruthElement>>(Output{"TST", "LABELS", 0, Lifetime::Timeframe});
+      mLabels1.flatten_to(sharedlabels);
+      auto s = sharedlabels.size();
+      // check last truth element
+      TruthElement checkelement; // = (TruthElement)sharedlabels[s-sizeof(TruthElement)]; // last byte
+      std::memcpy(&checkelement, &sharedlabels[s - sizeof(TruthElement)], sizeof(TruthElement));
+
+      // remember the address of the last label
+      mBuffer2Addr = (void*)(&(sharedlabels[s - sizeof(TruthElement)]));
+
+      LOG(INFO) << "CHECK " << s << " SIZE AND ELEMENT " << checkelement << " vs " << mLabels1.getLabels(mSize - 1)[1];
       sleep(1);
     } else {
       LOG(INFO) << "Old serialization";
-      pc.outputs().snapshot({"TST", "LABELS", 0, Lifetime::Timeframe}, container);
+      pc.outputs().snapshot({"TST", "LABELS", 0, Lifetime::Timeframe}, mLabels1);
       sleep(1);
     }
 
+    int size = 111;
+    auto buffer = pc.outputs().make<char>(Output{"TST", "SHM", 0, Lifetime::Timeframe}, size);
+    for (int i = 0; i < size; ++i)
+      buffer[i] = size - i;
+    LOG(INFO) << "SENDING BUFFER ADDRESS " << (void*)&(buffer[0]) << " AND SIZE " << buffer.size();
+    mBuffer = &(buffer[0]);
+
     // we should be only called once; tell DPL that this process is ready to exit
-    pc.services().get<ControlService>().readyToQuit(QuitRequest::Me);
+    // pc.services().get<ControlService>().readyToQuit(QuitRequest::Me);
     mFinished = true;
   }
 
@@ -72,7 +102,11 @@ class MCTruthSourceTask : public o2::framework::Task
   bool mFinished = false;
   int mSize = 0;
   bool mNew = false;
-  o2::dataformats::MCTruthContainer<long> mLabels; // labels which get filled
+  char* mBuffer = nullptr;
+  void* mBuffer2Addr = nullptr;
+
+  o2::dataformats::MCTruthContainer<TruthElement> mLabels1; // labels which get filled
+  o2::dataformats::MCTruthContainer<TruthElement> mLabels2; // labels which get filled
 };
 
 o2::framework::DataProcessorSpec getMCTruthSourceSpec(bool newmctruth)
@@ -84,6 +118,7 @@ o2::framework::DataProcessorSpec getMCTruthSourceSpec(bool newmctruth)
   //  options that can be used for this processor (here: input file names where to take the hits)
   std::vector<OutputSpec> outputs;
   outputs.emplace_back("TST", "LABELS", 0, Lifetime::Timeframe);
+  outputs.emplace_back("TST", "SHM", 0, Lifetime::Timeframe);
 
   return DataProcessorSpec{
     "MCTruthSource",
