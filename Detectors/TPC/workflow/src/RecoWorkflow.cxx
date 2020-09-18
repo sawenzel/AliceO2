@@ -143,6 +143,22 @@ framework::WorkflowSpec getWorkflow(std::vector<int> const& tpcSectors, std::vec
   // also the dispatch trigger needs to be updated.
   if (inputType == InputType::Digits) {
     using Type = std::vector<o2::tpc::Digit>;
+
+    // We provide a special publishing method for labels which have been stored in a split format and need
+    // to be transformed into a contiguous shareable container before publishing. For other branches/types this returns
+    // false and the generic RootTreeWriter publishing proceeds
+    static Reader::SpecialPublishHook hook{[](std::string_view name, ProcessingContext& context, o2::framework::Output const& output, char* data) -> bool {
+      if (TString(name.data()).Contains("TPCDigitMCTruth")) {
+        auto storedlabels = reinterpret_cast<o2::dataformats::IOMCTruthContainerView const*>(data);
+        o2::dataformats::ConstMCTruthContainer<o2::MCCompLabel> flatlabels;
+        storedlabels->copyandflatten(flatlabels);
+        LOG(INFO) << "PUBLISHING CONST LABELS " << flatlabels.getNElements();
+        context.outputs().snapshot(output, flatlabels);
+        return true;
+      }
+      return false;
+    }};
+
     specs.emplace_back(o2::tpc::getPublisherSpec<Type>(PublisherConf{
                                                          "tpc-digit-reader",
                                                          "o2sim",
@@ -151,7 +167,7 @@ framework::WorkflowSpec getWorkflow(std::vector<int> const& tpcSectors, std::vec
                                                          OutputSpec{"TPC", "DIGITS"},
                                                          OutputSpec{"TPC", "DIGITSMCTR"},
                                                          tpcSectors,
-                                                         laneConfiguration,
+                                                         laneConfiguration, &hook
                                                        },
                                                        propagateMC));
   } else if (inputType == InputType::ClustersHardware) {

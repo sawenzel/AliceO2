@@ -158,6 +158,20 @@ class GenericRootTreeReader
     /// start over at entry 0
     Loop,
   };
+
+  /// A struct holding a callback to specialize publishing based on branch name. This might be useful
+  /// when the read data needs to be transformed before publishing.
+  /// The hook gets the following input:
+  /// name: name of branch (may be used for selecting filtering)
+  /// context: The processing context (so that we can snapshot or publish)
+  /// Output: The DPL output channel on which to publish
+  /// data: pointer to the data object read by the TreeReader
+  /// The hook should return true when publishing succeeded and false when the ordinary publishing procedure
+  /// should proceed.
+  struct SpecialPublishHook {
+    std::function<bool(std::string_view name, ProcessingContext& context, Output const&, char* data)> hook;
+  };
+
   // the key must not be of type const char* to make sure that the variable argument
   // list of the constructor can be parsed
   static_assert(std::is_same<KeyType, const char*>::value == false, "the key type must not be const char*");
@@ -193,7 +207,7 @@ class GenericRootTreeReader
     virtual ~BranchConfigurationInterface() = default;
 
     /// Setup the branch configuration, namely get the branch and class information from the tree
-    virtual void setup(TTree&) {}
+    virtual void setup(TTree&, SpecialPublishHook* h = nullptr) {}
     /// Run the reader process
     /// This will recursively run every level of the the branch configuration and fetch the object
     /// at position \a entry. The object is published via the DPL ProcessingContext. A creator callback
@@ -230,20 +244,21 @@ class GenericRootTreeReader
 
     /// Setup branch configuration
     /// This is the virtal overload entry point to the upper most stage of the branch configuration
-    void setup(TTree& tree) override
+    void setup(TTree& tree, SpecialPublishHook *publishhook = nullptr) override
     {
-      setupInstance(tree);
+      setupInstance(tree, publishhook);
     }
 
     /// Run the setup, first recursively for all lower stages, and then the current stage
     /// This fetches the branch corresponding to the configured name
-    void setupInstance(TTree& tree)
+    void setupInstance(TTree& tree, SpecialPublishHook *publishhook = nullptr)
     {
       // recursing through the tree structure by simply using method of the previous type,
       // i.e. the base class method.
       if constexpr (STAGE > 1) {
-        PrevT::setupInstance(tree);
+        PrevT::setupInstance(tree, publishhook);
       }
+      mPublishHook = publishhook;
 
       // right now we allow the same key to appear for multiple branches
       mBranch = tree.GetBranch(mName.c_str());
@@ -290,33 +305,22 @@ class GenericRootTreeReader
       }
 
       auto snapshot = [this, &context, &stackcreator](const KeyType& key, const auto& object) {
-        LOG(INFO) << "PUBLISHING " << mName << " " << typeid(object).name() << " origin " << key.origin.str << " description " << key.description.str;
         context.outputs().snapshot(Output{key.origin, key.description, key.subSpec, key.lifetime, std::move(stackcreator())}, object);
       };
 
-      // this could be given by the user and called based on some filtering argument
-      auto specialpublish = [&context](const KeyType& key, std::function<o2::header::Stack()>& stackcreator, o2::dataformats::IOMCTruthContainerView const& labels) {
-        // try first of all the flat container
-	o2::dataformats::ConstMCTruthContainer<o2::MCCompLabel> flatlabels;
-        labels.copyandflatten(flatlabels);
-	// context.outputs().make<o2::dataformats::ConstMCTruthContainer<o2::MCCompLabel>>()
-        LOG(INFO) << "PUBLISHING CONST LABELS " << flatlabels.getNElements();
-        context.outputs().snapshot(Output{key.origin, key.description, key.subSpec, key.lifetime, std::move(stackcreator())}, flatlabels);
-      };
 
       char* data = nullptr;
       mBranch->SetAddress(&data);
       mBranch->GetEntry(entry);
 
-      // try to figureout when we need to do something special
-      if(TString(mClassInfo->GetName()).Contains("IOMCTruth")) {
-        // we are reading a special TruthContainer
-        LOG(INFO) << "READING IOTRuthContainer"; 
-        specialpublish(mKey, stackcreator, *reinterpret_cast<o2::dataformats::IOMCTruthContainerView*>(data));      
+      // execute hook if it was registered; if this return true do not proceed further
+      if (mPublishHook != nullptr
+          && (*mPublishHook).hook(mName, context, Output{mKey.origin, mKey.description, mKey.subSpec, mKey.lifetime, std::move(stackcreator())}, data)) {
+
       }
+      // try to figureout when we need to do something special
       else {
       if (mSizeBranch != nullptr) {
-        LOG(INFO) << "inside SizeBranch";
         size_t datasize = 0;
         mSizeBranch->SetAddress(&datasize);
         mSizeBranch->GetEntry(entry);
@@ -331,7 +335,6 @@ class GenericRootTreeReader
           snapshot(mKey, empty);
         }
       } else {
-        LOG(INFO) << "inside OtherBranch";
         if constexpr (std::is_void<value_type>::value == true) {
           // the default branch configuration publishes the object ROOT serialized
           snapshot(mKey, std::move(ROOTSerializedByClass(*data, mClassInfo)));
@@ -342,6 +345,7 @@ class GenericRootTreeReader
         }
       }
       }
+      // cleanup the memory
       auto* delfunc = mClassInfo->GetDelete();
       if (delfunc) {
         (*delfunc)(data);
@@ -355,11 +359,12 @@ class GenericRootTreeReader
     TBranch* mBranch = nullptr;
     TBranch* mSizeBranch = nullptr;
     TClass* mClassInfo = nullptr;
+    SpecialPublishHook* mPublishHook = nullptr;
   };
 
   /// branch definition structure
   /// This is a helper class to pass a branch definition to the reader constructor. The branch definition
-  /// is bound to a concrete type which will be used to determin the serialization method at DPL output.
+  /// is bound to a concrete type which will be used to determine the serialization method at DPL output.
   /// The key parameter describes the DPL output, the name parameter to branch name to publish.
   template <typename T>
   struct BranchDefinition {
@@ -398,7 +403,7 @@ class GenericRootTreeReader
   {
     mInput.SetCacheSize(0);
     parseConstructorArgs<0>(std::forward<Args>(args)...);
-    mBranchConfiguration->setup(mInput);
+    mBranchConfiguration->setup(mInput, mPublishHook);
   }
 
   /// add a file as source for the tree
@@ -507,6 +512,8 @@ class GenericRootTreeReader
       mMaxEntries = def;
     } else if constexpr (std::is_same<U, PublishingMode>::value) {
       mPublishingMode = def;
+    } else if constexpr (std::is_same<U, SpecialPublishHook*>::value) {
+      mPublishHook = def;
     } else if constexpr (is_specialization<U, BranchDefinition>::value) {
       cargs.emplace_back(key_type(def.key), def.name);
       using type = BranchConfigurationElement<typename U::type, BASE>;
@@ -548,6 +555,8 @@ class GenericRootTreeReader
   int mMaxEntries = -1;
   /// publishing mode
   PublishingMode mPublishingMode = PublishingMode::Single;
+  /// special user hook
+  SpecialPublishHook* mPublishHook = nullptr;
 };
 
 using RootTreeReader = GenericRootTreeReader<rtr::DefaultKey>;

@@ -194,7 +194,7 @@ void TPCITSMatchingDPL::run(ProcessingContext& pc)
   o2::tpc::ClusterNativeAccess clusterIndex;
   std::unique_ptr<o2::tpc::ClusterNative[]> clusterBuffer;
   memset(&clusterIndex, 0, sizeof(clusterIndex));
-  o2::tpc::ClusterNativeHelper::Reader::fillIndex(clusterIndex, clusterBuffer, clustersTPC);
+  // o2::tpc::ClusterNativeHelper::Reader::fillIndex(clusterIndex, clusterBuffer, clustersTPC);
   //----------------------------<< TPC Clusters loading <<------------------------------------------
 
   //
