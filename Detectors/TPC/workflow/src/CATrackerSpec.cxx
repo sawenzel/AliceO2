@@ -62,6 +62,7 @@
 #include <fcntl.h>
 #include "GPUReconstructionConvert.h"
 #include "DetectorsRaw/RDHUtils.h"
+#include <iostream>
 
 using namespace o2::framework;
 using namespace o2::header;
@@ -299,6 +300,9 @@ DataProcessorSpec getCATrackerSpec(ca::Config const& specconfig, std::vector<int
           }
           inputrefs[sector].labels = ref;
           if (specconfig.caClusterer) {
+	    std::cerr << "## labels\n";
+            auto& labels = pc.inputs().get<const ConstMCLabelContainer>(ref);
+	    std::cerr << labels.getNElements() << "\n";
             inputDigitsMC.emplace_back(pc.inputs().get<const ConstMCLabelContainer>(ref));
             inputDigitsMCPtrs[sector] = &inputDigitsMC.back();
           }
@@ -496,7 +500,9 @@ DataProcessorSpec getCATrackerSpec(ca::Config const& specconfig, std::vector<int
             continue;
           }
           if (refentry.second.labels.header != nullptr && refentry.second.labels.payload != nullptr) {
+	    std::cerr << "READING LABELS";
             auto& labels = pc.inputs().get<const ConstMCLabelContainer>(refentry.second.labels);
+            std::cerr << "GOT LABELS " << labels.getNElements();
             mcInputs.emplace_back(&labels);
           }
           inputs.emplace_back(gsl::span(ref.payload, DataRefUtils::getPayloadSize(ref)));
