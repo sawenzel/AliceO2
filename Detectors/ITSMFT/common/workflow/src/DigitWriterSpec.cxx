@@ -22,6 +22,10 @@
 #include <vector>
 #include <string>
 #include <algorithm>
+#ifdef NDEBUG
+#undef NDEBUG
+#include <cassert>
+#endif
 
 using namespace o2::framework;
 using SubSpecificationType = o2::framework::DataAllocator::SubSpecificationType;
@@ -35,10 +39,96 @@ template <typename T>
 using BranchDefinition = MakeRootTreeWriterSpec::BranchDefinition<T>;
 using MCCont = o2::dataformats::ConstMCTruthContainer<o2::MCCompLabel>;
 
+#define CUSTOM 1
+// make a std::vec use a gsl::span as internal buffer without copy
+template <typename T>
+void adopt(gsl::span<const T> const& data, std::vector<T>& v) {
+  static_assert(sizeof(v) == 24);
+  // we assume a standard layout of begin, end, end_capacity
+  T const * ptrs[3]; // the 3 pointers
+  ptrs[0]=&(data[0]);
+  ptrs[1]=&(data[data.size()]); // end pointer (beyond last element)
+  ptrs[2]=&(data[data.size()-1]);
+  // copy back to vector
+  std::memcpy(&v, ptrs, 3*sizeof(T*));
+  LOG(INFO) << "CHECK " << data.size() << " vs " << v.size();
+  if(v.size() != data.size()) {
+    LOG(ERROR) << "SIZE ERROR";
+  }
+  if(v.capacity() != v.size()) {
+    LOG(ERROR) << "CAPACITY ERROR";
+  }
+  if (data.size() > 0) {
+    // assert((void*)&v[0] == (void*)&data[0]);
+  }
+}
+
 /// create the processor spec
 /// describing a processor receiving digits for ITS/MFT and writing them to file
 DataProcessorSpec getDigitWriterSpec(bool mctruth, o2::header::DataOrigin detOrig, o2::detectors::DetID detId)
 {
+#ifdef CUSTOM
+  std::string detStr = o2::detectors::DetID::getName(detId);
+  std::string detStrL = detStr;
+  std::transform(detStrL.begin(), detStrL.end(), detStrL.begin(), ::tolower);
+  std::vector<o2::framework::InputSpec> inputs;
+  if (mctruth) {
+    inputs.emplace_back(InputSpec{"digitsMCTR", detOrig, "DIGITSMCTR", 0});
+    inputs.emplace_back(InputSpec{"digitsMC2ROF", detOrig, "DIGITSMC2ROF", 0});
+  }
+  inputs.emplace_back(InputSpec{"digits", detOrig, "DIGITS", 0});
+  inputs.emplace_back(InputSpec{"digitsROF", detOrig, "DIGITSROF", 0});
+
+  return {(detStr + "DigitWriter").c_str(),
+      inputs,
+      {},
+      AlgorithmSpec{
+        [detStrL, detStr, mctruth](ProcessingContext& ctx) {
+          static bool mFinished = false;
+          if (mFinished) {
+            return;
+          }
+
+          TFile f((detStrL + "digits.root").c_str(), "RECREATE");
+        TTree t("o2sim", "o2sim");
+        // define data
+        std::vector<itsmft::Digit> digits;
+        gsl::span<const itsmft::Digit> digitbuffer;
+        std::vector<itsmft::ROFRecord> rof;
+        gsl::span<const itsmft::ROFRecord> rofbuffer;
+        std::vector<itsmft::MC2ROFRecord> mc2rofrecords;
+        gsl::span<const itsmft::MC2ROFRecord> mc2rofbuffer;
+
+        gsl::span<char> labelbuffer;
+        o2::dataformats::IOMCTruthContainerView labelview;
+
+        // create the branches
+        if (mctruth) {
+          t.Branch((detStr + "DigitMCTruth").c_str(), &labelview);
+          t.Branch((detStr + "DigitMC2ROF").c_str(), &mc2rofrecords);
+        }
+        t.Branch((detStr + "DigitROF").c_str(), &rof);
+        t.Branch((detStr + "Digits").c_str(), &digits);
+
+        // get the data
+        if (mctruth) {
+           labelview.adopt(ctx.inputs().get<gsl::span<char>>("digitsMCTR"));
+           mc2rofbuffer = ctx.inputs().get<gsl::span<itsmft::MC2ROFRecord>>("digitsMC2ROF");
+        }
+        digitbuffer = ctx.inputs().get<gsl::span<itsmft::Digit>>("digits");
+        rofbuffer = ctx.inputs().get<gsl::span<itsmft::ROFRecord>>("digitsROF");
+
+        // adopt the view as a standard std::vector *** THIS IS A HACK ***
+        adopt(digitbuffer, digits);
+        //adopt(rofbuffer, rof);
+
+        // t.Fill();
+        f.Write();
+        f.Close();
+        ctx.services().get<ControlService>().readyToQuit(QuitRequest::Me);
+        mFinished = true;
+        }}};
+#else
   std::string detStr = o2::detectors::DetID::getName(detId);
   std::string detStrL = detStr;
   std::transform(detStrL.begin(), detStrL.end(), detStrL.begin(), ::tolower);
@@ -88,6 +178,7 @@ DataProcessorSpec getDigitWriterSpec(bool mctruth, o2::header::DataOrigin detOri
                                                                              logger},
                                 BranchDefinition<std::vector<itsmft::ROFRecord>>{InputSpec{"digitsROF", detOrig, "DIGITSROF", 0},
                                                                                  (detStr + "DigitROF").c_str()})();
+#endif
 }
 
 DataProcessorSpec getITSDigitWriterSpec(bool mctruth)
