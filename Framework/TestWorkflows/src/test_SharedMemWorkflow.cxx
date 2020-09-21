@@ -22,6 +22,29 @@ using DataDescription = o2::header::DataDescription;
 
 constexpr size_t SIZE = 10;
 
+template <typename T>
+void adopt(gsl::span<const T> const& data, std::vector<T>& v) {
+  static_assert(sizeof(v) == 24);
+  if (data.size() == 0) {
+    return;
+  }
+  // we assume a standard layout of begin, end, end_capacity and overwrite the internal members of the vector
+  struct Impl {
+    const T* start;
+    const T* end;
+    const T* cap;
+  };
+
+  Impl impl;
+  impl.start=&(data[0]);
+  impl.end=&(data[data.size()-1]) + 1; // end pointer (beyond last element)
+  impl.cap=impl.end;
+  std::memcpy(&v, &impl, sizeof(Impl));
+  assert(data.size() == v.size());
+  assert(v.capacity() == v.size());
+  assert((void*)&data[0] == (void*)&v[0]);
+}
+
 WorkflowSpec defineDataProcessing(ConfigContext const&)
 {
   return WorkflowSpec{
@@ -79,6 +102,9 @@ WorkflowSpec defineDataProcessing(ConfigContext const&)
          auto v = ctx.inputs().get<gsl::span<char>>("vecchar");          // OK. No copy
          auto v2 = ctx.inputs().get<const std::vector<char>>("vecchar"); // COPY MADE
          auto c2 = ctx.inputs().get<gsl::span<char>>("charbuff");        // OK
+         // let's also try an adopted vector
+         auto v3 = new std::vector<char>();
+         adopt(ctx.inputs().get<gsl::span<char>>("vecchar"),*v3);
 
          LOG(INFO) << "GOT " << v.size() << " BYTES";
          LOG(INFO) << "GOT " << v2.size() << " BYTES";
@@ -88,11 +114,13 @@ WorkflowSpec defineDataProcessing(ConfigContext const&)
          LOG(INFO) << "FIRST C2 " << (int)c2[SIZE - 1];
          LOG(INFO) << "FIRST V " << (int)v[SIZE - 1];
          LOG(INFO) << "FIRST V2 " << (int)v2[SIZE - 1];
+         LOG(INFO) << "FIRST V3 " << (int)(*v3)[SIZE - 1];
          sleep(4);
          LOG(INFO) << "SECOND C " << (int)c[SIZE - 1];
          LOG(INFO) << "SECOND C2 " << (int)c2[SIZE - 1];
          LOG(INFO) << "SECOND V " << (int)v[SIZE - 1];
          LOG(INFO) << "SECOND V2 " << (int)v2[SIZE - 1];
+         LOG(INFO) << "SECOND V3 " << (int)(*v3)[SIZE - 1];
 
          // SLEEP FOR A BIT TO ALLOW THE SENDER TO MODIFY THE DATA
          ctx.services().get<ControlService>().readyToQuit(QuitRequest::Me);

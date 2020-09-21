@@ -44,33 +44,34 @@ using MCCont = o2::dataformats::ConstMCTruthContainer<o2::MCCompLabel>;
 template <typename T>
 void adopt(gsl::span<const T> const& data, std::vector<T>& v) {
   static_assert(sizeof(v) == 24);
-  // we assume a standard layout of begin, end, end_capacity
-  T const * ptrs[3]; // the 3 pointers
-  ptrs[0]=&(data[0]);
-  ptrs[1]=&(data[data.size()]); // end pointer (beyond last element)
-  ptrs[2]=&(data[data.size()-1]);
-  // copy back to vector
-  std::memcpy(&v, ptrs, 3*sizeof(T*));
-  LOG(INFO) << "CHECK " << data.size() << " vs " << v.size();
-  if(v.size() != data.size()) {
-    LOG(ERROR) << "SIZE ERROR";
+  if (data.size() == 0) {
+    return;
   }
-  if(v.capacity() != v.size()) {
-    LOG(ERROR) << "CAPACITY ERROR";
-  }
-  if (data.size() > 0) {
-    // assert((void*)&v[0] == (void*)&data[0]);
-  }
+  // we assume a standard layout of begin, end, end_capacity and overwrite the internal members of the vector
+  struct Impl {
+    const T* start;
+    const T* end;
+    const T* cap;
+  };
+
+  Impl impl;
+  impl.start=&(data[0]);
+  impl.end=&(data[data.size()-1]) + 1; // end pointer (beyond last element)
+  impl.cap=impl.end;
+  std::memcpy(&v, &impl, sizeof(Impl));
+  assert(data.size() == v.size());
+  assert(v.capacity() == v.size());
+  assert((void*)&data[0] == (void*)&v[0]);
 }
 
 /// create the processor spec
 /// describing a processor receiving digits for ITS/MFT and writing them to file
 DataProcessorSpec getDigitWriterSpec(bool mctruth, o2::header::DataOrigin detOrig, o2::detectors::DetID detId)
 {
-#ifdef CUSTOM
   std::string detStr = o2::detectors::DetID::getName(detId);
   std::string detStrL = detStr;
   std::transform(detStrL.begin(), detStrL.end(), detStrL.begin(), ::tolower);
+  #ifdef CUSTOM
   std::vector<o2::framework::InputSpec> inputs;
   if (mctruth) {
     inputs.emplace_back(InputSpec{"digitsMCTR", detOrig, "DIGITSMCTR", 0});
@@ -92,14 +93,9 @@ DataProcessorSpec getDigitWriterSpec(bool mctruth, o2::header::DataOrigin detOri
           TFile f((detStrL + "digits.root").c_str(), "RECREATE");
         TTree t("o2sim", "o2sim");
         // define data
-        std::vector<itsmft::Digit> digits;
-        gsl::span<const itsmft::Digit> digitbuffer;
-        std::vector<itsmft::ROFRecord> rof;
-        gsl::span<const itsmft::ROFRecord> rofbuffer;
-        std::vector<itsmft::MC2ROFRecord> mc2rofrecords;
-        gsl::span<const itsmft::MC2ROFRecord> mc2rofbuffer;
-
-        gsl::span<char> labelbuffer;
+        auto digits = new std::vector<itsmft::Digit>; // needs to be a pointer since the message memory is managed by DPL and we have to avoid double deletes
+        auto rof = new std::vector<itsmft::ROFRecord>;
+        auto mc2rofrecords = new std::vector<itsmft::MC2ROFRecord>;
         o2::dataformats::IOMCTruthContainerView labelview;
 
         // create the branches
@@ -109,29 +105,22 @@ DataProcessorSpec getDigitWriterSpec(bool mctruth, o2::header::DataOrigin detOri
         }
         t.Branch((detStr + "DigitROF").c_str(), &rof);
         t.Branch((detStr + "Digits").c_str(), &digits);
-
-        // get the data
+        // get the data as gsl::span so that ideally no copy is made
+        // but immediately adopt the views in standard std::vectors *** THIS IS AN INTERNAL HACK ***
         if (mctruth) {
-           labelview.adopt(ctx.inputs().get<gsl::span<char>>("digitsMCTR"));
-           mc2rofbuffer = ctx.inputs().get<gsl::span<itsmft::MC2ROFRecord>>("digitsMC2ROF");
+	        labelview.adopt(ctx.inputs().get<gsl::span<char>>("digitsMCTR"));
+          adopt(ctx.inputs().get<gsl::span<itsmft::MC2ROFRecord>>("digitsMC2ROF"),*mc2rofrecords);
         }
-        digitbuffer = ctx.inputs().get<gsl::span<itsmft::Digit>>("digits");
-        rofbuffer = ctx.inputs().get<gsl::span<itsmft::ROFRecord>>("digitsROF");
+        adopt(ctx.inputs().get<gsl::span<itsmft::Digit>>("digits"), *digits);
+        adopt(ctx.inputs().get<gsl::span<itsmft::ROFRecord>>("digitsROF"), *rof);
 
-        // adopt the view as a standard std::vector *** THIS IS A HACK ***
-        adopt(digitbuffer, digits);
-        //adopt(rofbuffer, rof);
-
-        // t.Fill();
+        t.Fill();
         f.Write();
         f.Close();
         ctx.services().get<ControlService>().readyToQuit(QuitRequest::Me);
         mFinished = true;
         }}};
 #else
-  std::string detStr = o2::detectors::DetID::getName(detId);
-  std::string detStrL = detStr;
-  std::transform(detStrL.begin(), detStrL.end(), detStrL.begin(), ::tolower);
   auto logger = [](std::vector<o2::itsmft::Digit> const& inDigits) {
     LOG(INFO) << "RECEIVED DIGITS SIZE " << inDigits.size();
   };
