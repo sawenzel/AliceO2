@@ -98,23 +98,24 @@ DataProcessorSpec getDigitWriterSpec(bool mctruth, o2::header::DataOrigin detOri
         auto mc2rofrecords = new std::vector<itsmft::MC2ROFRecord>;
         o2::dataformats::IOMCTruthContainerView labelview;
 
-        // create the branches
-        if (mctruth) {
-          t.Branch((detStr + "DigitMCTruth").c_str(), &labelview);
-          t.Branch((detStr + "DigitMC2ROF").c_str(), &mc2rofrecords);
-        }
-        t.Branch((detStr + "DigitROF").c_str(), &rof);
-        t.Branch((detStr + "Digits").c_str(), &digits);
+        auto fillBranch = [](TBranch* br) {
+          br->Fill();
+          br->ResetAddress();
+          br->DropBaskets("all");
+        };
         // get the data as gsl::span so that ideally no copy is made
         // but immediately adopt the views in standard std::vectors *** THIS IS AN INTERNAL HACK ***
         if (mctruth) {
-	        labelview.adopt(ctx.inputs().get<gsl::span<char>>("digitsMCTR"));
+	  labelview.adopt(ctx.inputs().get<gsl::span<char>>("digitsMCTR"));
+          fillBranch(t.Branch((detStr + "DigitMCTruth").c_str(), &labelview));
           adopt(ctx.inputs().get<gsl::span<itsmft::MC2ROFRecord>>("digitsMC2ROF"),*mc2rofrecords);
+          fillBranch(t.Branch((detStr + "DigitMC2ROF").c_str(), &mc2rofrecords));
         }
         adopt(ctx.inputs().get<gsl::span<itsmft::Digit>>("digits"), *digits);
+        fillBranch(t.Branch((detStr + "Digits").c_str(), &digits));
         adopt(ctx.inputs().get<gsl::span<itsmft::ROFRecord>>("digitsROF"), *rof);
-
-        t.Fill();
+        fillBranch(t.Branch((detStr + "DigitROF").c_str(), &rof));
+        t.SetEntries(1);
         f.Write();
         f.Close();
         ctx.services().get<ControlService>().readyToQuit(QuitRequest::Me);

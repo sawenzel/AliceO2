@@ -130,11 +130,15 @@ class ITSMFTDPLDigitizerTask : BaseDPLDigitizer
 
     // here we have all digits and labels and we can send them to consumer (aka snapshot it onto output)
     pc.outputs().snapshot(Output{mOrigin, "DIGITS", 0, Lifetime::Timeframe}, mDigitsAccum);
+    mDigitsAccum = std::vector<itsmft::Digit>(); // free mem immediately
     pc.outputs().snapshot(Output{mOrigin, "DIGITSROF", 0, Lifetime::Timeframe}, mROFRecordsAccum);
     if (mWithMCTruth) {
       pc.outputs().snapshot(Output{mOrigin, "DIGITSMC2ROF", 0, Lifetime::Timeframe}, mMC2ROFRecordsAccum);
       auto& sharedlabels = pc.outputs().make<o2::dataformats::ConstMCTruthContainer<o2::MCCompLabel>>(Output{mOrigin, "DIGITSMCTR", 0, Lifetime::Timeframe});
       mLabelsAccum.flatten_to(sharedlabels);
+      // free space of existing label containers
+      mLabels.clear_andfreememory();
+      mLabelsAccum.clear_andfreememory();
     }
     LOG(INFO) << mID.getName() << ": Sending ROMode= " << mROMode << " to GRPUpdater";
     pc.outputs().snapshot(Output{mOrigin, "ROMode", 0, Lifetime::Timeframe}, mROMode);
