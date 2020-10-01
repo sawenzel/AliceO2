@@ -27,6 +27,8 @@ namespace dataformats
 {
 template <class T>
 class MCTruthContainer;
+template <class T>
+class ConstMCTruthContainer;
 }
 } // namespace o2
 
@@ -157,7 +159,7 @@ struct ClusterNative {
 struct ClusterNativeAccess {
   const ClusterNative* clustersLinear;
   const ClusterNative* clusters[constants::MAXSECTOR][constants::MAXGLOBALPADROW];
-  const o2::dataformats::MCTruthContainer<o2::MCCompLabel>* clustersMCTruth;
+  const o2::dataformats::ConstMCTruthContainer<o2::MCCompLabel>* clustersMCTruth;
   unsigned int nClusters[constants::MAXSECTOR][constants::MAXGLOBALPADROW];
   unsigned int nClustersSector[constants::MAXSECTOR];
   unsigned int clusterOffset[constants::MAXSECTOR][constants::MAXGLOBALPADROW];

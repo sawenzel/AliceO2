@@ -27,6 +27,8 @@ MCLabelAccumulator::MCLabelAccumulator(GPUTPCClusterFinder& clusterer)
 
 void MCLabelAccumulator::collect(const ChargePos& pos, Charge q)
 {
+  // TODO: remove this (added to avoid segfault)
+  return;
   if (q == 0 || !engaged()) {
     return;
   }

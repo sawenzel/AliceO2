@@ -177,8 +177,8 @@ int ClusterNativeHelper::Reader::fillIndex(ClusterNativeAccess& clusterIndex, st
   return 0;
 }
 
-int ClusterNativeHelper::Reader::parseSector(const char* buffer, size_t size, gsl::span<MCLabelContainer const> const& mcinput, ClusterNativeAccess& clusterIndex,
-                                             const MCLabelContainer* (&clustersMCTruth)[MAXSECTOR])
+int ClusterNativeHelper::Reader::parseSector(const char* buffer, size_t size, gsl::span<ConstMCLabelContainer const> const& mcinput, ClusterNativeAccess& clusterIndex,
+                                             const ConstMCLabelContainer* (&clustersMCTruth)[MAXSECTOR])
 {
   if (!buffer || size < sizeof(ClusterCountIndex)) {
     return 0;

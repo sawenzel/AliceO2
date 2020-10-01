@@ -58,6 +58,8 @@ namespace dataformats
 {
 template <class T>
 class MCTruthContainer;
+template <class T>
+class ConstMCTruthContainer;
 } // namespace dataformats
 } // namespace o2
 
