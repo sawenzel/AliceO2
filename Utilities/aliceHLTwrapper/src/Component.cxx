@@ -120,7 +120,8 @@ int Component::init(int argc, char** argv)
   bpo::store(bpo::parse_command_line(argc, argv, od), varmap);
 
   for (int option = 0; option < OptionKeyLast; ++option) {
-    if (varmap.count(OptionKeys[option]) == 0) continue;
+    if (varmap.count(OptionKeys[option]) == 0)
+      continue;
     switch (option) {
     case OptionKeyLibrary: break;
     case OptionKeyComponent: break;
@@ -198,9 +199,11 @@ int Component::init(int argc, char** argv)
     char* iterator = parameterBuffer.get();
     parameters.emplace_back(iterator);
     for (; *iterator != 0; iterator++) {
-      if (*iterator != ' ') continue;
+      if (*iterator != ' ')
+        continue;
       *iterator = 0; // separate strings
-      if (*(iterator + 1) != ' ' && *(iterator + 1) != 0) parameters.emplace_back(iterator + 1);
+      if (*(iterator + 1) != ' ' && *(iterator + 1) != 0)
+        parameters.emplace_back(iterator + 1);
     }
   }
 
@@ -222,7 +225,8 @@ int Component::init(int argc, char** argv)
 int Component::process(vector<MessageFormat::BufferDesc_t>& dataArray,
                        cballoc_signal_t* cbAllocate)
 {
-  if (!mpSystem) return -ENOSYS;
+  if (!mpSystem)
+    return -ENOSYS;
   int iResult = 0;
 
   unsigned outputBufferSize = 0;
@@ -294,9 +298,11 @@ int Component::process(vector<MessageFormat::BufferDesc_t>& dataArray,
     outputBlockCnt = 0;
     // TODO: check if that is working with the corresponding allocation method of the
     // component environment
-    if (pOutputBlocks) delete[] pOutputBlocks;
+    if (pOutputBlocks)
+      delete[] pOutputBlocks;
     pOutputBlocks = nullptr;
-    if (pEventDoneData) delete pEventDoneData;
+    if (pEventDoneData)
+      delete pEventDoneData;
     pEventDoneData = nullptr;
 
     iResult = mpSystem->processEvent(mProcessor, &evtData, &inputBlocks[0], &trigData,
@@ -336,7 +342,8 @@ int Component::process(vector<MessageFormat::BufferDesc_t>& dataArray,
     AliHLTComponentBlockData* pFiltered = pOutputBlocks;
     for (unsigned blockIndex = 0; blockIndex < outputBlockCnt; blockIndex++, pOutputBlock++) {
       // filter special data blocks
-      if (pOutputBlock->fDataType == kDataTypeEvent) continue;
+      if (pOutputBlock->fDataType == kDataTypeEvent)
+        continue;
 
       // block descriptors without any attached payload are propagated
       bool bValid = pOutputBlock->fSize == 0;
@@ -387,9 +394,11 @@ int Component::process(vector<MessageFormat::BufferDesc_t>& dataArray,
   // until released.
   inputBlocks.clear();
   outputBlockCnt = 0;
-  if (pOutputBlocks) delete[] pOutputBlocks;
+  if (pOutputBlocks)
+    delete[] pOutputBlocks;
   pOutputBlocks = nullptr;
-  if (pEventDoneData) delete pEventDoneData;
+  if (pEventDoneData)
+    delete pEventDoneData;
   pEventDoneData = nullptr;
 
   return -iResult;
