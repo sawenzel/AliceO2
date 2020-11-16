@@ -26,6 +26,16 @@ function banner() { echo ; echo ==================== $1 ==================== ; }
 
 function Usage() { echo "$0 --script scriptname | -c WORKDIR_RELATIVE_TO_TOP [ --jobname JOBNAME ] [ --topworkdir WORKDIR (ON TOP OF HOME) ] "; }
 
+upload_to_Alien() {
+  # uploads a file to alien and performs some error checking
+  SOURCE=$1
+  DEST=$2
+  alien.py cp file:$1 ${DEST}
+  alien.py xrdstat ${DEST} | awk 'BEGIN{c=0}/root:/{if($3="OK"){c=c+1}} END {if(c>=2) {exit 0}; exit 1}' 
+  echo "$?"
+}
+export -f upload_to_Alien
+
 # find out if this script is really executed on GRID
 # in this case, we should find an environment variable JALIEN_TOKEN_CERT
 ONGRID=0
