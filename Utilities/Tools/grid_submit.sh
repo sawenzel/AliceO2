@@ -26,15 +26,56 @@ function banner() { echo ; echo ==================== $1 ==================== ; }
 
 function Usage() { echo "$0 --script scriptname | -c WORKDIR_RELATIVE_TO_TOP [ --jobname JOBNAME ] [ --topworkdir WORKDIR (ON TOP OF HOME) ] "; }
 
+
 upload_to_Alien() {
-  # uploads a file to alien and performs some error checking
-  SOURCE=$1
-  DEST=$2
-  alien.py cp file:$1 ${DEST}
-  alien.py xrdstat ${DEST} | awk 'BEGIN{c=0}/root:/{if($3="OK"){c=c+1}} END {if(c>=2) {exit 0}; exit 1}' 
-  echo "$?"
+  # uploads a file to an alien path and performs some error checking
+  SOURCEFILE=$1  # needs to be a file in the local dir --> verify
+  DEST=$2  # needs to be a path
+  alien.py cp -f file:$SOURCEFILE ${DEST}
+  alien.py xrdstat ${DEST}/${SOURCEFILE} | awk 'BEGIN{c=0}/root:/{if($3="OK"){c=c+1}} END {if(c>=2) {exit 0}else{ exit 1}}' 
+  return $?
 }
 export -f upload_to_Alien
+
+notify_mattermost() {
+  set +x
+  text=$1
+  WEBHOOK=https://mattermost.web.cern.ch/hooks/68yrjeeg9pgg8ydwuip487b9me
+  COMMAND="curl -X POST -H 'Content-type: application/json' --data '{\"text\":\""${text}"\"}' "${WEBHOOK}
+  eval "${COMMAND}"  
+}
+
+# a hook which can be registered at end of "taskwrapper" tasks and which
+# triggers a possible checkpoint mechanism and resubmit
+checkpoint_hook_ttlbased() {
+  timepassedsincestart=$SECONDS
+  text1="checkpoint check for $2; ${SECONDS} passed since job start out of ${JOBTTL}"
+  notify_mattermost "${text1}"
+
+  # do calculation with AWK
+  CHECKPOINT=$(awk -v S="${SECONDS}" -v T="${JOBTTL}" '//{} END{if(S/T>0.9){print "OK"}}' < /dev/null);
+  if [ "$CHECKPOINT" = "OK" ]; then
+    # upload
+    text="CHECKPOINTING NOW"
+    # resubmit
+    notify_mattermost "${text}"
+  
+    # make tarball
+    tar -czf checkpoint.tar.gz *
+
+    # upload tarball
+    [ "${ALIEN_JOB_OUTPUTDIR}" ] && alien.py cp -f checkpoint.tar.gz alien://${ALIEN_JOB_OUTPUTDIR}/
+
+    # resubmit
+    [ "${ALIEN_JOB_OUTPUTDIR}" ] && ${ALIEN_DRIVER_SCRIPT} -c `basename ${ALIEN_JOB_OUTPUTDIR}` --jobname CONTINUE_ID${ALIEN_PROC_ID} --topworkdir foo --o2tag ${O2_PACKAGE_LATEST} --asuser aliperf --ttl ${JOBTTL}
+
+    # exit current workflow
+    exit 0
+  fi
+}
+export -f checkpoint_hook_ttlbased
+export -f notify_mattermost
+export JOBUTILS_JOB_ENDHOOK=checkpoint_hook_ttlbased
 
 # find out if this script is really executed on GRID
 # in this case, we should find an environment variable JALIEN_TOKEN_CERT
@@ -46,6 +87,7 @@ if [[ $ALIEN_PROC_ID ]]; then
   exec &> >(tee -a alien_log_${ALIEN_PROC_ID}.txt)
 fi
 
+JOBTTL=600
 # this tells us to continue an existing job --> in this case we don't create a new workdir
 while [ $# -gt 0 ] ; do
     case $1 in
@@ -58,12 +100,12 @@ while [ $# -gt 0 ] ; do
         --partition) GRIDPARTITION=$2; shift 2 ;; # allows to specificy a GRID partition for the job
         --dry) DRYRUN="ON"; shift 1 ;; # do a try run and not actually interact with the GRID (just produce local jdl file)
         --o2tag) O2TAG=$2; shift 2 ;; # 
+        --asuser) ASUSER=$2; shift 2 ;; #
 	-h) Usage ; exit ;;
         *) break ;;
     esac
 done
-
-echo "SCRIPT ${SCRIPT}"
+export JOBTTL
 
 # analyse options:
 # we should either run with --script or with -c
@@ -74,10 +116,18 @@ fi
 
 # General job configuration
 MY_USER=${ALIEN_USER:-`whoami`}
+
+alien.py whois -a ${MY_USER}
+
+[ "${ONGRID}" = 1 ] && alien-token-info
+
 if [[ ! $MY_USER ]]; then
   per "Problems retrieving current AliEn user. Did you run alien-token-init?"
   exit 1
 fi
+
+[ "${ASUSER}" ] && MY_USER=${ASUSER}
+
 MY_HOMEDIR="/alice/cern.ch/user/${MY_USER:0:1}/${MY_USER}"
 MY_JOBPREFIX="$MY_HOMEDIR/${ALIEN_TOPWORKDIR:-selfjobs}"
 MY_JOBSCRIPT="$(cd "$(dirname "${SCRIPT}")" && pwd -P)/$(basename "${SCRIPT}")" # the job script with full path
@@ -124,15 +174,15 @@ if [[ "${IS_ALIEN_JOB_SUBMITTER}" ]]; then
   # TODO: Make this configurable or read from a preamble section in the jobfile
   cat > "${MY_JOBNAMEDATE}.jdl" <<EOF
 Executable = "${MY_BINDIR}/${MY_JOBNAMEDATE}.sh";
-Arguments = "${CONTINUE_WORKDIR:+"-c ${CONTINUE_WORKDIR}"} --local ${O2TAG:+--o2tag ${O2TAG}}";
+Arguments = "${CONTINUE_WORKDIR:+"-c ${CONTINUE_WORKDIR}"} --local ${O2TAG:+--o2tag ${O2TAG}} --ttl ${JOBTTL}";
 InputFile = "LF:${MY_JOBWORKDIR}/alien_jobscript.sh";
 OutputDir = "${MY_JOBWORKDIR}";
 Output = {
-  "logs*.zip,alien*.txt,*digit*.root@disk=2"
+  "logs*.zip,*digit*.root@disk=2"
 };
 Requirements = member(other.GridPartitions,"${GRIDPARTITION:-cc7}");
 MemorySize = "60GB";
-TTL=${JOBTTL:-600};
+TTL=${JOBTTL};
 EOF
 #
 
@@ -142,7 +192,6 @@ EOF
 
     pok "Preparing job \"$MY_JOBNAMEDATE\""
     (
-      set -x
       # assemble all GRID interaction in a single script / transaction
       [ -f "${command_file}" ] && rm ${command_file}
       [ ! "${CONTINUE_WORKDIR}" ] && echo "rmdir ${MY_JOBWORKDIR}" >> ${command_file}    # remove existing job dir
@@ -153,16 +202,6 @@ EOF
       echo "cp ${PWD}/${MY_JOBNAMEDATE}.jdl alien://${MY_JOBWORKDIR}/${MY_JOBNAMEDATE}.jdl" >> ${command_file}  # copy the jdl
       echo "cp ${THIS_SCRIPT} alien://${MY_BINDIR}/${MY_JOBNAMEDATE}.sh" >> ${command_file}  # copy current job script to AliEn
       [ ! "${CONTINUE_WORKDIR}" ] && echo "cp ${MY_JOBSCRIPT} alien://${MY_JOBWORKDIR}/alien_jobscript.sh" >> ${command_file}
-
-#      [ ! "${CONTINUE_WORKDIR}" ] && alien.py rmdir "$MY_JOBWORKDIR" || true    # remove existing job dir
-#      alien.py mkdir "$MY_BINDIR" || true                                       # create bindir
-#      alien.py mkdir "$MY_JOBPREFIX" || true                                    # create job output prefix
-#      # alien.py mkdir jdl || true
-#      [ ! "${CONTINUE_WORKDIR}" ] && alien.py mkdir "$MY_JOBWORKDIR" || true
-#      alien.py rm "$MY_BINDIR/${MY_JOBNAMEDATE}.sh" || true                     # remove current job script
-#      alien.py cp "${PWD}/${MY_JOBNAMEDATE}.jdl" alien://${MY_JOBWORKDIR}/${MY_JOBNAMEDATE}.jdl@ALICE::CERN::EOS || true  # copy the jdl
-#      alien.py cp "$THIS_SCRIPT" alien://${MY_BINDIR}/${MY_JOBNAMEDATE}.sh@ALICE::CERN::EOS || true  # copy current job script to AliEn
-#      [ ! "${CONTINUE_WORKDIR}" ] && alien.py cp "${MY_JOBSCRIPT}" alien://${MY_JOBWORKDIR}/alien_jobscript.sh@ALICE::CERN::EOS || true
     ) &> alienlog.txt
 
     pok "Submitting job \"${MY_JOBNAMEDATE}\" from $PWD"
@@ -192,8 +231,6 @@ if [[ "${ONGRID}" == 0 ]]; then
   banner "Executing job in directory ${WORKDIR}"
   cd "${WORKDIR}" 2> /dev/null
 fi
-
-set -x
 
 
 # ----------- START JOB PREAMBLE  ----------------------------- 
@@ -235,7 +272,10 @@ cat /proc/meminfo > alien_meminfo.log
 if [ "${ONGRID}" = "1" ]; then
   alien.py ps --jdl ${ALIEN_PROC_ID} > this_jdl.jdl
   ALIEN_JOB_OUTPUTDIR=$(grep "OutputDir" this_jdl.jdl | awk '//{print $3}' | sed 's/"//g' | sed 's/;//')
+  ALIEN_DRIVER_SCRIPT=$0
   export ALIEN_JOB_OUTPUTDIR
+  export ALIEN_DRIVER_SCRIPT
+  export O2_PACKAGE_LATEST
 
   # ----------- FETCH PREVIOUS CHECKPOINT IN CASE WE CONTINUE A JOB ----
   if [ "${CONTINUE_WORKDIR}" ]; then
@@ -251,10 +291,11 @@ chmod +x ./alien_jobscript.sh
 ./alien_jobscript.sh
 
 # just to be sure that we get the logs
-alien.py cp -f alien_log_${ALIEN_PROC_ID}.txt alien://${ALIEN_JOB_OUTPUTDIR}/lastlog.txt
+cp alien_log_${ALIEN_PROC_ID}.txt logtmp_${ALIEN_PROC_ID}.txt
+[ "${ALIEN_JOB_OUTPUTDIR}" ] && upload_to_Alien logtmp_${ALIEN_PROC_ID}.txt ${ALIEN_JOB_OUTPUTDIR}/
 
 # MOMENTARILU WE ZIP ALL LOG FILES
-zip logs_PROCID${ALIEN_PROC_ID:-0}.zip *.log* alien_log*.txt
+zip logs_PROCID${ALIEN_PROC_ID:-0}.zip *.log* alien_log_${ALIEN_PROC_ID}.txt
 
 # We need to exit for the ALIEN JOB HANDLER!
 exit 0
