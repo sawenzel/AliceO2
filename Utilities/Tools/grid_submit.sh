@@ -26,24 +26,46 @@ function banner() { echo ; echo ==================== $1 ==================== ; }
 
 function Usage() { echo "$0 --script scriptname | -c WORKDIR_RELATIVE_TO_TOP [ --jobname JOBNAME ] [ --topworkdir WORKDIR (ON TOP OF HOME) ] "; }
 
-
-upload_to_Alien() {
-  # uploads a file to an alien path and performs some error checking
-  SOURCEFILE=$1  # needs to be a file in the local dir --> verify
-  DEST=$2  # needs to be a path
-  alien.py cp -f file:$SOURCEFILE ${DEST}
-  alien.py xrdstat ${DEST}/${SOURCEFILE} | awk 'BEGIN{c=0}/root:/{if($3="OK"){c=c+1}} END {if(c>=2) {exit 0}else{ exit 1}}' 
-  return $?
-}
-export -f upload_to_Alien
-
 notify_mattermost() {
   set +x
   text=$1
-  WEBHOOK=https://mattermost.web.cern.ch/hooks/68yrjeeg9pgg8ydwuip487b9me
+  WEBHOOK=https://mattermost.web.cern.ch/hooks/15h4aii35jgs3yidzdozd64gfy
   COMMAND="curl -X POST -H 'Content-type: application/json' --data '{\"text\":\""${text}"\"}' "${WEBHOOK}
   eval "${COMMAND}"  
 }
+
+starthook() {
+  notify_mattermost "EMBEDDING TEST ${ALIEN_PROC_ID}: Starting stage $2"
+}
+failhook() {
+  notify_mattermost "EMBEDDING TEST ${ALIEN_PROC_ID}: **Failure** in stage $2"
+}
+export -f starthook
+export -f failhook
+export JOBUTILS_JOB_STARTHOOK="starthook"
+export JOBUTILS_JOB_FAILUREHOOK="failhook"
+
+upload_to_Alien() {
+  set -x
+  # uploads a file to an alien path and performs some error checking
+  SOURCEFILE=$1  # needs to be a file in the local dir --> verify
+  DEST=$2  # needs to be a path
+  notify_mattermost "UPLOADING TO ALIEN: alien.py cp -f file:$SOURCEFILE ${DEST}"
+  alien.py cp -f file:$SOURCEFILE ${DEST}
+  RC=$?
+  [ ! "${RC}" = "0" ] && notify_mattermost "COPY OF FILE ${SOURCEFILE} TO ${DEST} RETURNED ${RC}"
+  # make a check 
+  alien.py ls ${DEST}/${SOURCEFILE}
+  RC=$?
+  [ ! "${RC}" = "0" ] && notify_mattermost "LS OF FILE ${DEST}/${SOURCEFILE} RETURNED ${RC}"
+
+  alien.py xrdstat ${DEST}/${SOURCEFILE} | awk 'BEGIN{c=0}/root:/{if($3="OK"){c=c+1}} END {if(c>=2) {exit 0}else{ exit 1}}'
+  RC=$?
+  notify_mattermost "FINISHED UPLOADING TO ALIEN: alien.py cp -f file:$SOURCEFILE ${DEST} ${RC}"
+  set +x
+  return ${RC}
+}
+export -f upload_to_Alien
 
 # a hook which can be registered at end of "taskwrapper" tasks and which
 # triggers a possible checkpoint mechanism and resubmit
@@ -53,21 +75,30 @@ checkpoint_hook_ttlbased() {
   notify_mattermost "${text1}"
 
   # do calculation with AWK
-  CHECKPOINT=$(awk -v S="${SECONDS}" -v T="${JOBTTL}" '//{} END{if(S/T>0.9){print "OK"}}' < /dev/null);
+  CHECKPOINT=$(awk -v S="${SECONDS}" -v T="${JOBTTL}" '//{} END{if(S/T>0.8){print "OK"}}' < /dev/null);
   if [ "$CHECKPOINT" = "OK" ]; then
     # upload
     text="CHECKPOINTING NOW"
     # resubmit
     notify_mattermost "${text}"
-  
-    # make tarball
-    tar -czf checkpoint.tar.gz *
+
+    # remove garbage (pipes, sockets, etc)  
+    find ./ -size 0 -delete
+
+    # make tarball (no compression to be fast and ROOT files are already compressed)
+    tar --exclude "output" -cf checkpoint.tar *
+ 
+    text="TARING RETURNED $? and it has size $(ls -al checkpoint.tar)"
+    notify_mattermost "${text}"
 
     # upload tarball
-    [ "${ALIEN_JOB_OUTPUTDIR}" ] && alien.py cp -f checkpoint.tar.gz alien://${ALIEN_JOB_OUTPUTDIR}/
+  #  [ "${ALIEN_JOB_OUTPUTDIR}" ] && upload_to_Alien checkpoint.tar ${ALIEN_JOB_OUTPUTDIR}/
 
     # resubmit
-    [ "${ALIEN_JOB_OUTPUTDIR}" ] && ${ALIEN_DRIVER_SCRIPT} -c `basename ${ALIEN_JOB_OUTPUTDIR}` --jobname CONTINUE_ID${ALIEN_PROC_ID} --topworkdir foo --o2tag ${O2_PACKAGE_LATEST} --asuser aliperf --ttl ${JOBTTL}
+   # if [ "$?" = "0" ]; then
+    #   notify_mattermost "RESUBMITTING"
+    #    [ "${ALIEN_JOB_OUTPUTDIR}" ] && ${ALIEN_DRIVER_SCRIPT} -c `basename ${ALIEN_JOB_OUTPUTDIR}` --jobname CONTINUE_ID${ALIEN_PROC_ID} --topworkdir foo --o2tag ${O2_PACKAGE_LATEST} --asuser aliperf --ttl ${JOBTTL}
+   # fi
 
     # exit current workflow
     exit 0
@@ -118,8 +149,6 @@ fi
 MY_USER=${ALIEN_USER:-`whoami`}
 
 alien.py whois -a ${MY_USER}
-
-[ "${ONGRID}" = 1 ] && alien-token-info
 
 if [[ ! $MY_USER ]]; then
   per "Problems retrieving current AliEn user. Did you run alien-token-init?"
@@ -178,9 +207,11 @@ Arguments = "${CONTINUE_WORKDIR:+"-c ${CONTINUE_WORKDIR}"} --local ${O2TAG:+--o2
 InputFile = "LF:${MY_JOBWORKDIR}/alien_jobscript.sh";
 OutputDir = "${MY_JOBWORKDIR}";
 Output = {
-  "logs*.zip,*digit*.root@disk=2"
+  "logs*.zip@disk=2",
+  "output_arch.zip:output/*@disk=2",
+  "checkpoint*.tar@disk=2"
 };
-Requirements = member(other.GridPartitions,"${GRIDPARTITION:-cc7}");
+Requirements = member(other.GridPartitions,"${GRIDPARTITION:-multicore_8}");
 MemorySize = "60GB";
 TTL=${JOBTTL};
 EOF
@@ -248,11 +279,11 @@ if [ ! "$O2_ROOT" ]; then
   [ "${O2TAG}" ] && O2_PACKAGE_LATEST=${O2TAG}
   eval "$(/cvmfs/alice.cern.ch/bin/alienv printenv O2::"$O2_PACKAGE_LATEST")"
 fi
-if [ ! "$XJALIEN_ROOT" ]; then
-  XJALIEN_LATEST=`find /cvmfs/alice.cern.ch/el7-x86_64/Modules/modulefiles/xjalienfs -type f -printf "%f\n" | tail -n1`
-  banner "Loading XJALIEN package $XJALIEN_LATEST"
-  eval "$(/cvmfs/alice.cern.ch/bin/alienv printenv xjalienfs::"$XJALIEN_LATEST")"
-fi
+#if [ ! "$XJALIEN_ROOT" ]; then
+#  XJALIEN_LATEST=`find /cvmfs/alice.cern.ch/el7-x86_64/Modules/modulefiles/xjalienfs -type f -printf "%f\n" | tail -n1`
+#  banner "Loading XJALIEN package $XJALIEN_LATEST"
+#  eval "$(/cvmfs/alice.cern.ch/bin/alienv printenv xjalienfs::"$XJALIEN_LATEST")"
+#fi
 if [ ! "$O2DPG_ROOT" ]; then
   O2DPG_LATEST=`find /cvmfs/alice.cern.ch/el7-x86_64/Modules/modulefiles/O2DPG -type f -printf "%f\n" | tail -n1`
   banner "Loading O2DPG package $O2DPG_LATEST"
@@ -270,18 +301,36 @@ cat /proc/meminfo > alien_meminfo.log
 # ----------- PREPARE SOME ALIEN ENV -- useful for the job -----------
 
 if [ "${ONGRID}" = "1" ]; then
+  notify_mattermost "STARTING GRID ${ALIEN_PROC_ID} CHECK $(which alien.py)"
+  notify_mattermost "WHOAMI $(alien.py whoami)"
+  notify_mattermost "PROCESS COUNT $(alien.py ps | wc)"
+  #alien-token-info
+  #alien-cert-info
+
   alien.py ps --jdl ${ALIEN_PROC_ID} > this_jdl.jdl
+  notify_mattermost "$(ls -al this_jdl.jdl)"
+  notify_mattermost "$(grep "OutputDir" this_jdl.jdl)"
   ALIEN_JOB_OUTPUTDIR=$(grep "OutputDir" this_jdl.jdl | awk '//{print $3}' | sed 's/"//g' | sed 's/;//')
   ALIEN_DRIVER_SCRIPT=$0
+
+  #OutputDir = "/alice/cern.ch/user/a/aliperf/foo/MS3-20201118-094030"; 
+
+  notify_mattermost "ALIEN JOB OUTDIR IS ${ALIEN_JOB_OUTPUTDIR}" 
+
   export ALIEN_JOB_OUTPUTDIR
   export ALIEN_DRIVER_SCRIPT
   export O2_PACKAGE_LATEST
 
   # ----------- FETCH PREVIOUS CHECKPOINT IN CASE WE CONTINUE A JOB ----
   if [ "${CONTINUE_WORKDIR}" ]; then
-    alien.py cp alien://${ALIEN_JOB_OUTPUTDIR}/checkpoint.tar.gz .
-    tar -xzf checkpoint.tar.gz
-    rm checkpoint.tar.gz
+    alien.py cp alien://${ALIEN_JOB_OUTPUTDIR}/checkpoint.tar .
+    if [ -f checkpoint.tar ]; then
+       tar -xf checkpoint.tar
+       rm checkpoint.tar
+    else
+       notify_mattermost "Could not download checkpoint; Quitting"
+       exit 0
+    fi
   fi
 fi
 
