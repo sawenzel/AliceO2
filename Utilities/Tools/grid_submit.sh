@@ -39,7 +39,13 @@ starthook() {
 }
 failhook() {
   notify_mattermost "EMBEDDING TEST ${ALIEN_PROC_ID}: **Failure** in stage $2"
+  cp alien_log_${ALIEN_PROC_ID}.txt logtmp_${ALIEN_PROC_ID}_failure.txt
+
+  # MOMENTARILU WE ZIP ALL LOG FILES
+  zip logs_PROCID${ALIEN_PROC_ID:-0}_failure.zip *.log* *mergerlog* *serverlog* *workerlog* alien_log_${ALIEN_PROC_ID}_failure.txt
+  [ "${ALIEN_JOB_OUTPUTDIR}" ] && upload_to_Alien logs_PROCID${ALIEN_PROC_ID:-0}_failure.zip  ${ALIEN_JOB_OUTPUTDIR}/
 }
+
 export -f starthook
 export -f failhook
 export JOBUTILS_JOB_STARTHOOK="starthook"
@@ -229,6 +235,7 @@ EOF
       # echo "mkdir ${MY_BINDIR}" >> ${command_file}                      # create bindir
       echo "mkdir ${MY_JOBPREFIX}" >> ${command_file}                   # create job output prefix
       [ ! "${CONTINUE_WORKDIR}" ] && echo "mkdir ${MY_JOBWORKDIR}" >> ${command_file}
+      [ ! "${CONTINUE_WORKDIR}" ] && echo "mkdir ${MY_JOBWORKDIR}/output" >> ${command_file}
       echo "rm ${MY_BINDIR}/${MY_JOBNAMEDATE}.sh" >> ${command_file}    # remove current job script
       echo "cp ${PWD}/${MY_JOBNAMEDATE}.jdl alien://${MY_JOBWORKDIR}/${MY_JOBNAMEDATE}.jdl" >> ${command_file}  # copy the jdl
       echo "cp ${THIS_SCRIPT} alien://${MY_BINDIR}/${MY_JOBNAMEDATE}.sh" >> ${command_file}  # copy current job script to AliEn
