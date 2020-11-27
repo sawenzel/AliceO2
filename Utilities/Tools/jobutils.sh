@@ -141,7 +141,7 @@ taskwrapper() {
     finalcommand="TIME=\"#walltime %e\" ${O2_ROOT}/share/scripts/monitor-mem.sh ${TIMECOMMAND} './${SCRIPTNAME}'"
   fi
   echo "Running: ${finalcommand}" > ${logfile}
-  eval ${finalcommand} >> ${logfile} 2>&1 &
+  eval ${finalcommand} >> ${logfile} 2>&1 & disown
 
   # THE NEXT PART IS THE SUPERVISION PART
   # get the PID
@@ -152,6 +152,9 @@ taskwrapper() {
 
   cpucounter=1
 
+  #declare -A current  # dict for current CPU
+  #declare -A previous # dict for prev CPU
+  reduction_factor=1
   while [ 1 ]; do
     # We don't like to see critical problems in the log file.
 
@@ -203,14 +206,73 @@ taskwrapper() {
     [ $? == 1 ] && break
 
     if [ "${JOBUTILS_MONITORCPU}" ]; then
-      # get some CPU usage statistics per process --> actual usage can be calculated thereafter
-      for p in $(childprocs ${PID}); do
-        total=`awk 'BEGIN{s=0}/cpu /{for (i=1;i<=NF;i++) s+=$i;} END {print s}' /proc/stat`
-        utime=`awk '//{print $14}' /proc/${p}/stat 2> /dev/null`
-        stime=`awk '//{print $15}' /proc/${p}/stat 2> /dev/null`
-        name=`awk '//{print $2}' /proc/${p}/stat 2> /dev/null`
-        echo "${cpucounter} ${p} ${total} ${utime} ${stime} ${name}" >> ${logfile}_cpuusage
+      # NOTE: The following section is quite compute intensive and currently not optimized
+      # A careful evaluation of awk vs bc or other tools might be needed -- or a move to a more
+      # system oriented language/tool
+
+      for p in $limitPIDs; do
+        # echo "waiting for cpulimiter ${p}"
+        wait ${p}
+        # echo "done wait"
       done
+
+      # get some CPU usage statistics per process --> actual usage can be calculated thereafter
+      total=`awk 'BEGIN{s=0}/cpu /{for (i=1;i<=NF;i++) s+=$i;} END {print s}' /proc/stat`
+      previous_total=${current_total}
+      current_total=${total}
+      # quickly fetch the data
+      childpids=$(childprocs ${PID})
+
+      for p in $childpids; do
+        while read -r name utime stime; do
+          echo "${cpucounter} ${p} ${total} ${utime} ${stime} ${name}" >> ${logfile}_cpuusage
+          previous[$p]=${current[$p]}
+          current[$p]=${utime}
+          name[$p]=${name}
+        done <<<$(awk '//{print $2" "$14" "$15}' /proc/${p}/stat 2>/dev/null)
+      done
+      # do some calculations based on the data
+      totalCPU=0
+      line=""
+      for p in $childpids; do
+        C=${current[$p]}
+        P=${previous[$p]}
+        CT=${total}
+        PT=${previous_total}
+        # echo "${p} : current ${C} previous ${P} ${CT} ${PT}"
+        thisCPU[$p]=$(awk -v "c=${C}" -v "p=${P}" -v "ct=${CT}" -v "pt=${PT}" '//{} END { print 100.*56*(c-p)/(ct-pt);}' < /dev/null)
+        line="${line} $p:${thisCPU[$p]}"
+        totalCPU=$(awk -v "t=${totalCPU}" -v "this=${thisCPU[$p]}" '//{} END { print (t + this); }' < /dev/null)
+        # echo "CPU last time window ${p} : ${thisCPU[$p]}"
+      done
+      # extrapolated unlimited CPU
+      totalCPU_unlimited=$(awk -v "t=${totalCPU}" -v "f=${reduction_factor}}" 'BEGIN { print (t/f); }')
+
+      echo "${line}"
+      echo "${cpucounter} totalCPU = ${totalCPU} -- without limitation ${totalCPU_unlimited}"
+      # We can check if the total load is above a resource limit
+      # And take corrective actions if we extend by 10%
+      limitPIDs="" 
+      if (( $(echo "${totalCPU_unlimited} > 1.1*${JOBUTILS_LIMITLOAD}" | bc -l) )); then
+        # we reduce each pid proportionally for the time until the next check and record the reduction factor in place
+        oldreduction=${reduction_factor}
+        reduction_factor=$(awk -v limit="${JOBUTILS_LIMITLOAD}" -v cur="${totalCPU_unlimited}" 'BEGIN{ print limit/cur;}')
+        echo "APPLYING REDUCTION = ${reduction_factor}"
+
+        for p in $childpids; do
+          cpulim=$(awk -v a="${thisCPU[${p}]}" -v newr="${reduction_factor}" -v oldr="${oldreduction}" 'BEGIN { r=(a/oldr)*newr; print r; if(r > 0.05) {exit 0;} exit 1; }')
+          if [ $? = "0" ]; then
+            # we only apply to jobs above a certain threashold
+            echo "Setting CPU lim for job ${p} / ${name[$p]} to ${cpulim}";
+            timeout ${JOBUTILS_WRAPPER_SLEEP} ./cpulimit -l ${cpulim} -p ${p} > /dev/null 2> /dev/null & disown
+            proc=$!
+            limitPIDs="${limitPIDs} ${proc}"
+          fi
+        done
+      else
+        echo "RESETING REDUCTION = 1" #-> wrong; we still need to remember old_value
+        reduction_factor=1.
+      fi
       let cpucounter=cpucounter+1
     fi
 
