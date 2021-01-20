@@ -21,7 +21,7 @@ using namespace o2;
 using namespace o2::framework;
 using namespace o2::framework::expressions;
 
-struct TPCSpectraTaskSplit {
+struct TPCSpectraTaskTiny {
   static constexpr int Np = 9;
   static constexpr const char* pT[Np] = {"e", "#mu", "#pi", "K", "p", "d", "t", "^{3}He", "#alpha"};
   static constexpr std::string_view hp[Np] = {"p/El", "p/Mu", "p/Pi", "p/Ka", "p/Pr", "p/De", "p/Tr", "p/He", "p/Al"};
@@ -55,9 +55,9 @@ struct TPCSpectraTaskSplit {
   Filter collisionFilter = nabs(aod::collision::posZ) < cfgCutVertex;
   Filter trackFilter = (nabs(aod::track::eta) < cfgCutEta) && (aod::track::isGlobalTrack == (uint8_t) true);
   using TrackCandidates = soa::Filtered<soa::Join<aod::Tracks, aod::TracksExtra,
-                                                  aod::pidRespTPCEl, aod::pidRespTPCMu, aod::pidRespTPCPi,
-                                                  aod::pidRespTPCKa, aod::pidRespTPCPr, aod::pidRespTPCDe,
-                                                  aod::pidRespTPCTr, aod::pidRespTPCHe, aod::pidRespTPCAl,
+                                                  aod::pidRespTPCTEl, aod::pidRespTPCTMu, aod::pidRespTPCTPi,
+                                                  aod::pidRespTPCTKa, aod::pidRespTPCTPr, aod::pidRespTPCTDe,
+                                                  aod::pidRespTPCTTr, aod::pidRespTPCTHe, aod::pidRespTPCTAl,
                                                   aod::TrackSelection>>;
 
   void process(TrackCandidates::iterator const& track)
@@ -77,8 +77,8 @@ struct TPCSpectraTaskSplit {
   }
 };
 
-WorkflowSpec defineDataProcessing(ConfigContext const& cfgc)
+WorkflowSpec defineDataProcessing(ConfigContext const&)
 {
-  WorkflowSpec workflow{adaptAnalysisTask<TPCSpectraTaskSplit>("tpcspectra-split-task")};
+  WorkflowSpec workflow{adaptAnalysisTask<TPCSpectraTaskTiny>("tpcspectra-tiny-task")};
   return workflow;
 }

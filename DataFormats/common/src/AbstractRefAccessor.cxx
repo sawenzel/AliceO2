@@ -8,14 +8,8 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-/// @file  VtxTrackIndex.h
-/// \brief Extention of GlobalTrackID by flags relevant for verter-track association
+/// \file AbstractRefAccessor.h
+/// \brief Accessor for objects of the same base class located in different containers
 /// \author ruben.shahoyan@cern.ch
 
-#include "ReconstructionDataFormats/VtxTrackIndex.h"
-#include "Framework/Logger.h"
-#include <fmt/printf.h>
-#include <iostream>
-#include <bitset>
-
-using namespace o2::dataformats;
+#include "CommonDataFormat/AbstractRefAccessor.h"

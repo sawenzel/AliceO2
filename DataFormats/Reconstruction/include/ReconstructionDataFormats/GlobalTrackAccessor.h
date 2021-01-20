@@ -8,14 +8,23 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-/// @file  VtxTrackIndex.h
-/// \brief Extention of GlobalTrackID by flags relevant for verter-track association
+/// @file  GlobalTrackAccessor.h
+/// \brief Accessor for TrackParCov derived objects from multiple containers
 /// \author ruben.shahoyan@cern.ch
 
-#include "ReconstructionDataFormats/VtxTrackIndex.h"
-#include "Framework/Logger.h"
-#include <fmt/printf.h>
-#include <iostream>
-#include <bitset>
+#ifndef O2_GLOBAL_TRACK_ACCESSOR
+#define O2_GLOBAL_TRACK_ACCESSOR
 
-using namespace o2::dataformats;
+#include "ReconstructionDataFormats/Track.h"
+#include "ReconstructionDataFormats/GlobalTrackID.h"
+#include "CommonDataFormat/AbstractRefAccessor.h"
+
+namespace o2
+{
+namespace dataformats
+{
+using GlobalTrackAccessor = AbstractRefAccessor<o2::track::TrackParCov, GlobalTrackID::NSources>;
+}
+} // namespace o2
+
+#endif
