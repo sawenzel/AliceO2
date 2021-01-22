@@ -4,7 +4,7 @@
 ulimit -n 4096 && ulimit -l unlimited && ulimit -m unlimited && ulimit -l unlimited
 if [ $? != 0 ]; then
   echo Error setting ulimits
-  exit 1
+#  exit 1
 fi
 
 if [ -z "$NTIMEFRAMES" ];   then export NTIMEFRAMES=1; fi              # Number of time frames to process

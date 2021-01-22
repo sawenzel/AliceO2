@@ -30,6 +30,7 @@ ENABLE_GPU_TEST=${ENABLE_GPU_TEST:-0} # Run the full system test also on the GPU
 NTIMEFRAMES=${NTIMEFRAMES:-1} # Number of time frames to process
 TFDELAY=${TFDELAY:-100} # Delay in seconds between publishing time frames
 NOMCLABELS="--disable-mc"
+SIMENGINE=${SIMENGINE:-TGeant3}
 
 # allow skipping
 JOBUTILS_SKIPDONE=ON
@@ -39,7 +40,7 @@ JOBUTILS_MONITORMEM=ON
 
 # prepare some metrics file for the monitoring system
 METRICFILE=metrics.dat
-CONFIG="full_system_test_N${NEvents}"
+CONFIG="full_system_test_N${NEvents}_${SIMENGINE}"
 HOST=`hostname`
 
 # include header information such as tested alidist tag and O2 tag
@@ -50,11 +51,11 @@ echo "versions,${TAG} alidist=\"${ALIDISTCOMMIT}\",O2=\"${O2COMMIT}\" " > ${METR
 ulimit -n 4096 # Make sure we can open sufficiently many files
 mkdir -p qed
 cd qed
-taskwrapper qedsim.log o2-sim -j $NJOBS -n$NEventsQED -m PIPE ITS MFT FT0 FV0 -g extgen --configKeyValues '"GeneratorExternal.fileName=$O2_ROOT/share/Generators/external/QEDLoader.C;QEDGenParam.yMin=-5;QEDGenParam.yMax=6;QEDGenParam.ptMin=0.001;QEDGenParam.ptMax=1.;Diamond.width[2]=6."'
+taskwrapper qedsim.log o2-sim -j $NJOBS -e ${SIMENGINE} -n$NEventsQED -m PIPE ITS MFT FT0 FV0 -g extgen --configKeyValues '"GeneratorExternal.fileName=$O2_ROOT/share/Generators/external/QEDLoader.C;QEDGenParam.yMin=-5;QEDGenParam.yMax=6;QEDGenParam.ptMin=0.001;QEDGenParam.ptMax=1.;Diamond.width[2]=6."' ${SIMSEED:+--seed ${SIMSEED}}
 cd ..
 
 GLOBALDPLOPT="-b" #  --monitoring-backend no-op:// is currently removed due to https://alice.its.cern.ch/jira/browse/O2-1887
-taskwrapper sim.log o2-sim -n $NEvents --skipModules ZDC --configKeyValues "Diamond.width[2]=6." -g pythia8hi -j $NJOBS
+taskwrapper sim.log o2-sim -e ${SIMENGINE} -n $NEvents --skipModules ZDC --configKeyValues "Diamond.width[2]=6." -g pythia8hi -j $NJOBS ${SIMSEED:+--seed ${SIMSEED}}
 taskwrapper digi.log o2-sim-digitizer-workflow -n $NEvents --simPrefixQED qed/o2sim --qed-x-section-ratio 3735  ${NOMCLABELS} --firstOrbit 0 --firstBC 0 --skipDet TRD --tpc-lanes $((NJOBS < 36 ? NJOBS : 36)) --shm-segment-size $SHMSIZE ${GLOBALDPLOPT}
 taskwrapper digiTRD.log o2-sim-digitizer-workflow -n $NEvents --simPrefixQED qed/o2sim --qed-x-section-ratio 3735  ${NOMCLABELS} --firstOrbit 0 --firstBC 0 --onlyDet TRD --shm-segment-size $SHMSIZE ${GLOBALDPLOPT} --incontext collisioncontext.root --configKeyValues "TRDSimParams.digithreads=${NJOBS}"
 mkdir -p raw
@@ -66,7 +67,7 @@ taskwrapper tofraw.log o2-tof-reco-workflow ${GLOBALDPLOPT} --tof-raw-file-for l
 taskwrapper midraw.log o2-mid-digits-to-raw-workflow ${GLOBALDPLOPT} --mid-raw-outdir raw/MID --mid-raw-perlink  --configKeyValues '"HBFUtils.nHBFPerTF=128;HBFUtils.orbitFirst=0"'
 taskwrapper emcraw.log o2-emcal-rawcreator --file-for link --configKeyValues '"HBFUtils.nHBFPerTF=128;HBFUtils.orbitFirst=0"' -o raw/EMC
 taskwrapper phsraw.log o2-phos-digi2raw  --file-for link --configKeyValues '"HBFUtils.nHBFPerTF=128;HBFUtils.orbitFirst=0"' -o raw/PHS
-taskwrapper cpvraw.log o2-cpv-digi2raw  --file-for link --configKeyValues '"HBFUtils.nHBFPerTF=128;HBFUtils.orbitFirst=0"' -o raw/CPV
+# taskwrapper cpvraw.log o2-cpv-digi2raw  --file-for link --configKeyValues '"HBFUtils.nHBFPerTF=128;HBFUtils.orbitFirst=0"' -o raw/CPV
 cat raw/*/*.cfg > rawAll.cfg
 
 # We run the workflow in both CPU-only and With-GPU mode
@@ -95,9 +96,9 @@ for STAGE in $STAGES; do
     export CTFINPUT=1
     export SAVECTF=0
   else
-    export CREATECTFDICT=1
+    export CREATECTFDICT=0
     export GPUTYPE=CPU
-    export SYNCMODE=0
+    export SYNCMODE=1
     export HOSTMEMSIZE=$TPCTRACKERSCRATCHMEMORY
     export CTFINPUT=0
     export SAVECTF=1
