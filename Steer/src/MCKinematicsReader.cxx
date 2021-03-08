@@ -84,7 +84,6 @@ void MCKinematicsReader::releaseTracksForSourceAndEvent(int source, int eventID)
   }
 }
 
-
 void MCKinematicsReader::loadHeadersForSource(int source) const
 {
   auto chain = mInputChains[source];

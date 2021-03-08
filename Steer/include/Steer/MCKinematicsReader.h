@@ -121,7 +121,7 @@ class MCKinematicsReader
   std::vector<TChain*> mInputChains;
 
   // a vector of tracks foreach source and each collision
-  mutable std::vector<std::vector<std::vector<o2::MCTrack> *>> mTracks;                                      // the in-memory track container
+  mutable std::vector<std::vector<std::vector<o2::MCTrack>*>> mTracks;                                       // the in-memory track container
   mutable std::vector<std::vector<o2::dataformats::MCEventHeader>> mHeaders;                                 // the in-memory header container
   mutable std::vector<std::vector<o2::dataformats::MCTruthContainer<o2::TrackReference>>> mIndexedTrackRefs; // the in-memory track ref container
 
@@ -138,7 +138,7 @@ inline MCTrack const* MCKinematicsReader::getTrack(o2::MCCompLabel const& label)
 
 inline MCTrack const* MCKinematicsReader::getTrack(int source, int event, int track) const
 {
-  return &getTracks(source,event)[track];
+  return &getTracks(source, event)[track];
 }
 
 inline MCTrack const* MCKinematicsReader::getTrack(int event, int track) const
