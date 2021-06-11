@@ -35,30 +35,29 @@ namespace bpo = boost::program_options;
 std::vector<int> gChildProcesses; // global vector of child pids
 int gMasterProcess = -1;
 int gDriverProcess = -1;
+#include <atomic>
 
-void sigaction_handler(int signal, siginfo_t* signal_info, void*)
+void sigaction_handler(int sgn, siginfo_t* signal_info, void*)
 {
   auto pid = getpid();
-  LOG(INFO) << pid << " caught signal " << signal << " from source " << signal_info->si_pid;
+  LOG(INFO) << pid << " caught signal " << sgn << " from source " << signal_info->si_pid;
+  static std::atomic<int> busy = 0;
+  if (busy) {
+    // signal handler in progress; put new signal back into queue
+    raise(sgn);
+  }
+  busy = 1;
   auto groupid = getpgrp();
   if (pid == gMasterProcess) {
-    killpg(pid, signal); // master kills whole process group
+    killpg(pid, sgn); // master kills whole process group
   } else {
     if (signal_info->si_pid != gDriverProcess) {
       // forward to master if coming internally
-      kill(groupid, signal);
+      kill(groupid, sgn);
     }
   }
-  if (signal_info->si_pid == gDriverProcess) {
-    _exit(0); // external requests are not treated as error
-  }
-  if (signal == SIGTERM) {
-    // normal termination is not error
-    _exit(0);
-  }
-  // we treat internal signal interruption as an error
-  // because only ordinary termination is good in the context of the distributed system
-  _exit(128 + signal);
+  signal(sgn, SIG_DFL);
+  raise(sgn);
 }
 
 void addCustomOptions(bpo::options_description& options)

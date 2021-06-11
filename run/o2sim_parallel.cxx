@@ -166,17 +166,34 @@ std::string getInternalControlAddress()
 }
 
 // signal handler for graceful exit
-void sighandler(int signal)
+void sighandler(int sig)
 {
-  if (signal == SIGINT || signal == SIGTERM) {
+  // the normal termination cases (to be completed)
+  if (sig == SIGINT || sig == SIGTERM || sig == SIGQUIT) {
     LOG(INFO) << "o2-sim driver: Signal caught ... clean up and exit";
     // forward signal to all children
     for (auto& pid : gChildProcesses) {
-      killpg(pid, signal);
+      killpg(pid, sig);
     }
     cleanup();
-    exit(0);
+
+    // we check if the children are actually gone
+    // and enforce after a while (max 10s)
+    int sleepcount = 0;
+    for (auto& pid : gChildProcesses) {
+      while (sleepcount < 10 && kill(pid, 0) == 0) {
+        sleep(1);
+        LOG(INFO) << "Process " << pid << " still alive ... waiting ";
+        sleepcount++;
+      }
+    }
+    for (auto& pid : gChildProcesses) {
+      killpg(pid, SIGKILL);
+    }
+    signal(sig, SIG_DFL);
+    raise(sig);
   }
+  // abnormal termination ?
 }
 
 bool isBusy()
@@ -318,6 +335,7 @@ int main(int argc, char* argv[])
 
   signal(SIGINT, sighandler);
   signal(SIGTERM, sighandler);
+  signal(SIGQUIT, sighandler);
   // we enable the forked version of the code by default
   setenv("ALICE_SIMFORKINTERNAL", "ON", 1);
 
@@ -517,7 +535,7 @@ int main(int argc, char* argv[])
     setenv("ALICE_O2SIMMERGERTODRIVER_PIPE", std::to_string(pipe_mergerdriver_fd[1]).c_str(), 1);
     const std::string name("o2-sim-hit-merger-runner");
     const std::string path = installpath + "/" + name;
-    execl(path.c_str(), name.c_str(), "--control", "static", "--catch-signals", "0", "--id", "hitmerger", "--mq-config", localconfig.c_str(),
+    execl(path.c_str(), name.c_str(), "--control", "static", "--catch-signals", "1", "--id", "hitmerger", "--mq-config", localconfig.c_str(),
           (char*)nullptr);
     return 0;
   } else {
@@ -557,18 +575,20 @@ int main(int argc, char* argv[])
   bool errored = false;
   while ((cpid = wait(&status)) != mergerpid) {
     if (WEXITSTATUS(status) || WIFSIGNALED(status)) {
-      LOG(INFO) << "Process " << cpid << " EXITED WITH CODE " << WEXITSTATUS(status) << " SIGNALED "
-                << WIFSIGNALED(status) << " SIGNAL " << WTERMSIG(status);
+      if (!errored) {
+        LOG(INFO) << "Process " << cpid << " EXITED WITH CODE " << WEXITSTATUS(status) << " SIGNALED "
+                  << WIFSIGNALED(status) << " SIGNAL " << WTERMSIG(status);
 
-      // we bring down all processes if one of them had problems or got a termination signal
-      // if (WTERMSIG(status) == SIGABRT || WTERMSIG(status) == SIGSEGV || WTERMSIG(status) == SIGBUS || WTERMSIG(status) == SIGTERM) {
-      LOG(INFO) << "Problem detected (or child received termination signal) ... shutting down whole system ";
-      for (auto p : gChildProcesses) {
-        LOG(INFO) << "TERMINATING " << p;
-        killpg(p, SIGTERM); // <--- makes sure to shutdown "unknown" child pids via the group property
+        // we bring down all processes if one of them had problems or got a termination signal
+        // if (WTERMSIG(status) == SIGABRT || WTERMSIG(status) == SIGSEGV || WTERMSIG(status) == SIGBUS || WTERMSIG(status) == SIGTERM) {
+        LOG(INFO) << "Problem detected (or child received termination signal) ... shutting down whole system ";
+        for (auto p : gChildProcesses) {
+          LOG(INFO) << "TERMINATING " << p;
+          killpg(p, SIGTERM); // <--- makes sure to shutdown "unknown" child pids via the group property
+        }
+        LOG(ERROR) << "SHUTTING DOWN DUE TO SIGNALED EXIT IN COMPONENT " << cpid;
+        errored = true;
       }
-      LOG(ERROR) << "SHUTTING DOWN DUE TO SIGNALED EXIT IN COMPONENT " << cpid;
-      errored = true;
     }
   }
   // This marks the actual end of the computation (since results are available)
