@@ -33,6 +33,7 @@ struct SubEventInfo {
   int32_t npersistenttracks = -1; // the number of persistent tracks for this SubEvent (might be set to cache it)
   int32_t nprimarytracks = -1;    // the number of primary tracks for this SubEvent
   // might add more fields (such as which process treated this chunk etc)
+  uint32_t startindex = 0; // where particles for this subevent are to be found (in PrimaryChunk)
 
   o2::dataformats::MCEventHeader mMCEventHeader; // associated FairMC header for vertex information
 
@@ -47,7 +48,7 @@ inline bool operator<(SubEventInfo const& a, SubEventInfo const& b)
 // Encapsulating primaries/tracks as well as the event info
 // to be processed by the simulation processors.
 struct PrimaryChunk {
-  SubEventInfo mSubEventInfo;
+  std::vector<SubEventInfo> mSubEventInfo;
   std::vector<TParticle> mParticles; // the particles for this chunk
   ClassDefNV(PrimaryChunk, 1);
 };

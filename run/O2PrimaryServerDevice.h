@@ -439,6 +439,8 @@ class O2PrimaryServerDevice final : public FairMQDevice
     // LOG(DEBUG) << "GOT A REQUEST WITH SIZE " << request->GetSize();
     // std::string requeststring(static_cast<char*>(request->GetData()), request->GetSize());
     // LOG(INFO) << "NORMAL REQUEST STRING " << requeststring;
+    o2::data::PrimaryChunk m;
+
     bool workavailable = true;
     if (mEventCounter >= mMaxEvents && mNeedNewEvent) {
       workavailable = false;
@@ -447,86 +449,104 @@ class O2PrimaryServerDevice final : public FairMQDevice
       // send a zero answer
       workavailable = false;
     }
+    LOG(INFO) << "Received request for work " << mEventCounter << " " << mMaxEvents << " " << mNeedNewEvent << " available " << workavailable;
 
     PrimaryChunkAnswer header{mState, workavailable};
     FairMQParts reply;
     std::unique_ptr<FairMQMessage> headermsg(channel.NewSimpleMessage(header));
     reply.AddPart(std::move(headermsg));
 
-    LOG(INFO) << "Received request for work " << mEventCounter << " " << mMaxEvents << " " << mNeedNewEvent << " available " << workavailable;
-    if (mNeedNewEvent) {
-      // we need a newly generated event now
-      if (mGeneratorThread.joinable()) {
-        try {
-          mGeneratorThread.join();
-        } catch (std::exception const& e) {
-          LOG(WARN) << "Exception during thread join ..ignoring";
+    int remainingspace = mChunkGranularity; // keeps track of remaining space in particle chunk
+
+    while (workavailable) { // here workavailabe reads "can further fill" this event chunk
+      if (mNeedNewEvent) {
+        // we need a newly generated event now
+        if (mGeneratorThread.joinable()) {
+          try {
+            mGeneratorThread.join();
+          } catch (std::exception const& e) {
+            LOG(WARN) << "Exception during thread join ..ignoring";
+          }
+        }
+        mNeedNewEvent = false;
+        mPartCounter = 0;
+        mEventCounter++;
+      }
+
+      auto& prims = mStack->getPrimaries();
+      auto numberofparts = (int)std::ceil(prims.size() / (1. * mChunkGranularity));
+      // number of parts should be at least 1 (even if empty)
+      numberofparts = std::max(1, numberofparts);
+      if (! (numberofparts == 1 && prims.size() < remainingspace)) {
+        // the event normally fits within one chunk
+        // in this case, we'd like to avoid splitting
+        workavailable = false;
+        continue;
+      } else {
+        remainingspace -= prims.size();
+      }
+
+      LOG(INFO) << "Have " << prims.size() << " " << numberofparts;
+
+      o2::data::SubEventInfo i;
+      i.eventID = workavailable ? mEventCounter : -1;
+      i.maxEvents = mMaxEvents;
+      i.part = mPartCounter + 1;
+      i.nparts = numberofparts;
+      i.seed = mEventCounter + mInitialSeed;
+      i.index = m.mParticles.size();
+      i.mMCEventHeader = mEventHeader;
+      i.startindex = m.mParticles.size();
+
+      m.mSubEventInfo.push_back(i);
+
+      if (workavailable) {
+        int endindex = prims.size() - mPartCounter * mChunkGranularity;
+        int startindex = prims.size() - (mPartCounter + 1) * mChunkGranularity;
+        LOG(INFO) << "indices " << startindex << " " << endindex;
+
+        if (startindex < 0) {
+          startindex = 0;
+        }
+        if (endindex < 0) {
+          endindex = 0;
+        }
+
+        for (int index = startindex; index < endindex; ++index) {
+          m.mParticles.emplace_back(prims[index]);
+        }
+
+        LOG(INFO) << "Appending " << m.mParticles.size() << " particles";
+        LOG(INFO) << "treating ev " << mEventCounter << " part " << i.part << " out of " << i.nparts << " in subevent " << m.mSubEventInfo.size();
+
+        // feedback to driver if new event started
+        if (mPipeToDriver != -1 && i.part == 1 && workavailable) {
+          if (write(mPipeToDriver, &mEventCounter, sizeof(mEventCounter))) {
+          }
+        }
+
+        mPartCounter++;
+        if (mPartCounter == numberofparts) {
+          mNeedNewEvent = true;
+          // start generation of a new event
+          mGeneratorThread = std::thread(&O2PrimaryServerDevice::generateEvent, this);
+        }
+
+        if (mEventCounter >= mMaxEvents) {
+          workavailable = false;
         }
       }
-      mNeedNewEvent = false;
-      mPartCounter = 0;
-      mEventCounter++;
+
     }
 
-    auto& prims = mStack->getPrimaries();
-    auto numberofparts = (int)std::ceil(prims.size() / (1. * mChunkGranularity));
-    // number of parts should be at least 1 (even if empty)
-    numberofparts = std::max(1, numberofparts);
+    TMessage* tmsg = new TMessage(kMESS_OBJECT);
+    tmsg->WriteObjectAny((void*)&m, TClass::GetClass("o2::data::PrimaryChunk"));
 
-    LOG(INFO) << "Have " << prims.size() << " " << numberofparts;
+    auto free_tmessage = [](void* data, void* hint) { delete static_cast<TMessage*>(hint); };
 
-    o2::data::PrimaryChunk m;
-    o2::data::SubEventInfo i;
-    i.eventID = workavailable ? mEventCounter : -1;
-    i.maxEvents = mMaxEvents;
-    i.part = mPartCounter + 1;
-    i.nparts = numberofparts;
-    i.seed = mEventCounter + mInitialSeed;
-    i.index = m.mParticles.size();
-    i.mMCEventHeader = mEventHeader;
-    m.mSubEventInfo = i;
+    std::unique_ptr<FairMQMessage> message(channel.NewMessage(tmsg->Buffer(), tmsg->BufferSize(), free_tmessage, tmsg));
 
-    if (workavailable) {
-      int endindex = prims.size() - mPartCounter * mChunkGranularity;
-      int startindex = prims.size() - (mPartCounter + 1) * mChunkGranularity;
-      LOG(INFO) << "indices " << startindex << " " << endindex;
-
-      if (startindex < 0) {
-        startindex = 0;
-      }
-      if (endindex < 0) {
-        endindex = 0;
-      }
-
-      for (int index = startindex; index < endindex; ++index) {
-        m.mParticles.emplace_back(prims[index]);
-      }
-
-      LOG(INFO) << "Sending " << m.mParticles.size() << " particles";
-      LOG(INFO) << "treating ev " << mEventCounter << " part " << i.part << " out of " << i.nparts;
-
-      // feedback to driver if new event started
-      if (mPipeToDriver != -1 && i.part == 1 && workavailable) {
-        if (write(mPipeToDriver, &mEventCounter, sizeof(mEventCounter))) {
-        }
-      }
-
-      mPartCounter++;
-      if (mPartCounter == numberofparts) {
-        mNeedNewEvent = true;
-        // start generation of a new event
-        mGeneratorThread = std::thread(&O2PrimaryServerDevice::generateEvent, this);
-      }
-
-      TMessage* tmsg = new TMessage(kMESS_OBJECT);
-      tmsg->WriteObjectAny((void*)&m, TClass::GetClass("o2::data::PrimaryChunk"));
-
-      auto free_tmessage = [](void* data, void* hint) { delete static_cast<TMessage*>(hint); };
-
-      std::unique_ptr<FairMQMessage> message(channel.NewMessage(tmsg->Buffer(), tmsg->BufferSize(), free_tmessage, tmsg));
-
-      reply.AddPart(std::move(message));
-    }
+    reply.AddPart(std::move(message));
 
     // send answer
     TStopwatch timer;
