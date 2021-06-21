@@ -679,7 +679,7 @@ void* CcdbApi::retrieveFromTFile(std::type_info const& tinfo, std::string const&
     bool use_sema = false;
     boost::interprocess::named_semaphore* sem = nullptr;
     std::hash<std::string> hasher;
-    const auto semhashedstring = "aliceccdb" + std::to_string(hasher(std::string(cachedir) + path)).substr(0,16);
+    const auto semhashedstring = "aliceccdb" + std::to_string(hasher(std::string(cachedir) + path)).substr(0, 16);
     try {
       sem = new boost::interprocess::named_semaphore(boost::interprocess::open_or_create_t{}, semhashedstring.c_str(), 1);
     } catch (std::exception e) {
