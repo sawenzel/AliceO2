@@ -22,6 +22,7 @@
 #define GPUCA_ALGORITHM_STD
 #endif
 
+
 // ----------------------------- SORTING -----------------------------
 
 namespace GPUCA_NAMESPACE
