@@ -10,7 +10,7 @@
 
 /// \file GPUCommonAlgorithm.h
 /// \author David Rohr
-
+#pragma once
 #ifndef GPUCOMMONALGORITHM_H
 #define GPUCOMMONALGORITHM_H
 
