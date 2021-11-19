@@ -336,7 +336,7 @@ void AODProducerWorkflowDPL::fillTrackTablesPerCollision(int collisionID,
             extraInfoHolder.trdPattern = getTRDPattern(trdOrig);
           }
 
-	  // set bit encoding for PVContributor property as part of the flag field
+          // set bit encoding for PVContributor property as part of the flag field
           if (trackIndex.isPVContributor()) {
             extraInfoHolder.flags |= o2::aod::track::PVContributor;
           }
