@@ -783,7 +783,7 @@ void AODProducerWorkflowDPL::fillMCTrackLabelsTable(const MCTrackLabelCursorType
               labelHolder.labelID = labelHolder.labelTPC;
             }
             if (labelHolder.labelITS != labelHolder.labelTPC) {
-              LOG(DEBUG) << "ITS-TPC MCTruth: labelIDs do not match at " << trackIndex.getIndex() << ", src = " << src;
+              LOG(debug) << "ITS-TPC MCTruth: labelIDs do not match at " << trackIndex.getIndex() << ", src = " << src;
               labelHolder.labelMask |= (0x1 << 13);
             }
           }
@@ -933,10 +933,10 @@ void AODProducerWorkflowDPL::init(InitContext& ic)
   mRunNumber = ic.options().get<int>("run-number");
 
   if (mTFNumber == -1L) {
-    LOG(INFO) << "TFNumber will be obtained from CCDB";
+    LOG(info) << "TFNumber will be obtained from CCDB";
   }
   if (mRunNumber == -1L) {
-    LOG(INFO) << "The Run number will be obtained from DPL headers";
+    LOG(info) << "The Run number will be obtained from DPL headers";
   }
 
   // create EventHandler used for calo cells
@@ -944,7 +944,7 @@ void AODProducerWorkflowDPL::init(InitContext& ic)
 
   // set no truncation if selected by user
   if (mTruncate != 1) {
-    LOG(INFO) << "Truncation is not used!";
+    LOG(info) << "Truncation is not used!";
     mCollisionPosition = 0xFFFFFFFF;
     mCollisionPositionCov = 0xFFFFFFFF;
     mTrackX = 0xFFFFFFFF;
@@ -1040,12 +1040,12 @@ void AODProducerWorkflowDPL::run(ProcessingContext& pc)
   auto caloEMCCells = recoData.getEMCALCells();
   auto caloEMCCellsTRGR = recoData.getEMCALTriggers();
 
-  LOG(DEBUG) << "FOUND " << primVertices.size() << " primary vertices";
-  LOG(DEBUG) << "FOUND " << ft0RecPoints.size() << " FT0 rec. points";
-  LOG(DEBUG) << "FOUND " << fv0RecPoints.size() << " FV0 rec. points";
-  LOG(DEBUG) << "FOUND " << fddRecPoints.size() << " FDD rec. points";
-  LOG(DEBUG) << "FOUND " << caloEMCCells.size() << " EMC cells";
-  LOG(DEBUG) << "FOUND " << caloEMCCellsTRGR.size() << " EMC Trigger Records";
+  LOG(debug) << "FOUND " << primVertices.size() << " primary vertices";
+  LOG(debug) << "FOUND " << ft0RecPoints.size() << " FT0 rec. points";
+  LOG(debug) << "FOUND " << fv0RecPoints.size() << " FV0 rec. points";
+  LOG(debug) << "FOUND " << fddRecPoints.size() << " FDD rec. points";
+  LOG(debug) << "FOUND " << caloEMCCells.size() << " EMC cells";
+  LOG(debug) << "FOUND " << caloEMCCellsTRGR.size() << " EMC Trigger Records";
 
   auto& bcBuilder = pc.outputs().make<TableBuilder>(Output{"AOD", "BC"});
   auto& cascadesBuilder = pc.outputs().make<TableBuilder>(Output{"AOD", "CASCADE"});
@@ -1098,7 +1098,7 @@ void AODProducerWorkflowDPL::run(ProcessingContext& pc)
   std::unique_ptr<o2::steer::MCKinematicsReader> mcReader;
   if (mUseMC) {
     mcReader = std::make_unique<o2::steer::MCKinematicsReader>("collisioncontext.root");
-    LOG(DEBUG) << "FOUND " << mcReader->getDigitizationContext()->getEventRecords().size()
+    LOG(debug) << "FOUND " << mcReader->getDigitizationContext()->getEventRecords().size()
                << " records" << mcReader->getDigitizationContext()->getEventParts().size() << " parts";
   }
 
@@ -1328,7 +1328,7 @@ void AODProducerWorkflowDPL::run(ProcessingContext& pc)
     const double interactionTime = timeStamp.getTimeStamp() * 1E3; // mus to ns
     uint64_t globalBC = relativeTime_to_GlobalBC(interactionTime);
     uint64_t localBC = relativeTime_to_LocalBC(interactionTime);
-    LOG(DEBUG) << "global BC " << globalBC << " local BC " << localBC << " relative interaction time " << interactionTime;
+    LOG(debug) << "global BC " << globalBC << " local BC " << localBC << " relative interaction time " << interactionTime;
     // collision timestamp in ns wrt the beginning of collision BC
     const float relInteractionTime = static_cast<float>(localBC * o2::constants::lhc::LHCBunchSpacingNS - interactionTime);
     auto item = bcsMap.find(globalBC);
@@ -1370,13 +1370,13 @@ void AODProducerWorkflowDPL::run(ProcessingContext& pc)
     if (item != mGIDToTableID.end()) {
       posTableIdx = item->second;
     } else {
-      LOG(WARN) << "Could not find a positive track index for prong ID " << trPosID;
+      LOG(warn) << "Could not find a positive track index for prong ID " << trPosID;
     }
     item = mGIDToTableID.find(trNegID);
     if (item != mGIDToTableID.end()) {
       negTableIdx = item->second;
     } else {
-      LOG(WARN) << "Could not find a negative track index for prong ID " << trNegID;
+      LOG(warn) << "Could not find a negative track index for prong ID " << trNegID;
     }
     if (posTableIdx != -1 and negTableIdx != -1) {
       v0sCursor(0, posTableIdx, negTableIdx);
@@ -1391,7 +1391,7 @@ void AODProducerWorkflowDPL::run(ProcessingContext& pc)
     if (item != mGIDToTableID.end()) {
       bachTableIdx = item->second;
     } else {
-      LOG(WARN) << "Could not find a bachelor track index";
+      LOG(warn) << "Could not find a bachelor track index";
     }
     cascadesCursor(0, cascade.getV0ID(), bachTableIdx);
   }
