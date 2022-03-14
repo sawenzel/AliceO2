@@ -14,6 +14,7 @@
 #include <map>
 #include "TFile.h"
 #include "TKey.h"
+#include "TBufferJSON.h"
 #include <iostream>
 
 // a simple tool to inspect/print metadata content of ROOT files containing CCDB entries
@@ -32,7 +33,14 @@ int main(int argc, char* argv[])
     for (int i = 0; i < keys->GetEntries(); ++i) {
       auto key = static_cast<TKey*>(keys->At(i));
       if (key) {
-        std::cout << key->GetName() << " of type " << key->GetClassName() << "\n";
+        auto keyname = key->GetName();
+        std::cout << keyname << " of type " << key->GetClassName() << "\n";
+        auto cl = TClass::GetClass(key->GetClassName());
+        if (cl and strcmp(keyname, "ccdb_object")==0) {
+          auto obj = file.GetObjectChecked(keyname,cl);
+          auto jsonStr = TBufferJSON::ConvertToJSON(obj, cl);
+	  std::cout << jsonStr << "\n";
+	}
       }
     }
   } else {
