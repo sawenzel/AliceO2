@@ -332,6 +332,25 @@ void Detector::flushSpatialResponse()
   }
 }
 
+// quick estimates the time of flight to reach this detector (located at z)
+// just based on primary particle properties
+// Meant for the neutron / proton detectors which sit a large z so that speed
+// is essentially the speed in z-direction.
+double estimateTimeOfFlight(TParticle const& part, double z /* needs to be in meters */)
+{
+  const auto m = part.GetMass();
+  constexpr auto SPEED_OF_LIGHT = 299792458.; // m/s
+  if (m == 0.) {
+    return z / SPEED_OF_LIGHT;
+  } else {
+    TLorentzVector lorentz; // could be made member var
+    part.Momentum(lorentz);
+    const auto gamma = lorentz.Gamma();
+    const auto speed = SPEED_OF_LIGHT * std::sqrt(1. - 1. / (gamma * gamma));
+    return z / speed; // could refine this
+  }
+}
+
 //_____________________________________________________________________________
 Bool_t Detector::ProcessHits(FairVolume* v)
 {
@@ -2492,6 +2511,9 @@ void Detector::BeginPrimary()
           mFastSimModel->setInput(modelInput);
           mFastSimModel->run();
           mFastSimResults.push_back(fastsim::processors::calculateChannels(mFastSimModel->getResult()[0], 1)[0]);
+
+          // produce hits from fast sim result
+          FastSimToHits(mFastSimModel->getResult()[0], mCurrentPrincipalParticle, 0 /* TODO: put correct ID */);
         }
       } else {
         mFastSimResults.push_back({0, 0, 0, 0, 0});
@@ -2538,7 +2560,7 @@ bool Detector::FastSimToHits(const Ort::Value& response, const TParticle& partic
   math_utils::Vector3D<float> xImp(0., 0., 0.); // good value
 
   // determines dimensions of the detector and binds it
-  auto [Nx, Ny] = determineDetectorGeometry(detector);
+  auto [Nx, Ny] = determineDetectorSize(detector);
   // if invalid detector was provided return false
   if (Nx == -1 || Ny == -1) {
     return false;
@@ -2576,6 +2598,22 @@ bool Detector::FastSimToHits(const Ort::Value& response, const TParticle& partic
     return ((x + y) % 2 == 0) ? mMediumPMCid : mMediumPMQid;
   };
 
+  auto z_position_of_detector = 0.;
+  if (detector == ZPA) {
+    o2::zdc::Geometry::ZPAPOSITION[3];
+  } else if (detector == ZPC) {
+    o2::zdc::Geometry::ZPCPOSITION[3];
+  } else if (detector == ZNA) {
+    o2::zdc::Geometry::ZNAPOSITION[3];
+  } else if (detector == ZNC) {
+    o2::zdc::Geometry::ZNCPOSITION[3];
+  } else {
+    // should not happen --> we don't have fastsim for other detectors
+    LOG(fatal) << "Unsupported detector in ZDC fast sim";
+  }
+
+  const float tof = estimateTimeOfFlight(particle, std::abs(z_position_of_detector));
+
   // loop over x = columns
   for (int x = 0; x < Nx; ++x) {
     // loop over y = rows
@@ -2586,7 +2624,7 @@ bool Detector::FastSimToHits(const Ort::Value& response, const TParticle& partic
       int currentMediumid = determineMediumID(detector, x, y);
       // LOG(info) << " x " << x << " y " << y << " sec " << sector << " medium " << currentMediumid;
       int nphe = pixels[Nx * x + y];
-      float tof = 0.;        // needs to be in nanoseconds ---> to be filled later on (should be meta-data of image or calculated otherwise)
+
       float trackenergy = 0; // energy of the primary (need to fill good value)
       createOrAddHit(detector,
                      sector,
