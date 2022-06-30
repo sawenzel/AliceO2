@@ -75,19 +75,21 @@ void print_globalHelp(int argc, char* argv[])
   std::cout << "Sub-command options can be seen with subcommand --help\n";
 }
 
-namespace {
-  template <typename T>
-  void printGRP(std::string const& filename, std::string const& objtype) {
-    std::cout << "\nPrinting " << objtype << " from file " << filename << "\n\n";
-    auto grp = T::loadFrom(filename);
-    if (grp) {
-      grp->print();
-      delete grp;
-    } else {
-      std::cerr << "Error loading " << objtype << " objects from file " << filename << "\n";
-    }
+namespace
+{
+template <typename T>
+void printGRP(std::string const& filename, std::string const& objtype)
+{
+  std::cout << "\nPrinting " << objtype << " from file " << filename << "\n\n";
+  auto grp = T::loadFrom(filename);
+  if (grp) {
+    grp->print();
+    delete grp;
+  } else {
+    std::cerr << "Error loading " << objtype << " objects from file " << filename << "\n";
   }
 }
+} // namespace
 
 void printGRPECS(std::string const& filename)
 {
@@ -182,26 +184,26 @@ bool publish(std::string const& filename, std::string const& path, std::string C
 }
 
 // download a set of basic GRP files based on run number/time
-bool anchor_GRPs(Options const& opts) 
+bool anchor_GRPs(Options const& opts)
 {
-   std::cout << "Fetching GRP from CCDB\n";
-   auto& ccdbmgr = o2::ccdb::BasicCCDBManager::instance();
-   auto soreor = ccdbmgr.getRunDuration(opts.run);
-   // fix the timestamp early
-   uint64_t runStart = soreor.first;
+  std::cout << "Fetching GRP from CCDB\n";
+  auto& ccdbmgr = o2::ccdb::BasicCCDBManager::instance();
+  auto soreor = ccdbmgr.getRunDuration(opts.run);
+  // fix the timestamp early
+  uint64_t runStart = soreor.first;
 
-   o2::ccdb::CcdbApi api;
-   api.init(opts.ccdbhost);
- 
-   const bool preserve_path = true;
-   const std::string filename("snapshot.root");
-   std::map<std::string, std::string> filter;
-   bool success = true;
-   for (auto& p : std::vector<std::string>{"GLO/Config/GRPECS", "GLO/Config/GRPMagField", "GLO/Config/GRPLHCIF"}) {
-     std::cout << "path " << p << "\n"; 
-     success &= api.retrieveBlob(p, opts.publishto, filter, runStart, preserve_path, filename);
-   }
-   return success;
+  o2::ccdb::CcdbApi api;
+  api.init(opts.ccdbhost);
+
+  const bool preserve_path = true;
+  const std::string filename("snapshot.root");
+  std::map<std::string, std::string> filter;
+  bool success = true;
+  for (auto& p : std::vector<std::string>{"GLO/Config/GRPECS", "GLO/Config/GRPMagField", "GLO/Config/GRPLHCIF"}) {
+    std::cout << "path " << p << "\n";
+    success &= api.retrieveBlob(p, opts.publishto, filter, runStart, preserve_path, filename);
+  }
+  return success;
 }
 
 // creates a set of basic GRP files (for simulation)
@@ -437,10 +439,8 @@ bool parseOptions(int argc, char* argv[], Options& optvalues)
     if (vm.count("print") > 0) {
       optvalues.print = true;
     }
-  }
-  else if (cmd == "createGRPs") {
+  } else if (cmd == "createGRPs") {
     optvalues.command = GRPCommand::kCREATE;
-
 
     // ls command has the following options:
     bpo::options_description desc("create options");
