@@ -95,6 +95,12 @@ class CTPRunScalers
   static constexpr uint32_t NCOUNTERS = 1070;
   static std::vector<std::string> scalerNames;
 
+  void printScalers() const; // some function to debugg stuff
+
+  // returns the pair of global (levelled) interaction rate, as well as interpolated
+  // rate in Hz at a certain orbit number within the run 
+  std::pair<double, double> getRate(uint32_t orbit, int classindex, int type) const;
+
  private:
   // map from class index to overflow
   // overflow counts how many time class scalerers overflowed
@@ -110,6 +116,8 @@ class CTPRunScalers
   int copyRawToO2ScalerRecord(const CTPScalerRecordRaw& rawrec, CTPScalerRecordO2& o2rec, overflows_t& classesoverflows);
   int updateOverflows(const CTPScalerRecordRaw& rec0, const CTPScalerRecordRaw& rec1, overflows_t& classesoverflows) const;
   int updateOverflows(const CTPScalerRaw& scal0, const CTPScalerRaw& scal1, std::array<uint32_t, 6>& overflow) const;
+
+
   ClassDefNV(CTPRunScalers, 2);
 };
 } // namespace ctp
