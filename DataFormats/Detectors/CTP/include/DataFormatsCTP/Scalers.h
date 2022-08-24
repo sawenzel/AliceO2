@@ -100,6 +100,11 @@ class CTPRunScalers
   // returns the pair of global (levelled) interaction rate, as well as interpolated
   // rate in Hz at a certain orbit number within the run 
   std::pair<double, double> getRate(uint32_t orbit, int classindex, int type) const;
+  std::pair<double, double> getRateGivenT(double timestamp, int classindex, int type) const;
+  std::pair<unsigned long, unsigned long> getTimeLimit() const 
+  { return std::make_pair((unsigned long)mScalerRecordO2[0].epochTime * 1000, (unsigned long) mScalerRecordO2[mScalerRecordO2.size()-1].epochTime * 1000); }
+  std::pair<unsigned long, unsigned long> getOrbitLimit() const
+  { return std::make_pair((unsigned long)mScalerRecordO2[0].intRecord.orbit, (unsigned long) mScalerRecordO2[mScalerRecordO2.size()-1].intRecord.orbit); }
 
  private:
   // map from class index to overflow

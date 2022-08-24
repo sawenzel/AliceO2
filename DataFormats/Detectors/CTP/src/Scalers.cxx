@@ -436,7 +436,8 @@ void CTPRunScalers::printScalers() const {
       double_t rMB = (s1->lmBefore - s0->lmBefore) / tt; // rate
       auto delta = curr->epochTime - prev->epochTime;
       double rMB2 = (s1->lmBefore - s0->lmBefore) / delta;
-      std::cout << "Class " << j << " " << prev->epochTime << " " << curr->epochTime << " DeltaTime " << delta << " tt " << tt << " interactions / s " << rMB << " in Hz " << rMB2 << "\n";
+      // std::cout << "Class " << j << " " << prev->intRecord.orbit << " " << curr->intRecord.orbit << " DeltaTime " << delta << " tt " << tt << " interactions / s " << rMB << " in Hz " << rMB2 << "\n";
+      std::cout << "Class " << j << " " << (unsigned long long)(prev->epochTime) << " " << (unsigned long long)(curr->epochTime) << " DeltaTime " << delta << " tt " << tt << " interactions / s " << rMB << " in Hz " << rMB2 << "\n";
     }
   }
 }
@@ -455,20 +456,57 @@ std::pair<double, double> CTPRunScalers::getRate(uint32_t orbit, int classindex,
   // then we can use binary search to find the right entries
   auto iter = std::lower_bound(mScalerRecordO2.begin(), mScalerRecordO2.end(), orbit, [&](CTPScalerRecordO2 const& a, uint32_t value){ return a.intRecord.orbit < value; });
   auto nextindex = iter - mScalerRecordO2.begin(); // this points to the first index that has orbit greater or equal to given orbit
-  if (nextindex == 0 || nextindex == mScalerRecordO2.size()) {
-    // orbit is out of bounds
-    LOG(error) << "orbit out of bounds";
-  }
-  else {
 
-    auto calcRate = [&](auto index1, auto index2) -> double {
-      auto next = &mScalerRecordO2[nextindex];
-      auto prev = &mScalerRecordO2[nextindex - 1];
+  auto calcRate = [&](auto index1, auto index2) -> double {
+      auto next = &mScalerRecordO2[index2];
+      auto prev = &mScalerRecordO2[index1];
       auto timedelta = (next->intRecord.orbit - prev->intRecord.orbit) * 88.e-6; // converts orbits into time
       auto s0 = &(prev->scalers[classindex]); // type CTPScalerO2*
       auto s1 = &(next->scalers[classindex]);
       return (s1->lmBefore - s0->lmBefore) / timedelta; // rate --> should be made better by selecting on type
-    };
+  };
+
+  if (nextindex == 0 || nextindex == mScalerRecordO2.size()) {
+    // orbit is out of bounds
+    LOG(info) << "query orbit " << orbit << " out of bounds; Just returning the global rate";
+    return std::make_pair(/*global mean rate*/ calcRate(0, mScalerRecordO2.size() - 1), /* current rate */ -1);
+  }
+  else {
+
+    return std::make_pair(/*global mean rate*/ calcRate(0, mScalerRecordO2.size() - 1), /* current rate */ calcRate(nextindex-1, nextindex));
+  }
+  return std::make_pair(-1.,-1.);  
+}
+// returns the pair of global (levelled) interaction rate, as well as instantaneous interpolated
+// rate in Hz at a certain orbit number within the run 
+std::pair<double, double> CTPRunScalers::getRateGivenT(double timestamp, int classindex, int type) const {
+  if (mScalerRecordO2.size() <= 1) {
+    LOG(error) << "not enough data";
+    return std::make_pair(-1.,-1.);
+  }
+
+  // assumption: mScalerRecordO2 is arranged in increasing
+  // orbit numbers
+
+  // then we can use binary search to find the right entries
+  auto iter = std::lower_bound(mScalerRecordO2.begin(), mScalerRecordO2.end(), timestamp, [&](CTPScalerRecordO2 const& a, uint32_t value){ return a.epochTime < value; });
+  auto nextindex = iter - mScalerRecordO2.begin(); // this points to the first index that has orbit greater or equal to given orbit
+
+  auto calcRate = [&](auto index1, auto index2) -> double {
+      auto next = &mScalerRecordO2[index2];
+      auto prev = &mScalerRecordO2[index1];
+      auto timedelta = (next->intRecord.orbit - prev->intRecord.orbit) * 88.e-6; // converts orbits into time
+      auto s0 = &(prev->scalers[classindex]); // type CTPScalerO2*
+      auto s1 = &(next->scalers[classindex]);
+      return (s1->lmBefore - s0->lmBefore) / timedelta; // rate --> should be made better by selecting on type
+  };
+
+  if (nextindex == 0 || nextindex == mScalerRecordO2.size()) {
+    // orbit is out of bounds
+    LOG(info) << "query timestamp " << timestamp << " out of bounds; Just returning the global rate";
+    return std::make_pair(/*global mean rate*/ calcRate(0, mScalerRecordO2.size() - 1), /* current rate */ -1);
+  }
+  else {
 
     return std::make_pair(/*global mean rate*/ calcRate(0, mScalerRecordO2.size() - 1), /* current rate */ calcRate(nextindex-1, nextindex));
   }
