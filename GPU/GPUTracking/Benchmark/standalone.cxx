@@ -89,7 +89,7 @@ std::vector<GPUChainTracking::InOutMemory> ioMemEvents;
 
 void SetCPUAndOSSettings()
 {
-#if not (defined(__ARM_NEON) or defined(__aarch64__)) // ARM doesn't have SSE
+#if not(defined(__ARM_NEON) or defined(__aarch64__)) // ARM doesn't have SSE
 #ifdef FE_DFL_DISABLE_SSE_DENORMS_ENV // Flush and load denormals to zero in any case
   fesetenv(FE_DFL_DISABLE_SSE_DENORMS_ENV);
 #else
