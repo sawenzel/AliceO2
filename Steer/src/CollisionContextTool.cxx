@@ -183,8 +183,8 @@ bool parseOptions(int argc, char* argv[], Options& optvalues)
     "orbitsPerTF", bpo::value<int>(&optvalues.orbitsPerTF)->default_value(256), "Orbits per timeframes")(
     "use-existing-kine", "Read existing kinematics to adjust event counts")(
     "timeframeID", bpo::value<int>(&optvalues.tfid)->default_value(0), "Timeframe id of the first timeframe int this context. Allows to generate contexts for different start orbits")(
-																						       "maxColsPerTF", bpo::value<int>(&optvalues.orbitsPerTF)->default_value(-1), "Maximal number of MC collisions to put into one timeframe.")(
-																																								 "noEmptyTF", bpo::bool_switch(&optvalues.noEmptyTF), "Enforce to have at least one collision");
+    "maxColsPerTF", bpo::value<int>(&optvalues.orbitsPerTF)->default_value(-1), "Maximal number of MC collisions to put into one timeframe.")(
+    "noEmptyTF", bpo::bool_switch(&optvalues.noEmptyTF), "Enforce to have at least one collision");
 
   options.add_options()("help,h", "Produce help message.");
 
