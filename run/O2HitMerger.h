@@ -22,6 +22,12 @@
 #include <fairlogger/Logger.h>
 #include <SimulationDataFormat/MCEventHeader.h>
 #include <DetectorsBase/Stack.h>
+
+#include <Framework/SourceInfoHeader.h>
+#include <Framework/ChannelInfo.h>
+#include <Headers/DataHeader.h>
+#include <Headers/Stack.h>
+
 #include <SimulationDataFormat/PrimaryChunk.h>
 #include <DetectorsCommonDataFormats/DetID.h>
 #include <DetectorsCommonDataFormats/DetectorNameConf.h>
@@ -348,6 +354,25 @@ class O2HitMerger : public fair::mq::Device
       // if we are done treating data we may go back to init phase
       // for the next batch
       return waitForControlInput();
+    }
+    if (mForwardKine && !more) {
+
+      auto sendEndOfStream = [&]() {
+	fair::mq::Parts parts;
+	fair::mq::MessagePtr payload(this->NewMessage());
+	o2::framework::SourceInfoHeader sih;
+	sih.state = o2::framework::InputChannelState::Completed;
+	auto channelAlloc = o2::pmr::getTransportAllocator(fChannels.at("kineforward").at(0).Transport());
+	auto header = o2::pmr::getMessage(o2::header::Stack{channelAlloc, sih});
+	parts.AddPart(std::move(header));
+	parts.AddPart(std::move(payload));
+	this->Send(parts, "kineforward", 0);
+      };
+
+      // all events have been processed so send an end-of-stream on
+      // the forwarding channel (under the assumption that there is a DPL consumer on the other side)
+      LOG(info) << "Sending end-of-stream";
+      sendEndOfStream();
     }
     return more;
   }

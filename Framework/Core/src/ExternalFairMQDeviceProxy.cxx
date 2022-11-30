@@ -484,6 +484,7 @@ DataProcessorSpec specifyExternalFairMQDeviceProxy(char const* name,
     }
 
     static auto countEoS = [](fair::mq::Parts& inputs) -> int {
+      LOG(info) << "Counting EOS\n";
       int count = 0;
       for (int msgidx = 0; msgidx < inputs.Size() / 2; ++msgidx) {
         // Skip when we have nullptr for the header.
@@ -493,6 +494,7 @@ DataProcessorSpec specifyExternalFairMQDeviceProxy(char const* name,
         }
         auto const sih = o2::header::get<SourceInfoHeader*>(inputs.At(msgidx * 2)->GetData());
         if (sih != nullptr && sih->state == InputChannelState::Completed) {
+          LOG(info) << "Detected end-of-stream";
           count++;
         }
       }

@@ -110,7 +110,7 @@ WorkflowSpec defineDataProcessing(ConfigContext const& configcontext)
                                          inputs,
                                          {},
                                          AlgorithmSpec{adaptFromTask<ConsumerTask>()},
-                                         {}});
+					   {{"nevents",VariantType::Int,0,{"number of events to process"}}} });
   }
 
   return specs;

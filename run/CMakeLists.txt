@@ -89,7 +89,7 @@ endif()
 o2_add_executable(hit-merger-runner
                   COMPONENT_NAME sim
                   SOURCES O2HitMergerRunner.cxx
-                  PUBLIC_LINK_LIBRARIES internal::allsim)
+                  PUBLIC_LINK_LIBRARIES internal::allsim O2::Framework)
 
 o2_add_executable(g4-determine-unknown-pdg-properties
                   COMPONENT_NAME sim

@@ -11,6 +11,6 @@ o2-sim-mctracks-proxy --enable-test-consumer &> out_mcanalysis.log &
 TRACKANAPROC=$!
 
 wait ${SIMPROC}
-sleep 5
-kill ${TRACKANAPROC}
+#sleep 5
+#kill ${TRACKANAPROC}
 wait ${TRACKANAPROC}
