@@ -10,7 +10,7 @@
 # or submit itself to any jurisdiction.
 
 o2_add_library(Steer
-               SOURCES src/O2MCApplication.cxx src/InteractionSampler.cxx
+               SOURCES src/O2MCApplication.cxx
                        src/HitProcessingManager.cxx src/MCKinematicsReader.cxx
                        src/MaterialBudgetMap.cxx src/O2MCApplicationEvalMat.cxx
 		       PUBLIC_LINK_LIBRARIES O2::CommonDataFormat
@@ -26,8 +26,7 @@ o2_add_executable(colcontexttool
                   PUBLIC_LINK_LIBRARIES Boost::program_options O2::Algorithm O2::Steer O2::SimulationDataFormat)
 
 o2_target_root_dictionary(Steer
-                          HEADERS include/Steer/InteractionSampler.h
-                                  include/Steer/HitProcessingManager.h
+                          HEADERS include/Steer/HitProcessingManager.h
                                   include/Steer/O2RunSim.h
                                   include/Steer/O2MCApplication.h
                                   include/Steer/O2MCApplicationBase.h
@@ -35,7 +34,7 @@ o2_target_root_dictionary(Steer
                                   include/Steer/MCKinematicsReader.h
                                   include/Steer/MaterialBudgetMap.h)
 o2_add_test(InteractionSampler
-            PUBLIC_LINK_LIBRARIES O2::Steer
+            PUBLIC_LINK_LIBRARIES O2::SimulationDataFormat
             SOURCES test/testInteractionSampler.cxx
             LABELS steer)
 
