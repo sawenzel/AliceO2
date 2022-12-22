@@ -51,7 +51,7 @@ struct Options {
   int maxCollsPerTF = -1; // the maximal number of hadronic collisions per TF (can be used to constrain number of collisions per timeframe to some maximal value)
   bool genVertices = false;         // whether to assign vertices to collisions
   std::string configKeyValues = ""; // string to init config key values
-  long timestamp = -1; // timestamp for CCDB queries
+  long timestamp = -1;              // timestamp for CCDB queries
 };
 
 enum class InteractionLockMode {
@@ -195,7 +195,7 @@ bool parseOptions(int argc, char* argv[], Options& optvalues)
     "use-existing-kine", "Read existing kinematics to adjust event counts")(
     "timeframeID", bpo::value<int>(&optvalues.tfid)->default_value(0), "Timeframe id of the first timeframe int this context. Allows to generate contexts for different start orbits")(
     "maxCollsPerTF", bpo::value<int>(&optvalues.maxCollsPerTF)->default_value(-1), "Maximal number of MC collisions to put into one timeframe. By default no constraint.")(
-																					   "noEmptyTF", bpo::bool_switch(&optvalues.noEmptyTF), "Enforce to have at least one collision")("configKeyValues", bpo::value<std::string>(&optvalues.configKeyValues)->default_value(""), "Semicolon separated key=value strings (e.g.: 'TPC.gasDensity=1;...')")("with-vertices", "Assign vertices to collisions.")(																																																			      						"timestamp", bpo::value<long>(&optvalues.timestamp)->default_value(-1L), "Timestamp for CCDB queries / anchoring");
+    "noEmptyTF", bpo::bool_switch(&optvalues.noEmptyTF), "Enforce to have at least one collision")("configKeyValues", bpo::value<std::string>(&optvalues.configKeyValues)->default_value(""), "Semicolon separated key=value strings (e.g.: 'TPC.gasDensity=1;...')")("with-vertices", "Assign vertices to collisions.")("timestamp", bpo::value<long>(&optvalues.timestamp)->default_value(-1L), "Timestamp for CCDB queries / anchoring");
 
   options.add_options()("help,h", "Produce help message.");
 
