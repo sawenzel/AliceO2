@@ -540,6 +540,10 @@ bool Detector::createHitsFromImage(SpatialPhotonResponse const& image, int detec
   // could be put inside the image class
   auto determineSectorID = [Nx, Ny](int detector, int x, int y) {
     if (detector == ZNA || detector == ZNC) {
+      // we have the common sector ( ZN[AC]C ) when the parity of the position is odd
+      if ((x + y) % 2 == 1) {
+        return (int)Common;
+      }
       if (x < Nx / 2) {
         if (y < Ny / 2) {
           return (int)Ch1;
@@ -555,7 +559,12 @@ bool Detector::createHitsFromImage(SpatialPhotonResponse const& image, int detec
       }
     }
 
+    // check if this is true for ZP or rather for EM
     if (detector == ZPA || detector == ZPC) {
+      // we have the common sector ( ZP[AC]C ) when the parity of the position is odd
+      if ((x + y) % 2 == 1) {
+        return (int)Common;
+      }
       auto i = (int)(4.f * x / Nx);
       return (int)(i + 1);
     }
@@ -573,6 +582,7 @@ bool Detector::createHitsFromImage(SpatialPhotonResponse const& image, int detec
     for (int y = 0; y < Ny; ++y) {
       // get sector
       int sector = determineSectorID(detector, x, y);
+      LOG(info) << "Hit is in sector " << sector;
       // get medium PMQ and PMC
       int currentMediumid = determineMediumID(detector, x, y);
       // LOG(info) << " x " << x << " y " << y << " sec " << sector << " medium " << currentMediumid;
@@ -2615,6 +2625,7 @@ void Detector::Reset()
 #ifdef ZDC_FASTSIM_ONNX
 bool Detector::FastSimToHits(const Ort::Value& response, const TParticle& particle, int detector)
 {
+  LOG(info) << "FASTSIMTOHITS";
   math_utils::Vector3D<float> xImp(0., 0., 0.); // good value
 
   // determines dimensions of the detector and binds it
@@ -2682,6 +2693,7 @@ bool Detector::FastSimToHits(const Ort::Value& response, const TParticle& partic
     for (int y = 0; y < Ny; ++y) {
       // get sector
       int sector = determineSectorID(detector, x, y);
+      LOG(info) << "found sector " << sector;
       // get medium PMQ and PMC
       int currentMediumid = determineMediumID(detector, x, y);
       // LOG(info) << " x " << x << " y " << y << " sec " << sector << " medium " << currentMediumid;

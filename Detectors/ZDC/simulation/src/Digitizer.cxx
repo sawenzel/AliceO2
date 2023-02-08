@@ -62,21 +62,22 @@ void Digitizer::process(const std::vector<o2::zdc::Hit>& hits,
     std::array<o2::InteractionRecord, NBC2Cache> cachedIR;
     // hit of given IR can con
     // for each hit find out sector + detector information
-    int detID = hit.GetDetectorID();
-    int secID = hit.getSector();
-    float nPhotons;
+    const int detID = hit.GetDetectorID();
+    const int secID = hit.getSector();
+    const int channel = toChannel(detID, secID);
+    float nPhotons = 0.f;
     if (detID == ZEM) {
       // ZEM calorimeters have only common PM
       nPhotons = hit.getPMCLightYield();
     } else {
       nPhotons = (secID == Common) ? hit.getPMCLightYield() : hit.getPMQLightYield();
     }
+    LOG(info) << " hit on channel " << channelName(channel) << " with photon count " << nPhotons;
     if (!nPhotons) {
       continue;
     }
     if (nPhotons < 0 || nPhotons > 1e6) {
-      int chan = toChannel(detID, secID);
-      LOG(error) << "Anomalous number of photons " << nPhotons << " for channel " << chan << '(' << channelName(chan) << ')';
+      LOG(error) << "Anomalous number of photons " << nPhotons << " for channel " << channel << '(' << channelName(channel) << ')';
       continue;
     }
 
@@ -97,10 +98,10 @@ void Digitizer::process(const std::vector<o2::zdc::Hit>& hits,
       }
       getCreateBCCache(cachedIR[nCachedIR++]); // ensure existence of cached container
     }
-    auto channel = toChannel(detID, secID);
     phe2Sample(nPhotons, hit.getParentID(), hTime, cachedIR, nCachedIR, channel);
     // if digit for this sector does not exist, create one otherwise add to it
   }
+  mCache.back().print();
 }
 
 //______________________________________________________________________________
@@ -115,9 +116,10 @@ void Digitizer::flush(std::vector<o2::zdc::BCData>& digitsBC,
     return;
   }
   if (mIR.differenceInBC(mCache.back()) > -BCCacheMin) {
-    LOG(debug) << "Generating new pedestal BL fluct. for BC range " << mCache.front() << " : " << mCache.back();
+    LOG(info) << "Generating new pedestal BL fluct. for BC range " << mCache.front() << " : " << mCache.back();
     generatePedestal();
   } else {
+    LOG(info) << "Nothing to flush ... returning";
     return;
   }
   o2::InteractionRecord ir0(mCache.front());
@@ -334,6 +336,8 @@ void Digitizer::storeBC(const BCCache& bc, uint32_t chan2Store,
                         std::vector<o2::zdc::BCData>& digitsBC, std::vector<o2::zdc::ChannelData>& digitsCh,
                         o2::dataformats::MCTruthContainer<o2::zdc::MCLabel>& labels)
 {
+  LOG(info) << "store BC called " << chan2Store;
+  bc.print();
   // store selected data of selected BC
   if (!chan2Store) {
     return;
@@ -371,24 +375,28 @@ void Digitizer::phe2Sample(int nphe, int parID, double timeHit, std::array<o2::I
   // function to simulate the waveform from no. of photoelectrons seen in a given sample
   //  for electrons at timeInSample wrt beginning of the sample
 
-  double time0 = cachedIR[0].bc2ns(); // start time of the 1st cashed BC
+  double time0 = cachedIR[0].bc2ns(); // start time of the 1st cached BC
   const auto& chanConfig = mSimCondition->channels[channel];
 
   float timeDiff = time0 - timeHit;
   int sample = (timeDiff - gRandom->Gaus(chanConfig.timePosition, chanConfig.timeJitter)) * ChannelSimCondition::ShapeBinWidthInv + chanConfig.ampMinID + TSNH;
   int ir = 0;
   bool stop = false;
-
+  LOG(info) << "Start sample " << sample;
   do {
     auto bcCache = getBCCache(cachedIR[ir]);
     bool added = false;
     for (int ib = 0; ib < NTimeBinsPerBC; ib++) {
       if (sample >= chanConfig.shape.size()) {
         stop = true;
+        LOG(info) << "Sample stop";
         break;
       }
       if (sample >= 0) {
-        auto signal = chanConfig.shape[sample] * nphe; // signal not accounting for the gain
+        auto signal = chanConfig.shape[sample] * nphe; // signal not accounting for the gai
+        if (ib==0) {
+          LOG(info) << "adding signal " << signal << " to channel " << channelName(channel) << " and ib " << ib;
+	}
         (*bcCache).data[channel][ib] += signal;
         added = true;
       }
