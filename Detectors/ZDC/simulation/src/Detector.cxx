@@ -2539,10 +2539,10 @@ void Detector::BeginPrimary()
       vector<vector<float>> classifierInput = {std::move(*scaledClassParticle)};
       mFastSimClassifier->setInput(classifierInput);
       mFastSimClassifier->run();
- 
+
       // this classifies if particle will leave a trace at all in one of the calos ---> TODO: better do it separately for ZN + ZP?
       if (fastsim::processors::readClassifier(mFastSimClassifier->getResult()[0], 1)[0]) {
-	// let's do the neutron (ZN) part
+        // let's do the neutron (ZN) part
         if (mModelScalerNeutron && mFastSimModelNeutron) {
           LOG(info) << "Generating fast hits for ZN";
           auto scaledModelParticleNeutron = mModelScalerNeutron->scale(rawInput);
@@ -2559,7 +2559,7 @@ void Detector::BeginPrimary()
             bool forward = mCurrentPrincipalParticle.Pz() > 0.;
             FastSimToHits(mFastSimModelNeutron->getResult()[0], mCurrentPrincipalParticle, forward ? ZNA : ZNC);
           }
-	}
+        }
         // let's do the proton (ZP) part
         if (mModelScalerProton && mFastSimModelProton) {
           LOG(info) << "Generating fast hits for ZP";
@@ -2574,7 +2574,7 @@ void Detector::BeginPrimary()
             bool forward = mCurrentPrincipalParticle.Pz() > 0.;
             FastSimToHits(mFastSimModelProton->getResult()[0], mCurrentPrincipalParticle, forward ? ZPA : ZPC);
           }
-	} // end proton treatment
+        } // end proton treatment
       }
     }
   }
