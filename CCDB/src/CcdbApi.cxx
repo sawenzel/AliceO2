@@ -127,10 +127,11 @@ void CcdbApi::init(std::string const& host)
     }
     snapshotReport = fmt::format("(cache snapshots to dir={}", mSnapshotCachePath);
   }
-  if (getenv("IGNORE_VALIDITYCHECK_OF_CCDB_LOCALCACHE")) {
+  const char* validityenv = getenv("IGNORE_VALIDITYCHECK_OF_CCDB_LOCALCACHE");
+  if (validityenv && std::strlen(validityenv) > 0) {
     mPreferSnapshotCache = true;
     if (mSnapshotCachePath.empty()) {
-      LOGP(fatal, "IGNORE_VALIDITYCHECK_OF_CCDB_LOCALCACHE is defined but the ALICEO2_CCDB_LOCALCACHE is not");
+      LOGP(fatal, "IGNORE_VALIDITYCHECK_OF_CCDB_LOCALCACHE is defined/non-empty but the ALICEO2_CCDB_LOCALCACHE is not");
     }
     snapshotReport += ", prefer if available";
   }
