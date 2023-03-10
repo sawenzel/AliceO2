@@ -66,9 +66,9 @@ class CCDBDownloader
 {
  public:
   /**
-    * Timer starts for each socket when its respective transfer finishes, and is stopped when another transfer starts for that handle.
-    * When the timer runs out it closes the socket. The period for which socket stays open is defined by socketTimoutMS.
-    */
+   * Timer starts for each socket when its respective transfer finishes, and is stopped when another transfer starts for that handle.
+   * When the timer runs out it closes the socket. The period for which socket stays open is defined by socketTimoutMS.
+   */
   std::unordered_map<curl_socket_t, uv_timer_t*> mSocketTimerMap;
 
   /**
