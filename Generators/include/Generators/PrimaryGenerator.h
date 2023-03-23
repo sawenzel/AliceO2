@@ -87,9 +87,9 @@ class PrimaryGenerator : public FairPrimaryGenerator
 
  protected:
   /** copy constructor **/
-  //PrimaryGenerator(const PrimaryGenerator&) = default;
+  // PrimaryGenerator(const PrimaryGenerator&) = default;
   /** operator= **/
-  //PrimaryGenerator& operator=(const PrimaryGenerator&) = default;
+  // PrimaryGenerator& operator=(const PrimaryGenerator&) = default;
 
   /** set interaction diamond position **/
   void setInteractionDiamond(const Double_t* xyz, const Double_t* sigmaxyz);
