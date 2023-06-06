@@ -29,7 +29,7 @@ o2::eventgen::GeneratorTGenerator* QEDepem()
   int trial = 0;
   TGenEpEmv1* genBg = nullptr;
   bool initialized = false;
-  for (;trial < numTrials; ++trial) {
+  for (; trial < numTrials; ++trial) {
     genBg = new TGenEpEmv1();
     genBg->SetYRange(qedParam.yMin, qedParam.yMax);                                  // Set Y limits
     genBg->SetPtRange(qedParam.ptMin, qedParam.ptMax);                               // Set pt limits (GeV) for e+-: 1MeV corresponds to max R=13.3mm at 5kGaus
@@ -39,8 +39,7 @@ o2::eventgen::GeneratorTGenerator* QEDepem()
     initialized = genBg->Init();
     if (!initialized) {
       delete genBg;
-    }
-    else {
+    } else {
       break;
     }
   }
