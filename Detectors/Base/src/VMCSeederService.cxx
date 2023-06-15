@@ -11,7 +11,7 @@
 
 #include "DetectorsBase/VMCSeederService.h"
 #include "TVirtualMC.h"
-#include <fairlogger/Logger.h> // for FairLogger
+#include <fairlogger/Logger.h>                    // for FairLogger
 #include <CommonUtils/ConfigurationMacroHelper.h> // for ROOT JIT helpers
 
 using namespace o2::base;
