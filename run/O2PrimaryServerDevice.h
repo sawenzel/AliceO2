@@ -237,12 +237,6 @@ class O2PrimaryServerDevice final : public fair::mq::Device
     // fatal without core dump
     fair::Logger::OnFatal([] { throw fair::FatalException("Fatal error occured. Exiting without core dump..."); });
 
-    // auto factory = fair::mq::TransportFactory::CreateTransportFactory("zeromq");
-    mControlChannel = fair::mq::Channel{"o2sim-control", "sub", fTransportFactory};
-    auto controlsocketname = getenv("ALICE_O2SIMCONTROL");
-    mControlChannel.Connect(std::string(controlsocketname));
-    mControlChannel.Validate();
-
     o2::simpubsub::publishMessage(fChannels["primary-notifications"].at(0), "SERVER : INITIALIZING");
 
     stateTransition(O2PrimaryServerState::Initializing, "INITTASK");
@@ -311,6 +305,16 @@ class O2PrimaryServerDevice final : public fair::mq::Device
     }
 
     mAsService = vm["asservice"].as<bool>();
+    if (mAsService) {
+      mControlChannel = fair::mq::Channel{"o2sim-control", "sub", fTransportFactory};
+      auto controlsocketname = getenv("ALICE_O2SIMCONTROL");
+      if (!controlsocketname) {
+        LOG(fatal) << "Internal error: Socketname for control input missing";
+      }
+      mControlChannel.Connect(std::string(controlsocketname));
+      mControlChannel.Validate();
+    }
+
 
     if (mMaxEvents <= 0) {
       if (mAsService) {
