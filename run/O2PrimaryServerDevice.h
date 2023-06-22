@@ -315,7 +315,6 @@ class O2PrimaryServerDevice final : public fair::mq::Device
       mControlChannel.Validate();
     }
 
-
     if (mMaxEvents <= 0) {
       if (mAsService) {
         stateTransition(O2PrimaryServerState::Idle, "INITTASK");
