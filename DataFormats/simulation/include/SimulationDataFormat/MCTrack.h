@@ -51,7 +51,7 @@ class MCTrackT
 
   ///  Standard constructor
   MCTrackT(Int_t pdgCode, Int_t motherID, Int_t secondMotherID, Int_t firstDaughterID, Int_t lastDaughterID,
-           Double_t px, Double_t py, Double_t pz, Double_t x, Double_t y, Double_t z, Double_t t,
+           Double_t px, Double_t py, Double_t pz, Double_t energy, Double_t x, Double_t y, Double_t z, Double_t t,
            Int_t nPoints);
 
   ///  Copy constructor
@@ -230,8 +230,8 @@ class MCTrackT
   const char* getProdProcessAsString() const;
 
  private:
-  /// Momentum components at start vertex [GeV]
-  _T mStartVertexMomentumX, mStartVertexMomentumY, mStartVertexMomentumZ;
+  /// 4-Momentum components at start vertex [GeV]
+  _T mStartVertexMomentumX, mStartVertexMomentumY, mStartVertexMomentumZ, mEnergy;
 
   /// Coordinates of start vertex [cm, ns]
   _T mStartVertexCoordinatesX, mStartVertexCoordinatesY, mStartVertexCoordinatesZ, mStartVertexCoordinatesT;
@@ -274,15 +274,21 @@ class MCTrackT
   // such as part of mProp (process) or mPDG
   Int_t mStatusCode = 0;
 
-  ClassDefNV(MCTrackT, 8);
+  ClassDefNV(MCTrackT, 9);
 };
 
 template <typename T>
 inline Double_t MCTrackT<T>::GetEnergy() const
 {
-  const auto mass = GetMass();
-  return std::sqrt(mass * mass + mStartVertexMomentumX * mStartVertexMomentumX +
-                   mStartVertexMomentumY * mStartVertexMomentumY + mStartVertexMomentumZ * mStartVertexMomentumZ);
+  if (mEnergy < 0) {
+    // this means that the particle should have a well defined mass from
+    // which we calculate the energy
+    const auto mass = GetMass();
+    return std::sqrt(mass * mass + mStartVertexMomentumX * mStartVertexMomentumX +
+                     mStartVertexMomentumY * mStartVertexMomentumY + mStartVertexMomentumZ * mStartVertexMomentumZ);
+  }
+  // the case for primary particles
+  return mEnergy;
 }
 
 template <typename T>
@@ -318,13 +324,14 @@ inline MCTrackT<T>::MCTrackT()
     mStartVertexCoordinatesZ(0.),
     mStartVertexCoordinatesT(0.),
     mProp(0),
-    mWeight(0)
+    mWeight(0),
+    mEnergy(-1.)
 {
 }
 
 template <typename T>
 inline MCTrackT<T>::MCTrackT(Int_t pdgCode, Int_t motherId, Int_t secondMotherId, Int_t firstDaughterId, Int_t lastDaughterId,
-                             Double_t px, Double_t py, Double_t pz, Double_t x,
+                             Double_t px, Double_t py, Double_t pz, Double_t energy, Double_t x,
                              Double_t y, Double_t z, Double_t t, Int_t mask)
   : mPdgCode(pdgCode),
     mMotherTrackId(motherId),
@@ -339,7 +346,8 @@ inline MCTrackT<T>::MCTrackT(Int_t pdgCode, Int_t motherId, Int_t secondMotherId
     mStartVertexCoordinatesZ(z),
     mStartVertexCoordinatesT(t),
     mProp(mask),
-    mWeight(0)
+    mWeight(0),
+    mEnergy(energy)
 {
 }
 
@@ -357,6 +365,7 @@ inline MCTrackT<T>::MCTrackT(const TParticle& part)
     mStartVertexCoordinatesY(part.Vy()),
     mStartVertexCoordinatesZ(part.Vz()),
     mStartVertexCoordinatesT(part.T() * 1e09),
+    mEnergy(part.Energy()),
     mWeight(part.GetWeight()),
     mProp(0),
     mStatusCode(0)
@@ -374,6 +383,12 @@ inline MCTrackT<T>::MCTrackT(const TParticle& part)
   }
   // set MC generator status code only for primaries
   mStatusCode = part.TestBit(ParticleStatus::kPrimary) ? part.GetStatusCode() : -1;
+  if (mStatusCode == -1) {
+    // if it is a secondary, the particle is trackable and has a well defined mass
+    // hence we can recalculate it's energy and simply store -1 in mEnergy. This will be excellent
+    // for compression and leave a small disc footprint
+    mEnergy = -1;
+  }
 }
 
 template <typename T>
