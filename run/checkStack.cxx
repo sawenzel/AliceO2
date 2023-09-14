@@ -103,12 +103,14 @@ int main(int argc, char** argv)
         // for primaries, this may be different (for instance with Pythia8)
         assert(ti > t.getMotherTrackId());
       }
+      /*
       if (t.leftTrace(o2::detectors::DetID::TPC)) {
         trackidsinTPC.emplace_back(ti);
       }
       if (t.leftTrace(o2::detectors::DetID::ITS)) {
         trackidsinITS.emplace_back(ti);
       }
+      */
       bool physicalPrim = o2::mcutils::MCTrackNavigator::isPhysicalPrimary(t, *mctracks);
       LOG(debug) << " track " << ti << "\t" << t.getMotherTrackId() << " hits " << t.hasHits() << " isPhysicalPrimary " << physicalPrim;
       if (t.isPrimary()) {
