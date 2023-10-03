@@ -127,18 +127,15 @@ class MatLayerCylSet : public o2::gpu::FlatObject
   static constexpr size_t getBufferAlignmentBytes() { return 8; }
 #endif // !GPUCA_GPUCODE
 
-  static constexpr float LayerRMax = 500; // maximum value of R lookup (corresponds to last layer of MatLUT) 
+  static constexpr float LayerRMax = 500;    // maximum value of R lookup (corresponds to last layer of MatLUT)
   static constexpr float VoxelRDelta = 0.05; // voxel spacing for layer lookup; seems a natural choice - corresponding ~ to smallest spacing
   static constexpr float InvVoxelRDelta = 1.f / VoxelRDelta;
 
   std::vector<std::pair<uint16_t, uint16_t>> mLayerVoxelLU{}; //! helper structure to lookup a layer based on radius
-  bool mLayerVoxelLUInitialized = false; //! if layer helper structure is initialized
+  bool mLayerVoxelLUInitialized = false;                      //! if layer helper structure is initialized
 
   ClassDefNV(MatLayerCylSet, 1);
 };
-
-
-
 
 } // namespace base
 } // namespace o2

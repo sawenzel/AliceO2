@@ -176,7 +176,8 @@ void MatLayerCylSet::writeToFile(const std::string& outFName)
   outf.Close();
 }
 
-GPUd() int MatLayerCylSet::searchLayerFast(float r2, int low, int high) const {
+GPUd() int MatLayerCylSet::searchLayerFast(float r2, int low, int high) const
+{
   // we can avoid the sqrt .. at the cost of more memory in the lookup
   const auto index = int(std::sqrt(r2) * InvVoxelRDelta);
   if (index >= mLayerVoxelLU.size()) {
@@ -190,7 +191,8 @@ GPUd() int MatLayerCylSet::searchLayerFast(float r2, int low, int high) const {
   return layers.first;
 }
 
-void MatLayerCylSet::initLayerVoxelLU() {
+void MatLayerCylSet::initLayerVoxelLU()
+{
   if (mLayerVoxelLUInitialized) {
     LOG(info) << "Layer voxel already initialized; Aborting";
     return;
@@ -201,10 +203,10 @@ void MatLayerCylSet::initLayerVoxelLU() {
   mLayerVoxelLU.reserve(numVoxels);
   for (int voxel = 0; voxel < numVoxels; ++voxel) {
     // check the 2 extremes of this voxel "covering"
-    const auto lowerR = voxel*VoxelRDelta;
+    const auto lowerR = voxel * VoxelRDelta;
     const auto upperR = lowerR + VoxelRDelta;
-    const auto lowerSegment = searchSegment(lowerR*lowerR);
-    const auto upperSegment = searchSegment(upperR*upperR);
+    const auto lowerSegment = searchSegment(lowerR * lowerR);
+    const auto upperSegment = searchSegment(upperR * upperR);
     mLayerVoxelLU.push_back(std::pair<uint16_t, u_int16_t>(lowerSegment, upperSegment));
   }
   mLayerVoxelLUInitialized = true;
@@ -301,11 +303,11 @@ GPUd() MatBudget MatLayerCylSet::getMatBudget(float x0, float y0, float z0, floa
   while (lrID >= lmin) { // go from outside to inside
     const auto& lr = getLayer(lrID);
     int nphiSlices = lr.getNPhiSlices();
-    int nc = ray.crossLayer(lr);  // determines how many crossings this ray has with this tubular layer 
+    int nc = ray.crossLayer(lr); // determines how many crossings this ray has with this tubular layer
     for (int ic = nc; ic--;) {
       float cross1, cross2;
       ray.getCrossParams(ic, cross1, cross2); // tmax,tmin of crossing the layer
-      
+
       auto phi0 = ray.getPhi(cross1), phi1 = ray.getPhi(cross2), dPhi = phi0 - phi1;
       auto phiID = lr.getPhiSliceID(phi0), phiIDLast = lr.getPhiSliceID(phi1);
       // account for eventual wrapping around 0
@@ -318,7 +320,7 @@ GPUd() MatBudget MatLayerCylSet::getMatBudget(float x0, float y0, float z0, floa
           phiID += nphiSlices;
         }
       }
-      
+
       int stepPhiID = phiID > phiIDLast ? -1 : 1;
       bool checkMorePhi = true;
       auto tStartPhi = cross1, tEndPhi = 0.f;
@@ -429,12 +431,11 @@ GPUd() bool MatLayerCylSet::getLayersRange(const Ray& ray, short& lmin, short& l
   if (!mLayerVoxelLUInitialized) {
     lmxInt = rmax2 < getRMax2() ? searchSegment(rmax2, 0) : get()->mNRIntervals - 2;
     lmnInt = rmin2 >= getRMin2() ? searchSegment(rmin2, 0, lmxInt + 1) : 0;
-  }
-  else {
+  } else {
     lmxInt = rmax2 < getRMax2() ? searchLayerFast(rmax2, 0) : get()->mNRIntervals - 2;
     lmnInt = rmin2 >= getRMin2() ? searchLayerFast(rmin2, 0, lmxInt + 1) : 0;
   }
- 
+
   const auto* interval2LrID = get()->mInterval2LrID;
   lmax = interval2LrID[lmxInt];
   lmin = interval2LrID[lmnInt];
