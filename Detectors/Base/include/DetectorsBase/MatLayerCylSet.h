@@ -18,7 +18,11 @@
 #include "GPUCommonDef.h"
 #include "DetectorsBase/MatLayerCyl.h"
 #include "DetectorsBase/Ray.h"
+#include "CommonUtils/TreeStreamRedirector.h"
 #include "FlatObject.h"
+#include "VecGeom/base/Flat2DVoxelHashMap.h"
+#include <gsl/span>
+
 
 #ifndef GPUCA_ALIGPUCODE // this part is unvisible on GPU version
 #include "MathUtils/Cartesian.h"
@@ -51,8 +55,8 @@ class MatLayerCylSet : public o2::gpu::FlatObject
 {
 
  public:
-  MatLayerCylSet() CON_DEFAULT;
-  ~MatLayerCylSet() CON_DEFAULT;
+  MatLayerCylSet() { inspectStream = new o2::utils::TreeStreamRedirector("MatButCall.root", "recreate"); };
+  ~MatLayerCylSet() { inspectStream->Close(); };
   MatLayerCylSet(const MatLayerCylSet& src) CON_DELETE;
 
   GPUd() const MatLayerCylSetLayout* get() const { return reinterpret_cast<const MatLayerCylSetLayout*>(mFlatBufferPtr); }
@@ -79,6 +83,10 @@ class MatLayerCylSet : public o2::gpu::FlatObject
   static MatLayerCylSet* loadFromFile(const std::string& inpFName = "matbud.root");
   static MatLayerCylSet* rectifyPtrFromFile(MatLayerCylSet* ptr);
 
+  // initializes internal voxel lookup
+  void initLayerVoxelLU() const;
+  void initPhiSectorVoxelLU(const char* pngname = nullptr) const;
+
   void flatten();
 
   MatLayerCyl& getLayer(int i) { return get()->mLayers[i]; }
@@ -97,6 +105,9 @@ class MatLayerCylSet : public o2::gpu::FlatObject
   GPUd() MatBudget getMatBudget(float x0, float y0, float z0, float x1, float y1, float z1) const;
 
   GPUd() int searchSegment(float val, int low = -1, int high = -1) const;
+  
+  /// searches a layer based on r2 input
+  GPUd() int searchLayerFast(float r2, int low = -1, int high = -1) const;
 
 #ifndef GPUCA_GPUCODE
   //-----------------------------------------------------------
@@ -118,8 +129,70 @@ class MatLayerCylSet : public o2::gpu::FlatObject
   static constexpr size_t getBufferAlignmentBytes() { return 8; }
 #endif // !GPUCA_GPUCODE
 
+  o2::utils::TreeStreamRedirector* inspectStream = nullptr; //!
+  
+  // mVoxelDIM
+  static constexpr int NVoxels1D = 10000; // number of voxels in one direction
+  static constexpr float XMIN = -500; // 
+  static constexpr float VDELTA = 1000. / NVoxels1D; // 1000 = 2*XMIN
+  static constexpr float InvVoxelPhiDelta = 1./ VDELTA;
+
+  mutable std::vector<std::vector<uint16_t>> *mPhiSectorVoxelLU = nullptr; //!
+  
+  using HashMap2D = typename vecgeom::Flat2DVoxelHashMap<std::pair<short, short>, int, false>;
+  mutable std::vector<HashMap2D*> mPhiSectorLUTs; //! a phi sector lookup PER Layer
+  
+  gsl::span<const std::pair<short, short>> getPhiPropList(int ki, int kj) const {
+    int s = 0;
+    const auto ptr = mPhiSectorLUTs[0]->getPropertiesGivenKey(mPhiSectorLUTs[0]->getKeyFromCells(ki, kj), s);
+    return gsl::span<const std::pair<short, short>>(ptr, s);
+  }
+  
+  static constexpr float VoxelRDelta = 0.05; // seems a natural choice - corresponding ~ to smallest spacing
+  static constexpr float InvVoxelRDelta = 1.f/VoxelRDelta;
+
+  mutable std::vector<std::pair<uint16_t, uint16_t>> mLayerVoxelLU{}; //!
+  mutable bool mVoxelInitialized = false; //!
+
+  void analyseLayers(); 
+
+  void findPhiVoxel(float x, float y, float z, int& i, int& j) const {
+    assert(x >= XMIN && x <= -XMIN);
+    assert(y >= XMIN && y <= -XMIN);
+    i = int((x - XMIN)*InvVoxelPhiDelta);
+    j = int((y - XMIN)*InvVoxelPhiDelta);
+  }
+
+  // convention
+  //
+  // 
+  // (-500, -500) 0,0 ..... 999, 0
+
+  // given i, j get the corners of the voxel
+  std::array<std::pair<float, float>, 4> getVoxelPoints(int i, int j) const {
+     std::array<std::pair<float, float>, 4> points;
+     points[0] = std::make_pair<float,float>(XMIN + i * VDELTA, XMIN + j * VDELTA);
+     points[1] = std::make_pair<float,float>(XMIN + (i + 1) * VDELTA, XMIN + j * VDELTA);
+     points[2] = std::make_pair<float,float>(XMIN + i * VDELTA, XMIN + (j + 1) * VDELTA);
+     points[3] = std::make_pair<float,float>(XMIN + (i + 1) * VDELTA, XMIN + (j + 1) * VDELTA);
+     return points;
+  }
+
+  
+  /*
+  void writeVoxelMapToImage() {
+    // using the PNG library to write the voxelfile to
+
+
+
+  }
+  */
+
   ClassDefNV(MatLayerCylSet, 1);
 };
+
+
+
 
 } // namespace base
 } // namespace o2

@@ -9,7 +9,7 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-/// @brief Class for creating debug root trees with std::cout like intervace
+/// @brief Class for creating debug root trees with std::cout like interface
 /// @author Marian Ivanov, marian.ivanov@cern.ch (original code in AliRoot)
 ///         Ruben Shahoyan, ruben.shahoyan@cern.ch (porting to O2).
 

@@ -9,6 +9,9 @@
 # granted to it by virtue of its status as an Intergovernmental Organization
 # or submit itself to any jurisdiction.
 
+find_package(PNG)
+find_package(VecGeom)
+
 o2_add_library(DetectorsBase
                SOURCES src/Detector.cxx
                        src/GeometryManager.cxx
@@ -42,6 +45,8 @@ o2_add_library(DetectorsBase
                                      O2::CCDB
                                      MC::VMC
                                      TBB::tbb
+                                     PNG::PNG
+                                     VecGeom::vecgeom
                PRIVATE_INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/GPU/GPUTracking/Merger # Must not link to avoid cyclic dependency
                              )
 
