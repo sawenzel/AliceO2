@@ -20,6 +20,7 @@
 #include "GPUCommonMath.h"
 #include "DetectorsBase/MatLayerCyl.h"
 #include "MathUtils/Utils.h"
+#include <vdt/atan2.h>
 
 #ifndef GPUCA_ALIGPUCODE // this part is unvisible on GPU version
 #include "MathUtils/Cartesian.h"
@@ -77,9 +78,17 @@ class Ray
   // for debud only
   float getPos(float t, int i) const { return mP[i] + t * mD[i]; }
 
+  // the phi angle at some point along the ray, parameterized by t
   GPUd() float getPhi(float t) const
   {
     float p = o2::gpu::CAMath::ATan2(mP[1] + t * mD[1], mP[0] + t * mD[0]);
+    o2::math_utils::bringTo02Pi(p);
+    return p;
+  }
+
+  GPUd() float getPhi_Approx(float t) const
+  {
+    float p = vdt::fast_atan2f(mP[1] + t * mD[1], mP[0] + t * mD[0]);
     o2::math_utils::bringTo02Pi(p);
     return p;
   }

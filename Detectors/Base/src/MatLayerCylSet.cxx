@@ -376,7 +376,8 @@ GPUd() MatBudget MatLayerCylSet::getMatBudget(float x0, float y0, float z0, floa
         //  LOG(error) << " inconstent results " << phiID << " " << phiIDcmp << " " << phiIDLast << " " << phiIDLastcmp << "\n";
         // }
       } else {
-        auto phi0 = ray.getPhi(cross1), phi1 = ray.getPhi(cross2), dPhi = phi0 - phi1;
+        auto phi0 = ray.getPhi_Approx(cross1), phi1 = ray.getPhi_Approx(cross2), dPhi = phi0 - phi1;
+        // auto phi0 = ray.getPhi(cross1), phi1 = ray.getPhi(cross2), dPhi = phi0 - phi1;
         phiID = lr.getPhiSliceID(phi0); phiIDLast = lr.getPhiSliceID(phi1);
         // account for eventual wrapping around 0
         if (dPhi > 0.f) {
