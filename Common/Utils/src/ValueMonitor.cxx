@@ -18,15 +18,18 @@ using namespace o2::utils;
 
 ValueMonitor::ValueMonitor(std::string filename) : mFileName(filename) {}
 
-ValueMonitor::~ValueMonitor()
-{
+void ValueMonitor::flush() {
   if (mHistos.size() > 0) {
     auto outfile = std::make_unique<TFile>(mFileName.c_str(), "RECREATE");
     // write all histos
     for (auto& h : mHistos) {
-      LOG(info) << "ValueMonitor: WRITING HISTO " << h.second->GetName();
       h.second->Write();
     }
     outfile->Close();
   }
+}
+
+ValueMonitor::~ValueMonitor()
+{
+  flush();
 }

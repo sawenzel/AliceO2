@@ -21,6 +21,7 @@
 #include "FlatObject.h"
 #include <vector>
 #include <utility>
+#include <iostream>
 
 #ifndef GPUCA_ALIGPUCODE // this part is unvisible on GPU version
 #include "MathUtils/Cartesian.h"
@@ -54,8 +55,8 @@ class MatLayerCylSet : public o2::gpu::FlatObject
 {
 
  public:
-  MatLayerCylSet() CON_DEFAULT;
-  ~MatLayerCylSet() CON_DEFAULT;
+  MatLayerCylSet() = default;
+  ~MatLayerCylSet() = default; 
   MatLayerCylSet(const MatLayerCylSet& src) CON_DELETE;
 
   GPUd() const MatLayerCylSetLayout* get() const { return reinterpret_cast<const MatLayerCylSetLayout*>(mFlatBufferPtr); }
@@ -84,6 +85,8 @@ class MatLayerCylSet : public o2::gpu::FlatObject
 
   // initializes internal voxel lookup
   void initLayerVoxelLU();
+  // initialize phi voxel lookups in a certain range  
+  void initPhiLayerVoxelLU(int low = 0, int up = 327);
 
   void flatten();
 
@@ -133,6 +136,51 @@ class MatLayerCylSet : public o2::gpu::FlatObject
 
   std::vector<std::pair<uint16_t, uint16_t>> mLayerVoxelLU{}; //! helper structure to lookup a layer based on radius
   bool mLayerVoxelLUInitialized = false;                      //! if layer helper structure is initialized
+
+  struct PhiLookup {
+    int dimX;
+    int dimY;
+    float R; // radius of circle that this is covering (positive)
+    float invDeltaX;
+    float invDeltaY;
+    static constexpr uint8_t UNITIALIZED = std::numeric_limits<uint8_t>::max();
+    static constexpr uint8_t INVALID = UNITIALIZED - 1;
+
+    // constructor 
+    PhiLookup(float R, int dimX, int dimY) : R(R), dimX(dimX), dimY(dimY) {
+      invDeltaX = 1. / (2*R / dimX);
+      invDeltaY = 1. / (2*R / dimY);
+
+      // we init the storage
+      phiStore2D.resize(dimX * dimY, UNITIALIZED);
+    }
+
+    int findKey(float x, float y) const {
+      const auto i = int((x + R)*invDeltaX);
+      const auto j = int((y + R)*invDeltaY);
+      return j * dimX + i;
+    }
+    
+    void set(float x, float y, uint8_t val) {
+      phiStore2D[findKey(x, y)] = val;
+    }
+
+    void set(int key, uint8_t val) {
+      phiStore2D[key] = val;
+    }
+
+    uint8_t get(float x, float y) const {
+      return phiStore2D[findKey(x,y)];
+    }
+
+    uint8_t get(int key) const {
+      return phiStore2D[key];
+    }
+    
+    std::vector<uint8_t> phiStore2D;
+  };
+  
+  std::vector<PhiLookup *> mPhiLUTs{328, nullptr}; // !
 
   ClassDefNV(MatLayerCylSet, 1);
 };

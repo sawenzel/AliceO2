@@ -52,6 +52,9 @@ class ValueMonitor
   template <typename T>
   void Collect(const char* key, T value);
 
+  /// flush the histograms to a file (if not wanting to depend on the constructor being called)
+  void flush();
+
  private:
   std::string mFileName; // name of file where histograms are dumped to
 

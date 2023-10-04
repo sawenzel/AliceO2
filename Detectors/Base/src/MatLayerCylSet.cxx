@@ -19,6 +19,8 @@
 
 #include "GPUCommonLogger.h"
 #include <TFile.h>
+#include "CommonUtils/ValueMonitor.h"
+#include <unistd.h>
 //#define _DBG_LOC_ // for local debugging only
 
 #endif // !GPUCA_ALIGPUCODE
@@ -176,21 +178,6 @@ void MatLayerCylSet::writeToFile(const std::string& outFName)
   outf.Close();
 }
 
-GPUd() int MatLayerCylSet::searchLayerFast(float r2, int low, int high) const
-{
-  // we can avoid the sqrt .. at the cost of more memory in the lookup
-  const auto index = int(std::sqrt(r2) * InvVoxelRDelta);
-  if (index >= mLayerVoxelLU.size()) {
-    return -1;
-  }
-  auto layers = mLayerVoxelLU[index];
-  if (layers.first != layers.second) {
-    // this means the voxel is undecided and we revert to search
-    return searchSegment(r2, layers.first, layers.second + 1);
-  }
-  return layers.first;
-}
-
 void MatLayerCylSet::initLayerVoxelLU()
 {
   if (mLayerVoxelLUInitialized) {
@@ -289,8 +276,33 @@ std::size_t MatLayerCylSet::estimateFlatBufferSize() const
 #endif // ! GPUCA_GPUCODE
 
 //_________________________________________________________________________________________________
+GPUd() int MatLayerCylSet::searchLayerFast(float r2, int low, int high) const
+{
+  // we can avoid the sqrt .. at the cost of more memory in the lookup
+  const auto index = int(std::sqrt(r2) * InvVoxelRDelta);
+  if (index >= mLayerVoxelLU.size()) {
+    return -1;
+  }
+  auto layers = mLayerVoxelLU[index];
+  if (layers.first != layers.second) {
+    // this means the voxel is undecided and we revert to search
+    return searchSegment(r2, layers.first, layers.second + 1);
+  }
+  return layers.first;
+}
+
+//_________________________________________________________________________________________________
 GPUd() MatBudget MatLayerCylSet::getMatBudget(float x0, float y0, float z0, float x1, float y1, float z1) const
 {
+  // static pid_t pid = getpid();
+  //static std::string name = std::string("MatBut_layers_") + std::to_string(pid) + std::string(".root");
+  //static o2::utils::ValueMonitor mon(name.c_str());
+  static int counter = 1;
+  // if (counter % 10000 == 0) {
+  //   mon.flush();
+  // }
+  // counter++;
+
   // get material budget traversed on the line between point0 and point1
   MatBudget rval;
   Ray ray(x0, y0, z0, x1, y1, z1);
@@ -301,6 +313,7 @@ GPUd() MatBudget MatLayerCylSet::getMatBudget(float x0, float y0, float z0, floa
   }
   short lrID = lmax;
   while (lrID >= lmin) { // go from outside to inside
+    // mon.Collect<int>("layer", lrID);
     const auto& lr = getLayer(lrID);
     int nphiSlices = lr.getNPhiSlices();
     int nc = ray.crossLayer(lr); // determines how many crossings this ray has with this tubular layer
@@ -308,6 +321,8 @@ GPUd() MatBudget MatLayerCylSet::getMatBudget(float x0, float y0, float z0, floa
       float cross1, cross2;
       ray.getCrossParams(ic, cross1, cross2); // tmax,tmin of crossing the layer
 
+      int phiID, phiIDLast;
+/*
       auto phi0 = ray.getPhi(cross1), phi1 = ray.getPhi(cross2), dPhi = phi0 - phi1;
       auto phiID = lr.getPhiSliceID(phi0), phiIDLast = lr.getPhiSliceID(phi1);
       // account for eventual wrapping around 0
@@ -318,6 +333,60 @@ GPUd() MatBudget MatLayerCylSet::getMatBudget(float x0, float y0, float z0, floa
       } else {
         if (dPhi < -o2::constants::math::PI) { // wraps around phi=0
           phiID += nphiSlices;
+        }
+      }
+*/
+
+      const auto phiLUT = mPhiLUTs[lrID];
+      if (phiLUT) {
+        int phiIDcmp, phiIDLastcmp;
+        const auto x1 = ray.getPos(cross1, 0);
+        const auto y1 = ray.getPos(cross1, 1);
+        const auto val1 = phiLUT->get(x1, y1);
+        if (val1 < PhiLookup::INVALID) {
+          phiIDcmp = val1;
+        }
+        else {
+          auto phi = o2::gpu::CAMath::ATan2(y1, x1);
+          o2::math_utils::bringTo02Pi(phi);
+          phiIDcmp = lr.getPhiSliceID(phi);
+        }
+        
+        const auto x2 = ray.getPos(cross2, 0);
+        const auto y2 = ray.getPos(cross2, 1);
+        const auto val2 = phiLUT->get(x2, y2);
+        if (val2 < PhiLookup::INVALID) {
+          phiIDLastcmp = val2;
+        }
+        else {
+          auto phi = o2::gpu::CAMath::ATan2(y2, x2);
+          o2::math_utils::bringTo02Pi(phi);
+          phiIDLastcmp = lr.getPhiSliceID(phi);
+        }
+        // wrapping case
+        if ((y1 < 0 && x1 > 0) && (y2 > 0) && (x2 > 0)) {
+          phiIDLastcmp += nphiSlices;
+        }
+        else if ((y1 > 0 && x1 > 0) && ((y2 < 0) && (x2 > 0))) {
+          phiIDcmp += nphiSlices;
+        }
+        phiID = phiIDcmp;
+        phiIDLast = phiIDLastcmp;
+        // if (phiIDcmp != phiID || phiIDLast != phiIDLastcmp) {
+        //  LOG(error) << " inconstent results " << phiID << " " << phiIDcmp << " " << phiIDLast << " " << phiIDLastcmp << "\n";
+        // }
+      } else {
+        auto phi0 = ray.getPhi(cross1), phi1 = ray.getPhi(cross2), dPhi = phi0 - phi1;
+        phiID = lr.getPhiSliceID(phi0); phiIDLast = lr.getPhiSliceID(phi1);
+        // account for eventual wrapping around 0
+        if (dPhi > 0.f) {
+          if (dPhi > o2::constants::math::PI) { // wraps around phi=0
+            phiIDLast += nphiSlices;
+          }
+        } else {
+          if (dPhi < -o2::constants::math::PI) { // wraps around phi=0
+            phiID += nphiSlices;
+          }
         }
       }
 
@@ -610,5 +679,146 @@ MatLayerCylSet* MatLayerCylSet::extractCopy(float rmin, float rmax, float tolera
   copy->flatten();
   return copy;
 }
+
+// initialize phi voxel lookups in a certain range  
+void MatLayerCylSet::initPhiLayerVoxelLU(int low, int up) {
+  
+  auto initPhiVoxelForLayer = [this](int layerID) {
+    
+    auto determineVoxelSet = [](MatLayerCyl const &layer, PhiLookup& lookup) {
+      
+      auto addProp = [&lookup, &layer](float x, float y) {
+        float phi = o2::gpu::CAMath::ATan2(y, x);
+        o2::math_utils::bringTo02Pi(phi);
+        const auto phislice = layer.getPhiSliceID(phi);
+        const auto key = lookup.findKey(x, y);
+        auto current = lookup.get(key);
+        if (current == PhiLookup::UNITIALIZED) {
+          lookup.set(key, phislice);
+        }
+        else if (current < PhiLookup::INVALID && current != phislice) {
+          lookup.set(key, PhiLookup::INVALID);
+        }
+      };
+
+      // determines the set of all voxel cells that have overlap with Cylinder
+      auto Rmax = layer.getRMax();
+      auto Rmin = layer.getRMin();
+  
+      const float xmin = -Rmax - 0.2; // 
+      const int NVoxels1D_ = 5000;
+      const float Delta = 2 * std::abs(xmin) / NVoxels1D_; // 1000 = 2*XMIN
+      const float invDelta = 1./ Delta;
+
+      for (float y = xmin; y <= -xmin; y += Delta) {
+        // determine the x - range to loop over ... with ray - circular layer intersection
+        Ray ray(xmin, y, 0, -xmin, y, 0);
+        float crsmax1, crsmax2, crsmin1, crsmin2;
+        bool outercross = ray.crossCircleR(layer.getRMax2(), crsmax1, crsmax2);
+        bool innercross = ray.crossCircleR(layer.getRMin2(), crsmin1, crsmin2);
+
+        if (outercross && !innercross) {
+          auto startX = ray.getPos(std::min(crsmax1, crsmax2), 0);
+          auto endX = ray.getPos(std::max(crsmax1, crsmax2), 0);
+          for (float x = startX - Delta; x <= endX + Delta; x += Delta) {   
+            addProp(x, y);
+          }
+        }
+        if (outercross && innercross) {
+          auto startX1 = ray.getPos(std::min(crsmax1, crsmax2), 0);
+          auto endX2 = ray.getPos(std::max(crsmax1, crsmax2), 0);
+
+          auto startX2 = ray.getPos(std::max(crsmin1, crsmin2), 0);
+          auto endX1 = ray.getPos(std::min(crsmin1, crsmin2), 0);
+          for (float x = startX1 - Delta; x <= endX1 + Delta; x += Delta) {   
+            addProp(x, y);
+          }
+          for (float x = startX2 - Delta; x <= endX2 + Delta; x += Delta) {   
+            addProp(x, y);
+          }
+        }
+      }
+    };
+    
+    auto estimateDimension = [this](int layerID) {
+      auto& layer = getLayer(layerID);
+      const auto Rlower = layer.getRMin();
+      const auto Rupper = layer.getRMax();
+      auto NSlices = layer.getNPhiSlices();
+      if (NSlices > 1) {
+        float deltaXMin = 1000000.;
+        float deltaYMin = 1000000.;
+        for (int slice = 0; slice < NSlices; ++slice) {
+          int binlower, binupper;
+          layer.getNPhiBinsInSlice(slice, binlower, binupper);
+          auto phiStart = layer.getPhiBinMin(binlower);
+          auto phiEnd = layer.getPhiBinMax(binupper);
+
+          auto y1 = Rlower * std::sin(phiStart);
+          auto x1 = Rlower * std::cos(phiStart);
+          auto y2 = Rupper * std::sin(phiStart);
+          auto x2 = Rupper * std::cos(phiStart);
+
+          auto y3 = Rlower * std::sin(phiEnd);
+          auto x3 = Rlower * std::cos(phiEnd);
+          auto y4 = Rupper * std::sin(phiEnd);
+          auto x4 = Rupper * std::cos(phiEnd);
+
+          deltaYMin = std::min(deltaYMin, std::abs(y4 - y1));
+          deltaXMin = std::min(deltaXMin, std::abs(x2 - x3));
+        }
+        auto dimX = int(Rupper / deltaXMin);
+        auto dimY = int(Rupper / deltaYMin);
+        // std::cout << " DeltaXMin " << deltaXMin << " " << " DeltaYMin " << deltaYMin << "\n";
+        // std::cout << dimX << " x " << dimY << "\n";
+        return std::pair<int, int>(std::min(1000,dimX), std::min(dimY,1000)); 
+      }
+      return std::pair<int, int>(1, 1); 
+    };
+
+    auto analysePhiLUTs = [](PhiLookup const& lookup) {
+       int count_void = 0;
+       int count_good = 0;
+       int count_bad = 0;
+       for (auto& val : lookup.phiStore2D) {
+          if (val == PhiLookup::UNITIALIZED) {
+            count_void++;
+          }
+          else if (val == PhiLookup::INVALID) {
+            count_bad++;
+          }
+          else {
+            count_good++;
+          }
+       }
+       std::cout << " good " << count_good << " bad " << count_bad << " ratio " << ( 1.*count_good ) / ( count_good + count_bad ) << " total " << count_good + count_bad + count_void << "\n";
+    };
+
+    auto& layer = getLayer(layerID);
+    if (layer.getNPhiSlices() == 1) {
+      // do trivial case of just 1 slice
+      mPhiLUTs[layerID] = new PhiLookup(layer.getRMax() + 0.1, 1, 1);
+    }
+    else if (layer.getNPhiSlices() >= PhiLookup::INVALID) {
+      // exclude cases requiring an encoding larger that uint8
+      return;
+    }
+    else {
+      auto dims = estimateDimension(layerID);
+      mPhiLUTs[layerID] = new PhiLookup(layer.getRMax() + 0.1, dims.first, dims.second);
+    }
+    if (mPhiLUTs[layerID]) {
+      determineVoxelSet(layer, (*mPhiLUTs[layerID]));
+      // analysePhiLUTs(*mPhiLUTs[layerID]);
+    }
+  };
+
+  // initialize all simple layer
+  for (int layerID = low; layerID <= std::min(up, getNLayers()); ++layerID) {
+    initPhiVoxelForLayer(layerID);
+  }
+
+}
+
 
 #endif
