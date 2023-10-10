@@ -13,9 +13,9 @@ set -x
 #    ALIBUILD_WORK_DIR="$ALIBUILD_WORK_DIR" 
 
 # PART a)
-./run-starlight.sh
+# ./run-starlight.sh
 
 # PART b)
 NEV=10
 o2-sim -j 4 -n ${NEV} -g hepmc -m PIPE ITS -o sim \
-       --configKeyValues "FileOrCmd.fileNames=starlight.hepmc;Diamond.position[2]=0.1;Diamond.width[2]=0.05"
+       --configKeyValues "FileOrCmd.cmd=${PWD}/starlight.sh;Diamond.position[2]=0.1;Diamond.width[2]=0.05"
