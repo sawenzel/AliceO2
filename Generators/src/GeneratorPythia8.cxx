@@ -196,6 +196,8 @@ Bool_t
   std::unique_ptr<Pythia8::Event> hadronLevelEvent;
   auto eventToRead = &event;
 
+  // event.list();
+
   // The right moment to filter out unwanted stuff (like parton-level event information)
   // Here, we aim to filter out everything before hadronization with the motivation to reduce the
   // size of the MC event record in the AOD.
@@ -213,9 +215,26 @@ Bool_t
       // we go from 1 since 0 is system as whole
       for (int i = 1; i < event.size(); ++i) {
         auto& p = event[i];
-        if (p.statusHepMC() == 1 || p.statusHepMC() == 2) {
-          filtered.push_back(p);
-          old_to_new[i] = filtered.size() - 1;
+        if ((p.statusHepMC() == 1 || p.statusHepMC() == 2) && old_to_new.find(i) == old_to_new.end()) {
+          std::deque<int> queue;
+          // start breath first traversal of children
+          queue.push_back(i);
+          while (queue.size() > 0) {
+            auto qid = queue.front();
+            queue.pop_front();
+            if (old_to_new.find(qid) == old_to_new.end()) {
+              filtered.push_back(event[qid]);
+              old_to_new[qid] = filtered.size() - 1;
+              // append children of qid to end of queue
+              for (auto child : event[qid].daughterList()) {
+                queue.push_back(child);
+              }
+            }
+            // append children of qid to end of queue
+            for (auto child : event[qid].daughterList()) {
+              queue.push_back(child);
+            }
+          }
         }
       }
 
@@ -231,9 +250,9 @@ Bool_t
       std::vector<int> childbuffer;
 
       // a lambda to check/assert size on children
-      auto checkChildrenSize = [&childbuffer](int expected) {
+      auto checkChildrenSize = [&childbuffer](std::string c, int expected) {
         if (expected != childbuffer.size()) {
-          LOG(error) << "Transcribed children list does not have expected size " << expected << " but " << childbuffer.size();
+          LOG(error) << c << " Transcribed children list does not have expected size " << expected << " but " << childbuffer.size();
         }
       };
 
@@ -260,22 +279,31 @@ Bool_t
         auto d2 = p.daughter2();
         if (d1 == 0 && d2 == 0) {
           // there is no offsprint --> nothing to do
-          checkChildrenSize(0);
+          checkChildrenSize("case 1" ,0);
         } else if (d1 == d2 && d1 != 0) {
           // carbon copy ... should not happend here
-          checkChildrenSize(1);
+          checkChildrenSize("case 2", 1);
           p.daughters(childbuffer[0], childbuffer[0]);
         } else if (d1 > 0 && d2 == 0) {
-          checkChildrenSize(1);
+          checkChildrenSize("case 3", 1);
           p.daughters(childbuffer[0], 0);
         } else if (d2 != 0 && d2 > d1) {
           // multiple decay products ... adjacent in the event
-          checkChildrenSize(d2 - d1 + 1);
-          p.daughters(lookupNew(d1), lookupNew(d2));
+          checkChildrenSize("case 4", d2 - d1 + 1);
+          try {
+            p.daughters(lookupNew(d1), lookupNew(d2));
+          } catch (std::exception) {
+            std::cout << "Exception looking up daughters for case 4\n";
+          }
         } else if (d2 != 0 && d2 < d1) {
           // 2 distinct products ... not adjacent to each other
-          checkChildrenSize(2);
-          p.daughters(lookupNew(d1), lookupNew(d2));
+          checkChildrenSize("case 5", 2);
+          try {
+            p.daughters(lookupNew(d1), lookupNew(d2));
+          }
+          catch (std::exception) {
+            std::cout << "Exception looking up daughters for case 5\n";
+          }
         }
 
         // fix mothers
@@ -308,11 +336,31 @@ Bool_t
           // so that all partons in this range should be considered mothers;
           // and analogously for abs(status) = 101 - 106, the formation of R-hadrons;
 
-          // here we simply delete the mothers
-          p.mothers(0, 0);
-          // verify that these shouldn't be in the list anyway
-          if (lookupNew(m1) != -1 || lookupNew(m2) != -1) {
-            LOG(warn) << "Indexing looks weird for primary hadron cases";
+          auto new1 = lookupNew(m1);
+          auto new2 = lookupNew(m2);
+          p.mothers(0, 0); // delete mothers
+          if (new1 != -1 && new2 != -1) {
+            p.mothers(new1, 0);
+            if (new2 - new1 != m2 - m1) {
+              LOG(warn) << "Distance not kept";
+            }
+            auto ok = (new2 > new1);
+            if (new2 - new1 > 1) {
+              // check that ALL indices in between new2 and new1 are there
+              for (int i = m1; i<= m2; ++i) {
+                ok &= lookupNew(i) != -1;
+              }
+            }
+            if (ok) {
+              p.mothers(new1, new2);
+            }
+            else {
+              LOG(warn) << "Particle had multiple mothers ... but they are not all kept / skipping mothers";
+              LOG(warn) << m1 << ":" << new1 << " " << m2 << ":" << new2 << "\n";
+            }
+          }
+          else if ((new1 == -1 && new2 != -1) || (new1 != -1 && new2 == -1)) {
+            LOG(warn) << "Indexing looks weird for primary hadron cases (one mother is zero)";
           }
         } else {
           LOG(warn) << "Unsupported / unexpected mother reindexing. Code needs more treatment";
