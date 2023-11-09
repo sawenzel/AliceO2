@@ -330,37 +330,37 @@ Bool_t
             p.mothers(0, 0);
           }
         } else if (m1 < m2 && m1 > 0) {
-          // mother1 < mother2, both > 0,
+          // mother1 < mother2, both > 0
+
+          // case "4":
           // case for abs(status) = 81 - 86: primary hadrons produced from
           // the fragmentation of a string spanning the range from mother1 to mother2,
           // so that all partons in this range should be considered mothers;
           // and analogously for abs(status) = 101 - 106, the formation of R-hadrons;
-
-          auto new1 = lookupNew(m1);
-          auto new2 = lookupNew(m2);
-          p.mothers(0, 0); // delete mothers
-          if (new1 != -1 && new2 != -1) {
-            p.mothers(new1, 0);
-            if (new2 - new1 != m2 - m1) {
-              LOG(warn) << "Distance not kept";
+          auto st = std::abs(p.status());
+          if ((81 <= st && st <= 86 || 101 <= st && st <= 106)) {
+            
+            auto new1 = lookupNew(m1);
+            auto new2 = lookupNew(m2);
+            p.mothers(0, 0); // delete mothers
+            if (new1 != -1 && new2 != -1) {
+              //p.mothers(std::min(new1, new2), std::max(new1, new2));
+              LOG(warn) << "Case 4 ... to be implemented ";
             }
-            auto ok = (new2 > new1);
-            if (new2 - new1 > 1) {
-              // check that ALL indices in between new2 and new1 are there
-              for (int i = m1; i<= m2; ++i) {
-                ok &= lookupNew(i) != -1;
-              }
-            }
-            if (ok) {
-              p.mothers(new1, new2);
-            }
-            else {
-              LOG(warn) << "Particle had multiple mothers ... but they are not all kept / skipping mothers";
-              LOG(warn) << m1 << ":" << new1 << " " << m2 << ":" << new2 << "\n";
-            }
+            // LOG(warn) << "Case 4 ... to be implemented ";
           }
-          else if ((new1 == -1 && new2 != -1) || (new1 != -1 && new2 == -1)) {
-            LOG(warn) << "Indexing looks weird for primary hadron cases (one mother is zero)";
+          else {
+            // case 5: mother1 < mother2, both > 0, except case 4: particles with two truly different mothers, in particular the particles emerging from a hard 2 → n interaction.
+            auto new1 = lookupNew(m1);
+            auto new2 = lookupNew(m2);
+            p.mothers(0, 0); // delete mothers
+            if (new1 != -1 && new2 != -1) {
+              LOG(warn) << "Case 5";
+              p.mothers(std::min(new1, new2), std::max(new1, new2));
+            } 
+            else if ((new1 == -1 && new2 != -1) || (new1 != -1 && new2 == -1)) {
+              LOG(warn) << "Indexing looks weird for primary hadron cases (one mother is zero)";
+            }
           }
         } else {
           LOG(warn) << "Unsupported / unexpected mother reindexing. Code needs more treatment";
