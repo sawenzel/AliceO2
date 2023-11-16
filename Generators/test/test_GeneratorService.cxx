@@ -26,11 +26,11 @@ BOOST_AUTO_TEST_CASE(boxgen_novertex)
   BOOST_CHECK(header.GetT() == 0);
 }
 
-BOOST_AUTO_TEST_CASE(pythia8pp_diamonvertex)   
+BOOST_AUTO_TEST_CASE(pythia8pp_diamonvertex)
 {
   // parameter to influence vertex position
   o2::conf::ConfigurableParam::updateFromString("Diamond.position[0]=1.1; Diamond.width[0]=0.");
-  
+
   GeneratorService service;
   // a pythia8 generator with vertex smearing coming from Diamond param
   service.initService("pythia8pp", o2::eventgen::DiamondParamVertexOption());
