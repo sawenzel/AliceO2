@@ -64,6 +64,7 @@ public:
     mEtaRangeIsSet = true;
   }
 
+
   /// generates a single particle conforming to particle gun parameters
   TParticle sampleParticle() const;
 
