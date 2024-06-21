@@ -25,16 +25,16 @@ struct GeneratorTask {
   // For readability to indicate where counting certain things (such as events or timeframes) should be of the same order of magnitude
   typedef uint64_t GenCount;
   std::string generator = "external"; //{"generator", "boxgen", "Name of generator"};
-  GenCount eventNum = 3; // {"nEvents", 1, "Number of events"};
-  std::string trigger = ""; //{"trigger", "", "Trigger type"}; //
+  GenCount eventNum = 3;              // {"nEvents", 1, "Number of events"};
+  std::string trigger = "";           //{"trigger", "", "Trigger type"}; //
   // std::string iniFile = "/home/swenzel/alisw/O2DPG/MC/config/ALICE3/ini/pythia8_pp_136tev.ini"; //{"configFile", "", "INI file containing configurable parameters"};
   std::string iniFile = "/home/swenzel/alisw/O2DPG/MC/config/PWGEM/ini/GeneratorEMCocktail.ini";
   std::string params = ""; // {"configKeyValues", "", "configurable params - configuring event generation internals"};
   long seed = 0;
   int aggregate = 10;
   std::string vtxModeArg = "kDiamondParam";
-  int64_t ttl = -1; // "time-limit", -1, "Maximum run time limit in seconds (default no limit)"};
-  std::string outputPrefix = "";// {"output", "", "Optional prefix for kinematics files written on disc. If non-empty, files <prefix>_Kine.root + <prefix>_MCHeader.root will be created."};
+  int64_t ttl = -1;              // "time-limit", -1, "Maximum run time limit in seconds (default no limit)"};
+  std::string outputPrefix = ""; // {"output", "", "Optional prefix for kinematics files written on disc. If non-empty, files <prefix>_Kine.root + <prefix>_MCHeader.root will be created."};
   GenCount nEvents = 0;
   GenCount eventCounter = 0;
   GenCount tfCounter = 0;
@@ -100,7 +100,7 @@ struct GeneratorTask {
       // pc.outputs().snapshot(Output{"MC", "MCHEADER", 0}, mcheader);
       // pc.outputs().snapshot(Output{"MC", "MCTRACKS", 0}, mctracks);
       LOG(info) << "generated " << mctracks.size() << " tracks";
-      std::copy(mctracks.begin(),mctracks.end(),std::back_inserter(accum));
+      std::copy(mctracks.begin(), mctracks.end(), std::back_inserter(accum));
       accumHeader.push_back(mcheader);
       ++eventCounter;
 
@@ -132,12 +132,13 @@ struct GeneratorTask {
       }
     }
   } // end run
-}; // end struct
+};  // end struct
 
-int main() {
+int main()
+{
   GeneratorTask task;
   task.init();
-  for (int i=0; i < task.eventNum/task.aggregate + 1; ++i) {
+  for (int i = 0; i < task.eventNum / task.aggregate + 1; ++i) {
     task.run();
   }
 }
