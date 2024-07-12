@@ -81,7 +81,7 @@ class DigitizationContext
 
   void setMuPerBC(float m) { mMuBC = m; }
   float getMuPerBC() const { return mMuBC; }
-  
+
   /// returns the main (hadronic interaction rate) associated to this digitization context
   float getCalculatedInteractionRate() const { return getMuPerBC() * getBunchFilling().getNBunches() * o2::constants::lhc::LHCRevFreq; }
 
@@ -154,7 +154,7 @@ class DigitizationContext
   }
 
   void setDigitizerInteractionRate(float intRate) { mDigitizerInteractionRate = intRate; }
-  float getDigitizerInteractionRate() const  { return mDigitizerInteractionRate; }
+  float getDigitizerInteractionRate() const { return mDigitizerInteractionRate; }
 
   std::vector<o2::ctp::CTPDigit> const* getCTPDigits() const { return mCTPTrigger; }
   bool hasTriggerInput() const { return mHasTrigger; }
@@ -195,7 +195,7 @@ class DigitizationContext
   // The value will be filled/inserted by the digitization workflow so that digiters can access it.
   // There is no guarantee that the value is available elsewhere.
   float mDigitizerInteractionRate{-1};
-                                             
+
   ClassDefNV(DigitizationContext, 6);
 };
 
