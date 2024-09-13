@@ -109,6 +109,12 @@ std::vector<long> findObjectsTSInPeriod(long start, long end, const o2::ccdb::Cc
 /// @return Pair with first and last time
 std::pair<uint64_t, uint64_t> findTSRange(TCanvas* qcQuality, bool selectBad = true)
 {
+  // Gets the plot with the quality flags
+  // The flag values are:
+  // Good: 3.5
+  // Medium: 2.5
+  // Bad: 1.5
+  // Null: 0.5
   auto* gr = static_cast<TGraph*>(qcQuality->GetListOfPrimitives()->FindObject("Graph"));
   double xp, yp;
   std::pair<uint64_t, uint64_t> range{std::numeric_limits<uint64_t>::max(), 0};
@@ -276,7 +282,7 @@ std::vector<o2::mid::ColumnData> build_rejectlist(long timestamp, const char* qc
   return build_rejectlist(timestamp, qcdbApi, ccdbApi, outCCDBApi);
 }
 
-/// @brief Builds the reject list iin a time range
+/// @brief Builds the reject list in a time range
 /// @param start Start time for query
 /// @param end End time for query
 /// @param qcdbUrl QCDB URL
