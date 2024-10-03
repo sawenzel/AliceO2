@@ -101,7 +101,7 @@ void Digitizer::process(const std::vector<o2::tpc::HitGroup>& hits,
 
       /// Loop over electrons
       for (int iEle = 0; iEle < nPrimaryElectrons; ++iEle) {
-
+       
         /// Drift and Diffusion
         const GlobalPosition3D posEleDiff = electronTransport.getElectronDrift(posEle, driftTime);
         const float eleTime = driftTime + hitTime; /// in us
@@ -111,6 +111,13 @@ void Digitizer::process(const std::vector<o2::tpc::HitGroup>& hits,
         }
         const float absoluteTime = eleTime + mTDriftOffset + (mEventTime - mOutputDigitTimeOffset); /// in us
 
+     
+        /// the absolute time needs to be within the readout limits
+        /// (otherwise negative times would all be accumulated in the 0-th timebin further below)
+        if ( ! (absoluteTime >= 0 /* && absoluteTime <= timeframelength */ ) ) {
+          continue;
+        }
+        
         /// Attachment
         if (electronTransport.isElectronAttachment(driftTime)) {
           continue;
@@ -217,9 +224,14 @@ void Digitizer::setUseSCDistortions(std::string_view finp)
 
 void Digitizer::setStartTime(double time)
 {
+  // this is setting the first timebin index for the digit container
+  // note that negative times w.r.t start of timeframe/data-taking == mOutputDigitTimeOffset
+  // will yield the 0-th bin (due to casting logic in sampaProcessing)
   SAMPAProcessing& sampaProcessing = SAMPAProcessing::instance();
   sampaProcessing.updateParameters(mVDrift);
-  mDigitContainer.setStartTime(sampaProcessing.getTimeBinFromTime(time - mOutputDigitTimeOffset));
+  const auto timediff = time - mOutputDigitTimeOffset;
+  const auto starttimebin = sampaProcessing.getTimeBinFromTime(timediff);
+  mDigitContainer.setStartTime(starttimebin);
 }
 
 void Digitizer::setLumiScaleFactor()
