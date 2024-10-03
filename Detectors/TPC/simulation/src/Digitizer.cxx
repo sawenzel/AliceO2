@@ -101,7 +101,7 @@ void Digitizer::process(const std::vector<o2::tpc::HitGroup>& hits,
 
       /// Loop over electrons
       for (int iEle = 0; iEle < nPrimaryElectrons; ++iEle) {
-       
+
         /// Drift and Diffusion
         const GlobalPosition3D posEleDiff = electronTransport.getElectronDrift(posEle, driftTime);
         const float eleTime = driftTime + hitTime; /// in us
@@ -111,13 +111,12 @@ void Digitizer::process(const std::vector<o2::tpc::HitGroup>& hits,
         }
         const float absoluteTime = eleTime + mTDriftOffset + (mEventTime - mOutputDigitTimeOffset); /// in us
 
-     
         /// the absolute time needs to be within the readout limits
         /// (otherwise negative times would all be accumulated in the 0-th timebin further below)
-        if ( ! (absoluteTime >= 0 /* && absoluteTime <= timeframelength */ ) ) {
+        if (!(absoluteTime >= 0 /* && absoluteTime <= timeframelength */)) {
           continue;
         }
-        
+
         /// Attachment
         if (electronTransport.isElectronAttachment(driftTime)) {
           continue;
