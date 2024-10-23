@@ -263,6 +263,26 @@ void TrackMCStudy::process(const o2::globaltracking::RecoContainer& recoData)
     return -1;
   };
 
+  auto flagTPCClusters = [&recoData](const o2::tpc::TrackTPC& trc, o2::MCCompLabel lbTrc) {
+    if (recoData.inputsTPCclusters) {
+      const auto clRefs = recoData.getTPCTracksClusterRefs();
+      const auto* TPCClMClab = recoData.inputsTPCclusters->clusterIndex.clustersMCTruth;
+      const auto& TPCClusterIdxStruct = recoData.inputsTPCclusters->clusterIndex;
+      for (int ic = 0; ic < trc.getNClusterReferences(); ic++) {
+        uint8_t clSect = 0, clRow = 0;
+        uint32_t clIdx = 0;
+        trc.getClusterReference(clRefs, ic, clSect, clRow, clIdx);
+        auto labels = TPCClMClab->getLabels(clIdx + TPCClusterIdxStruct.clusterOffset[clSect][clRow]);
+        for (auto& lbl : labels) {
+          if (lbl == lbTrc) {
+            const_cast<o2::MCCompLabel&>(lbl).setFakeFlag(true); // actually, in this way we are flagging that this cluster was correctly attached
+            break;
+          }
+        }
+      }
+    }
+  };
+
   {
     const auto* digconst = mcReader.getDigitizationContext();
     const auto& mcEvRecords = digconst->getEventRecords(false);
@@ -421,13 +441,11 @@ void TrackMCStudy::process(const o2::globaltracking::RecoContainer& recoData)
     }
   }
 
-  // collect ITS/TPC cluster info for selected MC particles
-  if (params.minTPCRefsToExtractClRes > 0) {
+  LOGP(info, "collected {} MC tracks", mSelMCTracks.size());
+  if (params.minTPCRefsToExtractClRes > 0) { // prepare MC trackrefs for TPC
     processTPCTrackRefs();
   }
-  fillMCClusterInfo(recoData);
 
-  LOGP(info, "collected {} MC tracks", mSelMCTracks.size());
   int mcnt = 0;
   for (auto& entry : mSelMCTracks) {
     auto& trackFam = entry.second;
@@ -489,6 +507,7 @@ void TrackMCStudy::process(const o2::globaltracking::RecoContainer& recoData)
           const auto& trtpc = recoData.getTPCTrack(gidSet[GTrackID::TPC]);
           tref.nClTPC = trtpc.getNClusters();
           tref.lowestPadRow = getLowestPadrow(trtpc);
+          flagTPCClusters(trtpc, entry.first);
           if (trackFam.entTPC < 0) {
             trackFam.entTPC = tcnt;
             trackFam.tpcT0 = trtpc.getTime0();
@@ -533,6 +552,10 @@ void TrackMCStudy::process(const o2::globaltracking::RecoContainer& recoData)
     auto& trackFam = entry.second;
     (*mDBGOut) << "tracks" << "tr=" << trackFam << "\n";
   }
+
+  // collect ITS/TPC cluster info for selected MC particles
+  fillMCClusterInfo(recoData);
+
   // decays
   std::vector<TrackFamily> decFam;
   for (int id = 0; id < mNCheckDecays; id++) {
@@ -620,6 +643,8 @@ void TrackMCStudy::fillMCClusterInfo(const o2::globaltracking::RecoContainer& re
   const auto& TPCClusterIdxStruct = recoData.inputsTPCclusters->clusterIndex;
   const auto* TPCClMClab = recoData.inputsTPCclusters->clusterIndex.clustersMCTruth;
   const auto& params = o2::trackstudy::TrackMCStudyConfig::Instance();
+
+  ClResTPC clRes{};
   for (uint8_t sector = 0; sector < 36; sector++) {
     for (uint8_t row = 0; row < 152; row++) {
       unsigned int offs = TPCClusterIdxStruct.clusterOffset[sector][row];
@@ -632,7 +657,12 @@ void TrackMCStudy::fillMCClusterInfo(const o2::globaltracking::RecoContainer& re
           }
           ncontLb++;
         }
-        for (const auto& lbl : labels) {
+        const auto& clus = TPCClusterIdxStruct.clusters[sector][row][icl0];
+        clRes.contTracks.clear();
+        bool doClusRes = (params.minTPCRefsToExtractClRes > 0) && (params.rejectClustersResStat <= 0. || gRandom->Rndm() < params.rejectClustersResStat);
+        for (auto lbl : labels) {
+          bool corrAttach = lbl.isFake(); // was this flagged in the flagTPCClusters called from process ?
+          lbl.setFakeFlag(false);
           auto entry = mSelMCTracks.find(lbl);
           if (entry == mSelMCTracks.end()) { // not selected
             continue;
@@ -654,29 +684,29 @@ void TrackMCStudy::fillMCClusterInfo(const o2::globaltracking::RecoContainer& re
             mctr.nTPCClShared++;
           }
           // try to extract ideal track position
-          if (params.minTPCRefsToExtractClRes > 0) {
+          if (doClusRes) {
             auto entTRefIDsIt = mSelTRefIdx.find(lbl);
             if (entTRefIDsIt == mSelTRefIdx.end()) {
               continue;
             }
+            float xc, yc, zc;
+            mTPCCorrMapsLoader.Transform(sector, row, clus.getPad(), clus.getTime(), xc, yc, zc, mctr.bcInTF / 8.); // nominal time of the track
+
             const auto& entTRefIDs = entTRefIDsIt->second;
             // find bracketing TRef params
             int entIDBelow = -1, entIDAbove = -1;
             float xBelow = -1e6, xAbove = 1e6;
-            const auto& clus = TPCClusterIdxStruct.clusters[sector][row][icl0];
-            float xc, yc, zc;
-            mTPCCorrMapsLoader.Transform(sector, row, clus.getPad(), clus.getTime(), xc, yc, zc, mctr.bcInTF / 8.); // nominal time of the track
 
             for (int entID = entTRefIDs.first; entID < entTRefIDs.second; entID++) {
               const auto& refTr = mSelTRefs[entID];
               if (refTr.getUserField() != sector % 18) {
                 continue;
               }
-              if (refTr.getX() < xc && refTr.getX() > xBelow && refTr.getX() > xc - params.maxTPCRefExtrap) {
+              if ((refTr.getX() < xc) && (refTr.getX() > xBelow) && (refTr.getX() > xc - params.maxTPCRefExtrap)) {
                 xBelow = refTr.getX();
                 entIDBelow = entID;
               }
-              if (refTr.getX() > xc && refTr.getX() < xAbove && refTr.getX() < xc + params.maxTPCRefExtrap) {
+              if ((refTr.getX() > xc) && (refTr.getX() < xAbove) && (refTr.getX() < xc + params.maxTPCRefExtrap)) {
                 xAbove = refTr.getX();
                 entIDAbove = entID;
               }
@@ -688,41 +718,52 @@ void TrackMCStudy::fillMCClusterInfo(const o2::globaltracking::RecoContainer& re
             o2::track::TrackPar tparAbove, tparBelow;
             bool okBelow = entIDBelow >= 0 && prop->PropagateToXBxByBz((tparBelow = mSelTRefs[entIDBelow]), xc, 0.99, 2.);
             bool okAbove = entIDAbove >= 0 && prop->PropagateToXBxByBz((tparAbove = mSelTRefs[entIDAbove]), xc, 0.99, 2.);
-            if ((!okBelow && !okAbove) || (params.requireTopBottomRefs && (!okBelow || !okAbove)) || (params.rejectClustersResStat > 0. && gRandom->Rndm() < params.rejectClustersResStat)) {
+            if ((!okBelow && !okAbove) || (params.requireTopBottomRefs && (!okBelow || !okAbove))) {
               continue;
             }
-            ClResTPC clRes{};
 
             int nmeas = 0;
+            auto& clCont = clRes.contTracks.emplace_back();
+            clCont.corrAttach = corrAttach;
             if (okBelow) {
-              clRes.below = {mSelTRefs[entIDBelow].getX(), tparBelow.getY(), tparBelow.getZ()};
-              clRes.snp += tparBelow.getSnp();
-              clRes.tgl += tparBelow.getTgl();
+              clCont.below = {mSelTRefs[entIDBelow].getX(), tparBelow.getY(), tparBelow.getZ()};
+              clCont.snp += tparBelow.getSnp();
+              clCont.tgl += tparBelow.getTgl();
+              clCont.q2pt += tparBelow.getQ2Pt();
               nmeas++;
             }
             if (okAbove) {
-              clRes.above = {mSelTRefs[entIDAbove].getX(), tparAbove.getY(), tparAbove.getZ()};
-              clRes.snp += tparAbove.getSnp();
-              clRes.tgl += tparBelow.getTgl();
+              clCont.above = {mSelTRefs[entIDAbove].getX(), tparAbove.getY(), tparAbove.getZ()};
+              clCont.snp += tparAbove.getSnp();
+              clCont.tgl += tparAbove.getTgl();
+              clCont.q2pt += tparAbove.getQ2Pt();
               nmeas++;
             }
             if (nmeas) {
-              if (nmeas > 1) {
-                clRes.snp *= 0.5;
-                clRes.tgl *= 0.5;
+              if (clRes.contTracks.size() == 1) {
+                int occBin = mctr.bcInTF / 8 * mNTPCOccBinLengthInv;
+                clRes.occ = occBin < 0 ? mTBinClOcc[0] : (occBin >= mTBinClOcc.size() ? mTBinClOcc.back() : mTBinClOcc[occBin]);
               }
-              clRes.clPos = {xc, yc, zc};
-              clRes.sect = sector;
-              clRes.row = row;
-              clRes.qtot = clus.getQtot();
-              clRes.qmax = clus.getQmax();
-              clRes.flags = clus.getFlags();
-              clRes.ncont = ncontLb;
-              int occBin = mctr.bcInTF / 8 * mNTPCOccBinLengthInv;
-              clRes.occ = occBin < 0 ? mTBinClOcc[0] : (occBin >= mTBinClOcc.size() ? mTBinClOcc.back() : mTBinClOcc[occBin]);
-              (*mDBGOut) << "clres" << "clr=" << clRes << "\n";
+              clCont.xyz = {xc, yc, zc};
+              if (nmeas > 1) {
+                clCont.snp *= 0.5;
+                clCont.tgl *= 0.5;
+                clCont.q2pt *= 0.5;
+              }
+            } else {
+              clRes.contTracks.pop_back();
             }
           }
+        }
+        if (clRes.getNCont()) {
+          clRes.sect = sector;
+          clRes.row = row;
+          clRes.qtot = clus.getQtot();
+          clRes.qmax = clus.getQmax();
+          clRes.flags = clus.getFlags();
+          clRes.ncont = ncontLb;
+          clRes.sortCont();
+          (*mDBGOut) << "clres" << "clr=" << clRes << "\n";
         }
       }
     }

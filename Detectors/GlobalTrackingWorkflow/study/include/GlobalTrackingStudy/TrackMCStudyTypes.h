@@ -20,6 +20,7 @@
 #include "CommonDataFormat/TimeStamp.h"
 #include "ReconstructionDataFormats/PrimaryVertex.h"
 #include <array>
+#include <vector>
 
 namespace o2::trackstudy
 {
@@ -112,24 +113,20 @@ struct TrackFamily { // set of tracks related to the same MC label
   ClassDefNV(TrackFamily, 1);
 };
 
-struct ClResTPC {
-  uint8_t sect = 0;
-  uint8_t row = 0;
-  uint8_t ncont = 0;
-  uint8_t flags = 0;
-  float snp = 0;
-  float tgl = 0;
-  float qmax = 0;
-  float qtot = 0;
-  float occ = 0;
-  std::array<float, 3> clPos{};
+struct ClResTPCCont {
+  // contributor to TPC Cluster
+  std::array<float, 3> xyz{};
   std::array<float, 3> below{};
   std::array<float, 3> above{};
+  float snp = 0.;
+  float tgl = 0.;
+  float q2pt = 0.;
+  bool corrAttach = false;
 
-  int getNExt() const { return below[0] > 1. + above[0] > 1.; }
+  int getNExt() const { return (below[0] > 1.) + (above[0] > 1.); }
 
-  float getDY() const { return clPos[1] - getYRef(); }
-  float getDZ() const { return clPos[2] - getZRef(); }
+  float getDY() const { return xyz[1] - getYRef(); }
+  float getDZ() const { return xyz[2] - getZRef(); }
 
   float getYRef() const
   {
@@ -165,15 +162,62 @@ struct ClResTPC {
   {
     float adxA = 1e9, adxB = 1e9;
     if (above[0] > 1.) {
-      adxA = clPos[0] - above[0];
+      adxA = xyz[0] - above[0];
     }
     if (below[0] > 1.) {
-      adxB = clPos[0] - below[0];
+      adxB = xyz[1] - below[0];
     }
     return std::abs(adxA) < std::abs(adxB) ? adxA : adxB;
   }
 
-  ClassDefNV(ClResTPC, 1);
+  float getDXMax() const
+  {
+    float adxA = 0, adxB = 0;
+    if (above[0] > 1.) {
+      adxA = xyz[0] - above[0];
+    }
+    if (below[0] > 1.) {
+      adxB = xyz[0] - below[0];
+    }
+    return std::abs(adxA) > std::abs(adxB) ? adxA : adxB;
+  }
+
+  float getEY() const { return getNExt() > 1 ? below[1] - above[1] : -999; }
+  float getEZ() const { return getNExt() > 1 ? below[2] - above[2] : -999; }
+
+  ClassDefNV(ClResTPCCont, 1);
+};
+
+struct ClResTPC {
+  uint8_t sect = 0;
+  uint8_t row = 0;
+  uint8_t ncont = 0;
+  uint8_t flags = 0;
+  float qmax = 0;
+  float qtot = 0;
+  float occ = 0;
+
+  std::vector<ClResTPCCont> contTracks;
+  int getNCont() const { return contTracks.size(); }
+
+  float getDY(int i) const { return i < getNCont() ? contTracks[i].getDY() : -999.; }
+  float getDZ(int i) const { return i < getNCont() ? contTracks[i].getDZ() : -999.; }
+  float getYRef(int i) const { return i < getNCont() ? contTracks[i].getYRef() : -999.; }
+  float getZRef(int i) const { return i < getNCont() ? contTracks[i].getZRef() : -999.; }
+  float getDXMin(int i) const { return i < getNCont() ? contTracks[i].getDXMin() : -999.; }
+  float getDXMax(int i) const { return i < getNCont() ? contTracks[i].getDXMax() : -999.; }
+  float getEY(int i) const { return i < getNCont() ? contTracks[i].getEY() : -999.; }
+  float getEZ(int i) const { return i < getNCont() ? contTracks[i].getEZ() : -999.; }
+
+  void sortCont()
+  {
+    std::sort(contTracks.begin(), contTracks.end(), [](const ClResTPCCont& a, const ClResTPCCont& b) {
+      float dya = a.getDY(), dyb = b.getDY(), dza = a.getDZ(), dzb = b.getDZ();
+      return dya * dya + dza * dza < dyb * dyb + dzb * dzb;
+    });
+  }
+
+  ClassDefNV(ClResTPC, 2);
 };
 
 struct RecPV {
