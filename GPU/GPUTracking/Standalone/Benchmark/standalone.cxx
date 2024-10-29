@@ -53,7 +53,9 @@
 #include "GPUTPCGMMergedTrack.h"
 #include "GPUSettings.h"
 #include <vector>
+#if not(defined(__ARM_NEON) or defined(__aarch64__)) // ARM doesn't have SSE
 #include <xmmintrin.h>
+#endif
 
 #include "GPUO2DataTypes.h"
 #ifdef GPUCA_HAVE_O2HEADERS
