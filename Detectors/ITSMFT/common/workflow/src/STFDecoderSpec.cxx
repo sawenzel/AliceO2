@@ -406,9 +406,9 @@ DataProcessorSpec getSTFDecoderSpec(const STFDecoderInp& inp)
   }
   inputs.emplace_back("noise", inp.origin, "NOISEMAP", 0, Lifetime::Condition,
                       o2::framework::ccdbParamSpec(fmt::format("{}/Calib/NoiseMap", inp.origin.as<std::string>())));
+  inputs.emplace_back("alppar", inp.origin, "ALPIDEPARAM", 0, Lifetime::Condition, ccdbParamSpec(fmt::format("{}/Config/AlpideParam", inp.origin.as<std::string>())));
   if (inp.doClusters) {
     inputs.emplace_back("cldict", inp.origin, "CLUSDICT", 0, Lifetime::Condition, ccdbParamSpec(fmt::format("{}/Calib/ClusterDictionary", inp.origin.as<std::string>())));
-    inputs.emplace_back("alppar", inp.origin, "ALPIDEPARAM", 0, Lifetime::Condition, ccdbParamSpec(fmt::format("{}/Config/AlpideParam", inp.origin.as<std::string>())));
     inputs.emplace_back("cluspar", inp.origin, "CLUSPARAM", 0, Lifetime::Condition, ccdbParamSpec(fmt::format("{}/Config/ClustererParam", inp.origin.as<std::string>())));
   }
 
