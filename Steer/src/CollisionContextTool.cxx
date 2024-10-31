@@ -226,8 +226,8 @@ bool parseOptions(int argc, char* argv[], Options& optvalues)
 
     // fix the first orbit and bunch crossing
     // auto orbitbcpair = parseOrbitAndBC(optvalues.firstIRString);
-    optvalues.firstOrbit = (uint32_t) optvalues.firstFractionalOrbit;
-    optvalues.firstBC = (uint32_t) ((optvalues.firstFractionalOrbit - 1.*optvalues.firstOrbit) * o2::constants::lhc::LHCMaxBunches);
+    optvalues.firstOrbit = (uint32_t)optvalues.firstFractionalOrbit;
+    optvalues.firstBC = (uint32_t)((optvalues.firstFractionalOrbit - 1. * optvalues.firstOrbit) * o2::constants::lhc::LHCMaxBunches);
     LOG(info) << "First orbit " << optvalues.firstOrbit;
     LOG(info) << "First BC " << optvalues.firstBC;
 
