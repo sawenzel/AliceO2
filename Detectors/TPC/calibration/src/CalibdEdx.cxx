@@ -327,6 +327,45 @@ auto ProjectBoostHistoXFast(const Hist& hist, std::vector<int>& bin_indices, int
   return histoProj;
 }
 
+template <typename Hist>
+auto ProjectBoostHistoXFastAllSectors(const Hist& hist, std::vector<int>& bin_indices, StackID id, const CalibdEdxCorrection* stackMean)
+{
+  // get an average histogram over all stacks of the same type
+  using ax = CalibdEdx::Axis;
+  const unsigned int nbinsdedx = hist.axis(ax::dEdx).size();
+  const double binStartX = hist.axis(ax::dEdx).bin(0).lower();
+  const double binEndX = hist.axis(ax::dEdx).bin(nbinsdedx - 1).upper();
+
+  // make fine histogram to be able to correctly store normalized dEdx values
+  auto histoProj = boost::histogram::make_histogram(CalibdEdx::FloatAxis(nbinsdedx, binStartX, binEndX));
+
+  // loop over sectors for merging the histograms
+  for (int iSec = 0; iSec < hist.axis(ax::Sector).size(); ++iSec) {
+    bin_indices[ax::Sector] = iSec;
+    id.sector = static_cast<int>(hist.axis(ax::Sector).bin(iSec).center());
+
+    // loop over all bins of the requested axis
+    for (int i = 0; i < nbinsdedx; ++i) {
+      // setting bin of the requested axis
+      bin_indices[ax::dEdx] = i;
+
+      // access the bin content specified by bin_indices
+      const float counts = hist.at(bin_indices);
+      float dEdx = hist.axis(ax::dEdx).value(i);
+
+      // scale the dedx to the mean
+      if (stackMean != nullptr) {
+        const auto charge = static_cast<ChargeType>(bin_indices[ax::Charge]);
+        dEdx /= stackMean->getCorrection(id, charge);
+      }
+
+      // fill the histogram with dedx as the bin center and the counts as the weight
+      histoProj(dEdx, bh::weight(counts));
+    }
+  }
+  return histoProj;
+}
+
 void CalibdEdx::fitHistGaus(TLinearFitter& fitter, CalibdEdxCorrection& corr, const CalibdEdxCorrection* stackMean)
 {
   using timer = std::chrono::high_resolution_clock;
@@ -335,7 +374,8 @@ void CalibdEdx::fitHistGaus(TLinearFitter& fitter, CalibdEdxCorrection& corr, co
   const bool projSectors = stackMean != nullptr;
   constexpr int sectors = SECTORSPERSIDE * SIDES;
   for (int iSnp = 0; iSnp < mHist.axis(ax::Snp).size(); ++iSnp) {
-    for (int iSec = 0; iSec < mHist.axis(ax::Sector).size(); ++iSec) {
+    const int iSecEnd = projSectors ? 1 : mHist.axis(ax::Sector).size();
+    for (int iSec = 0; iSec < iSecEnd; ++iSec) {
       for (int iStack = 0; iStack < mHist.axis(ax::Stack).size(); ++iStack) {
         for (int iCharge = 0; iCharge < mHist.axis(ax::Charge).size(); ++iCharge) {
 
@@ -359,7 +399,7 @@ void CalibdEdx::fitHistGaus(TLinearFitter& fitter, CalibdEdxCorrection& corr, co
             bin_indices[ax::Charge] = iCharge;
 
             for (int iter = 0; iter < 2; ++iter) {
-              auto boostHist1d = ProjectBoostHistoXFast(mHist, bin_indices, ax::dEdx);
+              auto boostHist1d = projSectors ? ProjectBoostHistoXFastAllSectors(mHist, bin_indices, id, stackMean) : ProjectBoostHistoXFast(mHist, bin_indices, ax::dEdx);
 
               float lowerCut = 0;
               float upperCut = 0;
@@ -397,11 +437,6 @@ void CalibdEdx::fitHistGaus(TLinearFitter& fitter, CalibdEdxCorrection& corr, co
                 double inputs[] = {
                   CalibdEdx::recoverTgl(mHist.axis(ax::Tgl).bin(iTgl).center(), id.type),
                   mHist.axis(ax::Snp).bin(iSnp).center()};
-
-                // scale fitted dEdx using the stacks mean
-                if (stackMean != nullptr) {
-                  dEdx /= stackMean->getCorrection(id, charge);
-                }
 
                 const auto fitNPoints = fitValues[3];
                 const float sigma = fitValues[2];
@@ -445,6 +480,7 @@ void CalibdEdx::fitHistGaus(TLinearFitter& fitter, CalibdEdxCorrection& corr, co
                                           << "iter=" << iter
                                           << "mSigmaLower=" << mSigmaLower
                                           << "mSigmaUpper=" << mSigmaUpper
+                                          << "projSectors=" << projSectors
                                           << "\n";
                 }
               } catch (o2::utils::FitGausError_t err) {
@@ -530,14 +566,12 @@ void CalibdEdx::finalize(const bool useGausFits)
     meanCorr.setDims(0);
     TLinearFitter meanFitter(0);
     meanFitter.SetFormula("1");
+    // get the mean dEdx for each stack
+    fitHist(mHist, meanCorr, meanFitter, mFitCut, mFitLowCutFactor, mFitPasses);
     if (!useGausFits) {
-      fitHist(mHist, meanCorr, meanFitter, mFitCut, mFitLowCutFactor, mFitPasses);
-
       // get higher dimension corrections with projected sectors
-      fitHist(mHist, mCalib, fitter, mFitCut, mFitLowCutFactor, mFitPasses, &meanCorr);
+      fitHist(mHist, mCalib, fitter, mFitCut, mFitLowCutFactor, mFitPasses, &meanCorr, mDebugOutputStreamer.get());
     } else {
-      fitHistGaus(meanFitter, meanCorr, nullptr);
-
       // get higher dimension corrections with projected sectors
       fitHistGaus(fitter, mCalib, &meanCorr);
     }
