@@ -58,6 +58,7 @@ HBFUtilsInitializer::HBFUtilsInitializer(const o2f::ConfigContext& configcontext
       bool helpasked = configcontext.helpOnCommandLine(); // if help is asked, don't take for granted that the ini file is there, don't produce an error if it is not!
       auto conf = configcontext.options().isSet(HBFConfOpt) ? configcontext.options().get<std::string>(HBFConfOpt) : "";
       if (!conf.empty()) {
+        int nopts = 0;
         auto vopts = o2::utils::Str::tokenize(conf, ',');
         for (const auto& optStr : vopts) {
           if (optStr == UpstreamOpt) {
@@ -65,6 +66,7 @@ HBFUtilsInitializer::HBFUtilsInitializer(const o2f::ConfigContext& configcontext
             continue;
           }
           HBFOpt opt = getOptType(optStr);
+          nopts++;
           if ((opt == HBFOpt::INI || opt == HBFOpt::JSON) && !helpasked) {
             o2::conf::ConfigurableParam::updateFromFile(optStr, "HBFUtils", true); // update only those values which were not touched yet (provenance == kCODE)
             const auto& hbfu = o2::raw::HBFUtils::Instance();
@@ -76,7 +78,12 @@ HBFUtilsInitializer::HBFUtilsInitializer(const o2f::ConfigContext& configcontext
             hbfuInput = optStr;
           } else if (opt == HBFOpt::ROOT) {
             rootFileInput = optStr;
+          } else {
+            LOGP(fatal, "uknown hbfutils-config option {}", optStr);
           }
+        }
+        if (!nopts && !helpasked) {
+          LOGP(fatal, "No source was provided for timing input of --hbfutils-config");
         }
       }
       done = true;
