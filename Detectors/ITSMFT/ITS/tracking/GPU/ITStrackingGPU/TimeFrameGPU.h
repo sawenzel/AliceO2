@@ -52,22 +52,28 @@ class TimeFrameGPU : public TimeFrame
   void initDevice(IndexTableUtils*, const TrackingParameters& trkParam, const TimeFrameGPUParameters&, const int, const int);
   void initDeviceSAFitting();
   void loadTrackingFrameInfoDevice(const int);
-  void loadUnsortedClustersDevice();
-  void loadClustersDevice();
+  void loadUnsortedClustersDevice(const int);
+  void loadClustersDevice(const int);
   void loadTrackletsDevice();
+  void loadTrackletsLUTDevice();
   void loadCellsDevice();
-  void loadCellsLUT();
+  void loadCellsLUTDevice();
   void loadTrackSeedsDevice();
   void loadTrackSeedsChi2Device();
   void loadRoadsDevice();
   void loadTrackSeedsDevice(std::vector<CellSeed>&);
+  void createCellsBuffers(const int);
+  void createCellsDevice();
+  void createCellsLUTDevice();
+  void createNeighboursDevice();
   void createNeighboursDevice(const unsigned int& layer, std::vector<std::pair<int, int>>& neighbours);
   void createNeighboursLUTDevice(const int, const unsigned int);
   void createTrackITSExtDevice(std::vector<CellSeed>&);
   void downloadTrackITSExtDevice(std::vector<CellSeed>&);
-  void downloadCellsNeighbours(std::vector<std::vector<std::pair<int, int>>>&, const int);
-  void downloadNeighboursLUT(std::vector<int>&, const int);
-  void downloadCellsDevice(const int);
+  void downloadCellsNeighboursDevice(std::vector<std::vector<std::pair<int, int>>>&, const int);
+  void downloadNeighboursLUTDevice(std::vector<int>&, const int);
+  void downloadCellsDevice();
+  void downloadCellsLUTDevice();
   void unregisterRest();
   void initDeviceChunks(const int, const int);
   template <Task task>
@@ -98,11 +104,11 @@ class TimeFrameGPU : public TimeFrame
   int* getDeviceNeighboursLUT(const int layer) { return mNeighboursLUTDevice[layer]; }
   gpuPair<int, int>* getDeviceNeighbours(const int layer) { return mNeighboursDevice[layer]; }
   TrackingFrameInfo* getDeviceTrackingFrameInfo(const int);
-  // TrackingFrameInfo** getDeviceArrayTrackingFrameInfo() { return mTrackingFrameInfoDeviceArray; }
   const TrackingFrameInfo** getDeviceArrayTrackingFrameInfo() const { return mTrackingFrameInfoDeviceArray; }
-  Cluster** getDeviceArrayClusters() const { return mClustersDeviceArray; }
-  Cluster** getDeviceArrayUnsortedClusters() const { return mUnsortedClustersDeviceArray; }
-  Tracklet** getDeviceArrayTracklets() const { return mTrackletsDeviceArray; }
+  const Cluster** getDeviceArrayClusters() const { return mClustersDeviceArray; }
+  const Cluster** getDeviceArrayUnsortedClusters() const { return mUnsortedClustersDeviceArray; }
+  const Tracklet** getDeviceArrayTracklets() const { return mTrackletsDeviceArray; }
+  const int** getDeviceArrayTrackletsLUT() const { return mTrackletsLUTDeviceArray; }
   int** getDeviceArrayCellsLUT() const { return mCellsLUTDeviceArray; }
   int** getDeviceArrayNeighboursCellLUT() const { return mNeighboursCellLUTDeviceArray; }
   CellSeed** getDeviceArrayCells() const { return mCellsDeviceArray; }
@@ -117,12 +123,20 @@ class TimeFrameGPU : public TimeFrame
   gsl::span<int> getHostNTracklets(const int chunkId);
   gsl::span<int> getHostNCells(const int chunkId);
 
+  // Host-available device getters
+  gsl::span<int*> getDeviceCellLUTs() { return mCellsLUTDevice; }
+  gsl::span<CellSeed*> getDeviceCells() { return mCellsDevice; }
+  gsl::span<int, nLayers - 2> getNCellsDevice() { return mNCells; }
+
  private:
   void allocMemAsync(void**, size_t, Stream*, bool); // Abstract owned and unowned memory allocations
   bool mHostRegistered = false;
   std::vector<GpuTimeFrameChunk<nLayers>> mMemChunks;
   TimeFrameGPUParameters mGpuParams;
   StaticTrackingParameters<nLayers> mStaticTrackingParams;
+
+  // Host-available device buffer sizes
+  std::array<int, nLayers - 2> mNCells;
 
   // Device pointers
   StaticTrackingParameters<nLayers>* mTrackingParamsDevice;
@@ -135,12 +149,15 @@ class TimeFrameGPU : public TimeFrame
   // Hybrid pref
   std::array<Cluster*, nLayers> mClustersDevice;
   std::array<Cluster*, nLayers> mUnsortedClustersDevice;
-  Cluster** mClustersDeviceArray;
-  Cluster** mUnsortedClustersDeviceArray;
+  const Cluster** mClustersDeviceArray;
+  const Cluster** mUnsortedClustersDeviceArray;
   std::array<Tracklet*, nLayers - 1> mTrackletsDevice;
-  Tracklet** mTrackletsDeviceArray;
+  const Tracklet** mTrackletsDeviceArray;
+  const int** mTrackletsLUTDeviceArray;
+  std::array<int*, nLayers - 2> mTrackletsLUTDevice;
   std::array<int*, nLayers - 2> mCellsLUTDevice;
   std::array<int*, nLayers - 3> mNeighboursLUTDevice;
+
   int** mCellsLUTDeviceArray;
   int** mNeighboursCellDeviceArray;
   int** mNeighboursCellLUTDeviceArray;

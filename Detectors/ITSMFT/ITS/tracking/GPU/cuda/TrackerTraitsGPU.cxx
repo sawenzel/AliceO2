@@ -29,6 +29,8 @@ template <int nLayers>
 void TrackerTraitsGPU<nLayers>::initialiseTimeFrame(const int iteration)
 {
   mTimeFrameGPU->initialise(iteration, mTrkParams[iteration], nLayers);
+  mTimeFrameGPU->loadClustersDevice(iteration);
+  mTimeFrameGPU->loadUnsortedClustersDevice(iteration);
   mTimeFrameGPU->loadTrackingFrameInfoDevice(iteration);
 }
 
@@ -317,18 +319,66 @@ void TrackerTraitsGPU<nLayers>::computeTrackletsHybrid(const int iteration, int 
 template <int nLayers>
 void TrackerTraitsGPU<nLayers>::computeCellsHybrid(const int iteration)
 {
-  TrackerTraits::computeLayerCells(iteration);
-};
+  mTimeFrameGPU->loadTrackletsDevice();
+  mTimeFrameGPU->loadTrackletsLUTDevice();
+  mTimeFrameGPU->createCellsLUTDevice();
+  auto& conf = o2::its::ITSGpuTrackingParamConfig::Instance();
+
+  // #pragma omp parallel for num_threads(nLayers)
+  for (int iLayer = 0; iLayer < mTrkParams[iteration].CellsPerRoad(); ++iLayer) {
+    if (mTimeFrameGPU->getTracklets()[iLayer + 1].empty() ||
+        mTimeFrameGPU->getTracklets()[iLayer].empty()) {
+      continue;
+    }
+
+    const int currentLayerTrackletsNum{static_cast<int>(mTimeFrameGPU->getTracklets()[iLayer].size())};
+    countCellsHandler(mTimeFrameGPU->getDeviceArrayClusters(),
+                      mTimeFrameGPU->getDeviceArrayUnsortedClusters(),
+                      mTimeFrameGPU->getDeviceArrayTrackingFrameInfo(),
+                      mTimeFrameGPU->getDeviceArrayTracklets(),
+                      mTimeFrameGPU->getDeviceArrayTrackletsLUT(),
+                      mTimeFrameGPU->getTracklets()[iLayer].size(),
+                      iLayer,
+                      nullptr,
+                      mTimeFrameGPU->getDeviceArrayCellsLUT(),
+                      mTimeFrameGPU->getDeviceCellLUTs()[iLayer],
+                      mBz,
+                      mTrkParams[iteration].MaxChi2ClusterAttachment,
+                      mTrkParams[iteration].CellDeltaTanLambdaSigma,
+                      mTrkParams[iteration].NSigmaCut,
+                      conf.nBlocks,
+                      conf.nThreads);
+    mTimeFrameGPU->createCellsBuffers(iLayer);
+    computeCellsHandler(mTimeFrameGPU->getDeviceArrayClusters(),
+                        mTimeFrameGPU->getDeviceArrayUnsortedClusters(),
+                        mTimeFrameGPU->getDeviceArrayTrackingFrameInfo(),
+                        mTimeFrameGPU->getDeviceArrayTracklets(),
+                        mTimeFrameGPU->getDeviceArrayTrackletsLUT(),
+                        mTimeFrameGPU->getTracklets()[iLayer].size(),
+                        iLayer,
+                        mTimeFrameGPU->getDeviceCells()[iLayer],
+                        mTimeFrameGPU->getDeviceArrayCellsLUT(),
+                        mTimeFrameGPU->getDeviceCellLUTs()[iLayer],
+                        mBz,
+                        mTrkParams[iteration].MaxChi2ClusterAttachment,
+                        mTrkParams[iteration].CellDeltaTanLambdaSigma,
+                        mTrkParams[iteration].NSigmaCut,
+                        conf.nBlocks,
+                        conf.nThreads);
+  }
+  // Needed for processNeighbours() which is still on CPU.
+  mTimeFrameGPU->downloadCellsDevice();
+  mTimeFrameGPU->downloadCellsLUTDevice();
+}
 
 template <int nLayers>
 void TrackerTraitsGPU<nLayers>::findCellsNeighboursHybrid(const int iteration)
 {
+  mTimeFrameGPU->createNeighboursDevice();
   auto& conf = o2::its::ITSGpuTrackingParamConfig::Instance();
-  mTimeFrameGPU->loadCellsDevice();
-  mTimeFrameGPU->loadCellsLUT();
   std::vector<std::vector<std::pair<int, int>>> cellsNeighboursLayer(mTrkParams[iteration].CellsPerRoad() - 1);
   for (int iLayer{0}; iLayer < mTrkParams[iteration].CellsPerRoad() - 1; ++iLayer) {
-    const int nextLayerCellsNum{static_cast<int>(mTimeFrameGPU->getCells()[iLayer + 1].size())};
+    const int nextLayerCellsNum{static_cast<int>(mTimeFrameGPU->getNCellsDevice()[iLayer + 1])};
     mTimeFrameGPU->getCellsNeighboursLUT()[iLayer].clear();
     mTimeFrameGPU->getCellsNeighboursLUT()[iLayer].resize(nextLayerCellsNum, 0);
 
@@ -353,7 +403,7 @@ void TrackerTraitsGPU<nLayers>::findCellsNeighboursHybrid(const int iteration)
                                1e2,
                                conf.nBlocks,
                                conf.nThreads);
-    mTimeFrameGPU->downloadNeighboursLUT(mTimeFrameGPU->getCellsNeighboursLUT()[iLayer], iLayer);
+    mTimeFrameGPU->downloadNeighboursLUTDevice(mTimeFrameGPU->getCellsNeighboursLUT()[iLayer], iLayer);
     // Get the number of found cells from LUT
     cellsNeighboursLayer[iLayer].resize(mTimeFrameGPU->getCellsNeighboursLUT()[iLayer].back());
     mTimeFrameGPU->createNeighboursDevice(iLayer, cellsNeighboursLayer[iLayer]);
@@ -372,12 +422,12 @@ void TrackerTraitsGPU<nLayers>::findCellsNeighboursHybrid(const int iteration)
                                  conf.nThreads);
     mTimeFrameGPU->getCellsNeighbours()[iLayer].clear();
     mTimeFrameGPU->getCellsNeighbours()[iLayer].reserve(cellsNeighboursLayer[iLayer].size());
-    mTimeFrameGPU->downloadCellsDevice(iLayer + 1); // Cells on layer 0 did not change.
 
     filterCellNeighboursHandler(mTimeFrameGPU->getCellsNeighbours()[iLayer],
                                 mTimeFrameGPU->getDeviceNeighbours(iLayer),
                                 cellsNeighboursLayer[iLayer].size());
   }
+  mTimeFrameGPU->downloadCellsDevice();
   mTimeFrameGPU->unregisterRest();
 };
 
@@ -415,19 +465,18 @@ void TrackerTraitsGPU<nLayers>::findRoads(const int iteration)
     mTimeFrameGPU->createTrackITSExtDevice(trackSeeds);
     mTimeFrameGPU->loadTrackSeedsDevice(trackSeeds);
     auto& conf = o2::its::ITSGpuTrackingParamConfig::Instance();
-    trackSeedHandler(
-      mTimeFrameGPU->getDeviceTrackSeeds(),             // CellSeed* trackSeeds,
-      mTimeFrameGPU->getDeviceArrayTrackingFrameInfo(), // TrackingFrameInfo** foundTrackingFrameInfo,
-      mTimeFrameGPU->getDeviceTrackITSExt(),            // o2::its::TrackITSExt* tracks,
-      trackSeeds.size(),                                // const size_t nSeeds,
-      mBz,                                              // const float Bz,
-      startLevel,                                       // const int startLevel,
-      mTrkParams[0].MaxChi2ClusterAttachment,           // float maxChi2ClusterAttachment,
-      mTrkParams[0].MaxChi2NDF,                         // float maxChi2NDF,
-      mTimeFrameGPU->getDevicePropagator(),             // const o2::base::Propagator* propagator
-      mCorrType,                                        // o2::base::PropagatorImpl<float>::MatCorrType
-      conf.nBlocks,
-      conf.nThreads);
+    trackSeedHandler(mTimeFrameGPU->getDeviceTrackSeeds(),             // CellSeed* trackSeeds,
+                     mTimeFrameGPU->getDeviceArrayTrackingFrameInfo(), // TrackingFrameInfo** foundTrackingFrameInfo,
+                     mTimeFrameGPU->getDeviceTrackITSExt(),            // o2::its::TrackITSExt* tracks,
+                     trackSeeds.size(),                                // const size_t nSeeds,
+                     mBz,                                              // const float Bz,
+                     startLevel,                                       // const int startLevel,
+                     mTrkParams[0].MaxChi2ClusterAttachment,           // float maxChi2ClusterAttachment,
+                     mTrkParams[0].MaxChi2NDF,                         // float maxChi2NDF,
+                     mTimeFrameGPU->getDevicePropagator(),             // const o2::base::Propagator* propagator
+                     mCorrType,                                        // o2::base::PropagatorImpl<float>::MatCorrType
+                     conf.nBlocks,
+                     conf.nThreads);
 
     mTimeFrameGPU->downloadTrackITSExtDevice(trackSeeds);
 

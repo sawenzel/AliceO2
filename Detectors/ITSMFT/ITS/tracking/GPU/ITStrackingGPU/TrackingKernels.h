@@ -49,6 +49,41 @@ GPUg() void fitTrackSeedsKernel(
   const o2::base::PropagatorF::MatCorrType matCorrType = o2::base::PropagatorF::MatCorrType::USEMatCorrLUT);
 #endif
 } // namespace gpu
+
+void countCellsHandler(const Cluster** sortedClusters,
+                       const Cluster** unsortedClusters,
+                       const TrackingFrameInfo** tfInfo,
+                       const Tracklet** tracklets,
+                       const int** trackletsLUT,
+                       const int nTracklets,
+                       const int layer,
+                       CellSeed* cells,
+                       int** cellsLUTsDeviceArray,
+                       int* cellsLUTsHost,
+                       const float bz,
+                       const float maxChi2ClusterAttachment,
+                       const float cellDeltaTanLambdaSigma,
+                       const float nSigmaCut,
+                       const int nBlocks,
+                       const int nThreads);
+
+void computeCellsHandler(const Cluster** sortedClusters,
+                         const Cluster** unsortedClusters,
+                         const TrackingFrameInfo** tfInfo,
+                         const Tracklet** tracklets,
+                         const int** trackletsLUT,
+                         const int nTracklets,
+                         const int layer,
+                         CellSeed* cells,
+                         int** cellsLUTsDeviceArray,
+                         int* cellsLUTsHost,
+                         const float bz,
+                         const float maxChi2ClusterAttachment,
+                         const float cellDeltaTanLambdaSigma,
+                         const float nSigmaCut,
+                         const int nBlocks,
+                         const int nThreads);
+
 void countCellNeighboursHandler(CellSeed** cellsLayersDevice,
                                 int* neighboursLUTs,
                                 int** cellsLUTs,
