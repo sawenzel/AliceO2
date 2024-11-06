@@ -851,7 +851,7 @@ void GPURecoWorkflowSpec::run(ProcessingContext& pc)
       }
       createEmptyOutput = !mConfParam->partialOutputForNonFatalErrors;
     } else {
-      throw std::runtime_error("tracker returned error code " + std::to_string(retVal));
+      throw std::runtime_error("GPU Reconstruction error: error code " + std::to_string(retVal));
     }
   }
 

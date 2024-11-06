@@ -89,7 +89,7 @@ AddOptionRTC(extraClusterErrorSplitPadSharedSingleY2, float, 0.03f, "", 0, "Addi
 AddOptionRTC(extraClusterErrorFactorSplitPadSharedSingleY2, float, 3.0f, "", 0, "Multiplicative extra cluster error for Y2 if splitpad, shared, or single set")
 AddOptionRTC(extraClusterErrorSplitTimeSharedSingleZ2, float, 0.03f, "", 0, "Additive extra cluster error for Z2 if splittime, shared, or single set")
 AddOptionRTC(extraClusterErrorFactorSplitTimeSharedSingleZ2, float, 3.0f, "", 0, "Multiplicative extra cluster error for Z2 if splittime, shared, or single set")
-AddOptionArray(errorsCECrossing, float, 5, (0.f, 0.f, 0.f, 0.f, 0.f), "", 0, "Extra errors to add to track when crossing CE, depending on addErrorsCECrossing") // BUG: CUDA cannot yet hand AddOptionArrayRTC
+AddOptionArray(errorsCECrossing, float, 5, (0.f, 0.f, 0.f, 0.f, 0.f), "", 0, "Extra errors to add to track when crossing CE, depending on addErrorsCECrossing") // BUG: CUDA cannot yet handle AddOptionArrayRTC
 AddOptionRTC(globalTrackingYRangeUpper, float, 0.85f, "", 0, "Inner portion of y-range in slice that is not used in searching for global track candidates")
 AddOptionRTC(globalTrackingYRangeLower, float, 0.85f, "", 0, "Inner portion of y-range in slice that is not used in searching for global track candidates")
 AddOptionRTC(trackFollowingYFactor, float, 4.f, "", 0, "Weight of y residual vs z residual in tracklet constructor")

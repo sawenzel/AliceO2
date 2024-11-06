@@ -216,8 +216,9 @@ int32_t GPUReconstructionCPU::RunChains()
 
   timerTotal.Start();
   if (mProcessingSettings.doublePipeline) {
-    if (EnqueuePipeline()) {
-      return 1;
+    int32_t retVal = EnqueuePipeline();
+    if (retVal) {
+      return retVal;
     }
   } else {
     if (mThreadId != GetThread()) {
