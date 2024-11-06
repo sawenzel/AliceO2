@@ -90,10 +90,11 @@ class CorrectionMapsHelper
     }
   }
 
-  void setMeanLumiRef(float v)
+  void setMeanLumiRef(float v, bool report = false)
   {
-    if (v != mMeanLumi) {
+    if (v != mMeanLumiRef) {
       mMeanLumiRef = v;
+      updateLumiScale(report);
     }
   }
 
