@@ -71,7 +71,10 @@ WorkflowSpec defineDataProcessing(ConfigContext const& configcontext)
   GID::mask_t srcTrc = allowedSourcesTrc & GID::getSourcesMask(configcontext.options().get<std::string>("track-sources"));
   GID::mask_t srcCls = allowedSourcesClus & GID::getSourcesMask(configcontext.options().get<std::string>("cluster-sources"));
   srcCls |= GID::getSourcesMask("ITS,TPC");
-
+  if (sclOpt.requestCTPLumi) {
+    srcTrc = srcTrc | GID::getSourcesMask("CTP");
+    srcCls = srcCls | GID::getSourcesMask("CTP");
+  }
   o2::globaltracking::InputHelper::addInputSpecs(configcontext, specs, srcCls, srcTrc, srcTrc, true);
   o2::globaltracking::InputHelper::addInputSpecsPVertex(configcontext, specs, true); // P-vertex is always needed
   if (checkSV) {
