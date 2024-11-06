@@ -1445,6 +1445,9 @@ int runStateMachine(DataProcessorSpecs const& workflow,
   if (driverConfig.batch == false && window == nullptr && frameworkId.empty()) {
     LOG(warn) << "Could not create GUI. Switching to batch mode. Do you have GLFW on your system?";
     driverConfig.batch = true;
+    if (varmap["error-policy"].defaulted()) {
+      driverInfo.processingPolicies.error = TerminationPolicy::QUIT;
+    }
   }
   bool guiQuitRequested = false;
   bool hasError = false;
