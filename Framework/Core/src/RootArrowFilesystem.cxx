@@ -11,14 +11,19 @@
 #include "Framework/RootArrowFilesystem.h"
 #include "Framework/Endian.h"
 #include "Framework/RuntimeError.h"
+#include <Rtypes.h>
+#include <arrow/array/array_primitive.h>
 #include <arrow/array/builder_nested.h>
 #include <arrow/array/builder_primitive.h>
+#include <memory>
 #include <stdexcept>
 #include <TFile.h>
 #include <TLeaf.h>
 #include <TBufferFile.h>
 #include <TTree.h>
 #include <TDirectoryFile.h>
+#include <arrow/type.h>
+#include <arrow/type_fwd.h>
 
 namespace
 {
@@ -73,35 +78,52 @@ namespace o2::framework
 {
 
 TFileFileSystem::TFileFileSystem(TDirectoryFile* f, size_t readahead)
-  : TTreeFileSystem(),
+  : VirtualRootFileSystemBase(),
     mFile(f)
 {
   ((TFile*)mFile)->SetReadaheadSize(50 * 1024 * 1024);
 }
 
-TTree* TFileFileSystem::GetTree(arrow::dataset::FileSource source)
+std::shared_ptr<VirtualRootFileSystemBase> TFileFileSystem::GetSubFilesystem(arrow::dataset::FileSource source)
 {
-  // Simply return the only TTree we have
-  return (TTree*)mFile->Get(source.path().c_str());
+  auto tree = (TTree*)mFile->GetObjectChecked(source.path().c_str(), TClass::GetClass<TTree>());
+  if (tree) {
+    return std::shared_ptr<VirtualRootFileSystemBase>(new SingleTreeFileSystem(tree));
+  }
+
+
+  auto directory = (TDirectoryFile*)mFile->GetObjectChecked(source.path().c_str(), TClass::GetClass<TDirectory>());
+  if (directory) {
+    return std::shared_ptr<VirtualRootFileSystemBase>(new TFileFileSystem(directory, 50 * 1024 * 1024));
+  }
+  throw runtime_error_f("Unsupported file layout");
 }
 
-arrow::Result<arrow::fs::FileInfo> TTreeFileSystem::GetFileInfo(const std::string& path)
+arrow::Result<arrow::fs::FileInfo> TFileFileSystem::GetFileInfo(const std::string& path)
 {
   arrow::fs::FileInfo result;
   result.set_type(arrow::fs::FileType::NotFound);
   result.set_path(path);
   arrow::dataset::FileSource source(path, shared_from_this());
 
-  for (auto branch : *GetTree(source)->GetListOfBranches()) {
-    if (strncmp(branch->GetName(), result.path().c_str(), path.size()) == 0) {
-      result.set_type(arrow::fs::FileType::File);
-      return result;
-    }
+  auto fs = GetSubFilesystem(source);
+
+  // For now we only support single trees.
+  if (std::dynamic_pointer_cast<SingleTreeFileSystem>(fs)) {
+    result.set_type(arrow::fs::FileType::File);
+    return result;
   }
   return result;
 }
 
-arrow::Result<arrow::fs::FileInfoVector> TTreeFileSystem::GetFileInfo(const arrow::fs::FileSelector& select)
+arrow::Result<arrow::fs::FileInfo> VirtualRootFileSystemBase::GetFileInfo(std::string const&)
+{
+  arrow::fs::FileInfo result;
+  result.set_type(arrow::fs::FileType::NotFound);
+  return result;
+}
+
+arrow::Result<arrow::fs::FileInfoVector> VirtualRootFileSystemBase::GetFileInfo(const arrow::fs::FileSelector& select)
 {
   arrow::fs::FileInfoVector results;
   auto selected = this->GetFileInfo(select.base_dir);
@@ -111,59 +133,59 @@ arrow::Result<arrow::fs::FileInfoVector> TTreeFileSystem::GetFileInfo(const arro
   return results;
 }
 
-arrow::Status TTreeFileSystem::CreateDir(const std::string& path, bool recursive)
+arrow::Status VirtualRootFileSystemBase::CreateDir(const std::string& path, bool recursive)
 {
   return arrow::Status::NotImplemented("Read only filesystem");
 }
 
-arrow::Status TTreeFileSystem::DeleteDir(const std::string& path)
+arrow::Status VirtualRootFileSystemBase::DeleteDir(const std::string& path)
 {
   return arrow::Status::NotImplemented("Read only filesystem");
 }
 
-arrow::Status TTreeFileSystem::CopyFile(const std::string& src, const std::string& dest)
+arrow::Status VirtualRootFileSystemBase::CopyFile(const std::string& src, const std::string& dest)
 {
   return arrow::Status::NotImplemented("Read only filesystem");
 }
 
-arrow::Status TTreeFileSystem::Move(const std::string& src, const std::string& dest)
+arrow::Status VirtualRootFileSystemBase::Move(const std::string& src, const std::string& dest)
 {
   return arrow::Status::NotImplemented("Read only filesystem");
 }
 
-arrow::Status TTreeFileSystem::DeleteDirContents(const std::string& path, bool missing_dir_ok)
+arrow::Status VirtualRootFileSystemBase::DeleteDirContents(const std::string& path, bool missing_dir_ok)
 {
   return arrow::Status::NotImplemented("Read only filesystem");
 }
 
-arrow::Status TTreeFileSystem::DeleteRootDirContents()
+arrow::Status VirtualRootFileSystemBase::DeleteRootDirContents()
 {
   return arrow::Status::NotImplemented("Read only filesystem");
 }
 
-arrow::Status TTreeFileSystem::DeleteFile(const std::string& path)
+arrow::Status VirtualRootFileSystemBase::DeleteFile(const std::string& path)
 {
   return arrow::Status::NotImplemented("Read only filesystem");
 }
 
-arrow::Result<std::shared_ptr<arrow::io::InputStream>> TTreeFileSystem::OpenInputStream(const std::string& path)
+arrow::Result<std::shared_ptr<arrow::io::InputStream>> VirtualRootFileSystemBase::OpenInputStream(const std::string& path)
 {
   return arrow::Status::NotImplemented("Non streamable filesystem");
 }
 
-arrow::Result<std::shared_ptr<arrow::io::RandomAccessFile>> TTreeFileSystem::OpenInputFile(const std::string& path)
+arrow::Result<std::shared_ptr<arrow::io::RandomAccessFile>> VirtualRootFileSystemBase::OpenInputFile(const std::string& path)
 {
   return arrow::Status::NotImplemented("No random access file system");
 }
 
-arrow::Result<std::shared_ptr<arrow::io::OutputStream>> TTreeFileSystem::OpenOutputStream(
+arrow::Result<std::shared_ptr<arrow::io::OutputStream>> VirtualRootFileSystemBase::OpenOutputStream(
   const std::string& path,
   const std::shared_ptr<const arrow::KeyValueMetadata>& metadata)
 {
   return arrow::Status::NotImplemented("Non streamable filesystem");
 }
 
-arrow::Result<std::shared_ptr<arrow::io::OutputStream>> TTreeFileSystem::OpenAppendStream(
+arrow::Result<std::shared_ptr<arrow::io::OutputStream>> VirtualRootFileSystemBase::OpenAppendStream(
   const std::string& path,
   const std::shared_ptr<const arrow::KeyValueMetadata>& metadata)
 {
@@ -173,8 +195,13 @@ arrow::Result<std::shared_ptr<arrow::io::OutputStream>> TTreeFileSystem::OpenApp
 arrow::Result<std::shared_ptr<arrow::Schema>> TTreeFileFormat::Inspect(const arrow::dataset::FileSource& source) const
 {
   arrow::Schema schema{{}};
-  auto fs = std::dynamic_pointer_cast<TTreeFileSystem>(source.filesystem());
-  TTree* tree = fs->GetTree(source);
+  auto fs = std::dynamic_pointer_cast<VirtualRootFileSystemBase>(source.filesystem());
+  // Actually get the TTree from the ROOT file.
+  auto treeFs = std::dynamic_pointer_cast<TTreeFileSystem>(fs->GetSubFilesystem(source));
+  if (!treeFs.get()) {
+    throw runtime_error_f("Unknown filesystem %s\n", source.filesystem()->type_name().c_str());
+  }
+  TTree* tree = treeFs->GetTree(source);
 
   auto branches = tree->GetListOfBranches();
   auto n = branches->GetEntries();
@@ -270,7 +297,9 @@ arrow::Result<arrow::RecordBatchGenerator> TTreeFileFormat::ScanBatchesAsync(
     auto physical_schema = *treeFragment->ReadPhysicalSchema();
 
     static TBufferFile buffer{TBuffer::EMode::kWrite, 4 * 1024 * 1024};
-    auto fs = std::dynamic_pointer_cast<TTreeFileSystem>(treeFragment->source().filesystem());
+    auto containerFS = std::dynamic_pointer_cast<VirtualRootFileSystemBase>(treeFragment->source().filesystem());
+    auto fs = std::dynamic_pointer_cast<TTreeFileSystem>(containerFS->GetSubFilesystem(treeFragment->source()));
+
     int64_t rows = -1;
     TTree* tree = fs->GetTree(treeFragment->source());
     for (auto& field : fields) {
@@ -446,9 +475,42 @@ arrow::Result<arrow::RecordBatchGenerator> TTreeFileFormat::ScanBatchesAsync(
 }
 
 TBufferFileFS::TBufferFileFS(TBufferFile* f)
-  : TTreeFileSystem(),
-    mTree((TTree*)f->ReadObject(TTree::Class()))
+  : VirtualRootFileSystemBase(),
+    mBuffer(f),
+    mFilesystem(nullptr)
 {
+}
+
+TTreeFileSystem::~TTreeFileSystem() = default;
+
+
+arrow::Result<arrow::fs::FileInfo> TBufferFileFS::GetFileInfo(const std::string& path)
+{
+  arrow::fs::FileInfo result;
+  result.set_type(arrow::fs::FileType::NotFound);
+  result.set_path(path);
+  arrow::dataset::FileSource source(path, shared_from_this());
+
+  // Only once to avoid rereading the streamed tree.
+  if (!mFilesystem.get()) {
+    return result;
+  }
+
+  // For now we only support single trees.
+  if (std::dynamic_pointer_cast<SingleTreeFileSystem>(mFilesystem)) {
+    result.set_type(arrow::fs::FileType::File);
+    return result;
+  }
+  return result;
+}
+
+std::shared_ptr<VirtualRootFileSystemBase> TBufferFileFS::GetSubFilesystem(arrow::dataset::FileSource source)
+{
+  if (!mFilesystem.get()) {
+    auto tree = ((TTree*)mBuffer->ReadObject(TTree::Class()));
+    mFilesystem = std::make_shared<SingleTreeFileSystem>(tree);
+  }
+  return mFilesystem;
 }
 
 } // namespace o2::framework

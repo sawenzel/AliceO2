@@ -15,6 +15,7 @@
 #include <arrow/dataset/file_base.h>
 #include <arrow/filesystem/type_fwd.h>
 #include <arrow/type_fwd.h>
+#include <memory>
 
 class TTree;
 class TBufferFile;
@@ -32,11 +33,13 @@ class TTreeFileWriteOptions : public arrow::dataset::FileWriteOptions
   }
 };
 
-// This is a virtual filesystem based on a ttree, where branches with the
-// same prefix get grouped into a fragment
-class TTreeFileSystem : public arrow::fs::FileSystem
+// This is to avoid having to implement a bunch of unimplemented methods
+// for all the possible virtual filesystem we can invent on top of ROOT
+// data structures.
+class VirtualRootFileSystemBase : public arrow::fs::FileSystem
 {
  public:
+  // Dummy implementation to avoid
   arrow::Result<arrow::fs::FileInfo> GetFileInfo(const std::string& path) override;
   arrow::Result<arrow::fs::FileInfoVector> GetFileInfo(const arrow::fs::FileSelector& select) override;
 
@@ -44,6 +47,8 @@ class TTreeFileSystem : public arrow::fs::FileSystem
   {
     return this->type_name() == other.type_name();
   }
+
+  virtual std::shared_ptr<VirtualRootFileSystemBase> GetSubFilesystem(arrow::dataset::FileSource source) = 0;
 
   arrow::Status CreateDir(const std::string& path, bool recursive) override;
 
@@ -70,8 +75,19 @@ class TTreeFileSystem : public arrow::fs::FileSystem
   arrow::Result<std::shared_ptr<arrow::io::OutputStream>> OpenAppendStream(
     const std::string& path,
     const std::shared_ptr<const arrow::KeyValueMetadata>& metadata) override;
+};
 
-  virtual TTree* GetTree(arrow::dataset::FileSource) = 0;
+// A filesystem which allows me to get a TTree
+class TTreeFileSystem : public VirtualRootFileSystemBase
+{
+ public:
+  ~TTreeFileSystem() override;
+
+  std::shared_ptr<VirtualRootFileSystemBase> GetSubFilesystem(arrow::dataset::FileSource source) override
+  {
+    return std::dynamic_pointer_cast<VirtualRootFileSystemBase>(shared_from_this());
+  };
+  virtual TTree* GetTree(arrow::dataset::FileSource source) = 0;
 };
 
 class SingleTreeFileSystem : public TTreeFileSystem
@@ -98,9 +114,11 @@ class SingleTreeFileSystem : public TTreeFileSystem
   TTree* mTree;
 };
 
-class TFileFileSystem : public TTreeFileSystem
+class TFileFileSystem : public VirtualRootFileSystemBase
 {
  public:
+  arrow::Result<arrow::fs::FileInfo> GetFileInfo(const std::string& path) override;
+
   TFileFileSystem(TDirectoryFile* f, size_t readahead);
 
   std::string type_name() const override
@@ -108,7 +126,7 @@ class TFileFileSystem : public TTreeFileSystem
     return "TDirectoryFile";
   }
 
-  TTree* GetTree(arrow::dataset::FileSource source) override;
+  std::shared_ptr<VirtualRootFileSystemBase> GetSubFilesystem(arrow::dataset::FileSource source) override;
 
   // We can go back to the TFile in case this is needed.
   TDirectoryFile* GetFile()
@@ -120,24 +138,22 @@ class TFileFileSystem : public TTreeFileSystem
   TDirectoryFile* mFile;
 };
 
-class TBufferFileFS : public TTreeFileSystem
+class TBufferFileFS : public VirtualRootFileSystemBase
 {
  public:
   TBufferFileFS(TBufferFile* f);
 
+  arrow::Result<arrow::fs::FileInfo> GetFileInfo(const std::string& path) override;
   std::string type_name() const override
   {
     return "tbufferfile";
   }
 
-  TTree* GetTree(arrow::dataset::FileSource) override
-  {
-    // Simply return the only TTree we have
-    return mTree;
-  }
+  std::shared_ptr<VirtualRootFileSystemBase> GetSubFilesystem(arrow::dataset::FileSource source) override;
 
  private:
-  TTree* mTree;
+  TBufferFile* mBuffer;
+  std::shared_ptr<VirtualRootFileSystemBase> mFilesystem;
 };
 
 class TTreeFileFragment : public arrow::dataset::FileFragment
@@ -179,8 +195,12 @@ class TTreeFileFormat : public arrow::dataset::FileFormat
 
   arrow::Result<bool> IsSupported(const arrow::dataset::FileSource& source) const override
   {
-    auto fs = std::dynamic_pointer_cast<TTreeFileSystem>(source.filesystem());
-    return fs != nullptr;
+    auto fs = std::dynamic_pointer_cast<VirtualRootFileSystemBase>(source.filesystem());
+    auto subFs = fs->GetSubFilesystem(source);
+    if (std::dynamic_pointer_cast<TTreeFileSystem>(subFs)) {
+      return true;
+    }
+    return false;
   }
 
   arrow::Result<std::shared_ptr<arrow::Schema>> Inspect(const arrow::dataset::FileSource& source) const override;

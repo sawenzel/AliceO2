@@ -19,6 +19,7 @@
 #include <ROOT/RDataFrame.hxx>
 #include <ROOT/RArrowDS.hxx>
 #include <TBufferFile.h>
+#include <TClass.h>
 #include <TMemFile.h>
 #include <TDirectory.h>
 #include <TTree.h>
@@ -231,6 +232,7 @@ TEST_CASE("RootTree2Fragment")
   size_t totalSizeUncompressed = 0;
   auto format = std::make_shared<TTreeFileFormat>(totalSizeCompressed, totalSizeUncompressed);
   auto fs = std::make_shared<TBufferFileFS>(fileRead);
+
   arrow::dataset::FileSource source("p", fs);
   REQUIRE(format->IsSupported(source) == true);
   auto schemaOpt = format->Inspect(source);
