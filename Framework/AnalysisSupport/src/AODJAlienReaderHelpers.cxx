@@ -120,10 +120,17 @@ static inline auto extractOriginalsTuple(framework::pack<Os...>, ProcessingConte
 
 AlgorithmSpec AODJAlienReaderHelpers::rootFileReaderCallback(ConfigContext const& config)
 {
-  auto callback = AlgorithmSpec{adaptStateful([](ConfigParamRegistry const& options,
-                                                 DeviceSpec const& spec,
-                                                 Monitoring& monitoring,
-                                                 DataProcessingStats& stats) {
+  // aod-parent-base-path-replacement is now a workflow option, so it needs to be
+  // retrieved from the ConfigContext. This is because we do not allow workflow options
+  // to change over start-stop-start because they can affect the topology generation.
+  std::string parentFileReplacement;
+  if (config.options().isSet("aod-parent-base-path-replacement")) {
+    parentFileReplacement = config.options().get<std::string>("aod-parent-base-path-replacement");
+  }
+  auto callback = AlgorithmSpec{adaptStateful([parentFileReplacement](ConfigParamRegistry const& options,
+                                                                      DeviceSpec const& spec,
+                                                                      Monitoring& monitoring,
+                                                                      DataProcessingStats& stats) {
     // FIXME: not actually needed, since data processing stats can specify that we should
     // send the initial value.
     stats.updateStats({static_cast<short>(ProcessingStatsId::ARROW_BYTES_CREATED), DataProcessingStats::Op::Set, 0});
@@ -140,11 +147,6 @@ AlgorithmSpec AODJAlienReaderHelpers::rootFileReaderCallback(ConfigContext const
     auto filename = options.get<std::string>("aod-file-private");
 
     auto maxRate = options.get<float>("aod-max-io-rate");
-
-    std::string parentFileReplacement;
-    if (options.isSet("aod-parent-base-path-replacement")) {
-      parentFileReplacement = options.get<std::string>("aod-parent-base-path-replacement");
-    }
 
     int parentAccessLevel = 0;
     if (options.isSet("aod-parent-access-level")) {
