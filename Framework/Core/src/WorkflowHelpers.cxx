@@ -606,7 +606,11 @@ void WorkflowHelpers::injectServiceDevices(WorkflowSpec& workflow, ConfigContext
     // add TFNumber and TFFilename as input to the writer
     outputsInputsAOD.emplace_back(InputSpec{"tfn", "TFN", "TFNumber"});
     outputsInputsAOD.emplace_back(InputSpec{"tff", "TFF", "TFFilename"});
-    auto fileSink = AnalysisSupportHelpers::getGlobalAODSink(dod, outputsInputsAOD);
+    int compressionLevel = 505;
+    if (ctx.options().hasOption("aod-writer-compression")) {
+      compressionLevel = ctx.options().get<int>("aod-writer-compression");
+    }
+    auto fileSink = AnalysisSupportHelpers::getGlobalAODSink(dod, outputsInputsAOD, compressionLevel);
     extraSpecs.push_back(fileSink);
 
     auto it = std::find_if(outputsInputs.begin(), outputsInputs.end(), [](InputSpec& spec) -> bool {

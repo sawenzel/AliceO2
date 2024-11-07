@@ -78,7 +78,7 @@ struct AnalysisSupportHelpers {
                                                 std::vector<OutputTaskInfo> const& tskmap);
   /// writes inputs of kind AOD to file
   static DataProcessorSpec getGlobalAODSink(std::shared_ptr<DataOutputDirector> dod,
-                                            std::vector<InputSpec> const& outputInputs);
+                                            std::vector<InputSpec> const& outputInputs, int compression);
 };
 
 }; // namespace o2::framework

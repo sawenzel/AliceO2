@@ -318,10 +318,10 @@ DataProcessorSpec AnalysisSupportHelpers::getOutputObjHistSink(std::vector<Outpu
 // add sink for the AODs
 DataProcessorSpec
   AnalysisSupportHelpers::getGlobalAODSink(std::shared_ptr<DataOutputDirector> dod,
-                                           std::vector<InputSpec> const& outputInputs)
+                                           std::vector<InputSpec> const& outputInputs, int compressionLevel)
 {
 
-  auto writerFunction = [dod, outputInputs](InitContext& ic) -> std::function<void(ProcessingContext&)> {
+  auto writerFunction = [dod, outputInputs, compressionLevel](InitContext& ic) -> std::function<void(ProcessingContext&)> {
     LOGP(debug, "======== getGlobalAODSink::Init ==========");
 
     // find out if any table needs to be saved
@@ -363,7 +363,7 @@ DataProcessorSpec
     std::vector<TString> aodMetaDataVals;
 
     // this functor is called once per time frame
-    return [dod, tfNumbers, tfFilenames, aodMetaDataKeys, aodMetaDataVals](ProcessingContext& pc) mutable -> void {
+    return [dod, tfNumbers, tfFilenames, aodMetaDataKeys, aodMetaDataVals, compressionLevel](ProcessingContext& pc) mutable -> void {
       LOGP(debug, "======== getGlobalAODSink::processing ==========");
       LOGP(debug, " processing data set with {} entries", pc.inputs().size());
 
@@ -457,7 +457,7 @@ DataProcessorSpec
         // a table can be saved in multiple ways
         // e.g. different selections of columns to different files
         for (auto d : ds) {
-          auto fileAndFolder = dod->getFileFolder(d, tfNumber, aodInputFile);
+          auto fileAndFolder = dod->getFileFolder(d, tfNumber, aodInputFile, compressionLevel);
           auto treename = fileAndFolder.folderName + "/" + d->treename;
           TableToTree ta2tr(table,
                             fileAndFolder.file,
@@ -495,11 +495,11 @@ DataProcessorSpec
   // the command line options relevant for the writer are global
   // see runDataProcessing.h
   DataProcessorSpec spec{
-    "internal-dpl-aod-writer",
-    outputInputs,
-    Outputs{},
-    AlgorithmSpec(writerFunction),
-    {}};
+    .name = "internal-dpl-aod-writer",
+    .inputs = outputInputs,
+    .outputs = {},
+    .algorithm = AlgorithmSpec{writerFunction},
+  };
 
   return spec;
 }

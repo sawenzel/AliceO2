@@ -37,6 +37,7 @@
 #include "Headers/DataHeader.h"
 #include "Headers/DataHeaderHelpers.h"
 
+#include <RtypesCore.h>
 #include <fairmq/ProgOptions.h>
 
 #include <uv.h>
@@ -536,7 +537,11 @@ o2::framework::ServiceSpec ArrowSupport::arrowBackendSpec()
         // add TFNumber and TFFilename as input to the writer
         outputsInputsAOD.emplace_back("tfn", "TFN", "TFNumber");
         outputsInputsAOD.emplace_back("tff", "TFF", "TFFilename");
-        workflow.push_back(AnalysisSupportHelpers::getGlobalAODSink(dod, outputsInputsAOD));
+        int compression = 505; 
+        if (ctx.options().hasOption("aod-writer-compression")) {
+          compression = ctx.options().get<int>("aod-writer-compression");
+        }
+        workflow.push_back(AnalysisSupportHelpers::getGlobalAODSink(dod, outputsInputsAOD, compression));
       }
       // Move the dummy sink at the end, if needed
       for (size_t i = 0; i < workflow.size(); ++i) {
