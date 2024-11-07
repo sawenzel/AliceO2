@@ -142,6 +142,7 @@ struct DiscoverMetadataInAOD : o2::framework::ConfigDiscoveryPlugin {
         if (tables.empty() == false) {
           results.push_back(ConfigParamSpec{"aod-metadata-tables", VariantType::ArrayString, tables, {"Tables in first AOD"}});
         }
+        currentFile->Close();
         return results;
       }};
   }
