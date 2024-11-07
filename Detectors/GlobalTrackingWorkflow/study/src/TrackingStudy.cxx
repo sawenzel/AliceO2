@@ -364,10 +364,30 @@ void TrackingStudySpec::process(o2::globaltracking::RecoContainer& recoData)
           continue;
         }
         {
+          o2::dataformats::DCA dcaTPC;
+          dcaTPC.set(-999.f, -999.f);
+          if (tpcTr) {
+            if (is == GTrackID::TPC) {
+              dcaTPC = dca;
+            } else {
+              o2::track::TrackParCov tmpTPC(*tpcTr);
+              if (iv < nv - 1 && is == GTrackID::TPC && tpcTr && !tpcTr->hasBothSidesClusters()) { // for unconstrained TPC tracks correct track Z
+                float corz = vdrit * (tpcTr->getTime0() * mTPCTBinMUS - pvvec[iv].getTimeStamp().getTimeStamp());
+                if (tpcTr->hasASideClustersOnly()) {
+                  corz = -corz; // A-side
+                }
+                tmpTPC.setZ(tmpTPC.getZ() + corz);
+              }
+              if (!prop->propagateToDCA(iv == nv - 1 ? vtxDummy : pvvec[iv], tmpTPC, prop->getNominalBz(), 2., o2::base::PropagatorF::MatCorrType::USEMatCorrLUT, &dcaTPC)) {
+                dcaTPC.set(-999.f, -999.f);
+              }
+            }
+          }
           auto& trcExt = trcExtVec.emplace_back();
           recoData.getTrackTime(vid, trcExt.ttime, trcExt.ttimeE);
           trcExt.track = trc;
           trcExt.dca = dca;
+          trcExt.dcaTPC = dcaTPC;
           trcExt.gid = vid;
           trcExt.xmin = xmin;
           auto gidRefs = recoData.getSingleDetectorRefs(vid);

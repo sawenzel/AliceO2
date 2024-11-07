@@ -27,6 +27,7 @@ namespace dataformats
 struct TrackInfoExt {
   o2::track::TrackParCov track;
   DCA dca{};
+  DCA dcaTPC{};
   VtxTrackIndex gid;
   MatchInfoTOF infoTOF;
   float ttime = 0;
