@@ -70,7 +70,7 @@ void DigitReader::init(InitContext& ic)
 void DigitReader::run(ProcessingContext& pc)
 {
   const auto& tinfo = pc.services().get<o2::framework::TimingInfo>();
-  if (tinfo.globalRunNumberChanged) { // new run is starting: 1st call
+  if (tinfo.globalRunNumberChanged && mUseIRFrames) { // new run is starting: 1st call
     // TODO: we have to find a way define CCDBInput for IRFrames mode only using DPL fetcher
     auto& ccdb = o2::ccdb::BasicCCDBManager::instance();
     auto rlim = ccdb.getRunDuration(tinfo.runNumber);
