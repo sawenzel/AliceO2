@@ -197,7 +197,6 @@ int mainNoCatch(int argc, char** argv)
   for (auto& extra : extraOptions) {
     workflowOptions.push_back(extra);
   }
-  workflowOptionsRegistry.loadExtra(extraOptions);
 
   ConfigContext configContext(workflowOptionsRegistry, argc, argv);
   o2::framework::WorkflowSpec specs = defineDataProcessing(configContext);

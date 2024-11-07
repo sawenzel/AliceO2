@@ -75,6 +75,7 @@ std::vector<ConfigParamSpec> ConfigParamDiscovery::discover(ConfigParamRegistry&
     for (auto& extra : extras) {
       result.push_back(extra);
     }
+    registry.loadExtra(extras);
   }
   return result;
 }
