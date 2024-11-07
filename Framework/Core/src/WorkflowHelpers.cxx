@@ -432,7 +432,7 @@ void WorkflowHelpers::injectServiceDevices(WorkflowSpec& workflow, ConfigContext
     auto mctracks2aod = std::find_if(workflow.begin(), workflow.end(), [](auto const& x) { return x.name == "mctracks-to-aod"; });
     if (mctracks2aod == workflow.end()) {
       // add normal reader
-      auto&& algo = PluginManager::loadAlgorithmFromPlugin("O2FrameworkAnalysisSupport", "ROOTFileReader");
+      auto&& algo = PluginManager::loadAlgorithmFromPlugin("O2FrameworkAnalysisSupport", "ROOTFileReader", ctx);
       if (internalRateLimiting) {
         aodReader.algorithm = CommonDataProcessors::wrapWithRateLimiting(algo);
       } else {
@@ -520,7 +520,7 @@ void WorkflowHelpers::injectServiceDevices(WorkflowSpec& workflow, ConfigContext
     }
 
     // Load the CCDB backend from the plugin
-    ccdbBackend.algorithm = PluginManager::loadAlgorithmFromPlugin("O2FrameworkCCDBSupport", "CCDBFetcherPlugin");
+    ccdbBackend.algorithm = PluginManager::loadAlgorithmFromPlugin("O2FrameworkCCDBSupport", "CCDBFetcherPlugin", ctx);
     extraSpecs.push_back(ccdbBackend);
   } else {
     // If there is no CCDB requested, but we still ask for a FLP/DISTSUBTIMEFRAME/0xccdb

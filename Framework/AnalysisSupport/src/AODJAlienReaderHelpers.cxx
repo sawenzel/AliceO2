@@ -22,6 +22,7 @@
 #include "Framework/DeviceSpec.h"
 #include "Framework/RawDeviceService.h"
 #include "Framework/DataSpecUtils.h"
+#include "Framework/ConfigContext.h"
 #include "DataInputDirector.h"
 #include "Framework/SourceInfoHeader.h"
 #include "Framework/ChannelInfo.h"
@@ -117,7 +118,7 @@ static inline auto extractOriginalsTuple(framework::pack<Os...>, ProcessingConte
   return std::make_tuple(extractTypedOriginal<Os>(pc)...);
 }
 
-AlgorithmSpec AODJAlienReaderHelpers::rootFileReaderCallback()
+AlgorithmSpec AODJAlienReaderHelpers::rootFileReaderCallback(ConfigContext const& config)
 {
   auto callback = AlgorithmSpec{adaptStateful([](ConfigParamRegistry const& options,
                                                  DeviceSpec const& spec,

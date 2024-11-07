@@ -26,9 +26,9 @@
 O2_DECLARE_DYNAMIC_LOG(analysis_support);
 
 struct ROOTFileReader : o2::framework::AlgorithmPlugin {
-  o2::framework::AlgorithmSpec create() override
+  o2::framework::AlgorithmSpec create(o2::framework::ConfigContext const& config) override
   {
-    return o2::framework::readers::AODJAlienReaderHelpers::rootFileReaderCallback();
+    return o2::framework::readers::AODJAlienReaderHelpers::rootFileReaderCallback(config);
   }
 };
 
