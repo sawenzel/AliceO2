@@ -448,7 +448,7 @@ class Spline1DSpec<DataT, YdimT, 1>
                            GPUgeneric() const T Sr[/*mYdim*/], GPUgeneric() const T Dr[/*mYdim*/],
                            DataT u, GPUgeneric() T S[/*mYdim*/]) const
   {
-    TBase::template interpolateU(YdimT, knotL, Sl, Dl, Sr, Dr, u, S);
+    TBase::interpolateU(YdimT, knotL, Sl, Dl, Sr, Dr, u, S);
   }
 
   using TBase::getNumberOfKnots;
