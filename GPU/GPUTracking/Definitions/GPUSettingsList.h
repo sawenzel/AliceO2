@@ -526,6 +526,7 @@ BeginSubConfig(GPUSettingsO2, global, configStandalone, "O2", 0, "O2 workflow se
 AddOption(solenoidBzNominalGPU, float, -1e6f, "", 0, "Field strength of solenoid Bz in kGaus")
 AddOption(constBz, bool, false, "", 0, "force constant Bz for tests")
 AddOption(continuousMaxTimeBin, int32_t, 0, "", 0, "maximum time bin of continuous data, 0 for triggered events, -1 for default of 23ms")
+AddOption(overrideNHbfPerTF, int32_t, 0, "", 0, "Overrides the number of HBF per TF if != 0")
 AddOption(deviceType, std::string, "CPU", "", 0, "Device type, CPU | CUDA | HIP | OCL1 | OCL2")
 AddOption(forceDeviceType, bool, true, "", 0, "force device type, otherwise allows fall-back to CPU")
 AddOption(synchronousProcessing, bool, false, "", 0, "Apply performance shortcuts for synchronous processing, disable unneeded steps")
