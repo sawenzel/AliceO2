@@ -118,19 +118,23 @@ static inline auto extractOriginalsTuple(framework::pack<Os...>, ProcessingConte
   return std::make_tuple(extractTypedOriginal<Os>(pc)...);
 }
 
-AlgorithmSpec AODJAlienReaderHelpers::rootFileReaderCallback(ConfigContext const& config)
+AlgorithmSpec AODJAlienReaderHelpers::rootFileReaderCallback(ConfigContext const& ctx)
 {
   // aod-parent-base-path-replacement is now a workflow option, so it needs to be
   // retrieved from the ConfigContext. This is because we do not allow workflow options
   // to change over start-stop-start because they can affect the topology generation.
   std::string parentFileReplacement;
-  if (config.options().isSet("aod-parent-base-path-replacement")) {
-    parentFileReplacement = config.options().get<std::string>("aod-parent-base-path-replacement");
+  if (ctx.options().isSet("aod-parent-base-path-replacement")) {
+    parentFileReplacement = ctx.options().get<std::string>("aod-parent-base-path-replacement");
   }
-  auto callback = AlgorithmSpec{adaptStateful([parentFileReplacement](ConfigParamRegistry const& options,
-                                                                      DeviceSpec const& spec,
-                                                                      Monitoring& monitoring,
-                                                                      DataProcessingStats& stats) {
+  int parentAccessLevel = 0;
+  if (ctx.options().isSet("aod-parent-access-level")) {
+    parentAccessLevel = ctx.options().get<int>("aod-parent-access-level");
+  }
+  auto callback = AlgorithmSpec{adaptStateful([parentFileReplacement, parentAccessLevel](ConfigParamRegistry const& options,
+                                                                                         DeviceSpec const& spec,
+                                                                                         Monitoring& monitoring,
+                                                                                         DataProcessingStats& stats) {
     // FIXME: not actually needed, since data processing stats can specify that we should
     // send the initial value.
     stats.updateStats({static_cast<short>(ProcessingStatsId::ARROW_BYTES_CREATED), DataProcessingStats::Op::Set, 0});
@@ -147,11 +151,6 @@ AlgorithmSpec AODJAlienReaderHelpers::rootFileReaderCallback(ConfigContext const
     auto filename = options.get<std::string>("aod-file-private");
 
     auto maxRate = options.get<float>("aod-max-io-rate");
-
-    int parentAccessLevel = 0;
-    if (options.isSet("aod-parent-access-level")) {
-      parentAccessLevel = options.get<int>("aod-parent-access-level");
-    }
 
     // create a DataInputDirector
     auto didir = std::make_shared<DataInputDirector>(filename, &monitoring, parentAccessLevel, parentFileReplacement);

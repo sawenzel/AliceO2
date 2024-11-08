@@ -150,13 +150,20 @@ struct DiscoverMetadataInAOD : o2::framework::ConfigDiscoveryPlugin {
           return results;
         }
 
-        // Lets try in parent files
+        if (!registry.isSet("aod-parent-access-level") || registry.get<int>("aod-parent-access-level") == 0) {
+          LOGP(info, "No metadata found in file \"{}\" and parent level 0 prevents further lookup.", filename);
+          results.push_back(ConfigParamSpec{"aod-metadata-disable", VariantType::String, "1", {"Metadata not found in AOD"}});
+          return results;
+        }
+
+        // Lets try in parent file.
         auto parentFiles = (TMap*)currentFile->Get("parentFiles");
         if (!parentFiles) {
           LOGP(info, "No metadata found in file \"{}\"", filename);
           results.push_back(ConfigParamSpec{"aod-metadata-disable", VariantType::String, "1", {"Metadata not found in AOD"}});
           return results;
         }
+        LOGP(info, "No metadata found in file \"{}\", checking in its parents.", filename);
         for (auto* p : *parentFiles) {
           std::string parentFilename = ((TPair*)p)->Value()->GetName();
           // Do the replacement. Notice this will require changing aod-parent-base-path-replacement to be

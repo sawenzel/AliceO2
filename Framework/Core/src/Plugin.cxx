@@ -141,7 +141,7 @@ struct DiscoverAODOptionsInCommandLine : o2::framework::ConfigDiscoveryPlugin {
         bool injectOption = true;
         for (size_t i = 0; i < argc; i++) {
           std::string_view arg = argv[i];
-          if (!arg.starts_with("--aod-writer-") && arg != "--aod-parent-base-path-replacement") {
+          if (!arg.starts_with("--aod-writer-") && !arg.starts_with("--aod-parent-")) {
             continue;
           }
           std::string key = arg.data() + 2;
@@ -155,6 +155,9 @@ struct DiscoverAODOptionsInCommandLine : o2::framework::ConfigDiscoveryPlugin {
           }
           if (key == "aod-parent-base-path-replacement") {
             results.push_back(ConfigParamSpec{"aod-parent-base-path-replacement", VariantType::String, value, {R"(Replace base path of parent files. Syntax: FROM;TO. E.g. "alien:///path/in/alien;/local/path". Enclose in "" on the command line.)"}});
+          }
+          if (key == "aod-parent-access-level") {
+            results.push_back(ConfigParamSpec{"aod-parent-access-level", VariantType::String, value, {"Allow parent file access up to specified level. Default: no (0)"}});
           }
         }
         if (injectOption) {
