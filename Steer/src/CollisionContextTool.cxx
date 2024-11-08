@@ -27,6 +27,7 @@
 #include "CommonUtils/ConfigurableParam.h"
 #include <CCDB/BasicCCDBManager.h>
 #include "DataFormatsParameters/GRPLHCIFData.h"
+#include "SimConfig/SimConfig.h"
 
 //
 // Created by Sandro Wenzel on 13.07.21.
@@ -52,11 +53,12 @@ struct Options {
   bool useexistingkinematics = false;
   bool noEmptyTF = false; // prevent empty timeframes; the first interaction will be shifted backwards to fall within the range given by Options.orbits
   int maxCollsPerTF = -1; // the maximal number of hadronic collisions per TF (can be used to constrain number of collisions per timeframe to some maximal value)
-  bool genVertices = false;         // whether to assign vertices to collisions
   std::string configKeyValues = ""; // string to init config key values
   long timestamp = -1;              // timestamp for CCDB queries
   std::string individualTFextraction = ""; // triggers extraction of individuel timeframe components when non-null
                                            // format is path prefix
+  std::string vertexModeString{"kNoVertex"}; // Vertex Mode; vertices will be assigned to collisions of mode != kNoVertex
+  o2::conf::VertexMode vertexMode = o2::conf::VertexMode::kNoVertex;
 };
 
 enum class InteractionLockMode {
@@ -203,7 +205,9 @@ bool parseOptions(int argc, char* argv[], Options& optvalues)
     "first-orbit", bpo::value<double>(&optvalues.firstFractionalOrbit)->default_value(0), "First (fractional) orbit in the run (HBFUtils.firstOrbit + BC from decimal)")(
     "maxCollsPerTF", bpo::value<int>(&optvalues.maxCollsPerTF)->default_value(-1), "Maximal number of MC collisions to put into one timeframe. By default no constraint.")(
     "noEmptyTF", bpo::bool_switch(&optvalues.noEmptyTF), "Enforce to have at least one collision")(
-    "configKeyValues", bpo::value<std::string>(&optvalues.configKeyValues)->default_value(""), "Semicolon separated key=value strings (e.g.: 'TPC.gasDensity=1;...')")("with-vertices", "Assign vertices to collisions.")("timestamp", bpo::value<long>(&optvalues.timestamp)->default_value(-1L), "Timestamp for CCDB queries / anchoring")(
+    "configKeyValues", bpo::value<std::string>(&optvalues.configKeyValues)->default_value(""), "Semicolon separated key=value strings (e.g.: 'TPC.gasDensity=1;...')")(
+    "with-vertices", bpo::value<std::string>(&optvalues.vertexModeString)->default_value("kNoVertex"), "Assign vertices to collisions. Argument is the vertex mode. Defaults to no vertexing applied")(
+    "timestamp", bpo::value<long>(&optvalues.timestamp)->default_value(-1L), "Timestamp for CCDB queries / anchoring")(
     "extract-per-timeframe", bpo::value<std::string>(&optvalues.individualTFextraction)->default_value(""),
     "Extract individual timeframe contexts. Format required: time_frame_prefix[:comma_separated_list_of_signals_to_offset]");
 
@@ -225,9 +229,8 @@ bool parseOptions(int argc, char* argv[], Options& optvalues)
     if (vm.count("use-existing-kine")) {
       optvalues.useexistingkinematics = true;
     }
-    if (vm.count("with-vertices")) {
-      optvalues.genVertices = true;
-    }
+
+    o2::conf::SimConfig::parseVertexModeString(optvalues.vertexModeString, optvalues.vertexMode);
 
     // fix the first orbit and bunch crossing
     // auto orbitbcpair = parseOrbitAndBC(optvalues.firstIRString);
@@ -277,10 +280,9 @@ int main(int argc, char* argv[])
       LOG(info) << "Fetch bcPattern information from CCDB";
       // fetch the GRP Object
       auto& ccdb = o2::ccdb::BasicCCDBManager::instance();
-      ccdb.setTimestamp(options.timestamp);
       ccdb.setCaching(false);
       ccdb.setLocalObjectValidityChecking(true);
-      auto grpLHC = ccdb.get<o2::parameters::GRPLHCIFData>("GLO/Config/GRPLHCIF");
+      auto grpLHC = ccdb.getForTimeStamp<o2::parameters::GRPLHCIFData>("GLO/Config/GRPLHCIF", options.timestamp);
       LOG(info) << "Fetched injection scheme " << grpLHC->getInjectionScheme() << " from CCDB";
       sampler.setBunchFilling(grpLHC->getBunchFilling());
     } else {
@@ -449,14 +451,32 @@ int main(int argc, char* argv[])
 
   auto numTimeFrames = digicontext.finalizeTimeframeStructure(orbitstart, options.orbitsPerTF);
 
-  if (options.genVertices) {
-    // TODO: offer option taking meanVertex directly from CCDB ! "GLO/Calib/MeanVertex"
-    // sample interaction vertices
+  if (options.vertexMode != o2::conf::VertexMode::kNoVertex) {
+    switch (options.vertexMode) {
+      case o2::conf::VertexMode::kCCDB: {
+        // fetch mean vertex from CCDB
+        auto meanv = o2::ccdb::BasicCCDBManager::instance().getForTimeStamp<o2::dataformats::MeanVertexObject>("GLO/Calib/MeanVertex", options.timestamp);
+        if (meanv) {
+          LOG(info) << "Applying vertexing using CCDB mean vertex " << *meanv;
+          digicontext.sampleInteractionVertices(*meanv);
+        } else {
+          LOG(fatal) << "No vertex available";
+        }
+        break;
+      }
 
-    // init this vertex from CCDB or InteractionDiamond parameter
-    const auto& dparam = o2::eventgen::InteractionDiamondParam::Instance();
-    o2::dataformats::MeanVertexObject meanv(dparam.position[0], dparam.position[1], dparam.position[2], dparam.width[0], dparam.width[1], dparam.width[2], dparam.slopeX, dparam.slopeY);
-    digicontext.sampleInteractionVertices(meanv);
+      case o2::conf::VertexMode::kDiamondParam: {
+        // init this vertex from CCDB or InteractionDiamond parameter
+        const auto& dparam = o2::eventgen::InteractionDiamondParam::Instance();
+        o2::dataformats::MeanVertexObject meanv(dparam.position[0], dparam.position[1], dparam.position[2], dparam.width[0], dparam.width[1], dparam.width[2], dparam.slopeX, dparam.slopeY);
+        LOG(info) << "Applying vertexing using DiamondParam mean vertex " << meanv;
+        digicontext.sampleInteractionVertices(meanv);
+        break;
+      }
+      default: {
+        LOG(error) << "Unknown vertex mode ... Not generating vertices";
+      }
+    }
   }
 
   // we fill QED contributions to the context

@@ -578,5 +578,7 @@ DigitizationContext DigitizationContext::extractSingleTimeframe(int timeframeid,
   } catch (std::exception) {
     LOG(warn) << "No such timeframe id in collision context. Returing empty object";
   }
+  // fix number of collisions
+  r.setNCollisions(r.mEventRecords.size());
   return r;
 }
