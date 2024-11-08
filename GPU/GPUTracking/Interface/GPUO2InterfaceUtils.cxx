@@ -83,30 +83,32 @@ std::unique_ptr<GPUParam> GPUO2InterfaceUtils::getFullParam(float solenoidBz, ui
 {
   std::unique_ptr<GPUParam> retVal = std::make_unique<GPUParam>();
   std::unique_ptr<GPUO2InterfaceConfiguration> tmpConfig;
+  std::unique_ptr<GPUSettingsO2> tmpSettingsO2;
   if (!pConfiguration) {
     tmpConfig = std::make_unique<GPUO2InterfaceConfiguration>();
     pConfiguration = &tmpConfig;
-    (*pConfiguration)->configGRP.continuousMaxTimeBin = -1;
+    (*pConfiguration)->configGRP.grpContinuousMaxTimeBin = -1;
   } else if (!*pConfiguration) {
     *pConfiguration = std::make_unique<GPUO2InterfaceConfiguration>();
-    (*pConfiguration)->configGRP.continuousMaxTimeBin = -1;
+    (*pConfiguration)->configGRP.grpContinuousMaxTimeBin = -1;
   }
   (*pConfiguration)->configGRP.solenoidBzNominalGPU = solenoidBz;
   if (pO2Settings && *pO2Settings) {
     **pO2Settings = (*pConfiguration)->ReadConfigurableParam();
-  } else if (pO2Settings) {
-    *pO2Settings = std::make_unique<GPUSettingsO2>((*pConfiguration)->ReadConfigurableParam());
   } else {
-    (*pConfiguration)->ReadConfigurableParam();
+    if (!pO2Settings) {
+      pO2Settings = &tmpSettingsO2;
+    }
+    *pO2Settings = std::make_unique<GPUSettingsO2>((*pConfiguration)->ReadConfigurableParam());
   }
   if (nHbfPerTf == 0) {
-    nHbfPerTf = 256;
+    nHbfPerTf = (*pO2Settings)->overrideNHbfPerTF ? (*pO2Settings)->overrideNHbfPerTF : 256;
   }
   if (autoMaxTimeBin) {
-    *autoMaxTimeBin = (*pConfiguration)->configGRP.continuousMaxTimeBin == -1;
+    *autoMaxTimeBin = (*pConfiguration)->configGRP.grpContinuousMaxTimeBin == -1;
   }
-  if ((*pConfiguration)->configGRP.continuousMaxTimeBin == -1) {
-    (*pConfiguration)->configGRP.continuousMaxTimeBin = (nHbfPerTf * o2::constants::lhc::LHCMaxBunches + 2 * o2::tpc::constants::LHCBCPERTIMEBIN - 2) / o2::tpc::constants::LHCBCPERTIMEBIN;
+  if ((*pConfiguration)->configGRP.grpContinuousMaxTimeBin == -1) {
+    (*pConfiguration)->configGRP.grpContinuousMaxTimeBin = (nHbfPerTf * o2::constants::lhc::LHCMaxBunches + 2 * o2::tpc::constants::LHCBCPERTIMEBIN - 2) / o2::tpc::constants::LHCBCPERTIMEBIN;
   }
   retVal->SetDefaults(&(*pConfiguration)->configGRP, &(*pConfiguration)->configReconstruction, &(*pConfiguration)->configProcessing, nullptr);
   return retVal;

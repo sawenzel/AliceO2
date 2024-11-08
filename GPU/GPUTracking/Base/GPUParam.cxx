@@ -130,8 +130,8 @@ void GPUParam::UpdateSettings(const GPUSettingsGRP* g, const GPUSettingsProcessi
     UpdateBzOnly(g->solenoidBzNominalGPU);
     par.assumeConstantBz = g->constBz;
     par.toyMCEventsFlag = g->homemadeEvents;
-    par.continuousTracking = g->continuousMaxTimeBin != 0;
-    continuousMaxTimeBin = g->continuousMaxTimeBin == -1 ? GPUSettings::TPC_MAX_TF_TIME_BIN : g->continuousMaxTimeBin;
+    par.continuousTracking = g->grpContinuousMaxTimeBin != 0;
+    continuousMaxTimeBin = g->grpContinuousMaxTimeBin == -1 ? GPUSettings::TPC_MAX_TF_TIME_BIN : g->grpContinuousMaxTimeBin;
   }
   par.earlyTpcTransform = rec.tpc.forceEarlyTransform == -1 ? (!par.continuousTracking) : rec.tpc.forceEarlyTransform;
   qptB5Scaler = CAMath::Abs(bzkG) > 0.1f ? CAMath::Abs(bzkG) / 5.006680f : 1.f; // Repeat here, since passing in g is optional

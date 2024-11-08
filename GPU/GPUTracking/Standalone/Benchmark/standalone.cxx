@@ -302,7 +302,7 @@ int32_t SetupReconstruction()
       printf("Error reading event config file\n");
       return 1;
     }
-    printf("Read event settings from dir %s (solenoidBz: %f, home-made events %d, constBz %d, maxTimeBin %d)\n", filename, rec->GetGRPSettings().solenoidBzNominalGPU, (int32_t)rec->GetGRPSettings().homemadeEvents, (int32_t)rec->GetGRPSettings().constBz, rec->GetGRPSettings().continuousMaxTimeBin);
+    printf("Read event settings from dir %s (solenoidBz: %f, home-made events %d, constBz %d, maxTimeBin %d)\n", filename, rec->GetGRPSettings().solenoidBzNominalGPU, (int32_t)rec->GetGRPSettings().homemadeEvents, (int32_t)rec->GetGRPSettings().constBz, rec->GetGRPSettings().grpContinuousMaxTimeBin);
     if (configStandalone.testSyncAsync) {
       recAsync->ReadSettings(filename);
     }
@@ -331,7 +331,7 @@ int32_t SetupReconstruction()
     grp.constBz = true;
   }
   if (configStandalone.TF.nMerge || configStandalone.TF.bunchSim) {
-    if (grp.continuousMaxTimeBin) {
+    if (grp.grpContinuousMaxTimeBin) {
       printf("ERROR: requested to overlay continuous data - not supported\n");
       return 1;
     }
@@ -340,11 +340,11 @@ int32_t SetupReconstruction()
       configStandalone.cont = true;
     }
     if (chainTracking->GetTPCTransformHelper()) {
-      grp.continuousMaxTimeBin = configStandalone.TF.timeFrameLen * ((double)GPUReconstructionTimeframe::TPCZ / (double)GPUReconstructionTimeframe::DRIFT_TIME) / chainTracking->GetTPCTransformHelper()->getCorrMap()->getVDrift();
+      grp.grpContinuousMaxTimeBin = configStandalone.TF.timeFrameLen * ((double)GPUReconstructionTimeframe::TPCZ / (double)GPUReconstructionTimeframe::DRIFT_TIME) / chainTracking->GetTPCTransformHelper()->getCorrMap()->getVDrift();
     }
   }
-  if (configStandalone.cont && grp.continuousMaxTimeBin == 0) {
-    grp.continuousMaxTimeBin = -1;
+  if (configStandalone.cont && grp.grpContinuousMaxTimeBin == 0) {
+    grp.grpContinuousMaxTimeBin = -1;
   }
   if (rec->GetDeviceType() == GPUReconstruction::DeviceType::CPU) {
     printf("Standalone Test Framework for CA Tracker - Using CPU\n");
@@ -904,11 +904,11 @@ int32_t main(int argc, char** argv)
 
         if (configStandalone.overrideMaxTimebin && (chainTracking->mIOPtrs.clustersNative || chainTracking->mIOPtrs.tpcPackedDigits || chainTracking->mIOPtrs.tpcZS)) {
           GPUSettingsGRP grp = rec->GetGRPSettings();
-          if (grp.continuousMaxTimeBin == 0) {
+          if (grp.grpContinuousMaxTimeBin == 0) {
             printf("Cannot override max time bin for non-continuous data!\n");
           } else {
-            grp.continuousMaxTimeBin = chainTracking->mIOPtrs.tpcZS ? GPUReconstructionConvert::GetMaxTimeBin(*chainTracking->mIOPtrs.tpcZS) : chainTracking->mIOPtrs.tpcPackedDigits ? GPUReconstructionConvert::GetMaxTimeBin(*chainTracking->mIOPtrs.tpcPackedDigits) : GPUReconstructionConvert::GetMaxTimeBin(*chainTracking->mIOPtrs.clustersNative);
-            printf("Max time bin set to %d\n", (int32_t)grp.continuousMaxTimeBin);
+            grp.grpContinuousMaxTimeBin = chainTracking->mIOPtrs.tpcZS ? GPUReconstructionConvert::GetMaxTimeBin(*chainTracking->mIOPtrs.tpcZS) : chainTracking->mIOPtrs.tpcPackedDigits ? GPUReconstructionConvert::GetMaxTimeBin(*chainTracking->mIOPtrs.tpcPackedDigits) : GPUReconstructionConvert::GetMaxTimeBin(*chainTracking->mIOPtrs.clustersNative);
+            printf("Max time bin set to %d\n", grp.grpContinuousMaxTimeBin);
             rec->UpdateSettings(&grp);
             if (recAsync) {
               recAsync->UpdateSettings(&grp);

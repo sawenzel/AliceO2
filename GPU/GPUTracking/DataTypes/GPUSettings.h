@@ -57,7 +57,7 @@ struct GPUSettingsGRP {
   float solenoidBzNominalGPU = -5.00668f; // solenoid field strength
   int32_t constBz = 0;                    // for test-MC events with constant Bz
   int32_t homemadeEvents = 0;             // Toy-MC events
-  int32_t continuousMaxTimeBin = 0;       // 0 for triggered events, -1 for default TF length
+  int32_t grpContinuousMaxTimeBin = -2;   // 0 for triggered events, -1 for automatic setting, -2 invalid default
   int32_t needsClusterer = 0;             // Set to true if the data requires the clusterizer
   int32_t doCompClusterDecode = 0;        // Set to true if the data contains compressed TPC clusters
 };

@@ -639,7 +639,7 @@ int32_t GPUChainTracking::DoQueuedUpdates(int32_t stream, bool updateSlave)
         grp->solenoidBzNominalGPU = mNewCalibValues->solenoidField;
       }
       if (mNewCalibValues->newContinuousMaxTimeBin) {
-        grp->continuousMaxTimeBin = mNewCalibValues->continuousMaxTimeBin;
+        grp->grpContinuousMaxTimeBin = mNewCalibValues->continuousMaxTimeBin;
       }
     }
   }
