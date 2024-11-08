@@ -175,6 +175,10 @@ struct DiscoverMetadataInAOD : o2::framework::ConfigDiscoveryPlugin {
             }
           }
 
+          if (parentFilename.starts_with("alien://")) {
+            TGrid::Connect("alien://");
+          }
+
           std::unique_ptr<TFile> parentFile{TFile::Open(parentFilename.c_str())};
           if (parentFile.get() == nullptr) {
             LOGP(fatal, "Couldn't open derived file \"{}\"!", parentFilename);
