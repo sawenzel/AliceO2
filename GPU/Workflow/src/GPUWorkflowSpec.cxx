@@ -156,7 +156,7 @@ void GPURecoWorkflowSpec::init(InitContext& ic)
   mAutoSolenoidBz = mConfParam->solenoidBzNominalGPU == -1e6f;
   mAutoContinuousMaxTimeBin = mConfig->configGRP.grpContinuousMaxTimeBin < 0;
   if (mAutoContinuousMaxTimeBin) {
-    mConfig->configGRP.grpContinuousMaxTimeBin = ((mConfParam->overrideNHbfPerTF ? mConfParam->overrideNHbfPerTF : 256) * o2::constants::lhc::LHCMaxBunches + 2 * o2::tpc::constants::LHCBCPERTIMEBIN - 2) / o2::tpc::constants::LHCBCPERTIMEBIN;
+    mConfig->configGRP.grpContinuousMaxTimeBin = GPUO2InterfaceUtils::getTpcMaxTimeBinFromNHbf(mConfParam->overrideNHbfPerTF ? mConfParam->overrideNHbfPerTF : 256);
   }
   if (mConfig->configProcessing.deviceNum == -2) {
     int32_t myId = ic.services().get<const o2::framework::DeviceSpec>().inputTimesliceId;
@@ -1013,7 +1013,7 @@ void GPURecoWorkflowSpec::doCalibUpdates(o2::framework::ProcessingContext& pc, c
       LOG(info) << "Updating solenoid field " << newCalibValues.solenoidField;
     }
     if (mAutoContinuousMaxTimeBin) {
-      mConfig->configGRP.grpContinuousMaxTimeBin = (mTFSettings->nHBFPerTF * o2::constants::lhc::LHCMaxBunches + 2 * o2::tpc::constants::LHCBCPERTIMEBIN - 2) / o2::tpc::constants::LHCBCPERTIMEBIN;
+      mConfig->configGRP.grpContinuousMaxTimeBin = GPUO2InterfaceUtils::getTpcMaxTimeBinFromNHbf(mTFSettings->nHBFPerTF);
       newCalibValues.newContinuousMaxTimeBin = true;
       newCalibValues.continuousMaxTimeBin = mConfig->configGRP.grpContinuousMaxTimeBin;
       LOG(info) << "Updating max time bin " << newCalibValues.continuousMaxTimeBin << " (" << mTFSettings->nHBFPerTF << " orbits)";

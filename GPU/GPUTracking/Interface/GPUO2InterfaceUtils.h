@@ -58,6 +58,7 @@ class GPUO2InterfaceUtils
   static std::unique_ptr<GPUParam> getFullParam(float solenoidBz, uint32_t nHbfPerTf = 0, std::unique_ptr<GPUO2InterfaceConfiguration>* pConfiguration = nullptr, std::unique_ptr<GPUSettingsO2>* pO2Settings = nullptr, bool* autoMaxTimeBin = nullptr);
   static std::shared_ptr<GPUParam> getFullParamShared(float solenoidBz, uint32_t nHbfPerTf = 0, std::unique_ptr<GPUO2InterfaceConfiguration>* pConfiguration = nullptr, std::unique_ptr<GPUSettingsO2>* pO2Settings = nullptr, bool* autoMaxTimeBin = nullptr); // Return owning pointer
   static void paramUseExternalOccupancyMap(GPUParam* param, uint32_t nHbfPerTf, const uint32_t* occupancymap, int32_t occupancyMapSize);
+  static uint32_t getTpcMaxTimeBinFromNHbf(uint32_t nHbf);
 
   class GPUReconstructionZSDecoder
   {

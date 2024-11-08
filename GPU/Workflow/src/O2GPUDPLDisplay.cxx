@@ -115,7 +115,7 @@ void O2GPUDPLDisplaySpec::run(ProcessingContext& pc)
     mGRPGeomUpdated = false;
     mConfig->configGRP.solenoidBzNominalGPU = GPUO2InterfaceUtils::getNominalGPUBz(*GRPGeomHelper::instance().getGRPMagField());
     if (mAutoContinuousMaxTimeBin) {
-      mConfig->configGRP.grpContinuousMaxTimeBin = (mTFSettings->nHBFPerTF * o2::constants::lhc::LHCMaxBunches + 2 * o2::tpc::constants::LHCBCPERTIMEBIN - 2) / o2::tpc::constants::LHCBCPERTIMEBIN;
+      mConfig->configGRP.grpContinuousMaxTimeBin = GPUO2InterfaceUtils::getTpcMaxTimeBinFromNHbf(mTFSettings->nHBFPerTF);
     }
     mDisplay->UpdateGRP(&mConfig->configGRP);
     if (mGeometryCreated == 0) {

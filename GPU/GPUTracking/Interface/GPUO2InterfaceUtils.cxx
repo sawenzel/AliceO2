@@ -108,7 +108,7 @@ std::unique_ptr<GPUParam> GPUO2InterfaceUtils::getFullParam(float solenoidBz, ui
     *autoMaxTimeBin = (*pConfiguration)->configGRP.grpContinuousMaxTimeBin == -1;
   }
   if ((*pConfiguration)->configGRP.grpContinuousMaxTimeBin == -1) {
-    (*pConfiguration)->configGRP.grpContinuousMaxTimeBin = (nHbfPerTf * o2::constants::lhc::LHCMaxBunches + 2 * o2::tpc::constants::LHCBCPERTIMEBIN - 2) / o2::tpc::constants::LHCBCPERTIMEBIN;
+    (*pConfiguration)->configGRP.grpContinuousMaxTimeBin = GPUO2InterfaceUtils::getTpcMaxTimeBinFromNHbf(nHbfPerTf);
   }
   retVal->SetDefaults(&(*pConfiguration)->configGRP, &(*pConfiguration)->configReconstruction, &(*pConfiguration)->configProcessing, nullptr);
   return retVal;
@@ -134,4 +134,9 @@ void GPUO2InterfaceUtils::paramUseExternalOccupancyMap(GPUParam* param, uint32_t
       param->occupancyMap = occupancymap + 2;
     }
   }
+}
+
+uint32_t GPUO2InterfaceUtils::getTpcMaxTimeBinFromNHbf(uint32_t nHbf)
+{
+  return (nHbf * o2::constants::lhc::LHCMaxBunches + 2 * o2::tpc::constants::LHCBCPERTIMEBIN - 2) / o2::tpc::constants::LHCBCPERTIMEBIN;
 }
