@@ -13,9 +13,13 @@
 #include "Framework/Endian.h"
 
 #include "arrow/type_traits.h"
+#include <arrow/dataset/file_base.h>
+#include <arrow/record_batch.h>
+#include <arrow/type.h>
 #include <arrow/util/key_value_metadata.h>
 #include <TBufferFile.h>
 
+#include <memory>
 #include <utility>
 namespace TableTreeHelpers
 {
@@ -407,7 +411,7 @@ std::shared_ptr<TTree> TableToTree::process()
 
   for (auto& reader : mColumnReaders) {
     int idealBasketSize = 1024 + reader->fieldSize() * reader->columnEntries(); // minimal additional size needed, otherwise we get 2 baskets
-    int basketSize = std::max(32000, idealBasketSize);        // keep a minimum value
+    int basketSize = std::max(32000, idealBasketSize);                          // keep a minimum value
     // std::cout << "Setting baskets size for " << reader->branchName() << " to " << basketSize << " =  1024 + "
     //           << reader->fieldSize() << " * " << reader->columnEntries() << ". mRows was " << mRows << std::endl;
     mTree->SetBasketSize(reader->branchName(), basketSize);
@@ -553,6 +557,30 @@ void TreeToTable::addReader(TBranch* branch, std::string const& name, bool VLA)
 std::shared_ptr<arrow::Table> TreeToTable::finalize()
 {
   return mTable;
+}
+
+FragmentToBatch::FragmentToBatch(arrow::MemoryPool* pool)
+  : mArrowMemoryPool{pool}
+{
+}
+
+void FragmentToBatch::setLabel(const char* label)
+{
+  mTableLabel = label;
+}
+
+void FragmentToBatch::fill(std::shared_ptr<arrow::dataset::FileFragment> fragment, std::shared_ptr<arrow::Schema> schema, std::shared_ptr<arrow::dataset::FileFormat> format)
+{
+  auto options = std::make_shared<arrow::dataset::ScanOptions>();
+  options->dataset_schema = schema;
+  auto scanner = format->ScanBatchesAsync(options, fragment);
+  auto batch = (*scanner)();
+  mRecordBatch = *batch.result();
+}
+
+std::shared_ptr<arrow::RecordBatch> FragmentToBatch::finalize()
+{
+  return mRecordBatch;
 }
 
 } // namespace o2::framework
