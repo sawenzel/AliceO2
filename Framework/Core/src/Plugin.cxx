@@ -57,7 +57,7 @@ auto lookForCommandLineAODOptions = [](ConfigParamRegistry& registry, int argc, 
       O2_SIGNPOST_EVENT_EMIT(capabilities, sid, "DiscoverAODOptionsInCommandLineCapability", "AOD options found in arguments. Populating from them.");
       return true;
     }
-    if (arg.starts_with("--aod-parent-base-path-replacement")) {
+    if (arg.starts_with("--aod-parent-")) {
       O2_SIGNPOST_EVENT_EMIT(capabilities, sid, "DiscoverAODOptionsInCommandLineCapability", "AOD options found in arguments. Populating from them.");
       return true;
     }
