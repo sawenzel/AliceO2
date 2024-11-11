@@ -27,6 +27,7 @@
 #include "GPUTPCGMPropagator.h"
 #include "GPUTPCMCInfo.h"
 #include "GPUParam.inc"
+#include "GPUCommonMath.h"
 
 #include <type_traits>
 
@@ -66,8 +67,12 @@ inline void GPUDisplay::insertVertexList(int32_t iSlice, size_t first, size_t la
 inline void GPUDisplay::drawPointLinestrip(int32_t iSlice, int32_t cid, int32_t id, int32_t id_limit)
 {
   mVertexBuffer[iSlice].emplace_back(mGlobalPos[cid].x, mGlobalPos[cid].y * mYFactor, mCfgH.projectXY ? 0 : mGlobalPos[cid].z);
-  if (mGlobalPos[cid].w < id_limit) {
-    mGlobalPos[cid].w = id;
+  float curVal;
+  while ((curVal = mGlobalPos[cid].w) < id_limit) {
+    if (GPUCommonMath::AtomicCAS(&mGlobalPos[cid].w, curVal, (float)id)) {
+      break;
+    }
+    curVal = mGlobalPos[cid].w;
   }
 }
 
