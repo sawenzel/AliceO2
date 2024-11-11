@@ -19,12 +19,12 @@
 
 #include "FlatObject.h"
 #include "Spline.h"
+#include "GPUCommonRtypes.h"
 #ifdef GPUCA_HAVE_O2HEADERS
 #include "DataFormatsTPC/Defs.h"
 #endif
 
 #if !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE) // code invisible on GPU and in the standalone compilation
-#include "Rtypes.h"                                       // for ClassDefNV
 #include <fmt/format.h>
 #endif
 

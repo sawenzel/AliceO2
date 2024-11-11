@@ -12,14 +12,13 @@
 /// \file  CalibdEdxContainer.cxx
 /// \author Matthias Kleiner <mkleiner@ikf.uni-frankfurt.de>
 
-#include "CalibdEdxContainer.h"
-
-#if !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE)
+#if !defined(GPUCA_STANDALONE)
 #include "TFile.h"
 #include "TPCBase/CalDet.h"
 #include "Framework/Logger.h"
 #include "clusterFinderDefs.h"
 #endif
+#include "CalibdEdxContainer.h"
 
 using namespace GPUCA_NAMESPACE::gpu;
 using namespace o2::tpc;

@@ -12,11 +12,11 @@
 /// \file GPUO2InterfaceQA.cxx
 /// \author David Rohr
 
+#include "TGraphAsymmErrors.h"
 #include "GPUParam.h"
 #include "GPUQA.h"
 #include "GPUO2InterfaceConfiguration.h"
 #include "GPUO2InterfaceQA.h"
-#include "TGraphAsymmErrors.h"
 
 using namespace o2::gpu;
 using namespace o2::tpc;

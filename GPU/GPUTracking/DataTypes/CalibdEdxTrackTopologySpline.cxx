@@ -14,11 +14,10 @@
 ///
 /// \author  Matthias Kleiner <matthias.kleiner@cern.ch>
 
-#include "CalibdEdxTrackTopologySpline.h"
-
 #if !defined(GPUCA_STANDALONE)
 #include "TFile.h"
 #endif
+#include "CalibdEdxTrackTopologySpline.h"
 
 using namespace GPUCA_NAMESPACE::gpu;
 using namespace o2::tpc;
