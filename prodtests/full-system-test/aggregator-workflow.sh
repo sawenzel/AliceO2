@@ -295,8 +295,8 @@ fi
 
 # TPC IDCs and SAC
 crus="0-359"  # to be used with $AGGREGATOR_TASKS == TPC_IDCBOTH_SAC or ALL
-lanesFactorize=${O2_TPC_IDC_FACTORIZE_NLANES:-10}
-threadFactorize=${O2_TPC_IDC_FACTORIZE_NTHREADS:-8}
+lanesFactorize=${O2_TPC_IDC_FACTORIZE_NLANES:-12}
+threadFactorize=${O2_TPC_IDC_FACTORIZE_NTHREADS:-16}
 nTFs=$((1000 * 128 / ${NHBPERTF}))
 nTFs_SAC=$((1000 * 128 / ${NHBPERTF}))
 nBuffer=$((100 * 128 / ${NHBPERTF}))
