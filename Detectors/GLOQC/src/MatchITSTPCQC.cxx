@@ -344,10 +344,10 @@ bool MatchITSTPCQC::init()
   mChi2Refit = new TH1F("mChi2Refit", "Chi2 of refit; chi2", 200, 0, 300);
   mChi2Refit->SetOption("logy");
   mChi2Refit->GetYaxis()->SetTitleOffset(1.4);
-  mDCAr = new TH1F("mDCAr", "DCA of TPC tracks; DCAr", 200, -100, 100);
-  mDCArVsPtNum = new TH2F("mDCArVsPtNum", "DCA of TPC tracks Vs Pt Num; #it{p}_{T} [GeV/c]; DCAr", 100, 0, 20., 200, -30, 30);
+  mDCAr = new TH1F("mDCAr", "DCA of TPC tracks; DCAr", 100, -mDCATPCCutY, mDCATPCCutY);
+  mDCArVsPtNum = new TH2F("mDCArVsPtNum", "DCA of TPC tracks Vs Pt Num; #it{p}_{T} [GeV/c]; DCAr", 100, 0, 20., 100, -mDCATPCCutY, mDCATPCCutY);
   mDCArVsPtNum->Sumw2();
-  mDCArVsPtDen = new TH2F("mDCArVsPtDen", "DCA of TPC tracks Vs Pt Den; #it{p}_{T} [GeV/c]; DCAr", 100, 0, 20., 200, -30, 30);
+  mDCArVsPtDen = new TH2F("mDCArVsPtDen", "DCA of TPC tracks Vs Pt Den; #it{p}_{T} [GeV/c]; DCAr", 100, 0, 20., 100, -mDCATPCCutY, mDCATPCCutY);
   mDCArVsPtDen->Sumw2();
   mFractionITSTPCmatchDCArVsPt = new TEfficiency("mFractionITSTPCmatchDCArVsPt", "Fraction of ITSTPC matched tracks wrt TPC vs DCAr; #it{p}_{T} [GeV#it{c}]; DCAr; Eff", 100, 0, 20., 200, -30, 30);
 
