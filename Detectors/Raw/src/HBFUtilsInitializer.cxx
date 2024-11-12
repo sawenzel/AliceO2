@@ -78,7 +78,7 @@ HBFUtilsInitializer::HBFUtilsInitializer(const o2f::ConfigContext& configcontext
             hbfuInput = optStr;
           } else if (opt == HBFOpt::ROOT) {
             rootFileInput = optStr;
-          } else {
+          } else if (!helpasked) {
             LOGP(fatal, "uknown hbfutils-config option {}", optStr);
           }
         }
