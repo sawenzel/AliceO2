@@ -17,6 +17,7 @@
 #include "Framework/AnalysisTask.h"
 #include <TH2F.h>
 #include <cmath>
+#include <iostream>
 
 using namespace o2;
 using namespace o2::framework;
@@ -43,7 +44,7 @@ struct EtaAndClsHistogramsSimple {
   {
     LOGP(info, "Invoking the simple one");
     for (auto& track : tracks) {
-      etaClsH->Fill(track.eta(), track.pt(), 0);
+      etaClsH->Fill(track.eta(), track.pt());
       skimEx(track.pt(), track.eta());
     }
   }
@@ -57,7 +58,7 @@ struct EtaAndClsHistogramsIUSimple {
   {
     LOGP(info, "Invoking the simple one");
     for (auto& track : tracks) {
-      etaClsH->Fill(track.eta(), track.pt(), 0);
+      etaClsH->Fill(track.eta(), track.pt());
       skimEx(track.pt(), track.eta());
     }
   }

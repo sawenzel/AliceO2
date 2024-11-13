@@ -30,7 +30,7 @@
 #include "Framework/ServiceMetricsInfo.h"
 #include "WorkflowHelpers.h"
 #include "Framework/WorkflowSpecNode.h"
-#include "AnalysisSupportHelpers.h"
+#include "Framework/AnalysisSupportHelpers.h"
 
 #include "CommonMessageBackendsHelpers.h"
 #include <Monitoring/Monitoring.h>
@@ -516,7 +516,7 @@ o2::framework::ServiceSpec ArrowSupport::arrowBackendSpec()
       auto [outputsInputs, isDangling] = WorkflowHelpers::analyzeOutputs(workflow);
 
       // create DataOutputDescriptor
-      std::shared_ptr<DataOutputDirector> dod = WorkflowHelpers::getDataOutputDirector(ctx.options(), outputsInputs, isDangling);
+      std::shared_ptr<DataOutputDirector> dod = AnalysisSupportHelpers::getDataOutputDirector(ctx);
 
       // select outputs of type AOD which need to be saved
       // ATTENTION: if there are dangling outputs the getGlobalAODSink
@@ -537,11 +537,7 @@ o2::framework::ServiceSpec ArrowSupport::arrowBackendSpec()
         // add TFNumber and TFFilename as input to the writer
         outputsInputsAOD.emplace_back("tfn", "TFN", "TFNumber");
         outputsInputsAOD.emplace_back("tff", "TFF", "TFFilename");
-        int compression = 505; 
-        if (ctx.options().hasOption("aod-writer-compression")) {
-          compression = ctx.options().get<int>("aod-writer-compression");
-        }
-        workflow.push_back(AnalysisSupportHelpers::getGlobalAODSink(dod, outputsInputsAOD, compression));
+        workflow.push_back(AnalysisSupportHelpers::getGlobalAODSink(ctx));
       }
       // Move the dummy sink at the end, if needed
       for (size_t i = 0; i < workflow.size(); ++i) {

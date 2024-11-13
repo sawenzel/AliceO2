@@ -30,6 +30,7 @@
 #include "Framework/CheckTypes.h"
 #include "Framework/StructToTuple.h"
 #include "Framework/ConfigParamDiscovery.h"
+#include "ServiceRegistryRef.h"
 #include <vector>
 
 namespace o2::framework
@@ -198,7 +199,8 @@ int mainNoCatch(int argc, char** argv)
     workflowOptions.push_back(extra);
   }
 
-  ConfigContext configContext(workflowOptionsRegistry, argc, argv);
+  ServiceRegistry configRegistry;
+  ConfigContext configContext(workflowOptionsRegistry, ServiceRegistryRef{configRegistry}, argc, argv);
   o2::framework::WorkflowSpec specs = defineDataProcessing(configContext);
   overrideCloning(configContext, specs);
   overridePipeline(configContext, specs);

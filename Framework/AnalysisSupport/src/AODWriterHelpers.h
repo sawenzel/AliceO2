@@ -9,24 +9,20 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-#include "Framework/ConfigContext.h"
+#ifndef O2_FRAMEWORK_AODROOTWRITERHELPERS_H_
+#define O2_FRAMEWORK_AODROOTWRITERHELPERS_H_
 
-namespace o2::framework
+#include "Framework/AlgorithmSpec.h"
+#include <Monitoring/Monitoring.h>
+
+namespace o2::framework::writers
 {
 
-ConfigContext::ConfigContext(ConfigParamRegistry& options, ServiceRegistryRef services, int argc, char** argv)
-  : mOptions{options}, mServices{services}, mArgc{argc}, mArgv{argv} {}
+struct AODWriterHelpers {
+  static AlgorithmSpec getOutputObjHistWriter(ConfigContext const& context);
+  static AlgorithmSpec getOutputTTreeWriter(ConfigContext const& context);
+};
 
-bool ConfigContext::helpOnCommandLine() const
-{
-  bool helpasked = false;
-  for (int argi = 0; argi < mArgc; ++argi) {
-    if (strcmp(mArgv[argi], "--help") == 0 || (strcmp(mArgv[argi], "-h") == 0)) {
-      helpasked = true;
-      break;
-    }
-  }
-  return helpasked;
-}
+} // namespace o2::framework::writers
 
-} // namespace o2::framework
+#endif // O2_FRAMEWORK_AODROOTWRITERHELPERS_H_

@@ -16,6 +16,7 @@
 #include "Framework/Capability.h"
 #include "Framework/Signpost.h"
 #include "AODJAlienReaderHelpers.h"
+#include "AODWriterHelpers.h"
 #include <TFile.h>
 #include <TMap.h>
 #include <TGrid.h>
@@ -30,6 +31,20 @@ struct ROOTFileReader : o2::framework::AlgorithmPlugin {
   o2::framework::AlgorithmSpec create(o2::framework::ConfigContext const& config) override
   {
     return o2::framework::readers::AODJAlienReaderHelpers::rootFileReaderCallback(config);
+  }
+};
+
+struct ROOTObjWriter : o2::framework::AlgorithmPlugin {
+  o2::framework::AlgorithmSpec create(o2::framework::ConfigContext const& config) override
+  {
+    return o2::framework::writers::AODWriterHelpers::getOutputObjHistWriter(config);
+  }
+};
+
+struct ROOTTTreeWriter : o2::framework::AlgorithmPlugin {
+  o2::framework::AlgorithmSpec create(o2::framework::ConfigContext const& config) override
+  {
+    return o2::framework::writers::AODWriterHelpers::getOutputTTreeWriter(config);
   }
 };
 
@@ -211,6 +226,8 @@ struct DiscoverMetadataInAOD : o2::framework::ConfigDiscoveryPlugin {
 
 DEFINE_DPL_PLUGINS_BEGIN
 DEFINE_DPL_PLUGIN_INSTANCE(ROOTFileReader, CustomAlgorithm);
+DEFINE_DPL_PLUGIN_INSTANCE(ROOTObjWriter, CustomAlgorithm);
+DEFINE_DPL_PLUGIN_INSTANCE(ROOTTTreeWriter, CustomAlgorithm);
 DEFINE_DPL_PLUGIN_INSTANCE(RunSummary, CustomService);
 DEFINE_DPL_PLUGIN_INSTANCE(DiscoverMetadataInAOD, ConfigDiscovery);
 DEFINE_DPL_PLUGINS_END
