@@ -94,7 +94,7 @@ class GPUTPCTracker : public GPUProcessor
     StructGPUParameters gpuParameters;  // GPU parameters
   };
 
-#if !defined(__OPENCL__) || defined(__OPENCLCPP__)
+#if !defined(__OPENCL1__)
   GPUhdi() GPUglobalref() const GPUTPCClusterData* ClusterData() const
   {
     return mData.ClusterData();

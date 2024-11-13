@@ -22,7 +22,7 @@
 #include "GPUO2DataTypes.h"
 #include "GPUTPCTrackParam.h"
 #include "GPUParam.inc"
-#if !defined(__OPENCL__) || defined(__OPENCLCPP__)
+#if !defined(__OPENCL1__)
 #include "GPUTPCConvertImpl.h"
 #endif
 

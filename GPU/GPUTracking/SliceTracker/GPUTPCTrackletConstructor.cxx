@@ -21,7 +21,7 @@
 #include "GPUTPCTracker.h"
 #include "GPUTPCTracklet.h"
 #include "GPUTPCTrackletConstructor.h"
-#if !defined(__OPENCL__) || defined(__OPENCLCPP__)
+#if !defined(__OPENCL1__)
 #include "GPUTPCGlobalTracking.h"
 #include "CorrectionMapsHelper.h"
 #ifdef GPUCA_HAVE_O2HEADERS
@@ -140,14 +140,14 @@ GPUdic(2, 1) void GPUTPCTrackletConstructor::UpdateTracklet(int32_t /*nBlocks*/,
       float z = z0 + hh.y * stepZ;
       if (iRow != r.mStartRow || !tracker.Param().par.continuousTracking) {
         tParam.ConstrainZ(z, tracker.ISlice(), z0, r.mLastZ);
-#if !defined(__OPENCL__) || defined(__OPENCLCPP__)
+#if !defined(__OPENCL1__)
         tracker.GetConstantMem()->calibObjects.fastTransformHelper->TransformXYZ(tracker.ISlice(), iRow, x, y, z);
 #endif
       }
       if (iRow == r.mStartRow) {
         if (tracker.Param().par.continuousTracking) {
           float refZ = ((z > 0) ? tracker.Param().rec.tpc.defaultZOffsetOverR : -tracker.Param().rec.tpc.defaultZOffsetOverR) * x;
-#if !defined(__OPENCL__) || defined(__OPENCLCPP__)
+#if !defined(__OPENCL1__)
           float zTmp = refZ;
           tracker.GetConstantMem()->calibObjects.fastTransformHelper->TransformXYZ(tracker.ISlice(), iRow, x, y, zTmp);
           z += zTmp - refZ; // Add zCorrection (=zTmp - refZ) to z, such that zOffset is set such, that transformed (z - zOffset) becomes refZ
@@ -266,7 +266,7 @@ GPUdic(2, 1) void GPUTPCTrackletConstructor::UpdateTracklet(int32_t /*nBlocks*/,
       r.mNMissed++;
 
       float x = row.X();
-#if !defined(__OPENCL__) || defined(__OPENCLCPP__)
+#if !defined(__OPENCL1__)
       {
         float tmpY, tmpZ;
         if (!tParam.GetPropagatedYZ(tracker.Param().bzCLight, x, tmpY, tmpZ)) {
@@ -299,7 +299,7 @@ GPUdic(2, 1) void GPUTPCTrackletConstructor::UpdateTracklet(int32_t /*nBlocks*/,
         GPUglobalref() const cahit2* hits = tracker.HitData(row);
         GPUglobalref() const calink* firsthit = tracker.FirstHitInBin(row);
 #endif //! GPUCA_TEXTURE_FETCH_CONSTRUCTOR
-#if !defined(__OPENCL__) || defined(__OPENCLCPP__)
+#if !defined(__OPENCL1__)
         tracker.GetConstantMem()->calibObjects.fastTransformHelper->InverseTransformYZtoNominalYZ(tracker.ISlice(), iRow, yUncorrected, zUncorrected, yUncorrected, zUncorrected);
 #endif
 
@@ -391,7 +391,7 @@ GPUdic(2, 1) void GPUTPCTrackletConstructor::UpdateTracklet(int32_t /*nBlocks*/,
         }
       } while (false);
       (void)found;
-#if defined(GPUCA_HAVE_O2HEADERS) && (!defined(__OPENCL__) || defined(__OPENCLCPP__))
+#if defined(GPUCA_HAVE_O2HEADERS) && !defined(__OPENCL1__)
       if (!found && tracker.GetConstantMem()->calibObjects.dEdxCalibContainer) {
         uint32_t pad = CAMath::Float2UIntRn(tracker.Param().tpcGeometry.LinearY2Pad(tracker.ISlice(), iRow, yUncorrected));
         if (pad < tracker.Param().tpcGeometry.NPads(iRow) && tracker.GetConstantMem()->calibObjects.dEdxCalibContainer->isDead(tracker.ISlice(), iRow, pad)) {
@@ -461,7 +461,7 @@ GPUdic(2, 1) void GPUTPCTrackletConstructor::DoTracklet(GPUconstantref() MEM_GLO
       iRow = r.mEndRow;
       iRowEnd = -1;
       float x = tracker.Row(r.mEndRow).X();
-#if !defined(__OPENCL__) || defined(__OPENCLCPP__)
+#if !defined(__OPENCL1__)
       {
         float tmpY, tmpZ;
         if (tParam.GetPropagatedYZ(tracker.Param().bzCLight, x, tmpY, tmpZ)) {
@@ -584,7 +584,7 @@ GPUd() int32_t GPUTPCTrackletConstructor::FetchTracklet(GPUconstantref() MEM_GLO
 
 #endif // GPUCA_GPUCODE
 
-#if !defined(__OPENCL__) || defined(__OPENCLCPP__)
+#if !defined(__OPENCL1__)
 template <>
 GPUd() int32_t GPUTPCTrackletConstructor::GPUTPCTrackletConstructorGlobalTracking<GPUTPCGlobalTracking::GPUSharedMemory>(GPUconstantref() MEM_GLOBAL(GPUTPCTracker) & GPUrestrict() tracker, GPUsharedref() GPUTPCGlobalTracking::GPUSharedMemory& sMem, MEM_LG(GPUTPCTrackParam) & GPUrestrict() tParam, int32_t row, int32_t increment, int32_t iTracklet, calink* rowHits)
 {

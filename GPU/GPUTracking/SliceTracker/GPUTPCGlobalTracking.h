@@ -25,7 +25,7 @@ namespace gpu
 MEM_CLASS_PRE()
 class GPUTPCTracker;
 
-#if !defined(__OPENCL__) || defined(__OPENCLCPP__)
+#if !defined(__OPENCL1__)
 class GPUTPCGlobalTracking : public GPUKernelTemplate
 {
  public:

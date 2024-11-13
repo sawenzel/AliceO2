@@ -17,7 +17,7 @@
 
 #include "GPUParam.h"
 #include "GPUTPCGMMergedTrackHit.h"
-#if !defined(__OPENCL__) || defined(__OPENCLCPP__)
+#if !defined(__OPENCL1__)
 #include "GPUTPCClusterOccupancyMap.h"
 #endif
 
@@ -228,7 +228,7 @@ GPUdi() void MEM_LG(GPUParam)::UpdateClusterError2ByState(int16_t clusterState, 
 MEM_CLASS_PRE()
 GPUdi() float MEM_LG(GPUParam)::GetUnscaledMult(float time) const
 {
-#if !defined(__OPENCL__) || defined(__OPENCLCPP__)
+#if !defined(__OPENCL1__)
   if (!occupancyMap) {
     return 0.f;
   }

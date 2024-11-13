@@ -14,6 +14,11 @@
 
 // clang-format off
 #define __OPENCL__
+#if defined(__cplusplus) && __cplusplus >= 201703L
+  #define __OPENCLCPP__
+#else
+  #define __OPENCL1__
+#endif
 #define GPUCA_GPUTYPE_OPENCL
 
 #ifdef __OPENCLCPP__

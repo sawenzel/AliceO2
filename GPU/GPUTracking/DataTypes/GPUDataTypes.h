@@ -125,7 +125,7 @@ namespace gpu
 #define GPUCA_RECO_STEP GPUDataTypes
 #endif
 
-#if defined(__OPENCL__) && !defined(__OPENCLCPP__)
+#if defined(__OPENCL1__)
 MEM_CLASS_PRE() // Macro with some template magic for OpenCL 1.2
 #endif
 class GPUTPCTrack;

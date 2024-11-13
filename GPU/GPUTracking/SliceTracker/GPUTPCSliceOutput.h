@@ -44,7 +44,7 @@ class GPUTPCSliceOutput
   }
   GPUhd() uint32_t NLocalTracks() const { return mNLocalTracks; }
   GPUhd() uint32_t NTrackClusters() const { return mNTrackClusters; }
-#if !defined(__OPENCL__) || defined(__OPENCLCPP__)
+#if !defined(__OPENCL1__)
   GPUhd() const GPUTPCTrack* GetFirstTrack() const
   {
     return (const GPUTPCTrack*)((const char*)this + sizeof(*this));

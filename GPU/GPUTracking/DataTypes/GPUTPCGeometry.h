@@ -34,7 +34,7 @@ namespace gpu
 // Should be unified, but cannot take the contants from the official headers for now, since we want it to be constexpr
 class GPUTPCGeometry // TODO: Make values constexpr
 {
-#if defined(__OPENCL__) && !defined(__OPENCLCPP__)
+#if defined(__OPENCL1__)
   GPUTPCGeometry(); // Fake constructor declaration for OpenCL due to static members, does not exist!
 #endif
 #ifdef GPUCA_TPC_GEOMETRY_O2
@@ -63,7 +63,7 @@ class GPUTPCGeometry // TODO: Make values constexpr
   const float mPadHeight[10] GPUCA_CPP11_INIT(= {.75f, .75f, .75f, .75f, 1.f, 1.f, 1.2f, 1.2f, 1.5f, 1.5f});
   const float mPadWidth[10] GPUCA_CPP11_INIT(= {.416f, .420f, .420f, .436f, .6f, .6f, .608f, .588f, .604f, .607f});
 
-#if !defined(__OPENCL__) || defined(__OPENCLCPP__)
+#if !defined(__OPENCL1__)
   static CONSTEXPR float FACTOR_T2Z GPUCA_CPP11_INIT(= 250.f / 512.f); // Used in compression, must remain constant at 250cm, 512 time bins!
 #endif
 
@@ -95,7 +95,7 @@ class GPUTPCGeometry // TODO: Make values constexpr
   const float mPadHeight[3] GPUCA_CPP11_INIT(= {.75f, 1.f, 1.5f});
   const float mPadWidth[3] GPUCA_CPP11_INIT(= {.4f, .6f, .6f});
 
-#if !defined(__OPENCL__) || defined(__OPENCLCPP__)
+#if !defined(__OPENCL1__)
   static CONSTEXPR float FACTOR_T2Z GPUCA_CPP11_INIT(= 250.f / 1024.f); // Used in compression, must remain constant at 250cm, 1024 time bins!
 #endif
 
@@ -109,7 +109,7 @@ class GPUTPCGeometry // TODO: Make values constexpr
   GPUd() int32_t EndOROC2() const { return GPUCA_ROW_COUNT; }
 #endif
  private:
-#if !defined(__OPENCL__) || defined(__OPENCLCPP__)
+#if !defined(__OPENCL1__)
   static CONSTEXPR float FACTOR_Z2T GPUCA_CPP11_INIT(= 1.f / FACTOR_T2Z);
 #endif
  public:
@@ -120,7 +120,7 @@ class GPUTPCGeometry // TODO: Make values constexpr
   GPUd() float PadWidth(int32_t row) const { return (mPadWidth[GetRegion(row)]); }
   GPUd() uint8_t NPads(int32_t row) const { return mNPads[row]; }
 
-#if !defined(__OPENCL__) || defined(__OPENCLCPP__)
+#if !defined(__OPENCL1__)
   GPUd() float LinearPad2Y(int32_t slice, int32_t row, float pad) const
   {
     const float u = (pad - 0.5f * mNPads[row]) * PadWidth(row);

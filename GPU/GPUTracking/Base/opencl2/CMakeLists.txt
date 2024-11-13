@@ -32,8 +32,6 @@ set(OCL_DEFINECL "-D$<JOIN:$<TARGET_PROPERTY:O2::GPUTracking,COMPILE_DEFINITIONS
             -I${CMAKE_SOURCE_DIR}/Detectors/TRD/base/src
             -I${CMAKE_SOURCE_DIR}/Detectors/Base/src
             -I${CMAKE_SOURCE_DIR}/DataFormats/Reconstruction/src
-            -I${CMAKE_SOURCE_DIR}/Detectors/ITSMFT/ITS/tracking/cuda/include
-            -D__OPENCLCPP__
 )
 
 set(SRCS GPUReconstructionOCL2.cxx)

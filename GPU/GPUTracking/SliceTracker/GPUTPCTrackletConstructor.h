@@ -100,7 +100,7 @@ class GPUTPCTrackletConstructor
   GPUd() static int32_t FetchTracklet(GPUconstantref() MEM_GLOBAL(GPUTPCTracker) & tracker, GPUsharedref() MEM_LOCAL(GPUSharedMemory) & sMem);
 #endif // GPUCA_GPUCODE
 
-#if !defined(__OPENCL__) || defined(__OPENCLCPP__)
+#if !defined(__OPENCL1__)
   template <class T>
   GPUd() static int32_t GPUTPCTrackletConstructorGlobalTracking(GPUconstantref() MEM_GLOBAL(GPUTPCTracker) & tracker, GPUsharedref() T& sMem, GPUTPCTrackParam& tParam, int32_t startrow, int32_t increment, int32_t iTracklet, calink* rowHits);
 #endif
