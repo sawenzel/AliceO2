@@ -212,7 +212,7 @@ GPUdi() void GPUdEdx::fillSubThreshold(int32_t padRow, const GPUParam& GPUrestri
   mNSubThresh++;
 }
 
-#endif // !GPUCA_HAVE_O2HEADERS || __OPENCL1__
+#endif // !GPUCA_HAVE_O2HEADERS || GPUCA_OPENCL1
 } // namespace gpu
 } // namespace GPUCA_NAMESPACE
 
