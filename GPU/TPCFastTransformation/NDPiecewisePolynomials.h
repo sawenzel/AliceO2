@@ -20,16 +20,11 @@
 #include "MultivariatePolynomialHelper.h"
 #include "GPUCommonMath.h"
 
-#if !defined(GPUCA_GPUCODE)
+#if !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE)
 #include <vector>
-#if !defined(GPUCA_STANDALONE)
-#include "TLinearFitter.h"
-#ifndef GPUCA_ALIROOT_LIB
-#include "CommonUtils/TreeStreamRedirector.h"
 #endif
-#include <TFile.h>
-#endif
-#endif
+
+class TFile;
 
 namespace GPUCA_NAMESPACE::gpu
 {
@@ -81,23 +76,20 @@ template <uint32_t Dim, uint32_t Degree, bool InteractionOnly>
 class NDPiecewisePolynomials : public FlatObject
 {
  public:
-#ifndef GPUCA_GPUCODE
+#if !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE)
   /// constructor
   /// \param min minimum coordinates of the grid
   /// \param max maximum coordinates of the grid (note: the resulting polynomials can NOT be evaluated at the maximum coordinates: only at min <= X < max)
   /// \param n number of vertices: defines number of fits per dimension: nFits = n - 1. n should be at least 2 to perform one fit
   NDPiecewisePolynomials(const float min[/* Dim */], const float max[/* Dim */], const uint32_t n[/* Dim */]) { init(min, max, n); }
-#endif
-#if !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE)
   /// constructor construct and object by initializing it from an object stored in a Root file
   /// \param fileName name of the file
   /// \param name name of the object
   NDPiecewisePolynomials(const char* fileName, const char* name)
   {
-    TFile f(fileName, "READ");
-    loadFromFile(f, name);
+    loadFromFile(fileName, name);
   };
-#endif
+#endif // !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE)
   /// default constructor
   NDPiecewisePolynomials() CON_DEFAULT;
 
@@ -115,7 +107,7 @@ class NDPiecewisePolynomials : public FlatObject
   /// move flat buffer to new location
   /// \param newBufferPtr new buffer location
   void moveBufferTo(char* newBufferPtr);
-#endif
+#endif // !defined(GPUCA_GPUCODE)
 
   /// destroy the object (release internal flat buffer)
   void destroy();
@@ -168,17 +160,16 @@ class NDPiecewisePolynomials : public FlatObject
   /// \return returns the parameters of the coefficients
   GPUd() const float* getParams() const { return mParams; }
 
-#if !defined(GPUCA_GPUCODE)
-  /// Setting directly the parameters of the polynomials
-  void setParams(const float params[/* getNParameters() */]) { std::copy(params, params + getNParameters(), mParams); }
-
   /// initalize the members
   /// \param min minimum coordinates of the grid
   /// \param max maximum coordinates of the grid (note: the resulting polynomials can NOT be evaluated at the maximum coordinates: only at min <= X < max)
   /// \param n number of vertices: defines number of fits per dimension: nFits = n - 1. n should be at least 2 to perform one fit
   void init(const float min[/* Dim */], const float max[/* Dim */], const uint32_t n[/* Dim */]);
 
-#ifndef GPUCA_STANDALONE
+#if !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE)
+  /// Setting directly the parameters of the polynomials
+  void setParams(const float params[/* getNParameters() */]) { std::copy(params, params + getNParameters(), mParams); }
+
   /// perform the polynomial fits on the grid
   /// \param func function which returns for every input x on the defined grid the true value
   /// \param nAuxiliaryPoints number of points which will be used for the fits (should be at least 2)
@@ -193,6 +184,8 @@ class NDPiecewisePolynomials : public FlatObject
   /// \param inpf input file
   /// \param name name of the object in the file
   void loadFromFile(TFile& inpf, const char* name);
+
+  void loadFromFile(const char* fileName, const char* name);
 
   /// write parameters to file
   /// \param outf output file
@@ -211,7 +204,6 @@ class NDPiecewisePolynomials : public FlatObject
 
   /// \return returns total number of polynomial fits
   uint32_t getNPolynomials() const;
-#endif
 
   /// converts the class to a container which can be written to a root file
   NDPiecewisePolynomialContainer getContainer() const { return NDPiecewisePolynomialContainer{Dim, Degree, getNParameters(), mParams, InteractionOnly, mMin, mMax, mN}; }
@@ -219,10 +211,10 @@ class NDPiecewisePolynomials : public FlatObject
   /// set the parameters from NDPiecewisePolynomialContainer
   /// \param container container for the parameters
   void setFromContainer(const NDPiecewisePolynomialContainer& container);
+#endif // !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE)
 
   /// \return returns the total number of stored parameters
   uint32_t getNParameters() const { return getNPolynomials() * MultivariatePolynomialParametersHelper::getNParameters(Degree, Dim, InteractionOnly); }
-#endif
 
   /// \return returns number of dimensions of the polynomials
   GPUd() static constexpr uint32_t getDim() { return Dim; }
@@ -292,15 +284,15 @@ class NDPiecewisePolynomials : public FlatObject
   /// \param ix index
   /// \param dim dimension
   double getVertexPosition(const uint32_t ix, const int32_t dim) const { return ix / static_cast<double>(mInvSpacing[dim]) + mMin[dim]; }
-#endif
+#endif // !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE)
 
 #if !defined(GPUCA_GPUCODE)
   /// \return returns the size of the parameters
   std::size_t sizeOfParameters() const { return getNParameters() * sizeof(DataTParams); }
+#endif // #if !defined(GPUCA_GPUCODE)
 
   // construct the object (flatbuffer)
   void construct();
-#endif
 
 #ifndef GPUCA_ALIROOT_LIB
   ClassDefNV(NDPiecewisePolynomials, 1);
@@ -312,20 +304,6 @@ class NDPiecewisePolynomials : public FlatObject
 //=================================================================================
 
 #if !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE)
-template <uint32_t Dim, uint32_t Degree, bool InteractionOnly>
-void NDPiecewisePolynomials<Dim, Degree, InteractionOnly>::loadFromFile(TFile& inpf, const char* name)
-{
-  NDPiecewisePolynomialContainer* gridTmp = nullptr;
-  inpf.GetObject(name, gridTmp);
-  if (gridTmp) {
-    setFromContainer(*gridTmp);
-    delete gridTmp;
-  } else {
-#ifndef GPUCA_ALIROOT_LIB
-    LOGP(info, "couldnt load object {} from input file", name);
-#endif
-  }
-}
 template <uint32_t Dim, uint32_t Degree, bool InteractionOnly>
 void NDPiecewisePolynomials<Dim, Degree, InteractionOnly>::setFromContainer(const NDPiecewisePolynomialContainer& container)
 {
@@ -350,12 +328,6 @@ void NDPiecewisePolynomials<Dim, Degree, InteractionOnly>::setFromContainer(cons
   init(container.mMin.data(), container.mMax.data(), container.mN.data());
   setParams(container.mParams.data());
 }
-template <uint32_t Dim, uint32_t Degree, bool InteractionOnly>
-void NDPiecewisePolynomials<Dim, Degree, InteractionOnly>::writeToFile(TFile& outf, const char* name) const
-{
-  const NDPiecewisePolynomialContainer cont = getContainer();
-  outf.WriteObject(&cont, name);
-}
 
 template <uint32_t Dim, uint32_t Degree, bool InteractionOnly>
 void NDPiecewisePolynomials<Dim, Degree, InteractionOnly>::setDefault()
@@ -368,7 +340,29 @@ void NDPiecewisePolynomials<Dim, Degree, InteractionOnly>::setDefault()
     std::copy(params.begin(), params.end(), &mParams[i * nParamsPerPol]);
   }
 }
-#endif
+
+template <uint32_t Dim, uint32_t Degree, bool InteractionOnly>
+uint32_t NDPiecewisePolynomials<Dim, Degree, InteractionOnly>::getNPolynomials() const
+{
+  uint32_t nP = getNPolynomials(0);
+  for (uint32_t i = 1; i < Dim; ++i) {
+    nP *= getNPolynomials(i);
+  }
+  return nP;
+}
+
+template <uint32_t Dim, uint32_t Degree, bool InteractionOnly>
+void NDPiecewisePolynomials<Dim, Degree, InteractionOnly>::checkPos(const uint32_t iMax[/* Dim */], int32_t pos[/* Dim */]) const
+{
+  for (uint32_t i = 0; i < Dim; ++i) {
+    if (pos[i] == int32_t(iMax[i])) {
+      ++pos[i + 1];
+      std::fill_n(pos, i + 1, 0);
+    }
+  }
+}
+
+#endif // !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE)
 
 #ifndef GPUCA_GPUCODE
 template <uint32_t Dim, uint32_t Degree, bool InteractionOnly>
@@ -405,7 +399,19 @@ void NDPiecewisePolynomials<Dim, Degree, InteractionOnly>::construct()
   FlatObject::finishConstruction(flatbufferSize);
   mParams = reinterpret_cast<DataTParams*>(mFlatBufferPtr);
 }
-#endif
+
+template <uint32_t Dim, uint32_t Degree, bool InteractionOnly>
+void NDPiecewisePolynomials<Dim, Degree, InteractionOnly>::init(const float min[], const float max[], const uint32_t n[])
+{
+  for (uint32_t i = 0; i < Dim; ++i) {
+    mMin[i] = min[i];
+    mMax[i] = max[i];
+    mN[i] = n[i];
+    mInvSpacing[i] = (mN[i] - 1) / (mMax[i] - mMin[i]);
+  }
+  construct();
+}
+#endif // !GPUCA_GPUCODE
 
 template <uint32_t Dim, uint32_t Degree, bool InteractionOnly>
 void NDPiecewisePolynomials<Dim, Degree, InteractionOnly>::destroy()
@@ -471,259 +477,6 @@ GPUdi() void NDPiecewisePolynomials<Dim, Degree, InteractionOnly>::clamp(float x
     return clamp<DimTmp - 1>(x, index);
   }
 }
-
-#ifndef GPUCA_GPUCODE
-template <uint32_t Dim, uint32_t Degree, bool InteractionOnly>
-void NDPiecewisePolynomials<Dim, Degree, InteractionOnly>::init(const float min[], const float max[], const uint32_t n[])
-{
-  for (uint32_t i = 0; i < Dim; ++i) {
-    mMin[i] = min[i];
-    mMax[i] = max[i];
-    mN[i] = n[i];
-    mInvSpacing[i] = (mN[i] - 1) / (mMax[i] - mMin[i]);
-  }
-  construct();
-}
-#endif
-
-#if !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE)
-template <uint32_t Dim, uint32_t Degree, bool InteractionOnly>
-uint32_t NDPiecewisePolynomials<Dim, Degree, InteractionOnly>::getNPolynomials() const
-{
-  uint32_t nP = getNPolynomials(0);
-  for (uint32_t i = 1; i < Dim; ++i) {
-    nP *= getNPolynomials(i);
-  }
-  return nP;
-}
-
-template <uint32_t Dim, uint32_t Degree, bool InteractionOnly>
-void NDPiecewisePolynomials<Dim, Degree, InteractionOnly>::checkPos(const uint32_t iMax[/* Dim */], int32_t pos[/* Dim */]) const
-{
-  for (uint32_t i = 0; i < Dim; ++i) {
-    if (pos[i] == int32_t(iMax[i])) {
-      ++pos[i + 1];
-      std::fill_n(pos, i + 1, 0);
-    }
-  }
-}
-
-template <uint32_t Dim, uint32_t Degree, bool InteractionOnly>
-void NDPiecewisePolynomials<Dim, Degree, InteractionOnly>::performFits(const std::function<double(const double x[/* Dim */])>& func, const uint32_t nAuxiliaryPoints[/* Dim */])
-{
-  const int32_t nTotalFits = getNPolynomials();
-#ifndef GPUCA_ALIROOT_LIB
-  LOGP(info, "Perform fitting of {}D-Polynomials of degree {} for a total of {} fits.", Dim, Degree, nTotalFits);
-#endif
-
-  MultivariatePolynomialHelper<0, 0, false> pol(Dim, Degree, InteractionOnly);
-  TLinearFitter fitter = pol.getTLinearFitter();
-
-  uint32_t nPoints = 1;
-  for (uint32_t i = 0; i < Dim; ++i) {
-    nPoints *= nAuxiliaryPoints[i];
-  }
-
-  std::vector<double> xCords;
-  std::vector<double> response;
-  xCords.reserve(Dim * nPoints);
-  response.reserve(nPoints);
-
-  uint32_t nPolynomials[Dim]{0};
-  for (uint32_t i = 0; i < Dim; ++i) {
-    nPolynomials[i] = getNPolynomials(i);
-  }
-
-  int32_t pos[Dim + 1]{0};
-  uint32_t counter = 0;
-  const int32_t printDebugForNFits = int32_t(nTotalFits / 20) + 1;
-
-  for (;;) {
-    const bool debug = !(++counter % printDebugForNFits);
-    if (debug) {
-#ifndef GPUCA_ALIROOT_LIB
-      LOGP(info, "Performing fit {} out of {}", counter, nTotalFits);
-#endif
-    }
-
-    checkPos(nPolynomials, pos);
-
-    if (pos[Dim] == 1) {
-      break;
-    }
-
-    xCords.clear();
-    response.clear();
-    fitInnerGrid(func, nAuxiliaryPoints, pos, fitter, xCords, response);
-    ++pos[0];
-  }
-}
-
-template <uint32_t Dim, uint32_t Degree, bool InteractionOnly>
-void NDPiecewisePolynomials<Dim, Degree, InteractionOnly>::performFits(const std::vector<float>& x, const std::vector<float>& y)
-{
-  const int32_t nTotalFits = getNPolynomials();
-#ifndef GPUCA_ALIROOT_LIB
-  LOGP(info, "Perform fitting of {}D-Polynomials of degree {} for a total of {} fits.", Dim, Degree, nTotalFits);
-#endif
-
-  // approximate number of points
-  uint32_t nPoints = 2 * y.size() / nTotalFits;
-
-  // polynomial index -> indices to datapoints
-  std::unordered_map<int32_t, std::vector<size_t>> dataPointsIndices;
-  for (int32_t i = 0; i < nTotalFits; ++i) {
-    dataPointsIndices[i].reserve(nPoints);
-  }
-
-  // check for each data point which polynomial to use
-  for (size_t i = 0; i < y.size(); ++i) {
-    std::array<int32_t, Dim> index;
-    float xVal[Dim];
-    std::copy(x.begin() + i * Dim, x.begin() + i * Dim + Dim, xVal);
-    setIndex<Dim - 1>(xVal, index.data());
-
-    std::array<int32_t, Dim> indexClamped{index};
-    clamp<Dim - 1>(xVal, indexClamped.data());
-
-    // check if data points are in the grid
-    if (index == indexClamped) {
-      // index of the polyniomial
-      const uint32_t idx = getDataIndex(index.data()) / MultivariatePolynomialParametersHelper::getNParameters(Degree, Dim, InteractionOnly);
-
-      // store index to data point
-      dataPointsIndices[idx].emplace_back(i);
-    }
-  }
-
-  // for fitting
-  MultivariatePolynomialHelper<0, 0, false> pol(Dim, Degree, InteractionOnly);
-  TLinearFitter fitter = pol.getTLinearFitter();
-
-  uint32_t counter = 0;
-  const int32_t printDebugForNFits = int32_t(nTotalFits / 20) + 1;
-
-  // temp storage for x and y values for fitting
-  std::vector<double> xCords;
-  std::vector<double> response;
-
-  for (int32_t i = 0; i < nTotalFits; ++i) {
-    const bool debug = !(++counter % printDebugForNFits);
-    if (debug) {
-#ifndef GPUCA_ALIROOT_LIB
-      LOGP(info, "Performing fit {} out of {}", counter, nTotalFits);
-#endif
-    }
-
-    // store values for fitting
-    if (dataPointsIndices[i].empty()) {
-#ifndef GPUCA_ALIROOT_LIB
-      LOGP(info, "No data points to fit");
-#endif
-      continue;
-    }
-
-    const auto nP = dataPointsIndices[i].size();
-    xCords.reserve(Dim * nP);
-    response.reserve(nP);
-    xCords.clear();
-    response.clear();
-
-    // add datapoints to fit
-    for (size_t j = 0; j < nP; ++j) {
-      const size_t idxOrig = dataPointsIndices[i][j];
-
-      // insert x values at the end of xCords
-      const int32_t idxXStart = idxOrig * Dim;
-      xCords.insert(xCords.end(), x.begin() + idxXStart, x.begin() + idxXStart + Dim);
-      response.emplace_back(y[idxOrig]);
-    }
-
-    // perform the fit on the points TODO make errors configurable
-    std::vector<double> error;
-    const auto params = MultivariatePolynomialHelper<0, 0, false>::fit(fitter, xCords, response, error, true);
-
-    // store parameters
-    std::copy(params.begin(), params.end(), &mParams[i * MultivariatePolynomialParametersHelper::getNParameters(Degree, Dim, InteractionOnly)]);
-  }
-}
-
-template <uint32_t Dim, uint32_t Degree, bool InteractionOnly>
-void NDPiecewisePolynomials<Dim, Degree, InteractionOnly>::fitInnerGrid(const std::function<double(const double x[/* Dim */])>& func, const uint32_t nAuxiliaryPoints[/* Dim */], const int32_t currentIndex[/* Dim */], TLinearFitter& fitter, std::vector<double>& xCords, std::vector<double>& response)
-{
-  int32_t pos[Dim + 1]{0};
-
-  // add points which will be used for the fit
-  for (;;) {
-    checkPos(nAuxiliaryPoints, pos);
-
-    if (pos[Dim] == 1) {
-      break;
-    }
-
-    for (uint32_t iDim = 0; iDim < Dim; ++iDim) {
-      const double stepWidth = getStepWidth(iDim, nAuxiliaryPoints[iDim]);
-      const double vertexPos = getVertexPosition(currentIndex[iDim], iDim);
-      const double realPosTmp = vertexPos + pos[iDim] * stepWidth;
-      xCords.emplace_back(realPosTmp);
-    }
-
-    // get response for last added points
-    const double responseTmp = func(&xCords[xCords.size() - Dim]);
-    response.emplace_back(responseTmp);
-    ++pos[0];
-  }
-
-  // perform the fit on the points TODO make errors configurable
-  std::vector<double> error;
-  const auto params = MultivariatePolynomialHelper<0, 0, false>::fit(fitter, xCords, response, error, true);
-
-  // store parameters
-  const uint32_t index = getDataIndex(currentIndex);
-  std::copy(params.begin(), params.end(), &mParams[index]);
-}
-
-#ifndef GPUCA_ALIROOT_LIB
-template <uint32_t Dim, uint32_t Degree, bool InteractionOnly>
-void NDPiecewisePolynomials<Dim, Degree, InteractionOnly>::dumpToTree(const uint32_t nSamplingPoints[/* Dim */], const char* outName, const char* treeName, const bool recreateFile) const
-{
-  o2::utils::TreeStreamRedirector pcstream(outName, recreateFile ? "RECREATE" : "UPDATE");
-
-  double factor[Dim]{};
-  for (uint32_t iDim = 0; iDim < Dim; ++iDim) {
-    factor[iDim] = (mMax[iDim] - mMin[iDim]) / (nSamplingPoints[iDim] - 1);
-  }
-
-  std::vector<float> x(Dim);
-  std::vector<uint32_t> ix(Dim);
-  int32_t pos[Dim + 1]{0};
-
-  for (;;) {
-    checkPos(nSamplingPoints, pos);
-
-    if (pos[Dim] == 1) {
-      break;
-    }
-
-    for (uint32_t iDim = 0; iDim < Dim; ++iDim) {
-      ix[iDim] = pos[iDim];
-      x[iDim] = mMin[iDim] + pos[iDim] * factor[iDim];
-    }
-
-    float value = eval(x.data());
-    pcstream << treeName
-             << "ix=" << ix
-             << "x=" << x
-             << "value=" << value
-             << "\n";
-
-    ++pos[0];
-  }
-  pcstream.Close();
-}
-#endif
-
-#endif
 
 } // namespace GPUCA_NAMESPACE::gpu
 

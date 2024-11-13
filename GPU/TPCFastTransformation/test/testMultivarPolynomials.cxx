@@ -18,7 +18,7 @@
 
 #include <boost/test/unit_test.hpp>
 #include "MultivariatePolynomial.h"
-#include "NDPiecewisePolynomials.h"
+#include "NDPiecewisePolynomials.inc"
 #include <vector>
 
 namespace o2::gpu

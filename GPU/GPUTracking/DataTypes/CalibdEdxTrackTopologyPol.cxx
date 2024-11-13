@@ -21,6 +21,7 @@
 using namespace o2::tpc;
 
 #if !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE) // code invisible on GPU and in the standalone compilation
+#include "NDPiecewisePolynomials.inc"
 void CalibdEdxTrackTopologyPol::dumpToTree(const uint32_t nSamplingPoints[/* Dim */], const char* outName) const
 {
   for (uint32_t i = 0; i < FFits; i++) {
