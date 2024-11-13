@@ -131,6 +131,7 @@ AddOptionRTC(cfNoiseSuppressionEpsilonRelative, uint8_t, 76, "", 0, "Cluster Fin
 AddOptionRTC(nWays, uint8_t, 3, "", 0, "Do N fit passes in final fit of merger")
 AddOptionRTC(nWaysOuter, int8_t, 0, "", 0, "Store outer param")
 AddOptionRTC(trackFitRejectMode, int8_t, 5, "", 0, "0: no limit on rejection or missed hits, >0: break after n rejected hits, <0: reject at max -n hits")
+AddOptionRTC(rejectIFCLowRadiusCluster, uint8_t, 0, "", 0, "Reject clusters that get the IFC mask error during refit")
 AddOptionRTC(dEdxTruncLow, uint8_t, 2, "", 0, "Low truncation threshold, fraction of 128")
 AddOptionRTC(dEdxTruncHigh, uint8_t, 77, "", 0, "High truncation threshold, fraction of 128")
 AddOptionRTC(globalTracking, int8_t, 1, "", 0, "Enable Global Tracking (prolong tracks to adjacent sectors to find short segments)")
