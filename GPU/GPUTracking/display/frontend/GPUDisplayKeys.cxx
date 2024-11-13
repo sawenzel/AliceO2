@@ -35,7 +35,7 @@ const char* HelpText[] = {
   "[L] / [K]                     Draw single collisions (next / previous)",
   "[C]                           Colorcode clusters of different collisions",
   "[v]                           Hide rejected clusters from tracks",
-  "[j]                           Show global tracks as additional segments of final tracks",
+  "[j]                           Show tracks segments propagated to adjacent sector in different color / splt CE tracks",
   "[u]                           Cycle through track filter",
   "[E] / [G]                     Extrapolate tracks / loopers",
   "[t] / [T]                     Take Screenshot / Record Animation to pictures",
@@ -164,8 +164,11 @@ void GPUDisplay::HandleKey(uint8_t key)
     mPrintInfoText &= 3;
     SetInfo("Info text display - console: %s, onscreen %s", (mPrintInfoText & 2) ? "enabled" : "disabled", (mPrintInfoText & 1) ? "enabled" : "disabled");
   } else if (key == 'j') {
+    if (mCfgH.separateGlobalTracks) {
+      mCfgH.splitCETracks ^= 1;
+    }
     mCfgH.separateGlobalTracks ^= 1;
-    SetInfo("Seperated display of global tracks %s", mCfgH.separateGlobalTracks ? "enabled" : "disabled");
+    SetInfo("Seperated display of tracks propagated to adjacent sectors %s / of CE tracks %s", mCfgH.separateGlobalTracks ? "enabled" : "disabled", mCfgH.splitCETracks ? "enabled" : "disabled");
   } else if (key == 'c') {
     if (mCfgH.markClusters == 0) {
       mCfgH.markClusters = 1;

@@ -611,6 +611,7 @@ void GPUDisplay::DrawGLScene_internal(float animateTime, bool renderToMixBuffer)
   bool showTimer = false;
   bool doScreenshot = (mRequestScreenshot || mAnimateScreenshot) && animateTime < 0;
 
+  updateOptions();
   if (animateTime < 0 && (mUpdateEventData || mResetScene || mUpdateVertexLists) && mIOPtrs) {
     disableUnsupportedOptions();
   }

@@ -150,6 +150,7 @@ class GPUDisplay : public GPUDisplayInterface
   void DrawGLScene_drawCommands();
   int32_t InitDisplay_internal();
   int32_t getNumThreads();
+  void updateOptions();
   void disableUnsupportedOptions();
   int32_t buildTrackFilter();
   const GPUTPCTracker& sliceTracker(int32_t iSlice);

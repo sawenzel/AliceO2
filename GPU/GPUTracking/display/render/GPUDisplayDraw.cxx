@@ -45,7 +45,6 @@
 using namespace GPUCA_NAMESPACE::gpu;
 
 #define GET_CID(slice, i) (mParam->par.earlyTpcTransform ? mIOPtrs->clusterData[slice][i].id : (mIOPtrs->clustersNative->clusterOffset[slice][0] + i))
-#define SEPERATE_GLOBAL_TRACKS_LIMIT (mCfgH.separateGlobalTracks ? tGLOBALTRACK : TRACK_TYPE_ID_LIMIT)
 
 const GPUTRDGeometry* GPUDisplay::trdGeometry() { return (GPUTRDGeometry*)mCalib->trdGeometry; }
 const GPUTPCTracker& GPUDisplay::sliceTracker(int32_t iSlice) { return mChain->GetTPCSliceTrackers()[iSlice]; }
@@ -421,6 +420,8 @@ void GPUDisplay::DrawFinal(int32_t iSlice, int32_t /*iCol*/, GPUTPCGMPropagator*
       }
 
       // Print TPC part of track
+      int32_t separateGlobalTracksLimit = (mCfgH.separateGlobalTracks ? tGLOBALTRACK : TRACK_TYPE_ID_LIMIT);
+      uint32_t lastSide = -1;
       for (int32_t k = 0; k < nClusters; k++) {
         if constexpr (std::is_same_v<T, GPUTPCGMMergedTrack>) {
           if (mCfgH.hideRejectedClusters && (mIOPtrs->mergedTrackHits[track->FirstClusterRef() + k].state & GPUTPCGMMergedTrackHit::flagReject)) {
@@ -435,9 +436,15 @@ void GPUDisplay::DrawFinal(int32_t iSlice, int32_t /*iCol*/, GPUTPCGMPropagator*
         }
         int32_t w = mGlobalPos[cid].w;
         if (drawing) {
-          drawPointLinestrip(iSlice, cid, tFINALTRACK, SEPERATE_GLOBAL_TRACKS_LIMIT);
+          if (mCfgH.splitCETracks && lastSide != (mGlobalPos[cid].z < 0)) {
+            insertVertexList(vBuf[0], startCountInner, mVertexBuffer[iSlice].size());
+            drawing = false;
+            lastCluster = -1;
+          } else {
+            drawPointLinestrip(iSlice, cid, tFINALTRACK, separateGlobalTracksLimit);
+          }
         }
-        if (w == SEPERATE_GLOBAL_TRACKS_LIMIT) {
+        if (w == separateGlobalTracksLimit) {
           if (drawing) {
             insertVertexList(vBuf[0], startCountInner, mVertexBuffer[iSlice].size());
           }
@@ -445,21 +452,21 @@ void GPUDisplay::DrawFinal(int32_t iSlice, int32_t /*iCol*/, GPUTPCGMPropagator*
         } else {
           if (!drawing) {
             startCountInner = mVertexBuffer[iSlice].size();
-          }
-          if (!drawing) {
-            drawPointLinestrip(iSlice, cid, tFINALTRACK, SEPERATE_GLOBAL_TRACKS_LIMIT);
-          }
-          if (!drawing && lastCluster != -1) {
-            if constexpr (std::is_same_v<T, GPUTPCGMMergedTrack>) {
-              cid = mIOPtrs->mergedTrackHits[track->FirstClusterRef() + lastCluster].num;
-            } else {
-              cid = &track->getCluster(mIOPtrs->outputClusRefsTPCO2, lastCluster, *mIOPtrs->clustersNative) - mIOPtrs->clustersNative->clustersLinear;
+            if (lastCluster != -1 && (!mCfgH.splitCETracks || lastSide == (mGlobalPos[cid].z < 0))) {
+              int32_t lastcid;
+              if constexpr (std::is_same_v<T, GPUTPCGMMergedTrack>) {
+                lastcid = mIOPtrs->mergedTrackHits[track->FirstClusterRef() + lastCluster].num;
+              } else {
+                lastcid = &track->getCluster(mIOPtrs->outputClusRefsTPCO2, lastCluster, *mIOPtrs->clustersNative) - mIOPtrs->clustersNative->clustersLinear;
+              }
+              drawPointLinestrip(iSlice, lastcid, tFINALTRACK, separateGlobalTracksLimit);
             }
-            drawPointLinestrip(iSlice, cid, 7, SEPERATE_GLOBAL_TRACKS_LIMIT);
+            drawPointLinestrip(iSlice, cid, tFINALTRACK, separateGlobalTracksLimit);
           }
           drawing = true;
         }
         lastCluster = k;
+        lastSide = mGlobalPos[cid].z < 0;
       }
 
       // Print ITS part of track

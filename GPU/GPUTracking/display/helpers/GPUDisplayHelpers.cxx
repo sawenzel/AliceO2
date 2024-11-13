@@ -36,6 +36,13 @@ int32_t GPUDisplay::getNumThreads()
   }
 }
 
+void GPUDisplay::updateOptions()
+{
+  if (mCfgH.splitCETracks == -1 && mParam) {
+    mCfgH.splitCETracks = mParam->continuousMaxTimeBin != 0;
+  }
+}
+
 void GPUDisplay::disableUnsupportedOptions()
 {
   if (!mIOPtrs->mergedTrackHitAttachment) {
