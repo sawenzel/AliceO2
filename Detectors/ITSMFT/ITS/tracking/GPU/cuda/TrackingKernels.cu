@@ -842,14 +842,14 @@ void countCellsHandler(
                                               cellsLUTsHost,      // d_in
                                               cellsLUTsHost,      // d_out
                                               nTracklets + 1,     // num_items
-                                              0));
+                                              0));                // NOLINT: this is the offset of the sum, not a pointer
   discardResult(cudaMalloc(&d_temp_storage, temp_storage_bytes));
   gpuCheckError(cub::DeviceScan::ExclusiveSum(d_temp_storage,     // d_temp_storage
                                               temp_storage_bytes, // temp_storage_bytes
                                               cellsLUTsHost,      // d_in
                                               cellsLUTsHost,      // d_out
                                               nTracklets + 1,     // num_items
-                                              0));
+                                              0));                // NOLINT: this is the offset of the sum, not a pointer
   // gpu::printBufferLayerOnThread<<<1, 1>>>(layer, cellsLUTsHost, nTracklets + 1);
   gpuCheckError(cudaFree(d_temp_storage));
 }
@@ -934,14 +934,14 @@ void countCellNeighboursHandler(CellSeed** cellsLayersDevice,
                                               neighboursIndexTable, // d_in
                                               neighboursIndexTable, // d_out
                                               nCells + 1,           // num_items
-                                              0));
+                                              0));                  // NOLINT: this is the offset of the sum, not a pointer
   discardResult(cudaMalloc(&d_temp_storage_2, temp_storage_bytes_2));
   gpuCheckError(cub::DeviceScan::ExclusiveSum(d_temp_storage_2,     // d_temp_storage
                                               temp_storage_bytes_2, // temp_storage_bytes
                                               neighboursIndexTable, // d_in
                                               neighboursIndexTable, // d_out
                                               nCells + 1,           // num_items
-                                              0));
+                                              0));                  // NOLINT: this is the offset of the sum, not a pointer
   gpuCheckError(cudaFree(d_temp_storage));
   gpuCheckError(cudaFree(d_temp_storage_2));
   gpuCheckError(cudaPeekAtLastError());
