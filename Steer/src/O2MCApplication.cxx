@@ -388,6 +388,8 @@ void addSpecialParticles()
   // Their life times are not known, so we set them to 1e-24
   // f0(1370) (PDG: width = 200-500 MeV) Spin/Parity might not be correct
   TVirtualMC::GetMC()->DefineParticle(10221, "f0_1370", kPTNeutron, 1.37, 0.0, 1e-24, "Hadron", 0.2, 1, 1, 1, 0, 0, 1, 0, 0, kTRUE);
+  // a2(1320) (PDG: width = 107.8 MeV) (Spin/Parity might not be correct)
+  TVirtualMC::GetMC()->DefineParticle(115, "a2_1320", kPTNeutron, 1.3182, 0.0, 1e-24, "Hadron", 0.1078, 1, 1, 1, 1, 0, 1, 0, 0, kTRUE);
   // f0(1500) (PDG: width = 112 MeV) Spin/Parity might not be correct
   TVirtualMC::GetMC()->DefineParticle(9030221, "f0_1500", kPTNeutron, 1.506, 0.0, 1e-24, "Hadron", 0.112, 0, 1, 1, 0, 0, 1, 0, 0, kTRUE);
   // f0(1710) (PDG: width = 139 MeV) Spin/Parity might not be correct
@@ -1242,6 +1244,7 @@ void addSpecialParticles()
   TVirtualMC::GetMC()->SetDecayMode(335, bratio, mode);     // f2(1525)
   TVirtualMC::GetMC()->SetDecayMode(10331, bratio, mode);   // f0(1710)
   TVirtualMC::GetMC()->SetDecayMode(10221, bratio, mode);   // f0(1370)
+  TVirtualMC::GetMC()->SetDecayMode(115, bratio, mode);     // a2(1320)
 
   // Define the 3-body phase space decay for the resonances: f1(1285), f1(1420)
   for (Int_t kz = 0; kz < 6; kz++) {
