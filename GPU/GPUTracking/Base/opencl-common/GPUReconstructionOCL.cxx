@@ -115,15 +115,16 @@ int32_t GPUReconstructionOCL::InitDevice_Runtime()
         clGetPlatformInfo(mInternals->platforms[i_platform], CL_PLATFORM_VERSION, sizeof(platform_version), platform_version, nullptr);
         clGetPlatformInfo(mInternals->platforms[i_platform], CL_PLATFORM_NAME, sizeof(platform_name), platform_name, nullptr);
         clGetPlatformInfo(mInternals->platforms[i_platform], CL_PLATFORM_VENDOR, sizeof(platform_vendor), platform_vendor, nullptr);
-        if (mProcessingSettings.debugLevel >= 2) {
-          GPUInfo("Available Platform %d: (%s %s) %s %s", i_platform, platform_profile, platform_version, platform_vendor, platform_name);
-        }
+        const char* platformUsageInfo = "";
         if (!found && CheckPlatform(i_platform)) {
           found = true;
           mInternals->platform = mInternals->platforms[i_platform];
           if (mProcessingSettings.debugLevel >= 2) {
-            GPUInfo("    Using this platform");
+            platformUsageInfo = "    !!! Using this platform !!!";
           }
+        }
+        if (mProcessingSettings.debugLevel >= 2) {
+          GPUInfo("Available Platform %d: (%s %s) %s %s%s", i_platform, platform_profile, platform_version, platform_vendor, platform_name, platformUsageInfo);
         }
       }
     }
