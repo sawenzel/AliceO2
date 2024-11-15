@@ -338,8 +338,29 @@ GPUdi() void GPUCommonAlgorithm::swap(T& a, T& b)
 // Nothing to do, work_group functions available
 #pragma OPENCL EXTENSION cl_khr_subgroups : enable
 
-#define warp_scan_inclusive_add(v) sub_group_scan_inclusive_add(v)
-#define warp_broadcast(v, i) sub_group_broadcast(v, i)
+template <class T>
+GPUdi() T work_group_scan_inclusive_add_FUNC(T v)
+{
+  return sub_group_scan_inclusive_add(v);
+}
+template <> // FIXME: It seems OpenCL does not support 8 and 16 bit subgroup operations
+GPUdi() uint8_t work_group_scan_inclusive_add_FUNC<uint8_t>(uint8_t v)
+{
+  return sub_group_scan_inclusive_add((uint32_t)v);
+}
+template <class T>
+GPUdi() T work_group_broadcast_FUNC(T v, int32_t i)
+{
+  return sub_group_broadcast(v, i);
+}
+template <>
+GPUdi() uint8_t work_group_broadcast_FUNC<uint8_t>(uint8_t v, int32_t i)
+{
+  return sub_group_broadcast((uint32_t)v, i);
+}
+
+#define warp_scan_inclusive_add(v) work_group_scan_inclusive_add_FUNC(v)
+#define warp_broadcast(v, i) work_group_broadcast_FUNC(v, i)
 
 #elif (defined(__CUDACC__) || defined(__HIPCC__))
 // CUDA and HIP work the same way using cub, need just different header
