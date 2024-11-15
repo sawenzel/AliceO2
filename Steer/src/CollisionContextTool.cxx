@@ -456,7 +456,7 @@ int main(int argc, char* argv[])
   // <---- at this moment we have a dense collision context (not representing the final output we want)
   LOG(info) << "<<------ DENSE CONTEXT ---------";
   if (options.printContext) {
-    digicontext.printCollisionSummary(options.qedInteraction.size() > 0);
+    digicontext.printCollisionSummary();
   }
   LOG(info) << "-------- DENSE CONTEXT ------->>";
 
@@ -467,7 +467,7 @@ int main(int argc, char* argv[])
   // <---- at this moment we have a dense collision context (not representing the final output we want)
   LOG(info) << "<<------ FILTERED CONTEXT ---------";
   if (options.printContext) {
-    digicontext.printCollisionSummary(options.qedInteraction.size() > 0);
+    digicontext.printCollisionSummary();
   }
   LOG(info) << "-------- FILTERED CONTEXT ------->>";
 
@@ -510,7 +510,7 @@ int main(int argc, char* argv[])
   }
 
   if (options.printContext) {
-    digicontext.printCollisionSummary(options.qedInteraction.size() > 0);
+    digicontext.printCollisionSummary();
   }
   digicontext.saveToFile(options.outfilename);
 
@@ -578,7 +578,7 @@ int main(int argc, char* argv[])
         str << path_prefix << tf_output_counter++ << "/collisioncontext.root";
         copy.saveToFile(str.str());
         LOG(info) << "----";
-        copy.printCollisionSummary(options.qedInteraction.size() > 0);
+        copy.printCollisionSummary();
       }
     }
   }

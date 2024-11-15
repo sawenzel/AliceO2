@@ -49,6 +49,27 @@ void DigitizationContext::printCollisionSummary(bool withQED, int truncateOutput
     }
   } else {
     std::cout << "Number of Collisions " << mEventRecords.size() << "\n";
+    if (mEventPartsWithQED.size() > 0) {
+      auto num_qed_events = mEventPartsWithQED.size() - mEventRecords.size();
+      if (num_qed_events > 0) {
+        std::cout << "Number of QED events (but not shown) " << num_qed_events << "\n";
+        // find first and last QED collision so that we can give the range in orbits where these
+        // things are included
+        auto firstQEDcoll_iter = std::find_if(mEventPartsWithQED.begin(), mEventPartsWithQED.end(),
+                                              [](const std::vector<EventPart>& vec) {
+                                                return std::find_if(vec.begin(), vec.end(), [](EventPart const& p) { return p.sourceID == 99; }) != vec.end();
+                                              });
+
+        auto lastColl_iter = std::find_if(mEventPartsWithQED.rbegin(), mEventPartsWithQED.rend(),
+                                          [](const std::vector<EventPart>& vec) {
+                                            return std::find_if(vec.begin(), vec.end(), [](EventPart const& p) { return p.sourceID == 99; }) != vec.end();
+                                          });
+
+        auto firstindex = std::distance(mEventPartsWithQED.begin(), firstQEDcoll_iter);
+        auto lastindex = std::distance(mEventPartsWithQED.begin(), lastColl_iter.base()) - 1;
+        std::cout << "QED from: " << mEventRecordsWithQED[firstindex] << " ---> " << mEventRecordsWithQED[lastindex] << "\n";
+      }
+    }
     for (int i = 0; i < mEventRecords.size(); ++i) {
       if (truncateOutputTo >= 0 && i > truncateOutputTo) {
         std::cout << "--- Output truncated to " << truncateOutputTo << " ---\n";
