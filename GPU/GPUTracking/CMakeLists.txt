@@ -265,7 +265,7 @@ endif()
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly)
 file(GENERATE
      OUTPUT include_gpu_onthefly/GPUReconstructionKernelList.h
-     INPUT Base/GPUReconstructionKernels.template.h
+     INPUT Base/GPUReconstructionKernelList.template.h
 )
 file(GENERATE
      OUTPUT include_gpu_onthefly/GPUReconstructionKernelIncludes.h
