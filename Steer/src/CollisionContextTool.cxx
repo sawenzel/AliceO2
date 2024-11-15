@@ -40,12 +40,12 @@ struct Options {
   std::vector<std::string> interactionRates;
   std::string qedInteraction; // specification for QED contribution
   std::string outfilename;    //
-  double timeframelengthinMS; // timeframe length in milliseconds
   int orbits;                 // number of orbits to generate (can be a multiple of orbitsPerTF --> determine fraction or multiple of timeframes)
   long seed;                  //
   bool printContext = false;
   std::string bcpatternfile;
   int tfid = 0;          // tfid -> used to calculate start orbit for collisions
+  double orbitsEarly = 0.;     // how many orbits from a prev timeframe should still be kept in the current timeframe
   double firstFractionalOrbit; // capture orbit and bunch crossing via decimal number
   uint32_t firstOrbit = 0; // first orbit in run (orbit offset)
   uint32_t firstBC = 0;    // first bunch crossing (relative to firstOrbit) of the first interaction;
@@ -191,7 +191,7 @@ bool parseOptions(int argc, char* argv[], Options& optvalues)
 
   options.add_options()(
     "interactions,i", bpo::value<std::vector<std::string>>(&optvalues.interactionRates)->multitoken(), "name,IRate|LockSpecifier")(
-    "QEDinteraction", bpo::value<std::string>(&optvalues.qedInteraction)->default_value(""), "Interaction specifyer for QED contribution (name,IRATE,maxeventnumber)")(
+    "QEDinteraction", bpo::value<std::string>(&optvalues.qedInteraction)->default_value(""), "Interaction specifier for QED contribution (name,IRATE,maxeventnumber)")(
     "outfile,o", bpo::value<std::string>(&optvalues.outfilename)->default_value("collisioncontext.root"), "Outfile of collision context")(
     "orbits", bpo::value<int>(&optvalues.orbits)->default_value(-1),
     "Number of orbits to generate maximally (if given, can be used to determine the number of timeframes). "
@@ -200,6 +200,7 @@ bool parseOptions(int argc, char* argv[], Options& optvalues)
     "show-context", "Print generated collision context to terminal.")(
     "bcPatternFile", bpo::value<std::string>(&optvalues.bcpatternfile)->default_value(""), "Interacting BC pattern file (e.g. from CreateBCPattern.C); Use \"ccdb\" when fetching from CCDB.")(
     "orbitsPerTF", bpo::value<int>(&optvalues.orbitsPerTF)->default_value(256), "Orbits per timeframes")(
+    "orbitsEarly", bpo::value<double>(&optvalues.orbitsEarly)->default_value(0.), "Number of orbits with extra collisions prefixed to each timeframe")(
     "use-existing-kine", "Read existing kinematics to adjust event counts")(
     "timeframeID", bpo::value<int>(&optvalues.tfid)->default_value(0), "Timeframe id of the first timeframe int this context. Allows to generate contexts for different start orbits")(
     "first-orbit", bpo::value<double>(&optvalues.firstFractionalOrbit)->default_value(0), "First (fractional) orbit in the run (HBFUtils.firstOrbit + BC from decimal)")(
@@ -273,7 +274,6 @@ int main(int argc, char* argv[])
 
   // now we generate the collision structure (interaction type by interaction type)
   bool usetimeframelength = options.orbits > 0;
-  o2::InteractionTimeRecord limitInteraction(0, options.orbits);
 
   auto setBCFillingHelper = [&options](auto& sampler, auto& bcPatternString) {
     if (bcPatternString == "ccdb") {
@@ -290,7 +290,14 @@ int main(int argc, char* argv[])
     }
   };
 
+  // this is the starting orbit from which on we construct interactions (it is possibly shifted by one tf to the left
+  // in order to generate eventual "earlyOrbits"
   auto orbitstart = options.firstOrbit + options.tfid * options.orbitsPerTF;
+  auto orbits_total = options.orbits;
+  if (options.orbitsEarly > 0.) {
+    orbitstart -= options.orbitsPerTF;
+    orbits_total += options.orbitsPerTF;
+  }
 
   for (int id = 0; id < ispecs.size(); ++id) {
     auto mode = ispecs[id].syncmode;
@@ -306,10 +313,10 @@ int main(int argc, char* argv[])
         sampler.setFirstIR(o2::InteractionRecord(options.firstBC, orbitstart));
         sampler.init();
         record = sampler.generateCollisionTime();
-      } while (options.noEmptyTF && usetimeframelength && record.orbit >= orbitstart + options.orbits);
+      } while (options.noEmptyTF && usetimeframelength && record.orbit >= orbitstart + orbits_total);
       int count = 0;
       do {
-        if (usetimeframelength && record.orbit >= orbitstart + options.orbits) {
+        if (usetimeframelength && record.orbit >= orbitstart + orbits_total) {
           break;
         }
         std::vector<o2::steer::EventPart> parts;
@@ -320,7 +327,7 @@ int main(int argc, char* argv[])
         collisions.insert(iter, insertvalue);
         record = sampler.generateCollisionTime();
         count++;
-      } while ((ispecs[id].mcnumberasked > 0 && count < ispecs[id].mcnumberasked));
+      } while ((ispecs[id].mcnumberasked > 0 && count < ispecs[id].mcnumberasked)); // TODO: this loop should probably be replaced by a condition with usetimeframelength and number of orbits
 
       // we support randomization etc on non-injected/embedded interactions
       // and we can apply them here
@@ -446,10 +453,25 @@ int main(int argc, char* argv[])
   }
   digicontext.setSimPrefixes(prefixes);
 
-  // apply max collision per timeframe filters + reindexing of event id (linearisation and compactification)
-  digicontext.applyMaxCollisionFilter(orbitstart, options.orbitsPerTF, options.maxCollsPerTF);
+  // <---- at this moment we have a dense collision context (not representing the final output we want)
+  LOG(info) << "<<------ DENSE CONTEXT ---------";
+  if (options.printContext) {
+    digicontext.printCollisionSummary(options.qedInteraction.size() > 0);
+  }
+  LOG(info) << "-------- DENSE CONTEXT ------->>";
 
-  auto numTimeFrames = digicontext.finalizeTimeframeStructure(orbitstart, options.orbitsPerTF);
+  auto timeframeindices = digicontext.calcTimeframeIndices(orbitstart, options.orbitsPerTF, options.orbitsEarly);
+  // apply max collision per timeframe filters + reindexing of event id (linearisation and compactification)
+  digicontext.applyMaxCollisionFilter(timeframeindices, orbitstart, options.orbitsPerTF, options.maxCollsPerTF, options.orbitsEarly);
+
+  // <---- at this moment we have a dense collision context (not representing the final output we want)
+  LOG(info) << "<<------ FILTERED CONTEXT ---------";
+  if (options.printContext) {
+    digicontext.printCollisionSummary(options.qedInteraction.size() > 0);
+  }
+  LOG(info) << "-------- FILTERED CONTEXT ------->>";
+
+  auto numTimeFrames = timeframeindices.size(); // digicontext.finalizeTimeframeStructure(orbitstart, options.orbitsPerTF, options.orbitsEarly);
 
   if (options.vertexMode != o2::conf::VertexMode::kNoVertex) {
     switch (options.vertexMode) {
@@ -539,9 +561,11 @@ int main(int argc, char* argv[])
         sources_to_offset.push_back(digicontext.findSimPrefix(tokens[i]));
       }
 
+      auto first_timeframe = options.orbitsEarly > 0. ? 1 : 0;
       // now we are ready to loop over all timeframes
-      for (int tf_id = 0; tf_id < numTimeFrames; ++tf_id) {
-        auto copy = digicontext.extractSingleTimeframe(tf_id, sources_to_offset);
+      int tf_output_counter = 1;
+      for (int tf_id = first_timeframe; tf_id < numTimeFrames; ++tf_id) {
+        auto copy = digicontext.extractSingleTimeframe(tf_id, timeframeindices, sources_to_offset);
 
         // each individual case gets QED interactions injected
         // This should probably be done inside the extraction itself
@@ -551,7 +575,7 @@ int main(int argc, char* argv[])
         }
 
         std::stringstream str;
-        str << path_prefix << (tf_id + 1) << "/collisioncontext.root";
+        str << path_prefix << tf_output_counter++ << "/collisioncontext.root";
         copy.saveToFile(str.str());
         LOG(info) << "----";
         copy.printCollisionSummary(options.qedInteraction.size() > 0);

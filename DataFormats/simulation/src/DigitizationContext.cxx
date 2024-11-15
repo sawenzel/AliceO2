@@ -380,18 +380,73 @@ std::vector<std::pair<int, int>> getTimeFrameBoundaries(std::vector<o2::Interact
   result.emplace_back(std::pair<int, int>(left, right - 1));
   return result;
 }
+
+// a common helper for timeframe structure - includes indices for orbits-early (orbits from last timeframe still affecting current one)
+std::vector<std::tuple<int, int, int>> getTimeFrameBoundaries(std::vector<o2::InteractionTimeRecord> const& irecords,
+                                                              long startOrbit,
+                                                              long orbitsPerTF,
+                                                              float orbitsEarly)
+{
+  // we could actually use the other method first ... then do another pass to fix the early-index ... or impact index
+  auto true_indices = getTimeFrameBoundaries(irecords, startOrbit, orbitsPerTF);
+
+  std::vector<std::tuple<int, int, int>> indices_with_early{};
+  for (int ti = 0; ti < true_indices.size(); ++ti) {
+    // for each timeframe we copy the true indices
+    auto& tf_range = true_indices[ti];
+
+    // init new index without fixing the early index yet
+    indices_with_early.push_back(std::make_tuple(tf_range.first, tf_range.second, -1));
+
+    // from the second timeframe on we can determine the index in the previous timeframe
+    // which matches our criterion
+    if (orbitsEarly > 0. && ti > 0) {
+      auto& prev_tf_range = true_indices[ti - 1];
+      // in this range search the smallest index which precedes
+      // timeframe ti by not more than "orbitsEarly" orbits
+      // (could probably use binary search, in case optimization becomes necessary)
+      int earlyOrbitIndex = prev_tf_range.second;
+
+      // this is the orbit of the ti-th timeframe start
+      auto orbit_timeframe_start = startOrbit + ti * orbitsPerTF;
+
+      auto orbit_timeframe_early_fractional = orbit_timeframe_start - orbitsEarly;
+      auto orbit_timeframe_early_integral = (uint32_t)(orbit_timeframe_early_fractional);
+
+      auto bc_early = (uint32_t)((orbit_timeframe_early_fractional - orbit_timeframe_early_integral) * o2::constants::lhc::LHCMaxBunches);
+
+      // this is the interaction record of the ti-th timeframe start
+      o2::InteractionRecord timeframe_start_record(0, orbit_timeframe_early_integral);
+      // this is the interaction record in some previous timeframe after which interactions could still
+      // influence the ti-th timeframe according to orbitsEarly
+      o2::InteractionRecord timeframe_early_record(bc_early, orbit_timeframe_early_integral);
+
+      auto differenceInBCNS_max = timeframe_start_record.differenceInBCNS(timeframe_early_record);
+
+      for (int j = prev_tf_range.second; j >= prev_tf_range.first; --j) {
+        // determine difference in timing in NS; compare that with the limit given by orbitsEarly
+        auto timediff_NS = timeframe_start_record.differenceInBCNS(irecords[j]);
+        if (timediff_NS < differenceInBCNS_max) {
+          earlyOrbitIndex = j;
+        } else {
+          break;
+        }
+      }
+      std::get<2>(indices_with_early.back()) = earlyOrbitIndex;
+    }
+  }
+  return indices_with_early;
+}
+
 } // namespace
 
-void DigitizationContext::applyMaxCollisionFilter(long startOrbit, long orbitsPerTF, int maxColl)
+void DigitizationContext::applyMaxCollisionFilter(std::vector<std::tuple<int, int, int>>& timeframeindices, long startOrbit, long orbitsPerTF, int maxColl, double orbitsEarly)
 {
   // the idea is to go through each timeframe and throw away collisions beyond a certain count
   // then the indices should be condensed
 
   std::vector<std::vector<o2::steer::EventPart>> newparts;
   std::vector<o2::InteractionTimeRecord> newrecords;
-
-  // get a timeframe boundary indexing
-  auto timeframeindices = getTimeFrameBoundaries(mEventRecords, startOrbit, orbitsPerTF);
 
   std::unordered_map<int, int> currMaxId;                           // the max id encountered for a source
   std::unordered_map<int, std::unordered_map<int, int>> reIndexMap; // for each source, a map of old to new index for the event parts
@@ -400,12 +455,51 @@ void DigitizationContext::applyMaxCollisionFilter(long startOrbit, long orbitsPe
     maxColl = mEventRecords.size();
   }
 
+  // the actual first actual timeframe
+  int first_timeframe = orbitsEarly > 0. ? 1 : 0;
+
+  // mapping of old to new indices
+  std::unordered_map<size_t, size_t> indices_old_to_new;
+
   // now we can go through the structure timeframe by timeframe
-  for (auto timeframe : timeframeindices) {
-    auto firstindex = timeframe.first;
-    auto lastindex = timeframe.second;
+  for (int tf_id = first_timeframe; tf_id < timeframeindices.size(); ++tf_id) {
+    auto& tf_indices = timeframeindices[tf_id];
+
+    auto firstindex = std::get<0>(tf_indices); // .first;
+    auto lastindex = std::get<1>(tf_indices);  // .second;
+    auto previndex = std::get<2>(tf_indices);
+
+    LOG(info) << "timeframe indices " << previndex << " : " << firstindex << " : " << lastindex;
+
+    int collCount = 0; // counting collisions within timeframe
     // copy to new structure
-    for (int index = firstindex; index <= std::min(lastindex, firstindex + maxColl - 1); ++index) {
+    for (int index = previndex >= 0 ? previndex : firstindex; index <= lastindex; ++index) {
+      if (collCount >= maxColl) {
+        continue;
+      }
+
+      // look if this index was already done?
+      // avoid duplicate entries in transformed records
+      if (indices_old_to_new.find(index) != indices_old_to_new.end()) {
+        continue;
+      }
+
+      // we put these events under a certain condition
+      bool keep = index < firstindex || collCount < maxColl;
+
+      if (!keep) {
+        continue;
+      }
+
+      if (index >= firstindex) {
+        collCount++;
+      }
+
+      // we must also make sure that we don't duplicate the records
+      // moreover some records are merely put as precoll of tf2 ---> so they shouldn't be part of tf1 in the final
+      // extraction, ouch !
+      // maybe we should combine the filter and individual tf extraction in one step !!
+      indices_old_to_new[index] = newrecords.size();
       newrecords.push_back(mEventRecords[index]);
       newparts.push_back(mEventParts[index]);
 
@@ -427,6 +521,19 @@ void DigitizationContext::applyMaxCollisionFilter(long startOrbit, long orbitsPe
           currMaxId[source] += 1;
         }
       }
+    } // ends one timeframe
+
+    // correct the timeframe indices
+    if (indices_old_to_new.find(firstindex) != indices_old_to_new.end()) {
+      std::get<0>(tf_indices) = indices_old_to_new[firstindex]; // start
+    }
+    if (indices_old_to_new.find(lastindex) != indices_old_to_new.end()) {
+      std::get<1>(tf_indices) = indices_old_to_new[lastindex]; // end;
+    } else {
+      std::get<1>(tf_indices) = newrecords.size(); // end;
+    }
+    if (indices_old_to_new.find(previndex) != indices_old_to_new.end()) {
+      std::get<2>(tf_indices) = indices_old_to_new[previndex]; // previous or "early" index
     }
   }
   // reassignment
@@ -434,15 +541,15 @@ void DigitizationContext::applyMaxCollisionFilter(long startOrbit, long orbitsPe
   mEventParts = newparts;
 }
 
-int DigitizationContext::finalizeTimeframeStructure(long startOrbit, long orbitsPerTF)
+std::vector<std::tuple<int, int, int>> DigitizationContext::calcTimeframeIndices(long startOrbit, long orbitsPerTF, double orbitsEarly) const
 {
-  mTimeFrameStartIndex = getTimeFrameBoundaries(mEventRecords, startOrbit, orbitsPerTF);
-  LOG(info) << "Fixed " << mTimeFrameStartIndex.size() << " timeframes ";
-  for (auto p : mTimeFrameStartIndex) {
-    LOG(info) << p.first << " " << p.second;
+  auto timeframeindices = getTimeFrameBoundaries(mEventRecords, startOrbit, orbitsPerTF, orbitsEarly);
+  LOG(info) << "Fixed " << timeframeindices.size() << " timeframes ";
+  for (auto p : timeframeindices) {
+    LOG(info) << std::get<0>(p) << " " << std::get<1>(p) << " " << std::get<2>(p);
   }
 
-  return mTimeFrameStartIndex.size();
+  return timeframeindices;
 }
 
 std::unordered_map<int, int> DigitizationContext::getCollisionIndicesForSource(int source) const
@@ -529,21 +636,25 @@ void DigitizationContext::sampleInteractionVertices(o2::dataformats::MeanVertexO
   }
 }
 
-DigitizationContext DigitizationContext::extractSingleTimeframe(int timeframeid, std::vector<int> const& sources_to_offset)
+DigitizationContext DigitizationContext::extractSingleTimeframe(int timeframeid, std::vector<std::tuple<int, int, int>> const& timeframeindices, std::vector<int> const& sources_to_offset)
 {
   DigitizationContext r; // make a return object
-  if (mTimeFrameStartIndex.size() == 0) {
-    LOG(error) << "No timeframe structure determined; Returning empty object. Please call ::finalizeTimeframeStructure before calling this function";
+  if (timeframeindices.size() == 0) {
+    LOG(error) << "Timeframe index structure empty; Returning empty object.";
     return r;
   }
   r.mSimPrefixes = mSimPrefixes;
   r.mMuBC = mMuBC;
   try {
-    auto startend = mTimeFrameStartIndex.at(timeframeid);
+    auto tf_ranges = timeframeindices.at(timeframeid);
 
-    auto startindex = startend.first;
-    auto endindex = startend.second;
+    auto startindex = std::get<0>(tf_ranges);
+    auto endindex = std::get<1>(tf_ranges);
+    auto earlyindex = std::get<2>(tf_ranges);
 
+    if (earlyindex >= 0) {
+      startindex = earlyindex;
+    }
     std::copy(mEventRecords.begin() + startindex, mEventRecords.begin() + endindex, std::back_inserter(r.mEventRecords));
     std::copy(mEventParts.begin() + startindex, mEventParts.begin() + endindex, std::back_inserter(r.mEventParts));
     if (mInteractionVertices.size() > endindex) {
