@@ -64,7 +64,7 @@ struct HBFUtilsInitializer {
   static o2::dataformats::IRFrame IRFrameSel; // IRFrame selected for the current TF
 
   HBFUtilsInitializer(const o2::framework::ConfigContext& configcontext, o2::framework::WorkflowSpec& wf);
-  static HBFOpt getOptType(const std::string& optString);
+  static HBFOpt getOptType(const std::string& optString, bool throwOnFailure = true);
   static std::vector<o2::dataformats::TFIDInfo> readTFIDInfoVector(const std::string& fname);
   static void readIRFramesVector(const std::string& fname);
   static void assignDataHeaderFromTFIDInfo(const std::vector<o2::dataformats::TFIDInfo>& tfinfoVec, o2::header::DataHeader& dh, o2::framework::DataProcessingHeader& dph);

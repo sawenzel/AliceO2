@@ -65,7 +65,7 @@ HBFUtilsInitializer::HBFUtilsInitializer(const o2f::ConfigContext& configcontext
             upstream = true;
             continue;
           }
-          HBFOpt opt = getOptType(optStr);
+          HBFOpt opt = getOptType(optStr, !helpasked); // do not throw on unknown opt if help-opt was given
           nopts++;
           if ((opt == HBFOpt::INI || opt == HBFOpt::JSON) && !helpasked) {
             o2::conf::ConfigurableParam::updateFromFile(optStr, "HBFUtils", true); // update only those values which were not touched yet (provenance == kCODE)
@@ -78,8 +78,6 @@ HBFUtilsInitializer::HBFUtilsInitializer(const o2f::ConfigContext& configcontext
             hbfuInput = optStr;
           } else if (opt == HBFOpt::ROOT) {
             rootFileInput = optStr;
-          } else if (!helpasked) {
-            LOGP(fatal, "uknown hbfutils-config option {}", optStr);
           }
         }
         if (!nopts && !helpasked) {
@@ -125,7 +123,7 @@ HBFUtilsInitializer::HBFUtilsInitializer(const o2f::ConfigContext& configcontext
 }
 
 //_________________________________________________________
-HBFUtilsInitializer::HBFOpt HBFUtilsInitializer::getOptType(const std::string& optString)
+HBFUtilsInitializer::HBFOpt HBFUtilsInitializer::getOptType(const std::string& optString, bool throwOnFailure)
 {
   // return type of the file provided via HBFConfOpt
   HBFOpt opt = HBFOpt::NONE;
@@ -138,7 +136,7 @@ HBFUtilsInitializer::HBFOpt HBFUtilsInitializer::getOptType(const std::string& o
       opt = HBFOpt::ROOT;
     } else if (optString == HBFUSrc) {
       opt = HBFOpt::HBFUTILS;
-    } else if (optString != "none") {
+    } else if (optString != "none" && throwOnFailure) {
       throw std::runtime_error(fmt::format("invalid option {} for {}", optString, HBFConfOpt));
     }
   }
