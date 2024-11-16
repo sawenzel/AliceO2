@@ -64,14 +64,14 @@ int32_t GPUReconstructionOCL2Backend::GetOCLPrograms()
   const char* ocl_flags = GPUCA_M_STR(OCL_FLAGS);
 
 #ifdef OPENCL2_ENABLED_SPIRV // clang-format off
-  if (ver >= 2.2f) {
-    GPUInfo("Reading OpenCL program from SPIR-V IL (Platform version %f)", ver);
+  if (ver >= 2.2f && !GetProcessingSettings().oclCompileFromSources) {
+    GPUInfo("Reading OpenCL program from SPIR-V IL (Platform version %4.2f)", ver);
     mInternals->program = clCreateProgramWithIL(mInternals->context, _binary_GPUReconstructionOCL2Code_spirv_start, _binary_GPUReconstructionOCL2Code_spirv_len, &ocl_error);
     ocl_flags = "";
   } else
 #endif // clang-format on
   {
-    GPUInfo("Compiling OpenCL program from sources (Platform version %f, %s)", ver);
+    GPUInfo("Compiling OpenCL program from sources (Platform version %4.2f)", ver);
     size_t program_sizes[1] = {_binary_GPUReconstructionOCL2Code_src_len};
     char* programs_sources[1] = {_binary_GPUReconstructionOCL2Code_src_start};
     mInternals->program = clCreateProgramWithSource(mInternals->context, (cl_uint)1, (const char**)&programs_sources, program_sizes, &ocl_error);
