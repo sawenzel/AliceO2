@@ -399,7 +399,7 @@ GPUdi() T GPUCommonMath::MaxWithRef(T x, T y, T z, T w, S refX, S refY, S refZ, 
 
 GPUdi() float GPUCommonMath::InvSqrt(float _x)
 {
-#ifdef GPUCA_NO_FAST_MATH
+#if defined(GPUCA_NO_FAST_MATH) || defined(__OPENCL__)
   return 1.f / Sqrt(_x);
 #elif defined(__CUDACC__) || defined(__HIPCC__)
   return __frsqrt_rn(_x);
