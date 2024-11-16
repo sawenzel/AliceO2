@@ -548,7 +548,7 @@ size_t GPUReconstructionCUDA::WriteToConstantMemory(size_t offset, const void* s
 }
 
 void GPUReconstructionCUDA::ReleaseEvent(deviceEvent ev) {}
-void GPUReconstructionCUDA::RecordMarker(deviceEvent ev, int32_t stream) { GPUFailedMsg(cudaEventRecord(ev.get<cudaEvent_t>(), mInternals->Streams[stream])); }
+void GPUReconstructionCUDA::RecordMarker(deviceEvent* ev, int32_t stream) { GPUFailedMsg(cudaEventRecord(ev->get<cudaEvent_t>(), mInternals->Streams[stream])); }
 
 std::unique_ptr<GPUReconstruction::GPUThreadContext> GPUReconstructionCUDA::GetThreadContext()
 {

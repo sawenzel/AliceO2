@@ -305,7 +305,7 @@ int32_t GPUChainTracking::RunTPCTrackingSlices_internal()
         SynchronizeGPU();
       } else {
         for (int32_t i = 0; i < mRec->NStreams(); i++) {
-          RecordMarker(mEvents->stream[i], i);
+          RecordMarker(&mEvents->stream[i], i);
         }
         runKernel<GPUTPCTrackletConstructor, 1>({GetGridAuto(0), krnlRunRangeNone, {&mEvents->single, mEvents->stream, mRec->NStreams()}});
         for (int32_t i = 0; i < mRec->NStreams(); i++) {

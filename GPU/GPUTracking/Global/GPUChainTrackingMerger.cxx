@@ -33,7 +33,7 @@ void GPUChainTracking::RunTPCTrackingMerger_MergeBorderTracks(int8_t withinSlice
   uint32_t n = withinSlice == -1 ? NSLICES / 2 : NSLICES;
   if (GetProcessingSettings().alternateBorderSort && (!mRec->IsGPU() || doGPUall)) {
     TransferMemoryResourceLinkToHost(RecoStep::TPCMerging, Merger.MemoryResMemory(), 0, &mEvents->init);
-    RecordMarker(mEvents->single, 0);
+    RecordMarker(&mEvents->single, 0);
     for (uint32_t i = 0; i < n; i++) {
       int32_t stream = i % mRec->NStreams();
       runKernel<GPUTPCGMMergerMergeBorders, 0>({GetGridAuto(stream, deviceType), krnlRunRangeNone, {nullptr, stream && i < (uint32_t)mRec->NStreams() ? &mEvents->single : nullptr}}, i, withinSlice, mergeMode);
@@ -55,7 +55,7 @@ void GPUChainTracking::RunTPCTrackingMerger_MergeBorderTracks(int8_t withinSlice
       if (i == n - 1) { // Synchronize all execution on stream 0 with the last kernel
         ne = std::min<int32_t>(n, mRec->NStreams());
         for (int32_t j = 1; j < ne; j++) {
-          RecordMarker(mEvents->slice[j], j);
+          RecordMarker(&mEvents->slice[j], j);
         }
         e = &mEvents->slice[1];
         ne--;
@@ -251,7 +251,7 @@ int32_t GPUChainTracking::RunTPCTrackingMerger(bool synchronizeOutput)
   DoDebugAndDump(RecoStep::TPCMerging, 2048, doGPUall, Merger, &GPUTPCGMMerger::DumpFinal, *mDebugFile);
 
   if (doGPUall) {
-    RecordMarker(mEvents->single, 0);
+    RecordMarker(&mEvents->single, 0);
     auto* waitEvent = &mEvents->single;
     if (GetProcessingSettings().keepDisplayMemory || GetProcessingSettings().createO2Output <= 1 || mFractionalQAEnabled) {
       if (!(GetProcessingSettings().keepDisplayMemory || GetProcessingSettings().createO2Output <= 1)) {
@@ -317,7 +317,7 @@ int32_t GPUChainTracking::RunTPCTrackingMerger(bool synchronizeOutput)
       TransferMemoryResourcesToHost(RecoStep::TPCMerging, &Merger, -1, true);
       runKernel<GPUTPCGMO2Output, GPUTPCGMO2Output::mc>(GetGridAuto(0, GPUReconstruction::krnlDeviceType::CPU));
     } else if (doGPUall) {
-      RecordMarker(mEvents->single, 0);
+      RecordMarker(&mEvents->single, 0);
       TransferMemoryResourceLinkToHost(RecoStep::TPCMerging, Merger.MemoryResOutputO2(), outputStream, nullptr, &mEvents->single);
       TransferMemoryResourceLinkToHost(RecoStep::TPCMerging, Merger.MemoryResOutputO2Clus(), outputStream);
       ReleaseEvent(mEvents->single);

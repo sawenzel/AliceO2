@@ -37,7 +37,7 @@ int32_t GPUChainTracking::RunTPCCompression()
   GPUTPCCompression& CompressorShadow = doGPU ? processorsShadow()->tpcCompressor : Compressor;
   const auto& threadContext = GetThreadContext();
   if (mPipelineFinalizationCtx && GetProcessingSettings().doublePipelineClusterizer) {
-    RecordMarker(mEvents->single, 0);
+    RecordMarker(&mEvents->single, 0);
   }
 
   if (GetProcessingSettings().tpcCompressionGatherMode == 3) {
@@ -124,7 +124,7 @@ int32_t GPUChainTracking::RunTPCCompression()
         return 1;
     }
     if (GetProcessingSettings().tpcCompressionGatherMode == 3) {
-      RecordMarker(mEvents->stream[outputStream], outputStream);
+      RecordMarker(&mEvents->stream[outputStream], outputStream);
       char* deviceFlatPts = (char*)Compressor.mOutput->qTotU;
       if (GetProcessingSettings().doublePipeline) {
         const size_t blockSize = CAMath::nextMultipleOf<1024>(copySize / 30);

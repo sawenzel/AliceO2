@@ -114,7 +114,7 @@ class GPUReconstructionCPU : public GPUReconstructionKernels<GPUReconstructionCP
   virtual void SynchronizeEvents(deviceEvent* evList, int32_t nEvents = 1) {}
   virtual void StreamWaitForEvents(int32_t stream, deviceEvent* evList, int32_t nEvents = 1) {}
   virtual bool IsEventDone(deviceEvent* evList, int32_t nEvents = 1) { return true; }
-  virtual void RecordMarker(deviceEvent ev, int32_t stream) {}
+  virtual void RecordMarker(deviceEvent* ev, int32_t stream) {}
   virtual void SynchronizeGPU() {}
   virtual void ReleaseEvent(deviceEvent ev) {}
   virtual int32_t StartHelperThreads() { return 0; }

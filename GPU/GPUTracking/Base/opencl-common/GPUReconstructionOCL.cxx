@@ -359,6 +359,11 @@ int32_t GPUReconstructionOCL::InitDevice_Runtime()
     mInternals = master->mInternals;
   }
 
+  for (uint32_t i = 0; i < mEvents.size(); i++) {
+    cl_event* events = (cl_event*)mEvents[i].data();
+    new (events) cl_event[mEvents[i].size()];
+  }
+
   return (0);
 }
 
@@ -432,7 +437,7 @@ size_t GPUReconstructionOCL::WriteToConstantMemory(size_t offset, const void* sr
 
 void GPUReconstructionOCL::ReleaseEvent(deviceEvent ev) { GPUFailedMsg(clReleaseEvent(ev.get<cl_event>())); }
 
-void GPUReconstructionOCL::RecordMarker(deviceEvent ev, int32_t stream) { GPUFailedMsg(clEnqueueMarkerWithWaitList(mInternals->command_queue[stream], 0, nullptr, ev.getEventList<cl_event>())); }
+void GPUReconstructionOCL::RecordMarker(deviceEvent* ev, int32_t stream) { GPUFailedMsg(clEnqueueMarkerWithWaitList(mInternals->command_queue[stream], 0, nullptr, ev->getEventList<cl_event>())); }
 
 int32_t GPUReconstructionOCL::DoStuckProtection(int32_t stream, deviceEvent event)
 {

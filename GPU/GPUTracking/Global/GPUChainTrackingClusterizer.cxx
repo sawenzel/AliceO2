@@ -934,7 +934,7 @@ int32_t GPUChainTracking::RunTPCClusterizer(bool synchronizeOutput)
         if (transferRunning[lane]) {
           ReleaseEvent(mEvents->stream[lane], doGPU);
         }
-        RecordMarker(mEvents->stream[lane], mRec->NStreams() - 1);
+        RecordMarker(&mEvents->stream[lane], mRec->NStreams() - 1);
         transferRunning[lane] = 1;
       }
 

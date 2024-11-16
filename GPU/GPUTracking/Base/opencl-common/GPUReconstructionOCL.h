@@ -52,7 +52,7 @@ class GPUReconstructionOCL : public GPUReconstructionDeviceBase
   size_t WriteToConstantMemory(size_t offset, const void* src, size_t size, int32_t stream = -1, deviceEvent* ev = nullptr) override;
   size_t GPUMemCpy(void* dst, const void* src, size_t size, int32_t stream, int32_t toGPU, deviceEvent* ev = nullptr, deviceEvent* evList = nullptr, int32_t nEvents = 1) override;
   void ReleaseEvent(deviceEvent ev) override;
-  void RecordMarker(deviceEvent ev, int32_t stream) override;
+  void RecordMarker(deviceEvent* ev, int32_t stream) override;
 
   virtual int32_t GetOCLPrograms() = 0;
   virtual bool CheckPlatform(uint32_t i) = 0;
