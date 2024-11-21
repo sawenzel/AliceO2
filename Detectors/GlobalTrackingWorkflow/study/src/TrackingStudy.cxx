@@ -250,6 +250,7 @@ void TrackingStudySpec::process(o2::globaltracking::RecoContainer& recoData)
 
   auto fillTPCClInfo = [&recoData, this](const o2::tpc::TrackTPC& trc, o2::dataformats::TrackInfoExt& trExt, float timestampTB = -1e9) {
     const auto clRefs = recoData.getTPCTracksClusterRefs();
+    const auto shMap = recoData.clusterShMapTPC.data();
     if (recoData.inputsTPCclusters) {
       uint8_t clSect = 0, clRow = 0, clRowP = -1;
       uint32_t clIdx = 0;
@@ -258,6 +259,9 @@ void TrackingStudySpec::process(o2::globaltracking::RecoContainer& recoData)
         if (clRow != clRowP) {
           trExt.rowCountTPC++;
           clRowP = clRow;
+        }
+        if (shMap[clRefs[ic + trc.getClusterRef().getFirstEntry()]]) {
+          trExt.nClTPCShared++;
         }
       }
       trc.getClusterReference(clRefs, trc.getNClusterReferences() - 1, clSect, clRow, clIdx);
