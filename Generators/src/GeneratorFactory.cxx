@@ -18,7 +18,6 @@
 #include <fairlogger/Logger.h>
 #include <SimConfig/SimConfig.h>
 #include <Generators/GeneratorFromFile.h>
-#include <Generators/GeneratorHybrid.h>
 #include <Generators/GeneratorTParticle.h>
 #include <Generators/GeneratorTParticleParam.h>
 #ifdef GENERATORS_WITH_PYTHIA8
@@ -27,11 +26,14 @@
 #endif
 #include <Generators/GeneratorTGenerator.h>
 #include <Generators/GeneratorExternalParam.h>
-#include <Generators/GeneratorHybridParam.h>
 #include "Generators/GeneratorFromO2KineParam.h"
 #ifdef GENERATORS_WITH_HEPMC3
 #include <Generators/GeneratorHepMC.h>
 #include <Generators/GeneratorHepMCParam.h>
+#endif
+#if defined(GENERATORS_WITH_PYTHIA8) && defined(GENERATORS_WITH_HEPMC3)
+#include <Generators/GeneratorHybrid.h>
+#include <Generators/GeneratorHybridParam.h>
 #endif
 #include <Generators/PrimaryGenerator.h>
 #include <Generators/BoxGunParam.h>
@@ -260,6 +262,7 @@ void GeneratorFactory::setPrimaryGenerator(o2::conf::SimConfig const& conf, Fair
         primGen->AddGenerator(boxGen);
       }
     }
+#if defined(GENERATORS_WITH_PYTHIA8) && defined(GENERATORS_WITH_HEPMC3)
   } else if (genconfig.compare("hybrid") == 0) { // hybrid using multiple generators
     LOG(info) << "Init hybrid generator";
     auto& hybridparam = GeneratorHybridParam::Instance();
@@ -276,6 +279,7 @@ void GeneratorFactory::setPrimaryGenerator(o2::conf::SimConfig const& conf, Fair
     }
     auto hybrid = new o2::eventgen::GeneratorHybrid(config);
     primGen->AddGenerator(hybrid);
+#endif
   } else {
     LOG(fatal) << "Invalid generator";
   }
