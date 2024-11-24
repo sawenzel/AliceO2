@@ -17,6 +17,8 @@
 #include <arrow/type_fwd.h>
 #include <memory>
 
+class TFile;
+class TBranch;
 class TTree;
 class TBufferFile;
 class TDirectoryFile;
@@ -227,11 +229,14 @@ class TTreeFileFormat : public arrow::dataset::FileFormat
     const std::shared_ptr<arrow::dataset::FileFragment>& fragment) const override;
 };
 
-// An arrow outputstream which allows to write to a ttree
-class TTreeOutputStream : public arrow::io::OutputStream
+// An arrow outputstream which allows to write to a TDirectoryFile.
+// This will point to the location of the file itself. You can
+// specify the location of the actual object inside it by passing the
+// associated path to the Write() API.
+class TDirectoryFileOutputStream : public arrow::io::OutputStream
 {
  public:
-  TTreeOutputStream(TTree* t);
+  TDirectoryFileOutputStream(TDirectoryFile*);
 
   arrow::Status Close() override;
 
@@ -241,6 +246,32 @@ class TTreeOutputStream : public arrow::io::OutputStream
 
   bool closed() const override;
 
+  TDirectoryFile* GetDirectory()
+  {
+    return mDirectory;
+  }
+
+ private:
+  TDirectoryFile* mDirectory;
+};
+
+// An arrow outputstream which allows to write to a TTree. Eventually
+// with a prefix for the branches.
+class TTreeOutputStream : public arrow::io::OutputStream
+{
+ public:
+  TTreeOutputStream(TTree*, std::string branchPrefix);
+
+  arrow::Status Close() override;
+
+  arrow::Result<int64_t> Tell() const override;
+
+  arrow::Status Write(const void* data, int64_t nbytes) override;
+
+  bool closed() const override;
+
+  TBranch* CreateBranch(char const* branchName, char const* sizeBranch);
+
   TTree* GetTree()
   {
     return mTree;
@@ -248,6 +279,7 @@ class TTreeOutputStream : public arrow::io::OutputStream
 
  private:
   TTree* mTree;
+  std::string mBranchPrefix;
 };
 
 } // namespace o2::framework
