@@ -18,7 +18,7 @@ namespace o2::tpc
 {
 struct AltroSyncSignal {
   int periodTF = 10;     // signal repeats every period-th TF
-  int timebin = 141192;  // every 10 TF, orbit 31, Time bin 384, BC 4 -> 141195, but clusters can be affected before that
+  int timebin = 14192;   // every 10 TF, orbit 31, Time bin 384, BC 4 -> 14195, but clusters can be affected before that
 
   int getTB2Cut(uint32_t tfCounter) const
   {
