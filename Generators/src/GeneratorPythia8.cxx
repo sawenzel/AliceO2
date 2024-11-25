@@ -45,26 +45,11 @@ namespace eventgen
 /*****************************************************************/
 /*****************************************************************/
 
-GeneratorPythia8::GeneratorPythia8() : Generator("ALICEo2", "ALICEo2 Pythia8 Generator")
+// the default construct uses the GeneratorPythia8Param singleton to extract a config and delegates
+// to the proper constructor
+GeneratorPythia8::GeneratorPythia8() : GeneratorPythia8(GeneratorPythia8Param::Instance().detach())
 {
-  /** default constructor **/
-
-  mInterface = reinterpret_cast<void*>(&mPythia);
-  mInterfaceName = "pythia8";
-
-  auto& param = GeneratorPythia8Param::Instance();
-  LOG(info) << "Default Instance \'Pythia8\' generator with following parameters";
-  LOG(info) << param;
-
-  // convert the outside singleton config to the internally used one
-  o2::eventgen::Pythia8GenConfig config{param.config,
-                                        param.hooksFileName, param.hooksFuncName, param.includePartonEvent, param.particleFilter, param.verbose};
-  mGenConfig = config;
-
-  setConfig(config.config);
-  setHooksFileName(config.hooksFileName);
-  setHooksFuncName(config.hooksFuncName);
-  // TODO: use constructor delegation to other interface
+  LOG(info) << "GeneratorPythia8 constructed from GeneratorPythia8Param ConfigurableParam";
 }
 
 /*****************************************************************/

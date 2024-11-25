@@ -48,8 +48,9 @@
 #pragma link C++ class o2::eventgen::GeneratorPythia8Param + ;
 #pragma link C++ class o2::eventgen::Pythia8GenConfig + ;
 #pragma link C++ class o2::eventgen::DecayerPythia8Param + ;
-#pragma link C++ class o2::conf::ConfigurableParamHelper < o2::eventgen::GeneratorPythia8Param> + ;
+#pragma link C++ class o2::conf::ConfigurableParamPromoter < o2::eventgen::GeneratorPythia8Param, o2::eventgen::Pythia8GenConfig> + ;
 #pragma link C++ class o2::conf::ConfigurableParamHelper < o2::eventgen::DecayerPythia8Param> + ;
+
 #pragma link C++ class o2::eventgen::GeneratorFactory + ;
 #endif
 #if defined(GENERATORS_WITH_PYTHIA8) && defined(GENERATORS_WITH_HEPMC3)
