@@ -219,14 +219,15 @@ int32_t GPUChainTracking::RunTPCDecompression()
       return ((tmpBuffer = std::make_unique<ClusterNative[]>(size))).get();
     };
     auto& decompressTimer = getTimer<TPCClusterDecompressor>("TPCDecompression", 0);
-    auto allocatorUse = GetProcessingSettings().tpcApplyCFCutsAtDecoding ? std::function<ClusterNative*(size_t)>{allocatorTmp} : std::function<ClusterNative*(size_t)>{allocatorFinal};
+    bool runFiltering = GetProcessingSettings().tpcApplyCFCutsAtDecoding;
+    auto allocatorUse = runFiltering ? std::function<ClusterNative*(size_t)>{allocatorTmp} : std::function<ClusterNative*(size_t)>{allocatorFinal};
     decompressTimer.Start();
     if (decomp.decompress(mIOPtrs.tpcCompressedClusters, *mClusterNativeAccess, allocatorUse, param(), GetProcessingSettings().deterministicGPUReconstruction)) {
       GPUError("Error decompressing clusters");
       return 1;
     }
-    if (GetProcessingSettings().tpcApplyCFCutsAtDecoding) {
-      RunTPCClusterFilter(mClusterNativeAccess.get(), allocatorFinal, true);
+    if (runFiltering) {
+      RunTPCClusterFilter(mClusterNativeAccess.get(), allocatorFinal, GetProcessingSettings().tpcApplyCFCutsAtDecoding);
     }
     decompressTimer.Stop();
     mIOPtrs.clustersNative = mClusterNativeAccess.get();
