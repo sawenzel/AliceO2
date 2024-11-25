@@ -72,7 +72,9 @@ struct TrackerParamConfig : public o2::conf::ConfigurableParamHelper<TrackerPara
   float diamondPos[3] = {0.f, 0.f, 0.f};
   bool useDiamond = false;
   unsigned long maxMemory = 0;
-  int useTrackFollower = -1;
+  int useTrackFollower = -1;          // bit 0: allow mixing implies bits 1&2; bit 1: topwards; bit2: downwards; => 0 off
+  float trackFollowerNSigmaZ = 1.f;   // sigma in z-cut for track-following search rectangle
+  float trackFollowerNSigmaPhi = 1.f; // sigma in phi-cut for track-following search rectangle
   float cellsPerClusterLimit = -1.f;
   float trackletsPerClusterLimit = -1.f;
   int findShortTracks = -1;
