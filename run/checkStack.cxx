@@ -143,8 +143,8 @@ int main(int argc, char** argv)
     if (havereferences) {
       for (auto& trackID : trackidsinTPC) {
         auto trackrefs = mcreader.getTrackRefs(eventID, trackID);
-        assert(trackrefs.size() > 0);
         LOG(debug) << " Track " << trackID << " has " << trackrefs.size() << " TrackRefs";
+        assert(trackrefs.size() > 0);
         for (auto& ref : trackrefs) {
           assert(ref.getTrackID() == trackID);
         }
