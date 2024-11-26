@@ -71,6 +71,7 @@ if(OPENCL2_ENABLED) # BUILD OpenCL2 source code for runtime compilation target
               ${OCL_FLAGS}
               ${OCL_DEFINECL}
               -cl-no-stdinc
+              -nostdinc
               -E ${CL_SRC} > ${CL_BIN}.src
       MAIN_DEPENDENCY ${CL_SRC}
       IMPLICIT_DEPENDS CXX ${CL_SRC}
