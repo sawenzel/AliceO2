@@ -43,7 +43,7 @@ void GPUTPCDecompression::SetPointersCompressedClusters(void*& mem, T& c, uint32
 
   uint32_t nClAreduced = reducedClA ? nClA - nTr : nClA;
 
-  if (!(mRec->GetParam().rec.tpc.compressionTypeMask & GPUSettings::CompressionTrackModel)) {
+  if (!(c.nComppressionModes & GPUSettings::CompressionTrackModel)) {
     return; // Track model disabled, do not allocate memory
   }
   computePointerWithAlignment(mem, c.qTotA, nClA);
