@@ -126,19 +126,40 @@ bool GeneratorFileOrCmd::executeCmdLine(const std::string& cmd) const
   return true;
 }
 // -----------------------------------------------------------------
-bool GeneratorFileOrCmd::makeTemp()
+bool GeneratorFileOrCmd::makeTemp(const bool& fromName)
 {
-  mFileNames.clear();
-  char buf[] = "generatorFifoXXXXXX";
-  auto fp = mkstemp(buf);
-  if (fp < 0) {
-    LOG(fatal) << "Failed to make temporary file: "
-               << std::strerror(errno);
-    return false;
+  if (fromName) {
+    if (mFileNames.empty()) {
+      LOG(fatal) << "No file names to make temporary file from";
+      return false;
+    } else if (mFileNames.size() > 1) {
+      LOG(warning) << "More than one file name to make temporary file from";
+      LOG(warning) << "Using the first one: " << mFileNames.front();
+      LOG(warning) << "Removing all the others";
+      mFileNames.erase(++mFileNames.begin(), mFileNames.end());
+    } else {
+      LOG(debug) << "Making temporary file from: " << mFileNames.front();
+    }
+    std::ofstream ofs(mFileNames.front().c_str());
+    if (!ofs) {
+      LOG(fatal) << "Failed to create temporary file: " << mFileNames.front();
+      return false;
+    }
+    mTemporary = std::string(mFileNames.front());
+    ofs.close();
+  } else {
+    mFileNames.clear();
+    char buf[] = "generatorFifoXXXXXX";
+    auto fp = mkstemp(buf);
+    if (fp < 0) {
+      LOG(fatal) << "Failed to make temporary file: "
+                 << std::strerror(errno);
+      return false;
+    }
+    mTemporary = std::string(buf);
+    mFileNames.push_back(mTemporary);
+    close(fp);
   }
-  mTemporary = std::string(buf);
-  mFileNames.push_back(mTemporary);
-  close(fp);
   return true;
 }
 // -----------------------------------------------------------------

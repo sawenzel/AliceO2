@@ -141,7 +141,7 @@ struct GeneratorFileOrCmd {
    * @return true if the temporary file name was generated
    * successfully.
    */
-  virtual bool makeTemp();
+  virtual bool makeTemp(const bool&);
   /**
    * Remove the temporary file if it was set and it exists.
    *
