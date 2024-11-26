@@ -921,33 +921,6 @@ int32_t GPUChainTracking::FinalizePipelinedProcessing()
   return RunChainFinalize();
 }
 
-int32_t GPUChainTracking::HelperReadEvent(int32_t iSlice, int32_t threadId, GPUReconstructionHelpers::helperParam* par) { return ReadEvent(iSlice, threadId); }
-
-int32_t GPUChainTracking::HelperOutput(int32_t iSlice, int32_t threadId, GPUReconstructionHelpers::helperParam* par)
-{
-  if (param().rec.tpc.globalTracking) {
-    uint32_t tmpSlice = GPUTPCGlobalTracking::GlobalTrackingSliceOrder(iSlice);
-    uint32_t sliceLeft, sliceRight;
-    GPUTPCGlobalTracking::GlobalTrackingSliceLeftRight(tmpSlice, sliceLeft, sliceRight);
-
-    while (mSliceSelectorReady < (int32_t)tmpSlice || mSliceSelectorReady < (int32_t)sliceLeft || mSliceSelectorReady < (int32_t)sliceRight) {
-      if (par->reset) {
-        return 1;
-      }
-    }
-    GlobalTracking(tmpSlice, 0);
-    WriteOutput(tmpSlice, 0);
-  } else {
-    while (mSliceSelectorReady < iSlice) {
-      if (par->reset) {
-        return 1;
-      }
-    }
-    WriteOutput(iSlice, threadId);
-  }
-  return 0;
-}
-
 int32_t GPUChainTracking::CheckErrorCodes(bool cpuOnly, bool forceShowErrors, std::vector<std::array<uint32_t, 4>>* fillErrors)
 {
   int32_t retVal = 0;

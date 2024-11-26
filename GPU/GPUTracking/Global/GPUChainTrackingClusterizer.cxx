@@ -457,6 +457,7 @@ std::pair<uint32_t, uint32_t> GPUChainTracking::RunTPCClusterizer_transferZS(int
 
 int32_t GPUChainTracking::RunTPCClusterizer_prepare(bool restorePointers)
 {
+  bool doGPU = mRec->GetRecoStepsGPU() & GPUDataTypes::RecoStep::TPCClusterFinding;
   if (restorePointers) {
     for (uint32_t iSlice = 0; iSlice < NSLICES; iSlice++) {
       processors()->tpcClusterer[iSlice].mPzsOffsets = mCFContext->ptrSave[iSlice].zsOffsetHost;
@@ -512,7 +513,7 @@ int32_t GPUChainTracking::RunTPCClusterizer_prepare(bool restorePointers)
       uint32_t threshold = 40000000;
       uint32_t nDigitsScaled = nDigitsBase > threshold ? nDigitsBase : std::min((threshold + nDigitsBase) / 2, 2 * nDigitsBase);
       processors()->tpcClusterer[iSlice].SetNMaxDigits(processors()->tpcClusterer[iSlice].mPmemory->counters.nDigits, mCFContext->nPagesFragmentMax, nDigitsScaled, mCFContext->nDigitsEndpointMax[iSlice]);
-      if (mRec->IsGPU()) {
+      if (doGPU) {
         processorsShadow()->tpcClusterer[iSlice].SetNMaxDigits(processors()->tpcClusterer[iSlice].mPmemory->counters.nDigits, mCFContext->nPagesFragmentMax, nDigitsScaled, mCFContext->nDigitsEndpointMax[iSlice]);
       }
       if (mPipelineNotifyCtx && GetProcessingSettings().doublePipelineClusterizer) {
@@ -578,7 +579,7 @@ int32_t GPUChainTracking::RunTPCClusterizer(bool synchronizeOutput)
   if (RunTPCClusterizer_prepare(mPipelineNotifyCtx && GetProcessingSettings().doublePipelineClusterizer)) {
     return 1;
   }
-  if (GetProcessingSettings().ompAutoNThreads && !mRec->IsGPU()) {
+  if (GetProcessingSettings().ompAutoNThreads && !doGPU) {
     mRec->SetNOMPThreads(mRec->MemoryScalers()->nTPCdigits / 20000);
   }
 
