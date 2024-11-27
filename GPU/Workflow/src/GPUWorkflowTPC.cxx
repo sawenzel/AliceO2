@@ -306,7 +306,7 @@ bool GPURecoWorkflowSpec::fetchCalibsCCDBTPC<GPUCalibObjectsConst>(ProcessingCon
     }
 
     if (mSpecConfig.outputTracks || mSpecConfig.caClusterer) {
-      mTPCCutAtTimeBin = pc.inputs().get<o2::tpc::AltroSyncSignal*>("tpcaltrosync")->getTB2Cut(pc.services().get<o2::framework::TimingInfo>().tfCounter);
+      mTPCCutAtTimeBin = mConfParam->overrideTPCTimeBinCur > 0 ? mConfParam->overrideTPCTimeBinCur : pc.inputs().get<o2::tpc::AltroSyncSignal*>("tpcaltrosync")->getTB2Cut(pc.services().get<o2::framework::TimingInfo>().tfCounter);
     }
 
     // these calibrations are only defined for the tracking

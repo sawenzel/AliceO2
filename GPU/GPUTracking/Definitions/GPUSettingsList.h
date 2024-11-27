@@ -536,6 +536,7 @@ AddOption(solenoidBzNominalGPU, float, -1e6f, "", 0, "Field strength of solenoid
 AddOption(constBz, bool, false, "", 0, "force constant Bz for tests")
 AddOption(setMaxTimeBin, int32_t, -2, "", 0, "maximum time bin of continuous data, 0 for triggered events, -1 for automatic continuous mode, -2 for automatic continuous / triggered")
 AddOption(overrideNHbfPerTF, int32_t, 0, "", 0, "Overrides the number of HBF per TF if != 0")
+AddOption(overrideTPCTimeBinCur, int32_t, 0, "", 0, "Overrides TPC time bin cut if > 0")
 AddOption(deviceType, std::string, "CPU", "", 0, "Device type, CPU | CUDA | HIP | OCL1 | OCL2")
 AddOption(forceDeviceType, bool, true, "", 0, "force device type, otherwise allows fall-back to CPU")
 AddOption(synchronousProcessing, bool, false, "", 0, "Apply performance shortcuts for synchronous processing, disable unneeded steps")
