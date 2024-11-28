@@ -153,6 +153,7 @@ Bool_t Detector::ProcessHits(FairVolume* vol)
   if (fMC->IsTrackEntering() || fMC->IsTrackExiting()) {
     stack->addTrackReference(o2::TrackReference(position.X(), position.Y(), position.Z(), momentum.X(), momentum.Y(),
                                                 momentum.Z(), fMC->TrackLength(), time, trackID, GetDetId()));
+    lastReferenceR = fMC->TrackLength();
   }
   if (TMath::Abs(lastReferenceR - fMC->TrackLength()) > kMaxDistRef) { /// we can speedup
     stack->addTrackReference(o2::TrackReference(position.X(), position.Y(), position.Z(), momentum.X(), momentum.Y(),
