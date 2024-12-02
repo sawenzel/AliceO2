@@ -15,6 +15,7 @@
 
 #include <cmath>
 #include <bitset>
+#include <limits>
 #include <numeric>
 #include <utility> // std::move
 
@@ -667,28 +668,54 @@ using FullTrack = FullTracks::iterator;
 namespace trackqa
 {
 // TRACKQA TABLE COLUMNS
-DECLARE_SOA_INDEX_COLUMN(Track, track);                              //! track to which this QA information belongs
-DECLARE_SOA_COLUMN(TPCTime0, tpcTime0, float);                       //! tpc only time0 (mTime0 in TPC track)
-DECLARE_SOA_COLUMN(TPCDCAR, tpcdcaR, int16_t);                       //! tpc only DCAr
-DECLARE_SOA_COLUMN(TPCDCAZ, tpcdcaZ, int16_t);                       //! tpc only DCAz
-DECLARE_SOA_COLUMN(TPCClusterByteMask, tpcClusterByteMask, uint8_t); //! tracklet bitmask - track defining 8 tracklets (152=8*19 rows) bit set if nCluster>thr (default 5)
-DECLARE_SOA_COLUMN(TPCdEdxMax0R, tpcdEdxMax0R, uint8_t);             //! TPC dEdxQMax -ROC0/dEdx
-DECLARE_SOA_COLUMN(TPCdEdxMax1R, tpcdEdxMax1R, uint8_t);             //! TPC dEdxQMax -ROC1/dEdx
-DECLARE_SOA_COLUMN(TPCdEdxMax2R, tpcdEdxMax2R, uint8_t);             //! TPC dEdxQMax -ROC2/dEdx
-DECLARE_SOA_COLUMN(TPCdEdxMax3R, tpcdEdxMax3R, uint8_t);             //! TPC dEdxQMax -ROC3/dEdx
-DECLARE_SOA_COLUMN(TPCdEdxTot0R, tpcdEdxTot0R, uint8_t);             //! TPC dEdxQtot -ROC0/dEdx
-DECLARE_SOA_COLUMN(TPCdEdxTot1R, tpcdEdxTot1R, uint8_t);             //! TPC dEdxQtot -ROC1/dEdx
-DECLARE_SOA_COLUMN(TPCdEdxTot2R, tpcdEdxTot2R, uint8_t);             //! TPC dEdxQtot -ROC2/dEdx
-DECLARE_SOA_COLUMN(TPCdEdxTot3R, tpcdEdxTot3R, uint8_t);             //! TPC dEdxQtot -ROC3/dEdx
+DECLARE_SOA_INDEX_COLUMN(Track, track);                                   //! track to which this QA information belongs
+DECLARE_SOA_COLUMN(TPCTime0, tpcTime0, float);                            //! tpc only time0 (mTime0 in TPC track)
+DECLARE_SOA_COLUMN(TPCDCAR, tpcdcaR, int16_t);                            //! tpc only DCAr
+DECLARE_SOA_COLUMN(TPCDCAZ, tpcdcaZ, int16_t);                            //! tpc only DCAz
+DECLARE_SOA_COLUMN(TPCClusterByteMask, tpcClusterByteMask, uint8_t);      //! tracklet bitmask - track defining 8 tracklets (152=8*19 rows) bit set if nCluster>thr (default 5)
+DECLARE_SOA_COLUMN(TPCdEdxMax0R, tpcdEdxMax0R, uint8_t);                  //! TPC dEdxQMax -ROC0/dEdx
+DECLARE_SOA_COLUMN(TPCdEdxMax1R, tpcdEdxMax1R, uint8_t);                  //! TPC dEdxQMax -ROC1/dEdx
+DECLARE_SOA_COLUMN(TPCdEdxMax2R, tpcdEdxMax2R, uint8_t);                  //! TPC dEdxQMax -ROC2/dEdx
+DECLARE_SOA_COLUMN(TPCdEdxMax3R, tpcdEdxMax3R, uint8_t);                  //! TPC dEdxQMax -ROC3/dEdx
+DECLARE_SOA_COLUMN(TPCdEdxTot0R, tpcdEdxTot0R, uint8_t);                  //! TPC dEdxQtot -ROC0/dEdx
+DECLARE_SOA_COLUMN(TPCdEdxTot1R, tpcdEdxTot1R, uint8_t);                  //! TPC dEdxQtot -ROC1/dEdx
+DECLARE_SOA_COLUMN(TPCdEdxTot2R, tpcdEdxTot2R, uint8_t);                  //! TPC dEdxQtot -ROC2/dEdx
+DECLARE_SOA_COLUMN(TPCdEdxTot3R, tpcdEdxTot3R, uint8_t);                  //! TPC dEdxQtot -ROC3/dEdx
+DECLARE_SOA_COLUMN(DeltaRefContParamY, deltaRefContParamY, int8_t);       //! Normalized delta of contributor tracks at reference point in the same frame Y
+DECLARE_SOA_COLUMN(DeltaRefContParamZ, deltaRefITSParamZ, int8_t);        //! Normalized delta of contributor tracks at reference point in the same frame Z
+DECLARE_SOA_COLUMN(DeltaRefContParamSnp, deltaRefContParamSnp, int8_t);   //! Normalized delta of contributor tracks at reference point in the same frame Snp
+DECLARE_SOA_COLUMN(DeltaRefContParamTgl, deltaRefContParamTgl, int8_t);   //! Normalized delta of contributor tracks at reference point in the same frame Tgl
+DECLARE_SOA_COLUMN(DeltaRefContParamQ2Pt, deltaRefContParamQ2Pt, int8_t); //! Normalized delta of contributor tracks at reference point in the same frame Q2Pt
+DECLARE_SOA_COLUMN(DeltaRefGloParamY, deltaRefGloParamY, int8_t);         //! Normalized delta of global track to average contributors matched tracks at reference point in the same frame Y
+DECLARE_SOA_COLUMN(DeltaRefGloParamZ, deltaRefGloParamZ, int8_t);         //! Normalized delta of global track to average contributors matched tracks at reference point in the same frame Z
+DECLARE_SOA_COLUMN(DeltaRefGloParamSnp, deltaRefGloParamSnp, int8_t);     //! Normalized delta of global track to average contributors matched tracks at reference point in the same frame Snp
+DECLARE_SOA_COLUMN(DeltaRefGloParamTgl, deltaRefGloParamTgl, int8_t);     //! Normalized delta of global track to average contributors matched tracks at reference point in the same frame Tgl
+DECLARE_SOA_COLUMN(DeltaRefGloParamQ2Pt, deltaRefGloParamQ2Pt, int8_t);   //! Normalized delta of global track to average contributors matched tracks at reference point in the same frame Q2Pt
+
+DECLARE_SOA_DYNAMIC_COLUMN(IsDummy, isDummy, //! indicates if the propagation of the contrib. tracks was successful and residuals are available
+                           [](int8_t cY, int8_t cZ, int8_t cSnp, int8_t cTgl, int8_t cQ2Pt, int8_t gY, int8_t gZ, int8_t gSnp, int8_t gTgl, int8_t gQ2Pt) -> bool {
+                             constexpr int8_t m = std::numeric_limits<int8_t>::min();
+                             return (cY == m && cZ == m && cSnp == m && cTgl == m && cQ2Pt == m && gY == m && gZ == m && gSnp == m && gTgl == m && gQ2Pt == m);
+                           });
 } // namespace trackqa
 
-DECLARE_SOA_TABLE(TracksQA, "AOD", "TRACKQA", //! trackQA information - sampled QA information currently for the TPC
+DECLARE_SOA_TABLE(TracksQA_000, "AOD", "TRACKQA", //! trackQA information - sampled QA information currently for the TPC - version 0
                   o2::soa::Index<>, trackqa::TrackId, trackqa::TPCTime0, trackqa::TPCDCAR, trackqa::TPCDCAZ, trackqa::TPCClusterByteMask,
                   trackqa::TPCdEdxMax0R, trackqa::TPCdEdxMax1R, trackqa::TPCdEdxMax2R, trackqa::TPCdEdxMax3R,
                   trackqa::TPCdEdxTot0R, trackqa::TPCdEdxTot1R, trackqa::TPCdEdxTot2R, trackqa::TPCdEdxTot3R);
 //                  o2::soa::Index<>, trackqa::TrackId, trackqa::TPCDCAR, trackqa::TPCDCAZ, trackqa::TPCClusterByteMask,
 
-using TrackQA = TracksQA::iterator;
+DECLARE_SOA_TABLE_VERSIONED(TracksQA_001, "AOD", "TRACKQA", 1, //! trackQA information - version 1 - including contributor residuals of matched tracks at reference radius
+                            o2::soa::Index<>, trackqa::TrackId, trackqa::TPCTime0, trackqa::TPCDCAR, trackqa::TPCDCAZ, trackqa::TPCClusterByteMask,
+                            trackqa::TPCdEdxMax0R, trackqa::TPCdEdxMax1R, trackqa::TPCdEdxMax2R, trackqa::TPCdEdxMax3R,
+                            trackqa::TPCdEdxTot0R, trackqa::TPCdEdxTot1R, trackqa::TPCdEdxTot2R, trackqa::TPCdEdxTot3R,
+                            trackqa::DeltaRefContParamY, trackqa::DeltaRefContParamZ, trackqa::DeltaRefContParamSnp, trackqa::DeltaRefContParamTgl, trackqa::DeltaRefContParamQ2Pt,
+                            trackqa::DeltaRefGloParamY, trackqa::DeltaRefGloParamZ, trackqa::DeltaRefGloParamSnp, trackqa::DeltaRefGloParamTgl, trackqa::DeltaRefGloParamQ2Pt,
+                            trackqa::IsDummy<trackqa::DeltaRefContParamY, trackqa::DeltaRefContParamZ, trackqa::DeltaRefContParamSnp, trackqa::DeltaRefContParamTgl, trackqa::DeltaRefContParamQ2Pt,
+                                             trackqa::DeltaRefGloParamY, trackqa::DeltaRefGloParamZ, trackqa::DeltaRefGloParamSnp, trackqa::DeltaRefGloParamTgl, trackqa::DeltaRefGloParamQ2Pt>);
+
+using TracksQAVersion = TracksQA_000;
+using TracksQA = TracksQAVersion::iterator;
 
 namespace fwdtrack
 {
