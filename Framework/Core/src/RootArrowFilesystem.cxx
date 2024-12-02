@@ -13,6 +13,7 @@
 #include "Framework/RuntimeError.h"
 #include "Framework/Signpost.h"
 #include <Rtypes.h>
+#include <arrow/array/array_nested.h>
 #include <arrow/array/array_primitive.h>
 #include <arrow/array/builder_nested.h>
 #include <arrow/array/builder_primitive.h>
@@ -427,7 +428,7 @@ class TTreeFileWriter : public arrow::dataset::FileWriter
         O2_SIGNPOST_EVENT_EMIT(root_arrow_fs, sid, "finaliseBasketSize", "Branch %s exists and uses %d bytes per entry.",
                                branch->GetName(), valueSize);
         // This should probably lookup the
-        auto column = firstBatch->GetColumnByName(branch->GetName());
+        auto column = firstBatch->GetColumnByName(schema_->field(i)->name());
         auto list = std::static_pointer_cast<arrow::ListArray>(column);
         O2_SIGNPOST_EVENT_EMIT(root_arrow_fs, sid, "finaliseBasketSize", "Branch %s needed. Associated size branch %s and there are %lli entries of size %d in that list.",
                                branch->GetName(), sizeBranch->GetName(), list->length(), valueSize);
@@ -497,8 +498,8 @@ class TTreeFileWriter : public arrow::dataset::FileWriter
         } break;
         case arrow::Type::LIST: {
           valueTypes.push_back(field->type()->field(0)->type());
-          listSizes.back() = 0; // VLA, we need to calculate it on the fly;
           std::string leafList = fmt::format("{}[{}_size]{}", field->name(), field->name(), rootSuffixFromArrow(valueTypes.back()->id()));
+          listSizes.back() = -1; // VLA, we need to calculate it on the fly;
           std::string sizeLeafList = field->name() + "_size/I";
           sizesBranches.push_back(treeStream->CreateBranch((field->name() + "_size").c_str(), sizeLeafList.c_str()));
           branches.push_back(treeStream->CreateBranch(field->name().c_str(), leafList.c_str()));
@@ -765,7 +766,7 @@ arrow::Result<arrow::RecordBatchGenerator> TTreeFileFormat::ScanBatchesAsync(
           typeSize = fixedSizeList->field(0)->type()->byte_width();
         } else if (auto vlaListType = std::dynamic_pointer_cast<arrow::ListType>(physicalField->type())) {
           listSize = -1;
-          typeSize = fixedSizeList->field(0)->type()->byte_width();
+          typeSize = vlaListType->field(0)->type()->byte_width();
         }
         if (listSize == -1) {
           mSizeBranch = branch->GetTree()->GetBranch((std::string{branch->GetName()} + "_size").c_str());
