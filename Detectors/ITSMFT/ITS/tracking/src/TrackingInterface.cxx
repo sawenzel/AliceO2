@@ -174,7 +174,7 @@ void ITSTrackingInterface::run(framework::ProcessingContext& pc)
   auto errorLogger = [&](std::string s) { LOG(error) << s; };
 
   FastMultEst multEst; // mult estimator
-  std::vector<bool> processingMask, processUPCMask;
+  std::vector<uint8_t> processingMask, processUPCMask;
   int cutVertexMult{0}, cutUPCVertex{0}, cutRandomMult = int(trackROFvec.size()) - multEst.selectROFs(trackROFvec, compClusters, physTriggers, processingMask);
   processUPCMask.resize(processingMask.size(), false);
   mTimeFrame->setMultiplicityCutMask(processingMask);
