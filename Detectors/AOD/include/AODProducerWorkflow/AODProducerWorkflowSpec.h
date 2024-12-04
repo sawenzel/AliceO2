@@ -21,7 +21,6 @@
 #include "DataFormatsTRD/TrackTRD.h"
 #include "DetectorsBase/GRPGeomHelper.h"
 #include "DetectorsBase/Propagator.h"
-#include "Framework/AnalysisHelpers.h"
 #include "Framework/DataProcessorSpec.h"
 #include "Framework/Task.h"
 #include "ReconstructionDataFormats/GlobalTrackID.h"
@@ -36,7 +35,6 @@
 #include <cstdint>
 #include <limits>
 #include <set>
-#include <string>
 #include <vector>
 #include <random>
 using namespace o2::framework;

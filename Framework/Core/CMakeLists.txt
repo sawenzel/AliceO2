@@ -236,6 +236,7 @@ add_executable(o2-test-framework-core
               test/test_Services.cxx
               test/test_StringHelpers.cxx
               test/test_StaticFor.cxx
+              test/test_TableSpawner.cxx
               test/test_TMessageSerializer.cxx
               test/test_TableBuilder.cxx
               test/test_TimeParallelPipelining.cxx

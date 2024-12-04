@@ -19,9 +19,10 @@
 using namespace o2::framework;
 using namespace arrow;
 using namespace o2::soa;
+using namespace o2::aod;
 
-DECLARE_SOA_METADATA();
-DECLARE_SOA_VERSIONING();
+namespace o2::aod
+{
 namespace test
 {
 DECLARE_SOA_COLUMN_FULL(X, x, float, "x");
@@ -31,6 +32,7 @@ DECLARE_SOA_DYNAMIC_COLUMN(Sum, sum, [](float x, float y) { return x + y; });
 } // namespace test
 
 DECLARE_SOA_TABLE(TestTable, "AOD", "TESTTBL", test::X, test::Y, test::Z, test::Sum<test::X, test::Y>);
+} // namespace o2::aod
 
 #ifdef __APPLE__
 constexpr unsigned int maxrange = 10;
@@ -217,7 +219,7 @@ static void BM_ASoASimpleForLoop(benchmark::State& state)
   }
   auto table = builder.finalize();
 
-  using Test = o2::soa::Table<o2::framework::OriginEnc{"AOD"}, test::X>;
+  using Test = o2::soa::InPlaceTable<"A/0"_h, test::X>;
 
   for (auto _ : state) {
     float sum = 0;
@@ -245,7 +247,7 @@ static void BM_ASoASimpleForLoopWithOp(benchmark::State& state)
   }
   auto table = builder.finalize();
 
-  using Test = o2::soa::Table<o2::framework::OriginEnc{"AOD"}, test::X, test::Y>;
+  using Test = o2::soa::InPlaceTable<"A/0"_h, test::X, test::Y>;
 
   for (auto _ : state) {
     Test tests{table};
@@ -273,7 +275,7 @@ static void BM_ASoADynamicColumnPresent(benchmark::State& state)
   }
   auto table = builder.finalize();
 
-  using Test = o2::soa::Table<o2::framework::OriginEnc{"AOD"}, test::X, test::Y, test::Z, test::Sum<test::X, test::Y>>;
+  using Test = o2::soa::InPlaceTable<"A/0"_h, test::X, test::Y, test::Z, test::Sum<test::X, test::Y>>;
 
   for (auto _ : state) {
     Test tests{table};
@@ -301,7 +303,7 @@ static void BM_ASoADynamicColumnCall(benchmark::State& state)
   }
   auto table = builder.finalize();
 
-  using Test = o2::soa::Table<o2::framework::OriginEnc{"AOD"}, test::X, test::Y, test::Sum<test::X, test::Y>>;
+  using Test = o2::soa::InPlaceTable<"A/0"_h, test::X, test::Y, test::Sum<test::X, test::Y>>;
 
   Test tests{table};
   for (auto _ : state) {
