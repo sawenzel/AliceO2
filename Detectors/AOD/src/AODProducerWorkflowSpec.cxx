@@ -358,47 +358,30 @@ void AODProducerWorkflowDPL::addToTracksExtraTable(TracksExtraCursorType& tracks
 template <typename TracksQACursorType>
 void AODProducerWorkflowDPL::addToTracksQATable(TracksQACursorType& tracksQACursor, TrackQA& trackQAInfoHolder)
 {
-  if constexpr (std::is_same_v<o2::aod::TracksQAVersion, o2::aod::TracksQA_001>) { // TODO remove remove once version changes
-    tracksQACursor(
-      trackQAInfoHolder.trackID,
-      truncateFloatFraction(trackQAInfoHolder.tpcTime0, mTPCTime0),
-      trackQAInfoHolder.tpcdcaR,
-      trackQAInfoHolder.tpcdcaZ,
-      trackQAInfoHolder.tpcClusterByteMask,
-      trackQAInfoHolder.tpcdEdxMax0R,
-      trackQAInfoHolder.tpcdEdxMax1R,
-      trackQAInfoHolder.tpcdEdxMax2R,
-      trackQAInfoHolder.tpcdEdxMax3R,
-      trackQAInfoHolder.tpcdEdxTot0R,
-      trackQAInfoHolder.tpcdEdxTot1R,
-      trackQAInfoHolder.tpcdEdxTot2R,
-      trackQAInfoHolder.tpcdEdxTot3R,
-      trackQAInfoHolder.dRefContY,
-      trackQAInfoHolder.dRefContZ,
-      trackQAInfoHolder.dRefContSnp,
-      trackQAInfoHolder.dRefContTgl,
-      trackQAInfoHolder.dRefContQ2Pt,
-      trackQAInfoHolder.dRefGloY,
-      trackQAInfoHolder.dRefGloZ,
-      trackQAInfoHolder.dRefGloSnp,
-      trackQAInfoHolder.dRefGloTgl,
-      trackQAInfoHolder.dRefGloQ2Pt);
-  } else {
-    tracksQACursor(
-      trackQAInfoHolder.trackID,
-      trackQAInfoHolder.tpcTime0,
-      trackQAInfoHolder.tpcdcaR,
-      trackQAInfoHolder.tpcdcaZ,
-      trackQAInfoHolder.tpcClusterByteMask,
-      trackQAInfoHolder.tpcdEdxMax0R,
-      trackQAInfoHolder.tpcdEdxMax1R,
-      trackQAInfoHolder.tpcdEdxMax2R,
-      trackQAInfoHolder.tpcdEdxMax3R,
-      trackQAInfoHolder.tpcdEdxTot0R,
-      trackQAInfoHolder.tpcdEdxTot1R,
-      trackQAInfoHolder.tpcdEdxTot2R,
-      trackQAInfoHolder.tpcdEdxTot3R);
-  }
+  tracksQACursor(
+    trackQAInfoHolder.trackID,
+    truncateFloatFraction(trackQAInfoHolder.tpcTime0, mTPCTime0),
+    trackQAInfoHolder.tpcdcaR,
+    trackQAInfoHolder.tpcdcaZ,
+    trackQAInfoHolder.tpcClusterByteMask,
+    trackQAInfoHolder.tpcdEdxMax0R,
+    trackQAInfoHolder.tpcdEdxMax1R,
+    trackQAInfoHolder.tpcdEdxMax2R,
+    trackQAInfoHolder.tpcdEdxMax3R,
+    trackQAInfoHolder.tpcdEdxTot0R,
+    trackQAInfoHolder.tpcdEdxTot1R,
+    trackQAInfoHolder.tpcdEdxTot2R,
+    trackQAInfoHolder.tpcdEdxTot3R,
+    trackQAInfoHolder.dRefContY,
+    trackQAInfoHolder.dRefContZ,
+    trackQAInfoHolder.dRefContSnp,
+    trackQAInfoHolder.dRefContTgl,
+    trackQAInfoHolder.dRefContQ2Pt,
+    trackQAInfoHolder.dRefGloY,
+    trackQAInfoHolder.dRefGloZ,
+    trackQAInfoHolder.dRefGloSnp,
+    trackQAInfoHolder.dRefGloTgl,
+    trackQAInfoHolder.dRefGloQ2Pt);
 }
 
 template <typename mftTracksCursorType, typename AmbigMFTTracksCursorType>
@@ -2615,95 +2598,93 @@ AODProducerWorkflowDPL::TrackQA AODProducerWorkflowDPL::processBarrelTrackQA(int
     trackQAHolder.tpcdEdxTot2R = uint8_t(tpcOrig.getdEdx().dEdxTotOROC2 * dEdxNorm);
     trackQAHolder.tpcdEdxTot3R = uint8_t(tpcOrig.getdEdx().dEdxTotOROC3 * dEdxNorm);
 
-    if constexpr (std::is_same_v<o2::aod::TracksQAVersion, o2::aod::TracksQA_001>) { // TODO remove remove once version changes
-      // Add matching information at a reference point (defined by
-      // o2::aod::track::trackQARefRadius) in the same frame as the global track
-      // without material corrections and error propagation
-      if (auto itsContGID = data.getITSContributorGID(trackIndex); itsContGID.isIndexSet() && itsContGID.getSource() != GIndex::ITSAB) {
-        const auto& itsOrig = data.getITSTrack(itsContGID);
-        o2::track::TrackPar gloCopy = trackPar;
-        o2::track::TrackPar itsCopy = itsOrig;
-        o2::track::TrackPar tpcCopy = tpcOrig;
-        if (prop->propagateToX(gloCopy, o2::aod::track::trackQARefRadius, prop->getNominalBz(), o2::base::Propagator::MAX_SIN_PHI, o2::base::Propagator::MAX_STEP, mMatCorr) &&
-            prop->propagateToAlphaX(tpcCopy, gloCopy.getAlpha(), o2::aod::track::trackQARefRadius, false, o2::base::Propagator::MAX_SIN_PHI, o2::base::Propagator::MAX_STEP, 1, mMatCorr) &&
-            prop->propagateToAlphaX(itsCopy, gloCopy.getAlpha(), o2::aod::track::trackQARefRadius, false, o2::base::Propagator::MAX_SIN_PHI, o2::base::Propagator::MAX_STEP, 1, mMatCorr)) {
-          // All tracks are now at the same radius and in the same frame and we can calculate the deltas wrt. to the global track
-          // The scale is defined by the global track scaling depending on beta0
-          const float beta0 = std::sqrt(std::min(50.f / tpcOrig.getdEdx().dEdxMaxTPC, 1.f));
-          const float qpt = gloCopy.getQ2Pt();
-          const float x = qpt / beta0;
-          // scaling is defined as sigmaBins/sqrt(p0^2 + (p1 * q/pt / beta)^2)
-          auto scaleCont = [&x](int i) -> float {
-            return o2::aod::track::trackQAScaleBins / std::sqrt(o2::aod::track::trackQAScaleContP0[i] * o2::aod::track::trackQAScaleContP0[i] + (o2::aod::track::trackQAScaleContP1[i] * x) * (o2::aod::track::trackQAScaleContP1[i] * x));
-          };
-          auto scaleGlo = [&x](int i) -> float {
-            return o2::aod::track::trackQAScaleBins / std::sqrt(o2::aod::track::trackQAScaleGloP0[i] * o2::aod::track::trackQAScaleGloP0[i] + (o2::aod::track::trackQAScaleGloP1[i] * x) * (o2::aod::track::trackQAScaleGloP1[i] * x));
-          };
+    // Add matching information at a reference point (defined by
+    // o2::aod::track::trackQARefRadius) in the same frame as the global track
+    // without material corrections and error propagation
+    if (auto itsContGID = data.getITSContributorGID(trackIndex); itsContGID.isIndexSet() && itsContGID.getSource() != GIndex::ITSAB) {
+      const auto& itsOrig = data.getITSTrack(itsContGID);
+      o2::track::TrackPar gloCopy = trackPar;
+      o2::track::TrackPar itsCopy = itsOrig;
+      o2::track::TrackPar tpcCopy = tpcOrig;
+      if (prop->propagateToX(gloCopy, o2::aod::track::trackQARefRadius, prop->getNominalBz(), o2::base::Propagator::MAX_SIN_PHI, o2::base::Propagator::MAX_STEP, mMatCorr) &&
+          prop->propagateToAlphaX(tpcCopy, gloCopy.getAlpha(), o2::aod::track::trackQARefRadius, false, o2::base::Propagator::MAX_SIN_PHI, o2::base::Propagator::MAX_STEP, 1, mMatCorr) &&
+          prop->propagateToAlphaX(itsCopy, gloCopy.getAlpha(), o2::aod::track::trackQARefRadius, false, o2::base::Propagator::MAX_SIN_PHI, o2::base::Propagator::MAX_STEP, 1, mMatCorr)) {
+        // All tracks are now at the same radius and in the same frame and we can calculate the deltas wrt. to the global track
+        // The scale is defined by the global track scaling depending on beta0
+        const float beta0 = std::sqrt(std::min(50.f / tpcOrig.getdEdx().dEdxMaxTPC, 1.f));
+        const float qpt = gloCopy.getQ2Pt();
+        const float x = qpt / beta0;
+        // scaling is defined as sigmaBins/sqrt(p0^2 + (p1 * q/pt / beta)^2)
+        auto scaleCont = [&x](int i) -> float {
+          return o2::aod::track::trackQAScaleBins / std::sqrt(o2::aod::track::trackQAScaleContP0[i] * o2::aod::track::trackQAScaleContP0[i] + (o2::aod::track::trackQAScaleContP1[i] * x) * (o2::aod::track::trackQAScaleContP1[i] * x));
+        };
+        auto scaleGlo = [&x](int i) -> float {
+          return o2::aod::track::trackQAScaleBins / std::sqrt(o2::aod::track::trackQAScaleGloP0[i] * o2::aod::track::trackQAScaleGloP0[i] + (o2::aod::track::trackQAScaleGloP1[i] * x) * (o2::aod::track::trackQAScaleGloP1[i] * x));
+        };
 
-          // This allows to safely clamp any float to one byte, using the
-          // minmal/maximum values as under-/overflow borders and rounding to the nearest integer
-          auto safeInt8Clamp = [](auto value) -> int8_t {
-            using ValType = decltype(value);
-            return static_cast<int8_t>(TMath::Nint(std::clamp(value, static_cast<ValType>(std::numeric_limits<int8_t>::min()), static_cast<ValType>(std::numeric_limits<int8_t>::max()))));
-          };
+        // This allows to safely clamp any float to one byte, using the
+        // minmal/maximum values as under-/overflow borders and rounding to the nearest integer
+        auto safeInt8Clamp = [](auto value) -> int8_t {
+          using ValType = decltype(value);
+          return static_cast<int8_t>(TMath::Nint(std::clamp(value, static_cast<ValType>(std::numeric_limits<int8_t>::min()), static_cast<ValType>(std::numeric_limits<int8_t>::max()))));
+        };
 
-          // Calculate deltas for contributors
-          trackQAHolder.dRefContY = safeInt8Clamp((itsCopy.getY() - tpcCopy.getY()) * scaleCont(0));
-          trackQAHolder.dRefContZ = safeInt8Clamp((itsCopy.getZ() - tpcCopy.getZ()) * scaleCont(1));
-          trackQAHolder.dRefContSnp = safeInt8Clamp((itsCopy.getSnp() - tpcCopy.getSnp()) * scaleCont(2));
-          trackQAHolder.dRefContTgl = safeInt8Clamp((itsCopy.getTgl() - tpcCopy.getTgl()) * scaleCont(3));
-          trackQAHolder.dRefContQ2Pt = safeInt8Clamp((itsCopy.getQ2Pt() - tpcCopy.getQ2Pt()) * scaleCont(4));
-          // Calculate deltas for global track against averaged contributors
-          trackQAHolder.dRefGloY = safeInt8Clamp(((itsCopy.getY() + tpcCopy.getY()) * 0.5f - gloCopy.getY()) * scaleGlo(0));
-          trackQAHolder.dRefGloZ = safeInt8Clamp(((itsCopy.getZ() + tpcCopy.getZ()) * 0.5f - gloCopy.getZ()) * scaleGlo(1));
-          trackQAHolder.dRefGloSnp = safeInt8Clamp(((itsCopy.getSnp() + tpcCopy.getSnp()) * 0.5f - gloCopy.getSnp()) * scaleGlo(2));
-          trackQAHolder.dRefGloTgl = safeInt8Clamp(((itsCopy.getTgl() + tpcCopy.getTgl()) * 0.5f - gloCopy.getTgl()) * scaleGlo(3));
-          trackQAHolder.dRefGloQ2Pt = safeInt8Clamp(((itsCopy.getQ2Pt() + tpcCopy.getQ2Pt()) * 0.5f - gloCopy.getQ2Pt()) * scaleGlo(4));
+        // Calculate deltas for contributors
+        trackQAHolder.dRefContY = safeInt8Clamp((itsCopy.getY() - tpcCopy.getY()) * scaleCont(0));
+        trackQAHolder.dRefContZ = safeInt8Clamp((itsCopy.getZ() - tpcCopy.getZ()) * scaleCont(1));
+        trackQAHolder.dRefContSnp = safeInt8Clamp((itsCopy.getSnp() - tpcCopy.getSnp()) * scaleCont(2));
+        trackQAHolder.dRefContTgl = safeInt8Clamp((itsCopy.getTgl() - tpcCopy.getTgl()) * scaleCont(3));
+        trackQAHolder.dRefContQ2Pt = safeInt8Clamp((itsCopy.getQ2Pt() - tpcCopy.getQ2Pt()) * scaleCont(4));
+        // Calculate deltas for global track against averaged contributors
+        trackQAHolder.dRefGloY = safeInt8Clamp(((itsCopy.getY() + tpcCopy.getY()) * 0.5f - gloCopy.getY()) * scaleGlo(0));
+        trackQAHolder.dRefGloZ = safeInt8Clamp(((itsCopy.getZ() + tpcCopy.getZ()) * 0.5f - gloCopy.getZ()) * scaleGlo(1));
+        trackQAHolder.dRefGloSnp = safeInt8Clamp(((itsCopy.getSnp() + tpcCopy.getSnp()) * 0.5f - gloCopy.getSnp()) * scaleGlo(2));
+        trackQAHolder.dRefGloTgl = safeInt8Clamp(((itsCopy.getTgl() + tpcCopy.getTgl()) * 0.5f - gloCopy.getTgl()) * scaleGlo(3));
+        trackQAHolder.dRefGloQ2Pt = safeInt8Clamp(((itsCopy.getQ2Pt() + tpcCopy.getQ2Pt()) * 0.5f - gloCopy.getQ2Pt()) * scaleGlo(4));
 
-          if (O2_ENUM_TEST_BIT(mStreamerMask, AODProducerStreamerMask::TrackQA)) {
-            (*mStreamer) << "trackQA"
-                         << "trackITSOrig=" << itsOrig
-                         << "trackTPCOrig=" << tpcOrig
-                         << "trackITSTPCOrig=" << trackPar
-                         << "trackITSProp=" << itsCopy
-                         << "trackTPCProp=" << tpcCopy
-                         << "trackITSTPCProp=" << gloCopy
-                         << "refRadius=" << o2::aod::track::trackQARefRadius
-                         << "scaleBins=" << o2::aod::track::trackQAScaleBins
-                         << "scaleCont0=" << scaleCont(0)
-                         << "scaleCont1=" << scaleCont(1)
-                         << "scaleCont2=" << scaleCont(2)
-                         << "scaleCont3=" << scaleCont(3)
-                         << "scaleCont4=" << scaleCont(4)
-                         << "scaleGlo0=" << scaleGlo(0)
-                         << "scaleGlo1=" << scaleGlo(1)
-                         << "scaleGlo2=" << scaleGlo(2)
-                         << "scaleGlo3=" << scaleGlo(3)
-                         << "scaleGlo4=" << scaleGlo(4)
-                         << "trackQAHolder.tpcTime0=" << trackQAHolder.tpcTime0
-                         << "trackQAHolder.tpcdcaR=" << trackQAHolder.tpcdcaR
-                         << "trackQAHolder.tpcdcaZ=" << trackQAHolder.tpcdcaZ
-                         << "trackQAHolder.tpcdcaClusterByteMask=" << trackQAHolder.tpcClusterByteMask
-                         << "trackQAHolder.tpcdEdxMax0R=" << trackQAHolder.tpcdEdxMax0R
-                         << "trackQAHolder.tpcdEdxMax1R=" << trackQAHolder.tpcdEdxMax1R
-                         << "trackQAHolder.tpcdEdxMax2R=" << trackQAHolder.tpcdEdxMax2R
-                         << "trackQAHolder.tpcdEdxMax3R=" << trackQAHolder.tpcdEdxMax3R
-                         << "trackQAHolder.tpcdEdxTot0R=" << trackQAHolder.tpcdEdxTot0R
-                         << "trackQAHolder.tpcdEdxTot1R=" << trackQAHolder.tpcdEdxTot1R
-                         << "trackQAHolder.tpcdEdxTot2R=" << trackQAHolder.tpcdEdxTot2R
-                         << "trackQAHolder.tpcdEdxTot3R=" << trackQAHolder.tpcdEdxTot3R
-                         << "trackQAHolder.dRefContY=" << trackQAHolder.dRefContY
-                         << "trackQAHolder.dRefContZ=" << trackQAHolder.dRefContZ
-                         << "trackQAHolder.dRefContSnp=" << trackQAHolder.dRefContSnp
-                         << "trackQAHolder.dRefContTgl=" << trackQAHolder.dRefContTgl
-                         << "trackQAHolder.dRefContQ2Pt=" << trackQAHolder.dRefContQ2Pt
-                         << "trackQAHolder.dRefGloY=" << trackQAHolder.dRefGloY
-                         << "trackQAHolder.dRefGloZ=" << trackQAHolder.dRefGloZ
-                         << "trackQAHolder.dRefGloSnp=" << trackQAHolder.dRefGloSnp
-                         << "trackQAHolder.dRefGloTgl=" << trackQAHolder.dRefGloTgl
-                         << "trackQAHolder.dRefGloQ2Pt=" << trackQAHolder.dRefGloQ2Pt
-                         << "\n";
-          }
+        if (O2_ENUM_TEST_BIT(mStreamerMask, AODProducerStreamerMask::TrackQA)) {
+          (*mStreamer) << "trackQA"
+                       << "trackITSOrig=" << itsOrig
+                       << "trackTPCOrig=" << tpcOrig
+                       << "trackITSTPCOrig=" << trackPar
+                       << "trackITSProp=" << itsCopy
+                       << "trackTPCProp=" << tpcCopy
+                       << "trackITSTPCProp=" << gloCopy
+                       << "refRadius=" << o2::aod::track::trackQARefRadius
+                       << "scaleBins=" << o2::aod::track::trackQAScaleBins
+                       << "scaleCont0=" << scaleCont(0)
+                       << "scaleCont1=" << scaleCont(1)
+                       << "scaleCont2=" << scaleCont(2)
+                       << "scaleCont3=" << scaleCont(3)
+                       << "scaleCont4=" << scaleCont(4)
+                       << "scaleGlo0=" << scaleGlo(0)
+                       << "scaleGlo1=" << scaleGlo(1)
+                       << "scaleGlo2=" << scaleGlo(2)
+                       << "scaleGlo3=" << scaleGlo(3)
+                       << "scaleGlo4=" << scaleGlo(4)
+                       << "trackQAHolder.tpcTime0=" << trackQAHolder.tpcTime0
+                       << "trackQAHolder.tpcdcaR=" << trackQAHolder.tpcdcaR
+                       << "trackQAHolder.tpcdcaZ=" << trackQAHolder.tpcdcaZ
+                       << "trackQAHolder.tpcdcaClusterByteMask=" << trackQAHolder.tpcClusterByteMask
+                       << "trackQAHolder.tpcdEdxMax0R=" << trackQAHolder.tpcdEdxMax0R
+                       << "trackQAHolder.tpcdEdxMax1R=" << trackQAHolder.tpcdEdxMax1R
+                       << "trackQAHolder.tpcdEdxMax2R=" << trackQAHolder.tpcdEdxMax2R
+                       << "trackQAHolder.tpcdEdxMax3R=" << trackQAHolder.tpcdEdxMax3R
+                       << "trackQAHolder.tpcdEdxTot0R=" << trackQAHolder.tpcdEdxTot0R
+                       << "trackQAHolder.tpcdEdxTot1R=" << trackQAHolder.tpcdEdxTot1R
+                       << "trackQAHolder.tpcdEdxTot2R=" << trackQAHolder.tpcdEdxTot2R
+                       << "trackQAHolder.tpcdEdxTot3R=" << trackQAHolder.tpcdEdxTot3R
+                       << "trackQAHolder.dRefContY=" << trackQAHolder.dRefContY
+                       << "trackQAHolder.dRefContZ=" << trackQAHolder.dRefContZ
+                       << "trackQAHolder.dRefContSnp=" << trackQAHolder.dRefContSnp
+                       << "trackQAHolder.dRefContTgl=" << trackQAHolder.dRefContTgl
+                       << "trackQAHolder.dRefContQ2Pt=" << trackQAHolder.dRefContQ2Pt
+                       << "trackQAHolder.dRefGloY=" << trackQAHolder.dRefGloY
+                       << "trackQAHolder.dRefGloZ=" << trackQAHolder.dRefGloZ
+                       << "trackQAHolder.dRefGloSnp=" << trackQAHolder.dRefGloSnp
+                       << "trackQAHolder.dRefGloTgl=" << trackQAHolder.dRefGloTgl
+                       << "trackQAHolder.dRefGloQ2Pt=" << trackQAHolder.dRefGloQ2Pt
+                       << "\n";
         }
       }
     }
