@@ -75,6 +75,10 @@ GeneratorHybrid::GeneratorHybrid(const std::string& inputgens)
         int confO2KineIndex = std::stoi(mConfigs[index].substr(9));
         gens.push_back(std::make_unique<o2::eventgen::GeneratorFromO2Kine>(*mO2KineGenConfigs[confO2KineIndex]));
         mGens.push_back(gen);
+      } else if (gen.compare("evtpool") == 0) {
+        int confEvtPoolIndex = std::stoi(mConfigs[index].substr(8));
+        gens.push_back(std::make_unique<o2::eventgen::GeneratorFromEventPool>(mEventPoolConfigs[confEvtPoolIndex]));
+        mGens.push_back(gen);
       } else if (gen.compare("external") == 0) {
         int confextIndex = std::stoi(mConfigs[index].substr(9));
         auto& extgen_filename = mExternalGenConfigs[confextIndex]->fileName;
@@ -265,6 +269,12 @@ Bool_t GeneratorHybrid::parseJSON(const std::string& path)
           auto o2kineConfig = TBufferJSON::FromJSON<o2::eventgen::O2KineGenConfig>(jsonValueToString(o2kineconf).c_str());
           mO2KineGenConfigs.push_back(std::move(o2kineConfig));
           mConfigs.push_back("extkinO2_" + std::to_string(mO2KineGenConfigs.size() - 1));
+          continue;
+        } else if (name == "evtpool") {
+          const auto& o2kineconf = gen["config"];
+          auto poolConfig = TBufferJSON::FromJSON<o2::eventgen::EventPoolGenConfig>(jsonValueToString(o2kineconf).c_str());
+          mEventPoolConfigs.push_back(*poolConfig);
+          mConfigs.push_back("evtpool_" + std::to_string(mEventPoolConfigs.size() - 1));
           continue;
         } else if (name == "external") {
           const auto& extconf = gen["config"];
