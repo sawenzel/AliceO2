@@ -1451,12 +1451,7 @@ using PresliceOptional = PresliceBase<T, true, true>;
 
 namespace o2::soa
 {
-template <typename T>
-class FilteredBase;
-template <typename T>
-class Filtered;
-
-template <typename T>
+template <soa::is_table T>
 class FilteredBase;
 template <typename T>
 class Filtered;
@@ -1728,7 +1723,8 @@ class Table
     using columns_t = typename Parent::columns_t;
     using external_index_columns_t = typename Parent::external_index_columns_t;
     using bindings_pack_t = decltype([]<typename... C>(framework::pack<C...>) -> framework::pack<typename C::binding_t...> {}(external_index_columns_t{}));
-    static constexpr const std::array<TableRef, sizeof...(T)> originals{T::ref...};
+    // static constexpr const std::array<TableRef, sizeof...(T)> originals{T::ref...};
+    static constexpr auto originals = Parent::originals;
     using policy_t = IP;
     using parent_t = Parent;
 
@@ -1741,7 +1737,7 @@ class Table
 
     template <typename P, typename... Os>
     TableIteratorBase& operator=(TableIteratorBase<IP, P, Os...> other)
-      requires(P::ref::signature == Parent::ref::signature)
+      requires(P::ref.desc_hash == Parent::ref.desc_hash)
     {
       static_cast<base_iterator<IP>&>(*this) = static_cast<base_iterator<IP>>(other);
       return *this;
@@ -1762,16 +1758,16 @@ class Table
       return *this;
     }
 
-    template <typename P, typename... Os>
-    TableIteratorBase(TableIteratorBase<IP, P, Os...> const& other)
-      requires(P::ref::signature == Parent::ref::signature)
+    template <typename P, typename O1, typename... Os>
+    TableIteratorBase(TableIteratorBase<IP, P, O1, Os...> const& other)
+      requires(P::ref.desc_hash == Parent::ref.desc_hash)
     {
       *this = other;
     }
 
-    template <typename P, typename... Os>
-    TableIteratorBase(TableIteratorBase<IP, P, Os...>&& other) noexcept
-      requires(P::ref::signature == Parent::ref::signature)
+    template <typename P, typename O1, typename... Os>
+    TableIteratorBase(TableIteratorBase<IP, P, O1, Os...>&& other) noexcept
+      requires(P::ref.desc_hash == Parent::ref.desc_hash)
     {
       *this = other;
     }
@@ -2503,7 +2499,7 @@ consteval auto getIndexTargets()
         for (auto const& i : *mColumnIterator) {                                                         \
           auto pos = mBinding.get<T>()->isInSelectedRows(i);                                             \
           if (pos > 0) {                                                                                 \
-            result.push_back(mBinding.get<T>()->iteratorAt(pos));                                        \
+            result.emplace_back(mBinding.get<T>()->iteratorAt(pos));                                     \
           }                                                                                              \
         }                                                                                                \
         return result;                                                                                   \
@@ -3061,9 +3057,6 @@ consteval auto getIndexTargets()
 
 namespace o2::soa
 {
-// template <typename T>
-// class FilteredBase;
-
 template <typename D, typename... Ts>
 struct JoinFull : Table<o2::aod::Hash<"JOIN"_h>, D, o2::aod::Hash<"JOIN"_h>, Ts...> {
   using base = Table<o2::aod::Hash<"JOIN"_h>, D, o2::aod::Hash<"JOIN"_h>, Ts...>;
@@ -3201,7 +3194,7 @@ constexpr auto concat(Ts const&... t)
   return Concat<Ts...>{t...};
 }
 
-template <typename T>
+template <soa::is_table T>
 class FilteredBase : public T
 {
  public:
@@ -3473,7 +3466,8 @@ class Filtered : public FilteredBase<T>
  public:
   using base_t = T;
   using self_t = Filtered<T>;
-  using table_t = typename FilteredBase<T>::table_t;
+  using table_t = typename T::table_t;
+  using columns_t = typename T::columns_t;
 
   using iterator = T::template iterator_template_o<FilteredIndexPolicy, self_t>;
   using unfiltered_iterator = T::template iterator_template_o<DefaultIndexPolicy, self_t>;
@@ -3633,9 +3627,10 @@ class Filtered<Filtered<T>> : public FilteredBase<typename T::table_t>
   using self_t = Filtered<Filtered<T>>;
   using base_t = T;
   using table_t = typename FilteredBase<typename T::table_t>::table_t;
+  using columns_t = typename T::columns_t;
 
-  using iterator = FilteredBase<typename T::table_t>::iterator;
-  using unfiltered_iterator = FilteredBase<typename T::table_t>::unfiltered_iterator;
+  using iterator = typename T::template iterator_template_o<FilteredIndexPolicy, self_t>;
+  using unfiltered_iterator = typename T::template iterator_template_o<DefaultIndexPolicy, self_t>;
   using const_iterator = iterator;
 
   iterator begin()

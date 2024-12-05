@@ -10,10 +10,12 @@
 // or submit itself to any jurisdiction.
 
 #include "Framework/ASoA.h"
+#include "Framework/AnalysisDataModel.h"
 #include "Framework/TableBuilder.h"
 #include "Framework/GroupSlicer.h"
 #include "Framework/ArrowTableSlicingCache.h"
 #include <arrow/util/config.h>
+#include <iostream>
 
 #include <catch_amalgamated.hpp>
 
@@ -85,6 +87,13 @@ DECLARE_SOA_COLUMN(Lst, lst, std::vector<double>);
 DECLARE_SOA_TABLE(EventExtra, "AOD", "EVTSXTRA", test::Arr, test::Boo, test::Lst);
 
 } // namespace o2::aod
+TEST_CASE("RelatedByIndex")
+{
+  using Trks = soa::Join<aod::Tracks, aod::TracksExtra>;
+  CHECK(soa::relatedByIndex<aod::Collision, Trks>() == true);
+  CHECK(soa::relatedByIndex<aod::Collision, aod::Tracks>() == true);
+}
+
 TEST_CASE("GroupSlicerOneAssociated")
 {
   TableBuilder builderE;
