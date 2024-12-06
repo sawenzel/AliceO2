@@ -41,19 +41,20 @@ struct TrackCovI {
     // (otherwise for quazi-collinear tracks the X will not be constrained)
     float cyy = trc.getSigmaY2(), czz = trc.getSigmaZ2(), cyz = trc.getSigmaZY(), cxx = cyy * xerrFactor;
     float detYZ = cyy * czz - cyz * cyz;
-    if (detYZ > 0.) {
-      auto detYZI = 1. / detYZ;
-      sxx = 1. / cxx;
-      syy = czz * detYZI;
-      syz = -cyz * detYZI;
-      szz = cyy * detYZI;
-    } else {
+    if (detYZ <= 0.) {
 #ifndef GPUCA_GPUCODE
-      throw std::runtime_error("invalid track covariance");
+      printf("overriding invalid track covariance from %s\n", trc.asString().c_str());
 #else
-      printf("invalid track covariance\n");
+      printf("overriding invalid track covariance cyy:%e czz:%e cyz:%e\n", cyy, czz, cyz);
 #endif
+      cyz = o2::gpu::GPUCommonMath::Sqrt(cyy * czz) * (cyz > 0 ? 0.98f : -0.98f);
+      detYZ = cyy * czz - cyz * cyz;
     }
+    auto detYZI = 1. / detYZ;
+    sxx = 1. / cxx;
+    syy = czz * detYZI;
+    syz = -cyz * detYZI;
+    szz = cyy * detYZI;
   }
 };
 
