@@ -251,7 +251,7 @@ class AODProducerWorkflowDPL : public Task
   std::unordered_set<GIndex> mGIDUsedBySVtx;
   std::unordered_set<GIndex> mGIDUsedByStr;
 
-  AODProducerStreamerMask mStreamerMask;
+  AODProducerStreamerMask mStreamerMask{0};
   std::shared_ptr<o2::utils::TreeStreamRedirector> mStreamer;
 
   int mNThreads = 1;
