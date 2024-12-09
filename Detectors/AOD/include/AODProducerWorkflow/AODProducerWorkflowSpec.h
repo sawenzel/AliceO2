@@ -30,7 +30,7 @@
 #include "ZDCBase/Constants.h"
 #include "GlobalTracking/MatchGlobalFwd.h"
 #include "CommonUtils/TreeStreamRedirector.h"
-#include "CommonUtils/EnumBitOperators.h"
+#include "CommonUtils/EnumFlags.h"
 
 #include <cstdint>
 #include <limits>
@@ -208,12 +208,9 @@ class BunchCrossings
 }; // end internal class
 
 // Steering bits for additional output during AOD production
-enum struct AODProducerStreamerMask : uint8_t {
-  None = 0,
-  TrackQA = O2_ENUM_SET_BIT(0),
-  All = std::numeric_limits<std::underlying_type_t<AODProducerStreamerMask>>::max(),
+enum struct AODProducerStreamerFlags : uint8_t {
+  TrackQA,
 };
-O2_DEFINE_ENUM_BIT_OPERATORS(AODProducerStreamerMask)
 
 class AODProducerWorkflowDPL : public Task
 {
@@ -251,7 +248,7 @@ class AODProducerWorkflowDPL : public Task
   std::unordered_set<GIndex> mGIDUsedBySVtx;
   std::unordered_set<GIndex> mGIDUsedByStr;
 
-  AODProducerStreamerMask mStreamerMask{0};
+  o2::utils::EnumFlags<AODProducerStreamerFlags> mStreamerFlags;
   std::shared_ptr<o2::utils::TreeStreamRedirector> mStreamer;
 
   int mNThreads = 1;

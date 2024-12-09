@@ -1675,9 +1675,10 @@ void AODProducerWorkflowDPL::init(InitContext& ic)
   mPropTracks = ic.options().get<bool>("propagate-tracks");
   mPropMuons = ic.options().get<bool>("propagate-muons");
   if (auto s = ic.options().get<std::string>("with-streamers"); !s.empty()) {
-    mStreamerMask = static_cast<AODProducerStreamerMask>(std::stoul(s, nullptr, 2));
-    if (O2_ENUM_ANY_BIT(mStreamerMask)) {
-      LOGP(info, "Writing streamer data with mask {:0{}b}", static_cast<std::underlying_type_t<AODProducerStreamerMask>>(mStreamerMask), std::numeric_limits<std::underlying_type_t<AODProducerStreamerMask>>::digits);
+    mStreamerFlags.set(s);
+    if (mStreamerFlags) {
+      LOGP(info, "Writing streamer data with mask:");
+      LOG(info) << mStreamerFlags;
     } else {
       LOGP(warn, "Specified non-default empty streamer mask!");
     }
@@ -1768,7 +1769,7 @@ void AODProducerWorkflowDPL::init(InitContext& ic)
 
   mTimer.Reset();
 
-  if (O2_ENUM_ANY_BIT(mStreamerMask)) {
+  if (mStreamerFlags) {
     mStreamer = std::make_unique<o2::utils::TreeStreamRedirector>("AO2DStreamer.root", "RECREATE");
   }
 }
@@ -2654,7 +2655,7 @@ AODProducerWorkflowDPL::TrackQA AODProducerWorkflowDPL::processBarrelTrackQA(int
         trackQAHolder.dRefGloQ2Pt = safeInt8Clamp(((itsCopy.getQ2Pt() + tpcCopy.getQ2Pt()) * 0.5f - gloCopy.getQ2Pt()) * scaleGlo(4));
         //
 
-        if (O2_ENUM_TEST_BIT(mStreamerMask, AODProducerStreamerMask::TrackQA)) {
+        if (mStreamerFlags[AODProducerStreamerFlags::TrackQA]) {
           (*mStreamer) << "trackQA"
                        << "trackITSOrig=" << itsOrig
                        << "trackTPCOrig=" << tpcOrig
