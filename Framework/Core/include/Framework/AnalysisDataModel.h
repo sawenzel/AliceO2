@@ -1672,6 +1672,26 @@ DECLARE_SOA_COLUMN(SPDFiredFastOrL0, spdFiredFastOrL0, uint16_t);     //! Fired 
 DECLARE_SOA_COLUMN(SPDFiredFastOrL1, spdFiredFastOrL1, uint16_t);     //! Fired FASTOR signals in the first layer of the SPD (online)
 DECLARE_SOA_COLUMN(V0TriggerChargeA, v0TriggerChargeA, uint16_t);     //! V0A trigger charge
 DECLARE_SOA_COLUMN(V0TriggerChargeC, v0TriggerChargeC, uint16_t);     //! V0C trigger charge
+namespace oftv0
+{
+DECLARE_SOA_INDEX_COLUMN(Collision, collision);                         //! Collision index
+DECLARE_SOA_INDEX_COLUMN_FULL(PosTrack, posTrack, int, Tracks, "_Pos"); //! Positive track
+DECLARE_SOA_INDEX_COLUMN_FULL(NegTrack, negTrack, int, Tracks, "_Neg"); //! Negative track
+DECLARE_SOA_COLUMN(Px, px, float);                                      //! momentum in x
+DECLARE_SOA_COLUMN(Py, py, float);                                      //! momentum in y
+DECLARE_SOA_COLUMN(Pz, pz, float);                                      //! momentum in z
+DECLARE_SOA_COLUMN(E, e, float);                                        //! energy
+DECLARE_SOA_COLUMN(Qt, qt, float);                                      //! Qt of AP
+DECLARE_SOA_COLUMN(Alpha, alpha, float);                                //! Alpha of AP
+DECLARE_SOA_COLUMN(X, x, float);                                        //! conversion point x coordiante
+DECLARE_SOA_COLUMN(Y, y, float);                                        //! conversion point y coordiante
+DECLARE_SOA_COLUMN(Z, z, float);                                        //! conversion point z coordiante
+DECLARE_SOA_COLUMN(Chi2NDF, chi2NDF, float);                            //! chi^2 over NDF from KFParticle
+DECLARE_SOA_COLUMN(PsiPair, psiPair, float);                            //! Psi pair
+DECLARE_SOA_COLUMN(DCAr, dcaR, float);                                  //! DCA in radial direction
+DECLARE_SOA_COLUMN(DCAz, dcaZ, float);                                  //! DCA in z direction
+DECLARE_SOA_COLUMN(Mass, mass, float);                                  //! mass of the conversion. Do NOT use for cut!
+} // namespace oftv0
 } // namespace run2
 
 DECLARE_SOA_TABLE(Run2BCInfos, "AOD", "RUN2BCINFO", run2::EventCuts, //! Legacy information for Run 2 event selection
@@ -1681,6 +1701,18 @@ DECLARE_SOA_TABLE(Run2BCInfos, "AOD", "RUN2BCINFO", run2::EventCuts, //! Legacy 
                   run2::SPDFiredFastOrL0, run2::SPDFiredFastOrL1,
                   run2::V0TriggerChargeA, run2::V0TriggerChargeC);
 using Run2BCInfo = Run2BCInfos::iterator;
+
+DECLARE_SOA_TABLE(Run2OTFV0s, "AOD", "Run2OTFV0", //! Run 2 V0 on the fly table
+                  o2::soa::Index<>,
+                  run2::oftv0::CollisionId, run2::oftv0::PosTrackId, run2::oftv0::NegTrackId,
+                  run2::oftv0::Px, run2::oftv0::Py, run2::oftv0::Pz, run2::oftv0::E,
+                  run2::oftv0::Qt, run2::oftv0::Alpha,
+                  run2::oftv0::X, run2::oftv0::Y, run2::oftv0::Z,
+                  run2::oftv0::Chi2NDF, run2::oftv0::PsiPair,
+                  run2::oftv0::DCAr, run2::oftv0::DCAz,
+                  run2::oftv0::Mass);
+
+using Run2OTFV0 = Run2OTFV0s::iterator;
 
 // ---- MC tables ----
 namespace mccollision
