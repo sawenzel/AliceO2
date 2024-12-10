@@ -259,6 +259,7 @@ class TimeFrame
   void printCellLUTonLayer(int i);
   void printTrackletLUTs();
   void printCellLUTs();
+  void printROFInfo(const int rofId);
 
   IndexTableUtils mIndexTableUtils;
 
