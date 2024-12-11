@@ -30,6 +30,8 @@
 #include <array>
 #include <cassert>
 #include <fmt/format.h>
+#include <concepts>
+#include <cstring>
 #include <gsl/span>
 #include <limits>
 
@@ -2171,6 +2173,82 @@ template <typename T, typename... Cs>
 std::tuple<typename Cs::type...> getRowData(arrow::Table* table, T rowIterator, uint64_t ci = std::numeric_limits<uint64_t>::max(), uint64_t ai = std::numeric_limits<uint64_t>::max(), uint64_t globalIndex = std::numeric_limits<uint64_t>::max())
 {
   return std::make_tuple(getSingleRowData<T, Cs>(table, rowIterator, ci, ai, globalIndex)...);
+}
+
+template <typename R, typename T, typename C>
+R getColumnValue(const T& rowIterator)
+{
+  return static_cast<R>(static_cast<C>(rowIterator).get());
+}
+
+template <typename R, typename T>
+using ColumnGetterFunction = R (*)(const T&);
+
+template <typename T, typename R>
+concept dynamic_with_common_getter = is_dynamic_column<T> &&
+                                     // lambda is callable without additional free args
+                                     framework::pack_size(typename T::bindings_t{}) == framework::pack_size(typename T::callable_t::args{}) &&
+                                     requires(T t) {
+                                       { t.get() } -> std::convertible_to<R>;
+                                     };
+
+template <typename T, typename R>
+concept persistent_with_common_getter = is_persistent_v<T> && requires(T t) {
+  { t.get() } -> std::convertible_to<R>;
+};
+
+template <typename R, typename T, persistent_with_common_getter<R> C>
+ColumnGetterFunction<R, T> createGetterPtr(const std::string_view& targetColumnLabel)
+{
+  return targetColumnLabel == C::columnLabel() ? &getColumnValue<R, T, C> : nullptr;
+}
+
+template <typename R, typename T, dynamic_with_common_getter<R> C>
+ColumnGetterFunction<R, T> createGetterPtr(const std::string_view& targetColumnLabel)
+{
+  std::string_view columnLabel(C::columnLabel());
+
+  // allows user to use consistent formatting (with prefix) of all column labels
+  // by default there isn't 'f' prefix for dynamic column labels
+  if (targetColumnLabel.starts_with("f") && targetColumnLabel.substr(1) == columnLabel) {
+    return &getColumnValue<R, T, C>;
+  }
+
+  // check also exact match if user is aware of prefix missing
+  if (targetColumnLabel == columnLabel) {
+    return &getColumnValue<R, T, C>;
+  }
+
+  return nullptr;
+}
+
+template <typename R, typename T, typename... Cs>
+ColumnGetterFunction<R, T> getColumnGetterByLabel(o2::framework::pack<Cs...>, const std::string_view& targetColumnLabel)
+{
+  ColumnGetterFunction<R, T> func;
+
+  (void)((func = createGetterPtr<R, T, Cs>(targetColumnLabel), func) || ...);
+
+  if (!func) {
+    throw framework::runtime_error_f("Getter for \"%s\" not found", targetColumnLabel);
+  }
+
+  return func;
+}
+
+template <typename T, typename R>
+using with_common_getter_t = typename std::conditional<persistent_with_common_getter<T, R> || dynamic_with_common_getter<T, R>, std::true_type, std::false_type>::type;
+
+template <typename R, typename T>
+ColumnGetterFunction<R, typename T::iterator> getColumnGetterByLabel(const std::string_view& targetColumnLabel)
+{
+  using TypesWithCommonGetter = o2::framework::selected_pack_multicondition<with_common_getter_t, framework::pack<R>, typename T::columns_t>;
+
+  if (targetColumnLabel.size() == 0) {
+    throw framework::runtime_error("columnLabel: must not be empty");
+  }
+
+  return getColumnGetterByLabel<R, typename T::iterator>(TypesWithCommonGetter{}, targetColumnLabel);
 }
 } // namespace row_helpers
 } // namespace o2::soa
