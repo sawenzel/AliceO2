@@ -573,6 +573,9 @@ void TrackerTraits::findRoads(const int iteration)
     const int minimumLayer{startLevel - 1};
     std::vector<CellSeed> trackSeeds;
     for (int startLayer{mTrkParams[iteration].CellsPerRoad() - 1}; startLayer >= minimumLayer; --startLayer) {
+      if ((mTrkParams[iteration].StartLayerMask & (1 << (startLayer + 2))) == 0) {
+        continue;
+      }
       CA_DEBUGGER(std::cout << "\t\t > Starting processing layer " << startLayer << std::endl);
       std::vector<int> lastCellId, updatedCellId;
       std::vector<CellSeed> lastCellSeed, updatedCellSeed;
@@ -615,7 +618,7 @@ void TrackerTraits::findRoads(const int iteration)
       temporaryTrack.resetCovariance();
       temporaryTrack.setChi2(0);
       fitSuccess = fitTrack(temporaryTrack, mTrkParams[0].NLayers - 1, -1, -1, mTrkParams[0].MaxChi2ClusterAttachment, mTrkParams[0].MaxChi2NDF, 50.f);
-      if (!fitSuccess) {
+      if (!fitSuccess || temporaryTrack.getPt() < mTrkParams[iteration].MinPt) {
         continue;
       }
       tracks[trackIndex++] = temporaryTrack;
