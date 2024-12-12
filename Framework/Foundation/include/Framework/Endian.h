@@ -38,7 +38,6 @@ inline uint16_t doSwap(std::same_as<uint16_t> auto x)
   return swap16_(x);
 }
 
-template <typename T>
 inline uint32_t doSwap(std::same_as<uint32_t> auto x)
 {
   return swap32_(x);
