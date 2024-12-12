@@ -2175,6 +2175,8 @@ std::tuple<typename Cs::type...> getRowData(arrow::Table* table, T rowIterator, 
   return std::make_tuple(getSingleRowData<T, Cs>(table, rowIterator, ci, ai, globalIndex)...);
 }
 
+namespace
+{
 template <typename R, typename T, typename C>
 R getColumnValue(const T& rowIterator)
 {
@@ -2238,6 +2240,7 @@ ColumnGetterFunction<R, T> getColumnGetterByLabel(o2::framework::pack<Cs...>, co
 
 template <typename T, typename R>
 using with_common_getter_t = typename std::conditional<persistent_with_common_getter<T, R> || dynamic_with_common_getter<T, R>, std::true_type, std::false_type>::type;
+} // namespace
 
 template <typename R, typename T>
 ColumnGetterFunction<R, typename T::iterator> getColumnGetterByLabel(const std::string_view& targetColumnLabel)
