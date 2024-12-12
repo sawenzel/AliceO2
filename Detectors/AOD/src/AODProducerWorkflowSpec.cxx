@@ -337,7 +337,7 @@ void AODProducerWorkflowDPL::addToTracksExtraTable(TracksExtraCursorType& tracks
                     extraInfoHolder.itsClusterSizes,
                     extraInfoHolder.tpcNClsFindable,
                     extraInfoHolder.tpcNClsFindableMinusFound,
-                    // extraInfoHolder.tpcNClsFindableMinusPID,
+                    extraInfoHolder.tpcNClsFindableMinusPID,
                     extraInfoHolder.tpcNClsFindableMinusCrossedRows,
                     extraInfoHolder.tpcNClsShared,
                     extraInfoHolder.trdPattern,

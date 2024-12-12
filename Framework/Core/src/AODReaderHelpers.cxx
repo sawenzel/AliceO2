@@ -166,6 +166,8 @@ AlgorithmSpec AODReaderHelpers::aodSpawnerCallback(std::vector<InputSpec>& reque
             outputs.adopt(Output{origin, description, version}, maker.template operator()<o2::aod::Hash<"EXTRACKEXTRA/0"_h>>());
           } else if (version == 1U) {
             outputs.adopt(Output{origin, description, version}, maker.template operator()<o2::aod::Hash<"EXTRACKEXTRA/1"_h>>());
+          } else if (version == 2U) {
+            outputs.adopt(Output{origin, description, version}, maker.template operator()<o2::aod::Hash<"EXTRACKEXTRA/2"_h>>());
           }
         } else if (description == header::DataDescription{"EXMFTTRACK"}) {
           if (version == 0U) {
