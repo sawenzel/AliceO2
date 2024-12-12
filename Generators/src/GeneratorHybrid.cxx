@@ -382,11 +382,11 @@ Bool_t GeneratorHybrid::parseJSON(const std::string& path)
   // check if there is a mode field
   if (doc.HasMember("mode")) {
     const auto& mode = doc["mode"].GetString();
-    if (mode == "sequential") {
+    if (strcmp(mode, "sequential") == 0) {
       // events are generated in the order given by fractions or random weight
       mGenerationMode = GenMode::kSeq;
     }
-    if (mode == std::string("parallel")) {
+    if (strcmp(mode, "parallel") == 0) {
       // events are generated fully in parallel and the order will be random
       // this is mainly for event pool generation or mono-type generators
       mGenerationMode = GenMode::kParallel;
