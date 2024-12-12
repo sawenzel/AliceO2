@@ -259,7 +259,7 @@ class TimeFrame
   void printCellLUTonLayer(int i);
   void printTrackletLUTs();
   void printCellLUTs();
-  void printROFInfo(const int rofId);
+  void printSliceInfo(const int, const int);
 
   IndexTableUtils mIndexTableUtils;
 
@@ -297,6 +297,13 @@ class TimeFrame
   std::vector<uint8_t> mMultiplicityCutMask;
 
   const o2::base::PropagatorImpl<float>* mPropagatorDevice = nullptr; // Needed only for GPU
+  void dropTracks()
+  {
+    for (auto& v : mTracks) {
+      deepVectorClear(v);
+    }
+  }
+
  protected:
   template <typename T>
   void deepVectorClear(std::vector<T>& vec)

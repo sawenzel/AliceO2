@@ -271,13 +271,13 @@ void ITSTrackingInterface::run(framework::ProcessingContext& pc)
     mTimeFrame->setROFMask(processUPCMask);
     // Run CA tracker
     if constexpr (isGPU) {
-      if (mMode == o2::its::TrackingMode::Async) {
+      if (mMode == o2::its::TrackingMode::Async && o2::its::TrackerParamConfig::Instance().fataliseUponFailure) {
         mTracker->clustersToTracksHybrid(logger, fatalLogger);
       } else {
         mTracker->clustersToTracksHybrid(logger, errorLogger);
       }
     } else {
-      if (mMode == o2::its::TrackingMode::Async) {
+      if (mMode == o2::its::TrackingMode::Async && o2::its::TrackerParamConfig::Instance().fataliseUponFailure) {
         mTracker->clustersToTracks(logger, fatalLogger);
       } else {
         mTracker->clustersToTracks(logger, errorLogger);

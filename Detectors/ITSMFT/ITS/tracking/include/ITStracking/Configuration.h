@@ -100,6 +100,8 @@ struct TrackingParameters {
   bool PerPrimaryVertexProcessing = false;
   bool SaveTimeBenchmarks = false;
   bool DoUPCIteration = false;
+  bool FataliseUponFailure = true;
+  bool DropTFUponFailure = false;
   /// Cluster attachment
   bool UseTrackFollower = false;
   bool UseTrackFollowerTop = false;
