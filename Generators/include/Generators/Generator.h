@@ -141,6 +141,11 @@ class Generator : public FairGenerator
   /** lorentz boost data members **/
   Double_t mBoost;
 
+  // a unique generator instance counter
+  // this can be used to make sure no two generator instances have the same seed etc.
+  static std::atomic<int> InstanceCounter;
+  int mThisInstanceID = 0;
+
  private:
   void updateSubGeneratorInformation(o2::dataformats::MCEventHeader* header) const;
 
