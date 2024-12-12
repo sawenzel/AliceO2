@@ -33,7 +33,6 @@
 #define O2_BIG_ENDIAN __BIG_ENDIAN
 #define O2_LITTLE_ENDIAN __LITTLE_ENDIAN
 
-template <typename T>
 inline uint16_t doSwap(std::same_as<uint16_t> auto x)
 {
   return swap16_(x);
