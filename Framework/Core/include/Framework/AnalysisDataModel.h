@@ -686,6 +686,8 @@ DECLARE_SOA_COLUMN(DeltaRefGloParamZ, deltaRefGloParamZ, int8_t);         //! No
 DECLARE_SOA_COLUMN(DeltaRefGloParamSnp, deltaRefGloParamSnp, int8_t);     //! Normalized delta of global track to average contributors matched tracks at reference point in the same frame Snp
 DECLARE_SOA_COLUMN(DeltaRefGloParamTgl, deltaRefGloParamTgl, int8_t);     //! Normalized delta of global track to average contributors matched tracks at reference point in the same frame Tgl
 DECLARE_SOA_COLUMN(DeltaRefGloParamQ2Pt, deltaRefGloParamQ2Pt, int8_t);   //! Normalized delta of global track to average contributors matched tracks at reference point in the same frame Q2Pt
+DECLARE_SOA_COLUMN(DeltaTOFdX, deltaTOFdX, int8_t);                       //!
+DECLARE_SOA_COLUMN(DeltaTOFdZ, deltaTOFdZ, int8_t);                       //!
 
 DECLARE_SOA_DYNAMIC_COLUMN(IsDummy, isDummy, //! indicates if the propagation of the contrib. tracks was successful and residuals are available
                            [](int8_t cY, int8_t cZ, int8_t cSnp, int8_t cTgl, int8_t cQ2Pt, int8_t gY, int8_t gZ, int8_t gSnp, int8_t gTgl, int8_t gQ2Pt) -> bool {
@@ -709,7 +711,17 @@ DECLARE_SOA_TABLE_VERSIONED(TracksQA_001, "AOD", "TRACKQA", 1, //! trackQA infor
                             trackqa::IsDummy<trackqa::DeltaRefContParamY, trackqa::DeltaRefContParamZ, trackqa::DeltaRefContParamSnp, trackqa::DeltaRefContParamTgl, trackqa::DeltaRefContParamQ2Pt,
                                              trackqa::DeltaRefGloParamY, trackqa::DeltaRefGloParamZ, trackqa::DeltaRefGloParamSnp, trackqa::DeltaRefGloParamTgl, trackqa::DeltaRefGloParamQ2Pt>);
 
-using TracksQAVersion = TracksQA_001;
+DECLARE_SOA_TABLE_VERSIONED(TracksQA_002, "AOD", "TRACKQA", 2, //! trackQA information - version 2 - including contributor residuals of matched tracks at reference radius + TOF delta information
+                            o2::soa::Index<>, trackqa::TrackId, trackqa::TPCTime0, trackqa::TPCDCAR, trackqa::TPCDCAZ, trackqa::TPCClusterByteMask,
+                            trackqa::TPCdEdxMax0R, trackqa::TPCdEdxMax1R, trackqa::TPCdEdxMax2R, trackqa::TPCdEdxMax3R,
+                            trackqa::TPCdEdxTot0R, trackqa::TPCdEdxTot1R, trackqa::TPCdEdxTot2R, trackqa::TPCdEdxTot3R,
+                            trackqa::DeltaRefContParamY, trackqa::DeltaRefContParamZ, trackqa::DeltaRefContParamSnp, trackqa::DeltaRefContParamTgl, trackqa::DeltaRefContParamQ2Pt,
+                            trackqa::DeltaRefGloParamY, trackqa::DeltaRefGloParamZ, trackqa::DeltaRefGloParamSnp, trackqa::DeltaRefGloParamTgl, trackqa::DeltaRefGloParamQ2Pt,
+                            trackqa::DeltaTOFdX, trackqa::DeltaTOFdZ,
+                            trackqa::IsDummy<trackqa::DeltaRefContParamY, trackqa::DeltaRefContParamZ, trackqa::DeltaRefContParamSnp, trackqa::DeltaRefContParamTgl, trackqa::DeltaRefContParamQ2Pt,
+                                             trackqa::DeltaRefGloParamY, trackqa::DeltaRefGloParamZ, trackqa::DeltaRefGloParamSnp, trackqa::DeltaRefGloParamTgl, trackqa::DeltaRefGloParamQ2Pt>);
+
+using TracksQAVersion = TracksQA_002;
 using TracksQA = TracksQAVersion::iterator;
 
 namespace fwdtrack
@@ -1651,7 +1663,7 @@ using Tracked3body = Tracked3Bodys::iterator;
 namespace origins
 {
 DECLARE_SOA_COLUMN(DataframeID, dataframeID, uint64_t); //! Data frame ID (what is usually found in directory name in the AO2D.root, i.e. DF_XXX)
-} // namespace origin
+} // namespace origins
 
 DECLARE_SOA_TABLE(Origins, "AOD", "ORIGIN", //! Table which contains the IDs of all dataframes merged into this dataframe
                   o2::soa::Index<>, origins::DataframeID);

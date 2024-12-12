@@ -381,7 +381,9 @@ void AODProducerWorkflowDPL::addToTracksQATable(TracksQACursorType& tracksQACurs
     trackQAInfoHolder.dRefGloZ,
     trackQAInfoHolder.dRefGloSnp,
     trackQAInfoHolder.dRefGloTgl,
-    trackQAInfoHolder.dRefGloQ2Pt);
+    trackQAInfoHolder.dRefGloQ2Pt,
+    trackQAInfoHolder.dTofdX,
+    trackQAInfoHolder.dTofdZ);
 }
 
 template <typename mftTracksCursorType, typename AmbigMFTTracksCursorType>
@@ -2567,6 +2569,12 @@ AODProducerWorkflowDPL::TrackQA AODProducerWorkflowDPL::processBarrelTrackQA(int
       trackQAHolder.tpcdcaR = 100. * dcaInfo[0] / sqrt(1. + trackPar.getQ2Pt() * trackPar.getQ2Pt());
       trackQAHolder.tpcdcaZ = 100. * dcaInfo[1] / sqrt(1. + trackPar.getQ2Pt() * trackPar.getQ2Pt());
     }
+    // This allows to safely clamp any float to one byte, using the
+    // minmal/maximum values as under-/overflow borders and rounding to the nearest integer
+    auto safeInt8Clamp = [](auto value) -> int8_t {
+      using ValType = decltype(value);
+      return static_cast<int8_t>(TMath::Nint(std::clamp(value, static_cast<ValType>(std::numeric_limits<int8_t>::min()), static_cast<ValType>(std::numeric_limits<int8_t>::max()))));
+    };
     /// get tracklet byteMask
     uint8_t clusterCounters[8] = {0};
     {
@@ -2597,6 +2605,16 @@ AODProducerWorkflowDPL::TrackQA AODProducerWorkflowDPL::processBarrelTrackQA(int
     trackQAHolder.tpcdEdxTot1R = uint8_t(tpcOrig.getdEdx().dEdxTotOROC1 * dEdxNorm);
     trackQAHolder.tpcdEdxTot2R = uint8_t(tpcOrig.getdEdx().dEdxTotOROC2 * dEdxNorm);
     trackQAHolder.tpcdEdxTot3R = uint8_t(tpcOrig.getdEdx().dEdxTotOROC3 * dEdxNorm);
+    ///
+    float scaleTOF{0};
+    auto contributorsGIDA = data.getSingleDetectorRefs(trackIndex);
+    if (contributorsGIDA[GIndex::Source::TOF].isIndexSet()) { // ITS-TPC-TRD-TOF, ITS-TPC-TOF, TPC-TRD-TOF, TPC-TOF
+      const auto& tofMatch = data.getTOFMatch(trackIndex);
+      const float qpt = trackPar.getQ2Pt();
+      scaleTOF = std::sqrt(o2::aod::track::trackQAScaledTOF[0] * o2::aod::track::trackQAScaledTOF[0] + qpt * qpt * o2::aod::track::trackQAScaledTOF[1] * o2::aod::track::trackQAScaledTOF[1]) / (2. * o2::aod::track::trackQAScaleBins);
+      trackQAHolder.dTofdX = safeInt8Clamp(tofMatch.getDXatTOF() / scaleTOF);
+      trackQAHolder.dTofdZ = safeInt8Clamp(tofMatch.getDZatTOF() / scaleTOF);
+    }
 
     // Add matching information at a reference point (defined by
     // o2::aod::track::trackQARefRadius) in the same frame as the global track
@@ -2622,13 +2640,6 @@ AODProducerWorkflowDPL::TrackQA AODProducerWorkflowDPL::processBarrelTrackQA(int
           return o2::aod::track::trackQAScaleBins / std::sqrt(o2::aod::track::trackQAScaleGloP0[i] * o2::aod::track::trackQAScaleGloP0[i] + (o2::aod::track::trackQAScaleGloP1[i] * x) * (o2::aod::track::trackQAScaleGloP1[i] * x));
         };
 
-        // This allows to safely clamp any float to one byte, using the
-        // minmal/maximum values as under-/overflow borders and rounding to the nearest integer
-        auto safeInt8Clamp = [](auto value) -> int8_t {
-          using ValType = decltype(value);
-          return static_cast<int8_t>(TMath::Nint(std::clamp(value, static_cast<ValType>(std::numeric_limits<int8_t>::min()), static_cast<ValType>(std::numeric_limits<int8_t>::max()))));
-        };
-
         // Calculate deltas for contributors
         trackQAHolder.dRefContY = safeInt8Clamp((itsCopy.getY() - tpcCopy.getY()) * scaleCont(0));
         trackQAHolder.dRefContZ = safeInt8Clamp((itsCopy.getZ() - tpcCopy.getZ()) * scaleCont(1));
@@ -2641,6 +2652,7 @@ AODProducerWorkflowDPL::TrackQA AODProducerWorkflowDPL::processBarrelTrackQA(int
         trackQAHolder.dRefGloSnp = safeInt8Clamp(((itsCopy.getSnp() + tpcCopy.getSnp()) * 0.5f - gloCopy.getSnp()) * scaleGlo(2));
         trackQAHolder.dRefGloTgl = safeInt8Clamp(((itsCopy.getTgl() + tpcCopy.getTgl()) * 0.5f - gloCopy.getTgl()) * scaleGlo(3));
         trackQAHolder.dRefGloQ2Pt = safeInt8Clamp(((itsCopy.getQ2Pt() + tpcCopy.getQ2Pt()) * 0.5f - gloCopy.getQ2Pt()) * scaleGlo(4));
+        //
 
         if (O2_ENUM_TEST_BIT(mStreamerMask, AODProducerStreamerMask::TrackQA)) {
           (*mStreamer) << "trackQA"
@@ -2684,6 +2696,9 @@ AODProducerWorkflowDPL::TrackQA AODProducerWorkflowDPL::processBarrelTrackQA(int
                        << "trackQAHolder.dRefGloSnp=" << trackQAHolder.dRefGloSnp
                        << "trackQAHolder.dRefGloTgl=" << trackQAHolder.dRefGloTgl
                        << "trackQAHolder.dRefGloQ2Pt=" << trackQAHolder.dRefGloQ2Pt
+                       << "trackQAHolder.dTofdX=" << trackQAHolder.dTofdX
+                       << "trackQAHolder.dTofdZ=" << trackQAHolder.dTofdZ
+                       << "scaleTOF=" << scaleTOF
                        << "\n";
         }
       }
