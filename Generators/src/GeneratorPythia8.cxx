@@ -692,8 +692,8 @@ void GeneratorPythia8::updateHeader(o2::dataformats::MCEventHeader* eventHeader)
 
   auto& info = mPythia.info;
 
-  eventHeader->putInfo<float>(Key::acceptedEvents, info.nAccepted());
-  eventHeader->putInfo<float>(Key::attemptedEvents, info.nTried());
+  eventHeader->putInfo<int>(Key::acceptedEvents, info.nAccepted());
+  eventHeader->putInfo<int>(Key::attemptedEvents, info.nTried());
 
   // Set PDF information
   eventHeader->putInfo<int>(Key::pdfParton1Id, info.id1pdf());
