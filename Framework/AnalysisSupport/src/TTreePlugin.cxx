@@ -53,7 +53,7 @@ class TTreeFileSystem : public VirtualRootFileSystemBase
     const std::string& path,
     const std::shared_ptr<const arrow::KeyValueMetadata>& metadata) override;
 
-  virtual TTree* GetTree(arrow::dataset::FileSource source) = 0;
+  virtual std::unique_ptr<TTree>& GetTree(arrow::dataset::FileSource source) = 0;
 };
 
 class SingleTreeFileSystem : public TTreeFileSystem
@@ -72,14 +72,14 @@ class SingleTreeFileSystem : public TTreeFileSystem
     return "ttree";
   }
 
-  TTree* GetTree(arrow::dataset::FileSource) override
+  std::unique_ptr<TTree>& GetTree(arrow::dataset::FileSource) override
   {
     // Simply return the only TTree we have
     return mTree;
   }
 
  private:
-  TTree* mTree;
+  std::unique_ptr<TTree> mTree;
 };
 
 arrow::Result<arrow::fs::FileInfo> SingleTreeFileSystem::GetFileInfo(std::string const& path)
@@ -158,7 +158,9 @@ class TTreeFileFormat : public arrow::dataset::FileFormat
 class TTreeOutputStream : public arrow::io::OutputStream
 {
  public:
-  TTreeOutputStream(TTree*, std::string branchPrefix);
+  // Using a pointer means that the tree itself is owned by another 
+  // class
+  TTreeOutputStream(TTree *, std::string branchPrefix);
 
   arrow::Status Close() override;
 
@@ -265,7 +267,7 @@ arrow::Result<arrow::RecordBatchGenerator> TTreeFileFormat::ScanBatchesAsync(
     auto fs = std::dynamic_pointer_cast<TTreeFileSystem>(containerFS->GetSubFilesystem(treeFragment->source()));
 
     int64_t rows = -1;
-    TTree* tree = fs->GetTree(treeFragment->source());
+    auto& tree = fs->GetTree(treeFragment->source());
     for (auto& field : fields) {
       // The field actually on disk
       auto physicalField = physical_schema->GetFieldByName(field->name());
@@ -477,9 +479,9 @@ arrow::Result<std::shared_ptr<arrow::io::OutputStream>> TTreeFileSystem::OpenOut
   arrow::dataset::FileSource source{path, shared_from_this()};
   auto prefix = metadata->Get("branch_prefix");
   if (prefix.ok()) {
-    return std::make_shared<TTreeOutputStream>(GetTree(source), *prefix);
+    return std::make_shared<TTreeOutputStream>(GetTree(source).get(), *prefix);
   }
-  return std::make_shared<TTreeOutputStream>(GetTree(source), "");
+  return std::make_shared<TTreeOutputStream>(GetTree(source).get(), "");
 }
 
 namespace
@@ -541,7 +543,7 @@ arrow::Result<std::shared_ptr<arrow::Schema>> TTreeFileFormat::Inspect(const arr
   if (!treeFs.get()) {
     throw runtime_error_f("Unknown filesystem %s\n", source.filesystem()->type_name().c_str());
   }
-  TTree* tree = treeFs->GetTree(source);
+  auto& tree = treeFs->GetTree(source);
 
   auto branches = tree->GetListOfBranches();
   auto n = branches->GetEntries();
@@ -688,7 +690,7 @@ class TTreeFileWriter : public arrow::dataset::FileWriter
       // We already have a tree stream, let's derive a new one
       // with the destination_locator_.path as prefix for the branches
       // This way we can multiplex multiple tables in the same tree.
-      auto tree = treeStream->GetTree();
+      auto* tree = treeStream->GetTree();
       treeStream = std::make_shared<TTreeOutputStream>(tree, destination_locator_.path);
     } else {
       // I could simply set a prefix here to merge to an already existing tree.
@@ -834,7 +836,7 @@ class TTreeFileWriter : public arrow::dataset::FileWriter
   arrow::Future<> FinishInternal() override
   {
     auto treeStream = std::dynamic_pointer_cast<TTreeOutputStream>(destination_);
-    TTree* tree = treeStream->GetTree();
+    auto* tree = treeStream->GetTree();
     tree->Write("", TObject::kOverwrite);
     tree->SetDirectory(nullptr);
 
