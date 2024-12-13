@@ -398,10 +398,12 @@ bool GeneratorFromEventPool::Init()
     LOG(error) << "No file found that can be used with EventPool generator";
     return false;
   }
+  LOG(info) << "Found " << mPoolFilesAvailable.size() << " available event pool files";
 
   // now choose the actual file
-  std::uniform_int_distribution<int> distribution(0, mPoolFilesAvailable.size());
-  mFileChosen = mPoolFilesAvailable[distribution(mRandomEngine)];
+  std::uniform_int_distribution<int> distribution(0, mPoolFilesAvailable.size() - 1);
+  auto chosenIndex = distribution(mRandomEngine);
+  mFileChosen = mPoolFilesAvailable[chosenIndex];
   LOG(info) << "EventPool is using file " << mFileChosen;
 
   // we bring up the internal mO2KineGenerator

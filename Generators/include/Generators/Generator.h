@@ -73,6 +73,7 @@ class Generator : public FairGenerator
   /** methods to override **/
   virtual Bool_t generateEvent() = 0;   // generates event (in structure internal to generator)
   virtual Bool_t importParticles() = 0; // fills the mParticles vector (transfer from generator state)
+  virtual void updateHeader(o2::dataformats::MCEventHeader* eventHeader) {};
 
   /** setters **/
   void setMomentumUnit(double val) { mMomentumUnit = val; };
@@ -101,9 +102,6 @@ class Generator : public FairGenerator
   Generator(const Generator&);
   /** operator= **/
   Generator& operator=(const Generator&);
-
-  /** methods that can be overridded **/
-  virtual void updateHeader(o2::dataformats::MCEventHeader* eventHeader){};
 
   /** internal methods **/
   Bool_t addTracks(FairPrimaryGenerator* primGen);

@@ -135,9 +135,11 @@ class GeneratorFromEventPool : public o2::eventgen::Generator
   }
   bool importParticles() override
   {
+    mO2KineGenerator->clearParticles(); // clear old container before filling with new ones
     auto import_good = mO2KineGenerator->importParticles();
     // transfer the particles (could be avoided)
     mParticles = mO2KineGenerator->getParticles();
+
     return import_good;
   }
 

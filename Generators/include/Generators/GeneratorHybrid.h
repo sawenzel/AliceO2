@@ -61,6 +61,7 @@ class GeneratorHybrid : public Generator
   Bool_t Init() override;
   Bool_t generateEvent() override;
   Bool_t importParticles() override;
+  void updateHeader(o2::dataformats::MCEventHeader* eventHeader) override;
 
   void setNEvents(int n) { mNEvents = n; }
 
@@ -106,6 +107,7 @@ class GeneratorHybrid : public Generator
   bool mIsInitialized = false;
 
   int mNEvents = -1; // the number of events to be done, if known (helps initiating cleanup)
+  o2::dataformats::MCEventHeader mMCEventHeader; // to capture event headers
 
   enum class GenMode {
     kSeq,
