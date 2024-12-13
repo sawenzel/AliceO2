@@ -332,17 +332,15 @@ bool GeneratorHybrid::importParticles()
   LOG(info) << "Importing particles for task " << genIndex;
 
   // at this moment the mIndex-th generator is ready to be used
-  std::copy(gens[genIndex]->getParticles().begin(), gens[genIndex]->getParticles().end(), std::back_insert_iterator(mParticles));
+  mParticles.clear();
+  mParticles = gens[genIndex]->getParticles();
+
+  // fetch the event Header information from the underlying generator
+  mMCEventHeader.clearInfo();
+  gens[genIndex]->updateHeader(&mMCEventHeader);
 
   mInputTaskQueue.push(genIndex);
   mTasksStarted++;
-
-  // we need to fix particles statuses --> need to enforce this on the importParticles level of individual generators
-  for (auto& p : mParticles) {
-    auto st = o2::mcgenstatus::MCGenStatusEncoding(p.GetStatusCode(), p.GetStatusCode()).fullEncoding;
-    p.SetStatusCode(st);
-    p.SetBit(ParticleStatus::kToBeDone, true);
-  }
 
   mseqCounter++;
   mEventCounter++;
@@ -351,6 +349,17 @@ bool GeneratorHybrid::importParticles()
     mStopFlag = true;
   }
   return true;
+}
+
+void GeneratorHybrid::updateHeader(o2::dataformats::MCEventHeader* eventHeader)
+{
+  if (eventHeader) {
+    // we forward the original header information if any
+    eventHeader->copyInfoFrom(mMCEventHeader);
+
+    // put additional information about
+    eventHeader->putInfo<std::string>("forwarding-generator", "HybridGen");
+  }
 }
 
 template <typename T>
