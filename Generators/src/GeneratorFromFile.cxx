@@ -405,7 +405,7 @@ bool GeneratorFromEventPool::Init()
   auto chosenIndex = distribution(mRandomEngine);
   mFileChosen = mPoolFilesAvailable[chosenIndex];
   LOG(info) << "EventPool is using file " << mFileChosen;
-  
+
   // we bring up the internal mO2KineGenerator
   auto kine_config = O2KineGenConfig{
     .skipNonTrackable = mConfig.skipNonTrackable,
