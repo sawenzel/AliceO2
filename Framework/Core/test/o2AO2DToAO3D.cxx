@@ -98,6 +98,13 @@ int main(int argc, char** argv)
       out->WriteTObject(copy);
       continue;
     }
+    if (dk->GetName() == std::string("parentFiles")) {
+      TMap* m = dynamic_cast<TMap*>(in->Get(dk->GetName()));
+      m->Print();
+      auto* copy = m->Clone("parentFiles");
+      out->WriteTObject(copy);
+      continue;
+    }
     auto* d = (TDirectory*)in->Get(dk->GetName());
     std::cout << "Processing: " << dk->GetName() << std::endl;
     // For the moment RNTuple does not support TDirectory, so
