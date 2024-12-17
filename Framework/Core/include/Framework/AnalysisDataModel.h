@@ -242,6 +242,7 @@ DECLARE_SOA_COLUMN(TPCNClsFindableMinusFound, tpcNClsFindableMinusFound, int8_t)
 DECLARE_SOA_COLUMN(TPCNClsFindableMinusPID, tpcNClsFindableMinusPID, int8_t);                 //! TPC Clusters: Findable - Found clusters used for PID
 DECLARE_SOA_COLUMN(TPCNClsFindableMinusCrossedRows, tpcNClsFindableMinusCrossedRows, int8_t); //! TPC Clusters: Findable - crossed rows
 DECLARE_SOA_COLUMN(TPCNClsShared, tpcNClsShared, uint8_t);                                    //! Number of shared TPC clusters
+DECLARE_SOA_COLUMN(ITSSharedClusterMap, itsSharedClusterMap, uint8_t);                        //! shared ITS cluster map (Run 2)
 DECLARE_SOA_COLUMN(TRDPattern, trdPattern, uint8_t);                                          //! Contributor to the track on TRD layer in bits 0-5, starting from the innermost, bit 6 indicates a potentially split tracklet, bit 7 if the track crossed a padrow
 DECLARE_SOA_COLUMN(ITSChi2NCl, itsChi2NCl, float);                                            //! Chi2 / cluster for the ITS track segment
 DECLARE_SOA_COLUMN(TPCChi2NCl, tpcChi2NCl, float);                                            //! Chi2 / cluster for the TPC track segment
@@ -430,6 +431,16 @@ DECLARE_SOA_DYNAMIC_COLUMN(ITSNClsInnerBarrel, itsNClsInnerBarrel, //! Number of
                                  itsNclsInnerBarrel++;
                              }
                              return itsNclsInnerBarrel;
+                           });
+DECLARE_SOA_DYNAMIC_COLUMN(ITSNSharedCls, itsNSharedCls, //! Number of shared ITS clusters (Run 2)
+                           [](uint8_t itsSharedClusterMap) -> uint8_t {
+                             uint8_t itsNSharedCls = 0;
+                             constexpr uint8_t bit = 1;
+                             for (int layer = 0; layer < 6; layer++) { // ITS1: 6 layers
+                               if (itsSharedClusterMap & (bit << layer))
+                                 itsNSharedCls++;
+                             }
+                             return itsNSharedCls;
                            });
 DECLARE_SOA_DYNAMIC_COLUMN(TPCFoundOverFindableCls, tpcFoundOverFindableCls, //! Ratio of found over findable clusters
                            [](uint8_t tpcNClsFindable, int8_t tpcNClsFindableMinusFound) -> float {
@@ -635,8 +646,11 @@ DECLARE_SOA_EXTENDED_TABLE(TracksExtra_001, StoredTracksExtra_001, "EXTRACKEXTRA
 DECLARE_SOA_EXTENDED_TABLE(TracksExtra_002, StoredTracksExtra_002, "EXTRACKEXTRA", 2, //! Additional track information (clusters, PID, etc.)
                            track::v001::DetectorMap);
 
-DECLARE_SOA_TABLE(Run2TrackExtras, "AOD", "RUN2TRACKEXTRA",
+DECLARE_SOA_TABLE(Run2TrackExtras_000, "AOD", "RUN2TRACKEXTRA",
                   track::ITSSignal);
+DECLARE_SOA_TABLE_VERSIONED(Run2TrackExtras_001, "AOD", "RUN2TRACKEXTRA", 1, //! adds ITS shared cluster map
+                            track::ITSSignal, track::ITSSharedClusterMap,
+                            track::ITSNSharedCls<track::ITSSharedClusterMap>);
 
 using StoredTracksExtra = StoredTracksExtra_002;
 using TracksExtra = TracksExtra_002;
@@ -646,6 +660,7 @@ using TrackIU = TracksIU::iterator;
 using TrackCov = TracksCov::iterator;
 using TrackCovIU = TracksCovIU::iterator;
 using TrackExtra = TracksExtra::iterator;
+using Run2TrackExtras = Run2TrackExtras_000;
 using Run2TrackExtra = Run2TrackExtras::iterator;
 
 } // namespace aod
