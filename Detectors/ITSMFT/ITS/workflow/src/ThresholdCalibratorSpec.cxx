@@ -1873,7 +1873,6 @@ void ITSThresholdCalibrator::finalize()
     }
   } else if (this->mScanType == 'P' || this->mScanType == 'p' || this->mScanType == 'r' || mScanType == 'R') { // pulse length scan 1D and 2D, vresetd scan 1D & 2D
     name = "Pulse";
-    std::set<int> thisRUs;
     // extract hits for the available row(s)
     auto itchip = this->mPixelHits.cbegin();
     while (itchip != mPixelHits.cend()) {
