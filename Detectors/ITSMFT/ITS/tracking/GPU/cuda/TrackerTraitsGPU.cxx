@@ -278,6 +278,9 @@ void TrackerTraitsGPU<nLayers>::findRoads(const int iteration)
     const int minimumLayer{startLevel - 1};
     std::vector<CellSeed> trackSeeds;
     for (int startLayer{mTrkParams[iteration].CellsPerRoad() - 1}; startLayer >= minimumLayer; --startLayer) {
+      if ((mTrkParams[iteration].StartLayerMask & (1 << (startLayer + 2))) == 0) {
+        continue;
+      }
       std::vector<int> lastCellId, updatedCellId;
       std::vector<CellSeed> lastCellSeed, updatedCellSeed;
 
@@ -308,6 +311,7 @@ void TrackerTraitsGPU<nLayers>::findRoads(const int iteration)
     trackSeedHandler(mTimeFrameGPU->getDeviceTrackSeeds(),             // CellSeed* trackSeeds,
                      mTimeFrameGPU->getDeviceArrayTrackingFrameInfo(), // TrackingFrameInfo** foundTrackingFrameInfo,
                      mTimeFrameGPU->getDeviceTrackITSExt(),            // o2::its::TrackITSExt* tracks,
+                     mTrkParams[iteration].MinPt,                      // std::vector<float>& minPtsHost,
                      trackSeeds.size(),                                // const size_t nSeeds,
                      mBz,                                              // const float Bz,
                      startLevel,                                       // const int startLevel,

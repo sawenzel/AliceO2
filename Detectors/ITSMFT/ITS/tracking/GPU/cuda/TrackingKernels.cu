@@ -267,6 +267,7 @@ GPUg() void fitTrackSeedsKernel(
   CellSeed* trackSeeds,
   const TrackingFrameInfo** foundTrackingFrameInfo,
   o2::its::TrackITSExt* tracks,
+  const float* minPts,
   const unsigned int nSeeds,
   const float Bz,
   const int startLevel,
@@ -317,7 +318,7 @@ GPUg() void fitTrackSeedsKernel(
                           foundTrackingFrameInfo,   // TrackingFrameInfo** trackingFrameInfo,
                           propagator,               // const o2::base::Propagator* propagator,
                           matCorrType);             // o2::base::PropagatorF::MatCorrType matCorrType
-    if (!fitSuccess) {
+    if (!fitSuccess || temporaryTrack.getPt() < minPts[nLayers - temporaryTrack.getNClusters()]) {
       continue;
     }
     tracks[iCurrentTrackSeedIndex] = temporaryTrack;
@@ -1089,6 +1090,7 @@ void filterCellNeighboursHandler(std::vector<int>& neighHost,
 void trackSeedHandler(CellSeed* trackSeeds,
                       const TrackingFrameInfo** foundTrackingFrameInfo,
                       o2::its::TrackITSExt* tracks,
+                      std::vector<float>& minPtsHost,
                       const unsigned int nSeeds,
                       const float Bz,
                       const int startLevel,
@@ -1099,17 +1101,19 @@ void trackSeedHandler(CellSeed* trackSeeds,
                       const int nBlocks,
                       const int nThreads)
 {
+  thrust::device_vector<float> minPts(minPtsHost);
   gpu::fitTrackSeedsKernel<<<nBlocks, nThreads>>>(
-    trackSeeds,               // CellSeed*
-    foundTrackingFrameInfo,   // TrackingFrameInfo**
-    tracks,                   // TrackITSExt*
-    nSeeds,                   // const unsigned int
-    Bz,                       // const float
-    startLevel,               // const int
-    maxChi2ClusterAttachment, // float
-    maxChi2NDF,               // float
-    propagator,               // const o2::base::Propagator*
-    matCorrType);             // o2::base::PropagatorF::MatCorrType
+    trackSeeds,                           // CellSeed*
+    foundTrackingFrameInfo,               // TrackingFrameInfo**
+    tracks,                               // TrackITSExt*
+    thrust::raw_pointer_cast(&minPts[0]), // const float* minPts,
+    nSeeds,                               // const unsigned int
+    Bz,                                   // const float
+    startLevel,                           // const int
+    maxChi2ClusterAttachment,             // float
+    maxChi2NDF,                           // float
+    propagator,                           // const o2::base::Propagator*
+    matCorrType);                         // o2::base::PropagatorF::MatCorrType
 
   gpuCheckError(cudaPeekAtLastError());
   gpuCheckError(cudaDeviceSynchronize());
