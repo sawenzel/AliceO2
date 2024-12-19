@@ -65,6 +65,12 @@ GeneratorHepMC::~GeneratorHepMC()
   if (mEvent) {
     delete mEvent;
   }
+  if (not mCmd.empty()) {
+    // Must be executed before removing the temporary file
+    // otherwise the current child process might still be writing on it
+    // causing unwanted stdout messages which could slow down the system
+    terminateCmd();
+  }
   removeTemp();
 }
 
