@@ -660,7 +660,7 @@ using TrackIU = TracksIU::iterator;
 using TrackCov = TracksCov::iterator;
 using TrackCovIU = TracksCovIU::iterator;
 using TrackExtra = TracksExtra::iterator;
-using Run2TrackExtras = Run2TrackExtras_000;
+using Run2TrackExtras = Run2TrackExtras_001;
 using Run2TrackExtra = Run2TrackExtras::iterator;
 
 } // namespace aod
@@ -1739,7 +1739,7 @@ DECLARE_SOA_TABLE_VERSIONED(Run2BCInfos_001, "AOD", "RUN2BCINFO", 1,
                             run2::V0TriggerChargeA, run2::V0TriggerChargeC,
                             run2::NTPCClusters, run2::NSDDSSDClusters);
 
-using Run2BCInfos = Run2BCInfos_000;
+using Run2BCInfos = Run2BCInfos_001;
 using Run2BCInfo = Run2BCInfos::iterator;
 
 DECLARE_SOA_TABLE(Run2OTFV0s, "AOD", "Run2OTFV0", //! Run 2 V0 on the fly table
