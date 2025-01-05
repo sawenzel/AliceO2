@@ -16,6 +16,7 @@
 #include "Framework/Logger.h"
 #include "Framework/TimingHelpers.h"
 #include "Framework/DataProcessingStats.h"
+#include "Framework/ServiceRegistryHelpers.h"
 #include "uv.h"
 
 #pragma GCC diagnostic push

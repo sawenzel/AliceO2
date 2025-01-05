@@ -34,6 +34,7 @@
 #include "Framework/DeviceState.h"
 #include "Framework/DeviceConfig.h"
 #include "DeviceStateHelpers.h"
+#include "Framework/ServiceRegistryHelpers.h"
 #include "Framework/DevicesManager.h"
 #include "Framework/DebugGUI.h"
 #include "Framework/LocalRootFileService.h"

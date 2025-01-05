@@ -14,17 +14,13 @@
 #include "Framework/ThreadSafetyAnalysis.h"
 #include "Framework/ServiceHandle.h"
 #include "Framework/ServiceSpec.h"
-#include "Framework/ServiceRegistryHelpers.h"
 #include "Framework/CompilerBuiltins.h"
 #include "Framework/TypeIdHelpers.h"
 
-#include <algorithm>
 #include <array>
-#include <functional>
 #include <string>
 #include <type_traits>
 #include <typeinfo>
-#include <thread>
 #include <atomic>
 #include <mutex>
 

@@ -31,6 +31,8 @@
 #include "WorkflowHelpers.h"
 #include "Framework/WorkflowSpecNode.h"
 #include "Framework/AnalysisSupportHelpers.h"
+#include "Framework/ServiceRegistryRef.h"
+#include "Framework/ServiceRegistryHelpers.h"
 
 #include "CommonMessageBackendsHelpers.h"
 #include <Monitoring/Monitoring.h>
