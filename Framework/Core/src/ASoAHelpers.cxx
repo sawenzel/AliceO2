@@ -19,4 +19,4 @@ void dataSizeVariesBetweenColumns()
 {
   throw o2::framework::runtime_error("Combinations: data size varies between selected columns");
 }
-}
+} // namespace o2::soa
