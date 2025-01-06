@@ -18,6 +18,7 @@ o2_add_library(Framework
                        src/AnalysisDataModel.cxx
                        src/AnalysisSupportHelpers.cxx
                        src/ASoA.cxx
+                       src/ASoAHelpers.cxx
                        src/AsyncQueue.cxx
                        src/AnalysisDataModelHelpers.cxx
                        src/BoostOptionsRetriever.cxx
