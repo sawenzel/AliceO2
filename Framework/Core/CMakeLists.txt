@@ -138,6 +138,7 @@ o2_add_library(Framework
                        src/Task.cxx
                        src/Array2D.cxx
                        src/Variant.cxx
+                       src/VariantPropertyTreeHelpers.cxx
                        src/WorkflowCustomizationHelpers.cxx
                        src/WorkflowHelpers.cxx
                        src/WorkflowSerializationHelpers.cxx
