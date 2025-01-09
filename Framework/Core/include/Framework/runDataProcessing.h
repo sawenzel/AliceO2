@@ -87,11 +87,6 @@ void defaultConfiguration(std::vector<o2::framework::ServiceSpec>& services)
 /// Workflow options which are required by DPL in order to work.
 std::vector<o2::framework::ConfigParamSpec> requiredWorkflowOptions();
 
-void defaultConfiguration(o2::framework::OnWorkflowTerminationHook& hook)
-{
-  hook = [](const char*) {};
-}
-
 template <typename T>
 concept WithUserOverride = requires(T& something) { customize(something); };
 
@@ -154,6 +149,22 @@ std::vector<T> injectCustomizations()
   return policies;
 }
 
+template <typename T>
+  requires requires(T& hook) { customize(hook); }
+void callWorkflowTermination(T& hook, char const* idstring)
+{
+  customize(hook);
+  hook(idstring);
+  doDefaultWorkflowTerminationHook();
+}
+
+// Do not call the user hook if it's not there.
+template <typename T>
+void callWorkflowTermination(T&, char const* idstring)
+{
+  doDefaultWorkflowTerminationHook();
+}
+
 void overrideAll(o2::framework::ConfigContext& ctx, std::vector<o2::framework::DataProcessorSpec>& workflow);
 
 o2::framework::ConfigContext createConfigContext(std::unique_ptr<o2::framework::ConfigParamRegistry>& workflowOptionsRegistry,
@@ -208,9 +219,7 @@ int main(int argc, char** argv)
 
   char* idstring = getIdString(argc, argv);
   o2::framework::OnWorkflowTerminationHook onWorkflowTerminationHook;
-  UserCustomizationsHelper::userDefinedCustomization(onWorkflowTerminationHook);
-  onWorkflowTerminationHook(idstring);
-  doDefaultWorkflowTerminationHook();
+  callWorkflowTermination(onWorkflowTerminationHook, idstring);
 
   return result;
 }
