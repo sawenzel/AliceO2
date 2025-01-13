@@ -243,13 +243,13 @@ struct FlexibleBinningPolicy<std::tuple<Ls...>, Ts...> : BinningPolicyBase<sizeo
   template <typename T, typename T2>
   auto getBinningValue(T& rowIterator, uint64_t globalIndex = -1) const
   {
+    if (globalIndex != -1) {
+      rowIterator.setCursor(globalIndex);
+    }
     if constexpr (has_type<T2>(pack<Ls...>{})) {
-      if (globalIndex != -1) {
-        rowIterator.setCursor(globalIndex);
-      }
       return std::get<T2>(mBinningFunctions)(rowIterator);
     } else {
-      return soa::row_helpers::getSingleRowData<T, T2>(rowIterator, globalIndex);
+      return soa::row_helpers::getColumnValue<typename T2::type, T, T2>(rowIterator);
     }
   }
 
@@ -286,7 +286,10 @@ struct ColumnBinningPolicy : BinningPolicyBase<sizeof...(Ts)> {
   template <typename T>
   auto getBinningValues(T& rowIterator, uint64_t globalIndex = -1) const
   {
-    return std::make_tuple(soa::row_helpers::getSingleRowData<T, Ts>(rowIterator, globalIndex)...);
+    if (globalIndex != -1) {
+      rowIterator.setCursor(globalIndex);
+    }
+    return std::make_tuple(soa::row_helpers::getColumnValue<typename Ts::type, T, Ts>(rowIterator)...);
   }
 
   template <typename T>
@@ -311,7 +314,10 @@ struct NoBinningPolicy {
   template <typename T>
   auto getBinningValues(T& rowIterator, uint64_t globalIndex = -1) const
   {
-    return std::make_tuple(soa::row_helpers::getSingleRowData<T, C>(rowIterator, globalIndex));
+    if (globalIndex != -1) {
+      rowIterator.setCursor(globalIndex);
+    }
+    return std::make_tuple(soa::row_helpers::getColumnValue<typename C::type, T, C>(rowIterator));
   }
 
   template <typename T>
