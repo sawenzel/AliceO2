@@ -28,8 +28,9 @@ concept SimpleConfigValueType = std::same_as<T, int> ||
                                 std::same_as<T, int16_t> ||
                                 std::same_as<T, uint8_t> ||
                                 std::same_as<T, uint16_t> ||
-                                std::same_as<T, uint32_t> ||
-                                std::same_as<T, uint64_t> ||
+                                std::same_as<T, unsigned int> ||
+                                std::same_as<T, unsigned long> ||
+                                std::same_as<T, unsigned long long> ||
                                 std::same_as<T, long> ||
                                 std::same_as<T, long long> ||
                                 std::same_as<T, float> ||
