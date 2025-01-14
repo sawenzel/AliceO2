@@ -134,9 +134,6 @@
 #include <unistd.h>
 #include <execinfo.h>
 #include <cfenv>
-// This is to allow C++20 aggregate initialisation
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpedantic"
 #if defined(__linux__) && __has_include(<sched.h>)
 #include <sched.h>
 #elif __has_include(<linux/getcpu.h>)
