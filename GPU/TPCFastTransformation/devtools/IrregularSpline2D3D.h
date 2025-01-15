@@ -70,13 +70,13 @@ class IrregularSpline2D3D : public FlatObject
   IrregularSpline2D3D();
 
   /// Copy constructor: disabled to avoid ambiguity. Use cloneFromObject() instead
-  IrregularSpline2D3D(const IrregularSpline2D3D&) CON_DELETE;
+  IrregularSpline2D3D(const IrregularSpline2D3D&) = delete;
 
   /// Assignment operator: disabled to avoid ambiguity. Use cloneFromObject() instead
-  IrregularSpline2D3D& operator=(const IrregularSpline2D3D&) CON_DELETE;
+  IrregularSpline2D3D& operator=(const IrregularSpline2D3D&) = delete;
 
   /// Destructor
-  ~IrregularSpline2D3D() CON_DEFAULT;
+  ~IrregularSpline2D3D() = default;
 
   /// _____________  FlatObject functionality, see FlatObject class for description  ____________
 

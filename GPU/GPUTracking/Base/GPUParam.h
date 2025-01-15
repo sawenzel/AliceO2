@@ -22,7 +22,7 @@
 #include "GPUTPCGeometry.h"
 #include "GPUTPCGMPolynomialField.h"
 
-#if !defined(GPUCA_GPUCODE) && defined(GPUCA_NOCOMPAT)
+#if !defined(GPUCA_GPUCODE)
 namespace o2::base
 {
 template <typename>

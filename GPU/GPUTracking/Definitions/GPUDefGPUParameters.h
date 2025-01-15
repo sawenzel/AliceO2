@@ -617,13 +617,11 @@
 // #define GPUCA_KERNEL_DEBUGGER_OUTPUT
 
 // Some assertions to make sure out parameters are not invalid
-#ifdef GPUCA_NOCOMPAT
   static_assert(GPUCA_MAXN >= GPUCA_NEIGHBOURS_FINDER_MAX_NNEIGHUP, "Invalid GPUCA_NEIGHBOURS_FINDER_MAX_NNEIGHUP");
   static_assert(GPUCA_ROW_COUNT >= GPUCA_TRACKLET_SELECTOR_HITS_REG_SIZE, "Invalid GPUCA_TRACKLET_SELECTOR_HITS_REG_SIZE");
   #ifdef GPUCA_GPUCODE
     static_assert(GPUCA_M_FIRST(GPUCA_LB_GPUTPCCompressionKernels_step1unattached) * 2 <= GPUCA_TPC_COMP_CHUNK_SIZE, "Invalid GPUCA_TPC_COMP_CHUNK_SIZE");
   #endif
-#endif
 
 // Derived parameters
 #ifdef GPUCA_USE_TEXTURES

@@ -86,17 +86,10 @@ class GPUKernelTemplate
   {
     return &processors;
   }
-#ifdef GPUCA_NOCOMPAT
   template <int32_t iKernel, typename... Args>
   GPUd() static void Thread(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& smem, processorType& processors, Args... args)
   {
   }
-#else
-  template <int32_t iKernel>
-  GPUd() static void Thread(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& smem, processorType& processors)
-  {
-  }
-#endif
 };
 
 // Clean memory, ptr multiple of 16, size will be extended to multiple of 16

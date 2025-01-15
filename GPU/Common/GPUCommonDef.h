@@ -30,10 +30,6 @@
 //Some GPU configuration settings, must be included first
 #include "GPUCommonDefSettings.h"
 
-#if defined(__cplusplus) && __cplusplus >= 201103L
-  #define GPUCA_NOCOMPAT // C++11 + No old ROOT5 + No old OpenCL
-#endif
-
 #if !(defined(__CLING__) || defined(__ROOTCLING__) || defined(G__ROOT)) // No GPU code for ROOT
   #if defined(__CUDACC__) || defined(__OPENCL__) || defined(__HIPCC__) || defined(__OPENCL_HOST__)
     #define GPUCA_GPUCODE // Compiled by GPU compiler
@@ -45,20 +41,10 @@
 #endif
 
 // Definitions for C++11 features
-#ifdef GPUCA_NOCOMPAT
-  #define CON_DELETE = delete
-  #define CON_DEFAULT = default
-  #define GPUCA_CPP11_INIT(...) __VA_ARGS__
-  #if defined(__cplusplus) && __cplusplus >= 201703L
-    #define CONSTEXPR constexpr
-  #else
-    #define CONSTEXPR
-  #endif
+#if defined(__cplusplus) && __cplusplus >= 201703L
+  #define CONSTEXPR constexpr
 #else
-  #define CON_DELETE
-  #define CON_DEFAULT
   #define CONSTEXPR
-  #define GPUCA_CPP11_INIT(...)
 #endif
 
 // Set AliRoot / O2 namespace

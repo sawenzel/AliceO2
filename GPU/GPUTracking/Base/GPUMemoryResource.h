@@ -79,7 +79,7 @@ class GPUMemoryResource
   GPUMemoryResource(GPUProcessor* proc, void* (GPUProcessor::*setPtr)(void*), MemoryType type, const char* name = "") : mProcessor(proc), mPtr(nullptr), mPtrDevice(nullptr), mSetPointers(setPtr), mName(name), mSize(0), mOverrideSize(0), mReuse(-1), mType(type)
   {
   }
-  GPUMemoryResource(const GPUMemoryResource&) CON_DEFAULT;
+  GPUMemoryResource(const GPUMemoryResource&) = default;
 
   void* SetPointers(void* ptr)
   {

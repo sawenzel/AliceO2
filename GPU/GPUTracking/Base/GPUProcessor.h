@@ -46,8 +46,8 @@ class GPUProcessor
 #ifndef GPUCA_GPUCODE
   GPUProcessor();
   ~GPUProcessor();
-  GPUProcessor(const GPUProcessor&) CON_DELETE;
-  GPUProcessor& operator=(const GPUProcessor&) CON_DELETE;
+  GPUProcessor(const GPUProcessor&) = delete;
+  GPUProcessor& operator=(const GPUProcessor&) = delete;
 #endif
 
   GPUd() GPUconstantref() const GPUConstantMem* GetConstantMem() const; // Body in GPUConstantMem.h to avoid circular headers

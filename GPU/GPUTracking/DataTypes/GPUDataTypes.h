@@ -23,7 +23,6 @@
 #include <cstddef>
 #endif
 #include "GPUCommonTypeTraits.h"
-#ifdef GPUCA_NOCOMPAT
 #include "GPUTRDDef.h"
 
 struct AliHLTTPCClusterMCLabel;
@@ -41,7 +40,6 @@ namespace constants
 } // namespace constants
 } // namespace tpc
 } // namespace o2
-#endif
 
 namespace o2
 {
@@ -56,13 +54,9 @@ class MatLayerCylSet;
 } // namespace base
 namespace track
 {
-#ifdef GPUCA_NOCOMPAT
 template <typename value_T>
 class TrackParametrizationWithError;
 using TrackParCov = TrackParametrizationWithError<float>;
-#else
-class TrackParCov;
-#endif
 } // namespace track
 namespace trd
 {
@@ -173,9 +167,7 @@ class GPUDataTypes
 #endif
   typedef bitfield<RecoStep, uint32_t> RecoStepField;
   typedef bitfield<InOutType, uint32_t> InOutTypeField;
-#ifdef GPUCA_NOCOMPAT
   static constexpr uint32_t NSLICES = 36;
-#endif
   static DeviceType GetDeviceType(const char* type);
 };
 
@@ -185,8 +177,6 @@ struct GPURecoStepConfiguration {
   GPUDataTypes::InOutTypeField inputs = 0;
   GPUDataTypes::InOutTypeField outputs = 0;
 };
-
-#ifdef GPUCA_NOCOMPAT
 
 template <class T>
 struct DefaultPtr {
@@ -332,12 +322,6 @@ struct GPUTrackingInOutPointers {
   // Common
   const GPUSettingsTF* settingsTF = nullptr;
 };
-#else
-struct GPUTrackingInOutPointers {
-};
-struct GPUCalibObjectsConst {
-};
-#endif
 
 #undef ENUM_CLASS
 #undef ENUM_UINT

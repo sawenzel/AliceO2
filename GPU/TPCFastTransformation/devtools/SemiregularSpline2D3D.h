@@ -58,13 +58,13 @@ class SemiregularSpline2D3D : public FlatObject
   SemiregularSpline2D3D();
 
   /// Copy constructor: disabled to avoid ambiguity. Use cloneFromObject() instead
-  SemiregularSpline2D3D(const SemiregularSpline2D3D&) CON_DELETE;
+  SemiregularSpline2D3D(const SemiregularSpline2D3D&) = delete;
 
   /// Assignment operator: disabled to avoid ambiguity. Use cloneFromObject() instead
-  SemiregularSpline2D3D& operator=(const SemiregularSpline2D3D&) CON_DELETE;
+  SemiregularSpline2D3D& operator=(const SemiregularSpline2D3D&) = delete;
 
   /// Destructor
-  ~SemiregularSpline2D3D() CON_DEFAULT;
+  ~SemiregularSpline2D3D() = default;
 
   /// _____________  FlatObject functionality, see FlatObject class for description  ____________
 

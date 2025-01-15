@@ -58,13 +58,13 @@ class Spline2DContainer : public FlatObject
   /// _____________  C++ constructors / destructors __________________________
 
   /// Default constructor
-  Spline2DContainer() CON_DEFAULT;
+  Spline2DContainer() = default;
 
   /// Disable all other constructors
-  Spline2DContainer(const Spline2DContainer&) CON_DELETE;
+  Spline2DContainer(const Spline2DContainer&) = delete;
 
   /// Destructor
-  ~Spline2DContainer() CON_DEFAULT;
+  ~Spline2DContainer() = default;
 
   /// _______________  Construction interface  ________________________
 

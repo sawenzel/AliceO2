@@ -65,10 +65,10 @@ class GPUTPCSliceOutput
   GPUhd() void SetNTrackClusters(uint32_t v) { mNTrackClusters = v; }
 
  private:
-  GPUTPCSliceOutput() CON_DELETE;                                    // NOLINT: Must be private or ROOT tries to use them!
-  ~GPUTPCSliceOutput() CON_DELETE;                                   // NOLINT
-  GPUTPCSliceOutput(const GPUTPCSliceOutput&) CON_DELETE;            // NOLINT
-  GPUTPCSliceOutput& operator=(const GPUTPCSliceOutput&) CON_DELETE; // NOLINT
+  GPUTPCSliceOutput() = delete;                                    // NOLINT: Must be private or ROOT tries to use them!
+  ~GPUTPCSliceOutput() = delete;                                   // NOLINT
+  GPUTPCSliceOutput(const GPUTPCSliceOutput&) = delete;            // NOLINT
+  GPUTPCSliceOutput& operator=(const GPUTPCSliceOutput&) = delete; // NOLINT
 
   GPUhd() void SetMemorySize(size_t val) { mMemorySize = val; }
 

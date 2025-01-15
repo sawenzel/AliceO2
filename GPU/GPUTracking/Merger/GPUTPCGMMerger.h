@@ -63,9 +63,9 @@ class GPUTPCGMMerger : public GPUProcessor
 {
  public:
   GPUTPCGMMerger();
-  ~GPUTPCGMMerger() CON_DEFAULT;
-  GPUTPCGMMerger(const GPUTPCGMMerger&) CON_DELETE;
-  const GPUTPCGMMerger& operator=(const GPUTPCGMMerger&) const CON_DELETE;
+  ~GPUTPCGMMerger() = default;
+  GPUTPCGMMerger(const GPUTPCGMMerger&) = delete;
+  const GPUTPCGMMerger& operator=(const GPUTPCGMMerger&) const = delete;
   static CONSTEXPR const int32_t NSLICES = GPUCA_NSLICES; //* N slices
 
   struct memory {

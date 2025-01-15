@@ -44,8 +44,8 @@ class GPUTPCTracker : public GPUProcessor
 #ifndef GPUCA_GPUCODE_DEVICE
   GPUTPCTracker();
   ~GPUTPCTracker();
-  GPUTPCTracker(const GPUTPCTracker&) CON_DELETE;
-  GPUTPCTracker& operator=(const GPUTPCTracker&) CON_DELETE;
+  GPUTPCTracker(const GPUTPCTracker&) = delete;
+  GPUTPCTracker& operator=(const GPUTPCTracker&) = delete;
 
   void SetSlice(int32_t iSlice);
   void InitializeProcessor();

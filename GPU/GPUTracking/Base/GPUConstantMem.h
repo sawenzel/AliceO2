@@ -80,7 +80,7 @@ struct GPUConstantMem {
   GPUKernelDebugOutput debugOutput;
 #endif
 
-#if defined(GPUCA_HAVE_O2HEADERS) && defined(GPUCA_NOCOMPAT)
+#if defined(GPUCA_HAVE_O2HEADERS)
   template <int32_t I>
   GPUd() auto& getTRDTracker();
 #else  // GPUCA_HAVE_O2HEADERS
@@ -92,7 +92,7 @@ struct GPUConstantMem {
 #endif // !GPUCA_HAVE_O2HEADERS
 };
 
-#if defined(GPUCA_HAVE_O2HEADERS) && defined(GPUCA_NOCOMPAT)
+#if defined(GPUCA_HAVE_O2HEADERS)
 template <>
 GPUdi() auto& GPUConstantMem::getTRDTracker<0>()
 {
@@ -105,7 +105,6 @@ GPUdi() auto& GPUConstantMem::getTRDTracker<1>()
 }
 #endif
 
-#ifdef GPUCA_NOCOMPAT
 union GPUConstantMemCopyable {
 #if !defined(__OPENCL__) || defined(__OPENCL_HOST__)
   GPUh() GPUConstantMemCopyable() {}  // NOLINT: We want an empty constructor, not a default one
@@ -119,9 +118,8 @@ union GPUConstantMemCopyable {
 #endif
   GPUConstantMem v;
 };
-#endif
 
-#if defined(GPUCA_GPUCODE) && defined(GPUCA_NOCOMPAT)
+#if defined(GPUCA_GPUCODE)
 static constexpr size_t gGPUConstantMemBufferSize = (sizeof(GPUConstantMem) + sizeof(uint4) - 1);
 #endif
 } // namespace gpu

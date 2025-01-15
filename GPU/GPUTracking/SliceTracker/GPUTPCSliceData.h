@@ -34,7 +34,7 @@ class GPUTPCSliceData
   GPUTPCSliceData() : mNumberOfHits(0), mNumberOfHitsPlusAlign(0), mClusterIdOffset(0), mGPUTextureBase(nullptr), mRows(nullptr), mLinkUpData(nullptr), mLinkDownData(nullptr), mClusterData(nullptr) {}
 
 #ifndef GPUCA_GPUCODE_DEVICE
-  ~GPUTPCSliceData() CON_DEFAULT;
+  ~GPUTPCSliceData() = default;
   void InitializeRows(const GPUParam& p);
   void SetMaxData();
   void SetClusterData(const GPUTPCClusterData* data, int32_t nClusters, int32_t clusterIdOffset);
@@ -123,8 +123,8 @@ class GPUTPCSliceData
 
  private:
 #ifndef GPUCA_GPUCODE
-  GPUTPCSliceData& operator=(const GPUTPCSliceData&) CON_DELETE; // ROOT 5 tries to use this if it is not private
-  GPUTPCSliceData(const GPUTPCSliceData&) CON_DELETE;            //
+  GPUTPCSliceData& operator=(const GPUTPCSliceData&) = delete; // ROOT 5 tries to use this if it is not private
+  GPUTPCSliceData(const GPUTPCSliceData&) = delete;            //
 #endif
   GPUd() void CreateGrid(GPUconstantref() const GPUConstantMem* mem, GPUTPCRow* GPUrestrict() row, float yMin, float yMax, float zMin, float zMax);
   GPUd() void SetRowGridEmpty(GPUTPCRow& GPUrestrict() row);

@@ -145,12 +145,6 @@ class GPUCommonMath
   template <int32_t I, class T>
   GPUd() CONSTEXPR static T nextMultipleOf(T val);
 
-#ifdef GPUCA_NOCOMPAT
-  GPUdi() static float Sum2() // Needed for legacy C++, For >=17 the below if constexpr handles the case
-  {
-    return 0.f;
-  }
-
   template <typename... Args>
   GPUdi() static float Sum2(float w, Args... args)
   {
@@ -161,7 +155,6 @@ class GPUCommonMath
     }
     return 0;
   }
-#endif
 
  private:
   template <class S, class T>
@@ -441,11 +434,8 @@ GPUhdi() float GPUCommonMath::Copysign(float x, float y)
   return copysign(x, y);
 #elif defined(GPUCA_GPUCODE) && !defined(__OPENCL__)
   return copysignf(x, y);
-#elif defined(__cplusplus) && __cplusplus >= 201103L
-  return std::copysignf(x, y);
 #else
-  x = GPUCommonMath::Abs(x);
-  return (y >= 0) ? x : -x;
+  return std::copysignf(x, y);
 #endif // GPUCA_GPUCODE
 }
 

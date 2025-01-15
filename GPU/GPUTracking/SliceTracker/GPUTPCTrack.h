@@ -37,7 +37,7 @@ class GPUTPCTrack
   GPUTPCTrack() : mFirstHitID(0), mNHits(0), mLocalTrackId(-1), mParam()
   {
   }
-  ~GPUTPCTrack() CON_DEFAULT;
+  ~GPUTPCTrack() = default;
 #endif //! GPUCA_GPUCODE
 
   GPUhd() int32_t NHits() const { return mNHits; }
