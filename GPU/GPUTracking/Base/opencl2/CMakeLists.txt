@@ -9,7 +9,7 @@
 # granted to it by virtue of its status as an Intergovernmental Organization
 # or submit itself to any jurisdiction.
 
-set(MODULE GPUTrackingOCL2)
+set(MODULE GPUTrackingOCL)
 enable_language(ASM)
 
 message(STATUS "Building GPUTracking with OpenCL 2 support")
@@ -21,7 +21,7 @@ else()
   set(GPUDIR ${CMAKE_SOURCE_DIR}/GPU/GPUTracking)
 endif()
 set(CL_SRC ${GPUDIR}/Base/opencl-common/GPUReconstructionOCL.cl)
-set(CL_BIN ${CMAKE_CURRENT_BINARY_DIR}/GPUReconstructionOCL2Code)
+set(CL_BIN ${CMAKE_CURRENT_BINARY_DIR}/GPUReconstructionOCLCode)
 
 set(OCL_FLAGS -Dcl_clang_storage_class_specifiers -cl-std=CLC++2021)
 if(NOT DEFINED GPUCA_NO_FAST_MATH OR NOT ${GPUCA_NO_FAST_MATH})
@@ -39,7 +39,7 @@ set(OCL_DEFINECL "-D$<JOIN:$<TARGET_PROPERTY:O2::GPUTracking,COMPILE_DEFINITIONS
 set(SRCS GPUReconstructionOCL2.cxx)
 set(HDRS GPUReconstructionOCL2.h GPUReconstructionOCL2Internals.h)
 
-if(OPENCL2_ENABLED_SPIRV) # BUILD OpenCL2 intermediate code for SPIR-V target
+if(OPENCL_ENABLED_SPIRV) # BUILD OpenCL intermediate code for SPIR-V target
   # executes clang to create llvm IL code
   # Add -fintegrated-objemitter once we switch to clang >= 17
   cmake_path(GET LLVM_SPIRV PARENT_PATH TMP_LLVM_SPIRV_PATH)
@@ -56,13 +56,13 @@ if(OPENCL2_ENABLED_SPIRV) # BUILD OpenCL2 intermediate code for SPIR-V target
       MAIN_DEPENDENCY ${CL_SRC}
       IMPLICIT_DEPENDS CXX ${CL_SRC}
       COMMAND_EXPAND_LISTS
-      COMMENT "Compiling OpenCL2 CL source file ${CL_SRC} to SPIRV ${CL_BIN}.spirv")
+      COMMENT "Compiling OpenCL CL source file ${CL_SRC} to SPIRV ${CL_BIN}.spirv")
 
   create_binary_resource(${CL_BIN}.spirv ${CMAKE_CURRENT_BINARY_DIR}/GPUReconstructionOCLCode.spirv.o)
   set(SRCS ${SRCS} ${CMAKE_CURRENT_BINARY_DIR}/GPUReconstructionOCLCode.spirv.o)
 endif()
 
-if(OPENCL2_ENABLED) # BUILD OpenCL2 source code for runtime compilation target
+if(OPENCL_ENABLED) # BUILD OpenCL source code for runtime compilation target
   # executes clang to preprocess
   add_custom_command(
       OUTPUT ${CL_BIN}.src
@@ -76,7 +76,7 @@ if(OPENCL2_ENABLED) # BUILD OpenCL2 source code for runtime compilation target
       MAIN_DEPENDENCY ${CL_SRC}
       IMPLICIT_DEPENDS CXX ${CL_SRC}
       COMMAND_EXPAND_LISTS
-      COMMENT "Preparing OpenCL2 CL source file for run time compilation ${CL_BIN}.src")
+      COMMENT "Preparing OpenCL CL source file for run time compilation ${CL_BIN}.src")
 
   create_binary_resource(${CL_BIN}.src ${CMAKE_CURRENT_BINARY_DIR}/GPUReconstructionOCLCode.src.o)
   set(SRCS ${SRCS} ${CMAKE_CURRENT_BINARY_DIR}/GPUReconstructionOCLCode.src.o)
@@ -122,7 +122,7 @@ if(ALIGPU_BUILD_TYPE STREQUAL "Standalone")
   set(targetName ${MODULE})
 endif()
 
-if(OPENCL2_ENABLED_SPIRV)
-  target_compile_definitions(${targetName} PRIVATE OPENCL2_ENABLED_SPIRV)
+if(OPENCL_ENABLED_SPIRV)
+  target_compile_definitions(${targetName} PRIVATE OPENCL_ENABLED_SPIRV)
 endif()
 target_compile_definitions(${targetName} PRIVATE OCL_FLAGS=$<JOIN:${OCL_FLAGS},\ >)

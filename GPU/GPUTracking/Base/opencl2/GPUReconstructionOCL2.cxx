@@ -9,14 +9,14 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-/// \file GPUReconstructionOCL2.cxx
+/// \file GPUReconstructionOCL.cxx
 /// \author David Rohr
 
 #define GPUCA_GPUTYPE_OPENCL
 #define __OPENCL_HOST__
 
 #include "GPUReconstructionOCL2.h"
-#include "GPUReconstructionOCL2Internals.h"
+#include "GPUReconstructionOCLInternals.h"
 #include "GPUReconstructionIncludes.h"
 
 using namespace GPUCA_NAMESPACE::gpu;
@@ -27,32 +27,32 @@ using namespace GPUCA_NAMESPACE::gpu;
 #include <cstdlib>
 
 #include "utils/qGetLdBinarySymbols.h"
-QGET_LD_BINARY_SYMBOLS(GPUReconstructionOCL2Code_src);
-#ifdef OPENCL2_ENABLED_SPIRV
-QGET_LD_BINARY_SYMBOLS(GPUReconstructionOCL2Code_spirv);
+QGET_LD_BINARY_SYMBOLS(GPUReconstructionOCLCode_src);
+#ifdef OPENCL_ENABLED_SPIRV
+QGET_LD_BINARY_SYMBOLS(GPUReconstructionOCLCode_spirv);
 #endif
 
-GPUReconstruction* GPUReconstruction_Create_OCL2(const GPUSettingsDeviceBackend& cfg) { return new GPUReconstructionOCL2(cfg); }
+GPUReconstruction* GPUReconstruction_Create_OCL(const GPUSettingsDeviceBackend& cfg) { return new GPUReconstructionOCL2(cfg); }
 
-GPUReconstructionOCL2Backend::GPUReconstructionOCL2Backend(const GPUSettingsDeviceBackend& cfg) : GPUReconstructionOCL(cfg)
+GPUReconstructionOCLBackend::GPUReconstructionOCLBackend(const GPUSettingsDeviceBackend& cfg) : GPUReconstructionOCL(cfg)
 {
 }
 
 template <class T, int32_t I, typename... Args>
-int32_t GPUReconstructionOCL2Backend::runKernelBackend(const krnlSetupArgs<T, I, Args...>& args)
+int32_t GPUReconstructionOCLBackend::runKernelBackend(const krnlSetupArgs<T, I, Args...>& args)
 {
   cl_kernel k = args.s.y.num > 1 ? getKernelObject<cl_kernel, T, I, true>() : getKernelObject<cl_kernel, T, I, false>();
   return std::apply([this, &args, &k](auto&... vals) { return runKernelBackendInternal(args.s, k, vals...); }, args.v);
 }
 
 template <class S, class T, int32_t I, bool MULTI>
-S& GPUReconstructionOCL2Backend::getKernelObject()
+S& GPUReconstructionOCLBackend::getKernelObject()
 {
   static uint32_t krnl = FindKernel<T, I>(MULTI ? 2 : 1);
   return mInternals->kernels[krnl].first;
 }
 
-int32_t GPUReconstructionOCL2Backend::GetOCLPrograms()
+int32_t GPUReconstructionOCLBackend::GetOCLPrograms()
 {
   char platform_version[256] = {};
   GPUFailedMsg(clGetPlatformInfo(mInternals->platform, CL_PLATFORM_VERSION, sizeof(platform_version), platform_version, nullptr));
@@ -63,17 +63,17 @@ int32_t GPUReconstructionOCL2Backend::GetOCLPrograms()
 
   const char* ocl_flags = GPUCA_M_STR(OCL_FLAGS);
 
-#ifdef OPENCL2_ENABLED_SPIRV // clang-format off
+#ifdef OPENCL_ENABLED_SPIRV // clang-format off
   if (ver >= 2.2f && !GetProcessingSettings().oclCompileFromSources) {
     GPUInfo("Reading OpenCL program from SPIR-V IL (Platform version %4.2f)", ver);
-    mInternals->program = clCreateProgramWithIL(mInternals->context, _binary_GPUReconstructionOCL2Code_spirv_start, _binary_GPUReconstructionOCL2Code_spirv_len, &ocl_error);
+    mInternals->program = clCreateProgramWithIL(mInternals->context, _binary_GPUReconstructionOCLCode_spirv_start, _binary_GPUReconstructionOCLCode_spirv_len, &ocl_error);
     ocl_flags = "";
   } else
 #endif // clang-format on
   {
     GPUInfo("Compiling OpenCL program from sources (Platform version %4.2f)", ver);
-    size_t program_sizes[1] = {_binary_GPUReconstructionOCL2Code_src_len};
-    char* programs_sources[1] = {_binary_GPUReconstructionOCL2Code_src_start};
+    size_t program_sizes[1] = {_binary_GPUReconstructionOCLCode_src_len};
+    char* programs_sources[1] = {_binary_GPUReconstructionOCLCode_src_start};
     mInternals->program = clCreateProgramWithSource(mInternals->context, (cl_uint)1, (const char**)&programs_sources, program_sizes, &ocl_error);
   }
 
@@ -113,7 +113,7 @@ int32_t GPUReconstructionOCL2Backend::GetOCLPrograms()
   return 0;
 }
 
-bool GPUReconstructionOCL2Backend::CheckPlatform(uint32_t i)
+bool GPUReconstructionOCLBackend::CheckPlatform(uint32_t i)
 {
   char platform_version[64] = {}, platform_vendor[64] = {};
   clGetPlatformInfo(mInternals->platforms[i], CL_PLATFORM_VERSION, sizeof(platform_version), platform_version, nullptr);

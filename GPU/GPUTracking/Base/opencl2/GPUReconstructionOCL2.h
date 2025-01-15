@@ -9,7 +9,7 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-/// \file GPUReconstructionOCL2.h
+/// \file GPUReconstructionOCL.h
 /// \author David Rohr
 
 #ifndef GPURECONSTRUCTIONOCL2_H
@@ -18,22 +18,22 @@
 #include "GPUReconstructionOCL.h"
 
 #ifdef _WIN32
-extern "C" __declspec(dllexport) GPUCA_NAMESPACE::gpu::GPUReconstruction* GPUReconstruction_Create_OCL2(const GPUCA_NAMESPACE::gpu::GPUSettingsDeviceBackend& cfg);
+extern "C" __declspec(dllexport) GPUCA_NAMESPACE::gpu::GPUReconstruction* GPUReconstruction_Create_OCL(const GPUCA_NAMESPACE::gpu::GPUSettingsDeviceBackend& cfg);
 #else
-extern "C" GPUCA_NAMESPACE::gpu::GPUReconstruction* GPUReconstruction_Create_OCL2(const GPUCA_NAMESPACE::gpu::GPUSettingsDeviceBackend& cfg);
+extern "C" GPUCA_NAMESPACE::gpu::GPUReconstruction* GPUReconstruction_Create_OCL(const GPUCA_NAMESPACE::gpu::GPUSettingsDeviceBackend& cfg);
 #endif
 
 namespace GPUCA_NAMESPACE::gpu
 {
-struct GPUReconstructionOCL2Internals;
+struct GPUReconstructionOCLInternals;
 
-class GPUReconstructionOCL2Backend : public GPUReconstructionOCL
+class GPUReconstructionOCLBackend : public GPUReconstructionOCL
 {
  public:
-  ~GPUReconstructionOCL2Backend() override = default;
+  ~GPUReconstructionOCLBackend() override = default;
 
  protected:
-  GPUReconstructionOCL2Backend(const GPUSettingsDeviceBackend& cfg);
+  GPUReconstructionOCLBackend(const GPUSettingsDeviceBackend& cfg);
 
   template <class T, int32_t I = 0, typename... Args>
   int32_t runKernelBackend(const krnlSetupArgs<T, I, Args...>& args);
@@ -44,7 +44,7 @@ class GPUReconstructionOCL2Backend : public GPUReconstructionOCL
   bool CheckPlatform(uint32_t i) override;
 };
 
-using GPUReconstructionOCL2 = GPUReconstructionKernels<GPUReconstructionOCL2Backend>;
+using GPUReconstructionOCL2 = GPUReconstructionKernels<GPUReconstructionOCLBackend>;
 } // namespace GPUCA_NAMESPACE::gpu
 
 #endif

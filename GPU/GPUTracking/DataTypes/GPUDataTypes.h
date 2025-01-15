@@ -147,8 +147,7 @@ class GPUDataTypes
                               CPU = 1,
                               CUDA = 2,
                               HIP = 3,
-                              OCL = 4,
-                              OCL2 = 5 };
+                              OCL = 4 };
   enum ENUM_CLASS GeneralStep { Prepare = 1,
                                 QA = 2 };
 
@@ -175,7 +174,7 @@ class GPUDataTypes
                               ITSTracks = 256 };
 
 #ifdef GPUCA_NOCOMPAT_ALLOPENCL
-  static constexpr const char* const DEVICE_TYPE_NAMES[] = {"INVALID", "CPU", "CUDA", "HIP", "OCL", "OCL2"};
+  static constexpr const char* const DEVICE_TYPE_NAMES[] = {"INVALID", "CPU", "CUDA", "HIP", "OCL"};
   static constexpr const char* const RECO_STEP_NAMES[] = {"TPC Transformation", "TPC Sector Tracking", "TPC Track Merging and Fit", "TPC Compression", "TRD Tracking", "ITS Tracking", "TPC dEdx Computation", "TPC Cluster Finding", "TPC Decompression", "Global Refit"};
   static constexpr const char* const GENERAL_STEP_NAMES[] = {"Prepare", "QA"};
   typedef bitfield<RecoStep, uint32_t> RecoStepField;
