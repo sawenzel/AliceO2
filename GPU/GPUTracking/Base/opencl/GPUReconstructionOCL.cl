@@ -15,12 +15,12 @@
 // clang-format off
 #define __OPENCL__
 #if defined(__cplusplus) && __cplusplus >= 201703L
-  #define __OPENCLCPP__
+  #define __OPENCL__
 #endif
 #define GPUCA_GPUTYPE_OPENCL
 
-#ifdef __OPENCLCPP__
-  #ifdef GPUCA_OPENCLCPP_NO_CONSTANT_MEMORY
+#ifdef __OPENCL__
+  #ifdef GPUCA_OPENCL_NO_CONSTANT_MEMORY
     #define GPUCA_NO_CONSTANT_MEMORY
   #endif
   #pragma OPENCL EXTENSION cl_khr_fp64 : enable // Allow double precision variables

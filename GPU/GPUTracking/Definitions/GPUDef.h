@@ -24,7 +24,7 @@
 // Macros for masking ptrs in OpenCL kernel calls as uint64_t (The API only allows us to pass buffer objects)
 #ifdef __OPENCL__
   #define GPUPtr1(a, b) uint64_t b
-  #ifdef __OPENCLCPP__
+  #ifdef __OPENCL__
     #define GPUPtr2(a, b) ((__generic a) (a) b)
   #else
     #define GPUPtr2(a, b) ((__global a) (a) b)

@@ -437,7 +437,7 @@ GPUhdi() int32_t GPUCommonMath::Abs<int32_t>(int32_t x)
 
 GPUhdi() float GPUCommonMath::Copysign(float x, float y)
 {
-#if defined(__OPENCLCPP__)
+#if defined(__OPENCL__)
   return copysign(x, y);
 #elif defined(GPUCA_GPUCODE) && !defined(__OPENCL__)
   return copysignf(x, y);
@@ -452,7 +452,7 @@ GPUhdi() float GPUCommonMath::Copysign(float x, float y)
 template <class S, class T>
 GPUdi() uint32_t GPUCommonMath::AtomicExchInternal(S* addr, T val)
 {
-#if defined(GPUCA_GPUCODE) && defined(__OPENCLCPP__) && (!defined(__clang__) || defined(GPUCA_OPENCL_CPP_CLANG_C11_ATOMICS))
+#if defined(GPUCA_GPUCODE) && defined(__OPENCL__) && (!defined(__clang__) || defined(GPUCA_OPENCL_CLANG_C11_ATOMICS))
   return ::atomic_exchange(addr, val);
 #elif defined(GPUCA_GPUCODE) && defined(__OPENCL__)
   return ::atomic_xchg(addr, val);
@@ -470,7 +470,7 @@ GPUdi() uint32_t GPUCommonMath::AtomicExchInternal(S* addr, T val)
 template <class S, class T>
 GPUdi() bool GPUCommonMath::AtomicCASInternal(S* addr, T cmp, T val)
 {
-#if defined(GPUCA_GPUCODE) && defined(__OPENCLCPP__) && (!defined(__clang__) || defined(GPUCA_OPENCL_CPP_CLANG_C11_ATOMICS))
+#if defined(GPUCA_GPUCODE) && defined(__OPENCL__) && (!defined(__clang__) || defined(GPUCA_OPENCL_CLANG_C11_ATOMICS))
   return ::atomic_compare_exchange(addr, cmp, val) == cmp;
 #elif defined(GPUCA_GPUCODE) && defined(__OPENCL__)
   return ::atomic_cmpxchg(addr, cmp, val) == cmp;
@@ -486,7 +486,7 @@ GPUdi() bool GPUCommonMath::AtomicCASInternal(S* addr, T cmp, T val)
 template <class S, class T>
 GPUdi() uint32_t GPUCommonMath::AtomicAddInternal(S* addr, T val)
 {
-#if defined(GPUCA_GPUCODE) && defined(__OPENCLCPP__) && (!defined(__clang__) || defined(GPUCA_OPENCL_CPP_CLANG_C11_ATOMICS))
+#if defined(GPUCA_GPUCODE) && defined(__OPENCL__) && (!defined(__clang__) || defined(GPUCA_OPENCL_CLANG_C11_ATOMICS))
   return ::atomic_fetch_add(addr, val);
 #elif defined(GPUCA_GPUCODE) && defined(__OPENCL__)
   return ::atomic_add(addr, val);
@@ -502,7 +502,7 @@ GPUdi() uint32_t GPUCommonMath::AtomicAddInternal(S* addr, T val)
 template <class S, class T>
 GPUdi() void GPUCommonMath::AtomicMaxInternal(S* addr, T val)
 {
-#if defined(GPUCA_GPUCODE) && defined(__OPENCLCPP__) && (!defined(__clang__) || defined(GPUCA_OPENCL_CPP_CLANG_C11_ATOMICS))
+#if defined(GPUCA_GPUCODE) && defined(__OPENCL__) && (!defined(__clang__) || defined(GPUCA_OPENCL_CLANG_C11_ATOMICS))
   ::atomic_fetch_max(addr, val);
 #elif defined(GPUCA_GPUCODE) && defined(__OPENCL__)
   ::atomic_max(addr, val);
@@ -518,7 +518,7 @@ GPUdi() void GPUCommonMath::AtomicMaxInternal(S* addr, T val)
 template <class S, class T>
 GPUdi() void GPUCommonMath::AtomicMinInternal(S* addr, T val)
 {
-#if defined(GPUCA_GPUCODE) && defined(__OPENCLCPP__) && (!defined(__clang__) || defined(GPUCA_OPENCL_CPP_CLANG_C11_ATOMICS))
+#if defined(GPUCA_GPUCODE) && defined(__OPENCL__) && (!defined(__clang__) || defined(GPUCA_OPENCL_CLANG_C11_ATOMICS))
   ::atomic_fetch_min(addr, val);
 #elif defined(GPUCA_GPUCODE) && defined(__OPENCL__)
   ::atomic_min(addr, val);
