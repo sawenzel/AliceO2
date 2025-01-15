@@ -531,7 +531,7 @@ GPUdi() void GPUCommonMath::AtomicMinInternal(S* addr, T val)
 #endif // GPUCA_GPUCODE
 }
 
-#if (defined(__CUDACC__) || defined(__HIPCC__)) && !defined(__ROOTCINT__) && !defined(G__ROOT)
+#if (defined(__CUDACC__) || defined(__HIPCC__)) && !defined(G__ROOT)
 #define GPUCA_HAVE_ATOMIC_MINMAX_FLOAT
 template <>
 GPUdii() void GPUCommonMath::AtomicMaxInternal(GPUglobalref() GPUgeneric() GPUAtomic(float) * addr, float val)

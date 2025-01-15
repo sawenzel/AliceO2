@@ -78,7 +78,6 @@ struct GPUParam_t {
 };
 } // namespace internal
 
-#if !(defined(__CINT__) || defined(__ROOTCINT__)) || defined(__CLING__) // Hide from ROOT 5 CINT
 struct GPUParam : public internal::GPUParam_t<GPUSettingsRec, GPUSettingsParam> {
 
 #ifndef GPUCA_GPUCODE
@@ -115,7 +114,6 @@ struct GPUParam : public internal::GPUParam_t<GPUSettingsRec, GPUSettingsParam> 
 
   GPUd() bool rejectEdgeClusterByY(float uncorrectedY, int32_t iRow, float trackSigmaY) const;
 };
-#endif
 
 } // namespace gpu
 } // namespace GPUCA_NAMESPACE

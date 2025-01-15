@@ -30,14 +30,11 @@
 //Some GPU configuration settings, must be included first
 #include "GPUCommonDefSettings.h"
 
-#if (!(defined(__CINT__) || defined(__ROOTCINT__)) || defined(__CLING__)) && defined(__cplusplus) && __cplusplus >= 201103L
+#if defined(__cplusplus) && __cplusplus >= 201103L
   #define GPUCA_NOCOMPAT // C++11 + No old ROOT5 + No old OpenCL
-  #ifndef __CINT__
-    #define GPUCA_NOCOMPAT_ALLCINT // + No ROOT CINT at all
-  #endif
 #endif
 
-#if !(defined(__CINT__) || defined(__ROOTCINT__) || defined(__CLING__) || defined(__ROOTCLING__) || defined(G__ROOT)) // No GPU code for ROOT
+#if !(defined(__CLING__) || defined(__ROOTCLING__) || defined(G__ROOT)) // No GPU code for ROOT
   #if defined(__CUDACC__) || defined(__OPENCL__) || defined(__HIPCC__) || defined(__OPENCL_HOST__)
     #define GPUCA_GPUCODE // Compiled by GPU compiler
   #endif
@@ -47,7 +44,7 @@
   #endif
 #endif
 
-// Definitions for C++11 features not supported by CINT / OpenCL
+// Definitions for C++11 features
 #ifdef GPUCA_NOCOMPAT
   #define CON_DELETE = delete
   #define CON_DEFAULT = default
@@ -62,11 +59,6 @@
   #define CON_DEFAULT
   #define CONSTEXPR
   #define GPUCA_CPP11_INIT(...)
-#endif
-#if defined(__ROOT__) && !defined(GPUCA_NOCOMPAT)
-  #define VOLATILE // ROOT5 has a problem with volatile in CINT
-#else
-  #define VOLATILE volatile
 #endif
 
 // Set AliRoot / O2 namespace

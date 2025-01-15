@@ -18,7 +18,7 @@
 #include "GPUCommonDef.h"
 // clang-format off
 #if !defined(GPUCA_NOCOMPAT)
-  // Cannot do anything for ROOT5CINT, so just disable
+  // just disable
   #define GPUInfo(...)
   #define GPUImportant(...)
   #define GPUWarning(...)
