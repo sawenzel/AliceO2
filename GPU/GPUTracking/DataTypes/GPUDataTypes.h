@@ -21,10 +21,8 @@
 // Please add complex data types required on the host but not GPU to GPUHostDataTypes.h and forward-declare!
 #ifndef GPUCA_GPUCODE_DEVICE
 #include <cstddef>
-#ifdef GPUCA_NOCOMPAT_ALLOPENCL
-#include <type_traits>
 #endif
-#endif
+#include "GPUCommonTypeTraits.h"
 #ifdef GPUCA_NOCOMPAT
 #include "GPUTRDDef.h"
 
@@ -114,16 +112,10 @@ namespace GPUCA_NAMESPACE
 {
 namespace gpu
 {
-#ifdef GPUCA_NOCOMPAT_ALLOPENCL
 #include "utils/bitfield.h"
 #define ENUM_CLASS class
 #define ENUM_UINT : uint32_t
 #define GPUCA_RECO_STEP GPUDataTypes::RecoStep
-#else
-#define ENUM_CLASS
-#define ENUM_UINT
-#define GPUCA_RECO_STEP GPUDataTypes
-#endif
 
 class GPUTPCTrack;
 class GPUTPCHitId;
@@ -172,30 +164,27 @@ class GPUDataTypes
                               TPCRaw = 64,
                               ITSClusters = 128,
                               ITSTracks = 256 };
-
-#ifdef GPUCA_NOCOMPAT_ALLOPENCL
+#ifndef __OPENCL__
   static constexpr const char* const DEVICE_TYPE_NAMES[] = {"INVALID", "CPU", "CUDA", "HIP", "OCL"};
   static constexpr const char* const RECO_STEP_NAMES[] = {"TPC Transformation", "TPC Sector Tracking", "TPC Track Merging and Fit", "TPC Compression", "TRD Tracking", "ITS Tracking", "TPC dEdx Computation", "TPC Cluster Finding", "TPC Decompression", "Global Refit"};
   static constexpr const char* const GENERAL_STEP_NAMES[] = {"Prepare", "QA"};
-  typedef bitfield<RecoStep, uint32_t> RecoStepField;
-  typedef bitfield<InOutType, uint32_t> InOutTypeField;
   constexpr static int32_t N_RECO_STEPS = sizeof(GPUDataTypes::RECO_STEP_NAMES) / sizeof(GPUDataTypes::RECO_STEP_NAMES[0]);
   constexpr static int32_t N_GENERAL_STEPS = sizeof(GPUDataTypes::GENERAL_STEP_NAMES) / sizeof(GPUDataTypes::GENERAL_STEP_NAMES[0]);
 #endif
+  typedef bitfield<RecoStep, uint32_t> RecoStepField;
+  typedef bitfield<InOutType, uint32_t> InOutTypeField;
 #ifdef GPUCA_NOCOMPAT
   static constexpr uint32_t NSLICES = 36;
 #endif
   static DeviceType GetDeviceType(const char* type);
 };
 
-#ifdef GPUCA_NOCOMPAT_ALLOPENCL
 struct GPURecoStepConfiguration {
   GPUDataTypes::RecoStepField steps = 0;
   GPUDataTypes::RecoStepField stepsGPUMask = GPUDataTypes::RecoStep::AllRecoSteps;
   GPUDataTypes::InOutTypeField inputs = 0;
   GPUDataTypes::InOutTypeField outputs = 0;
 };
-#endif
 
 #ifdef GPUCA_NOCOMPAT
 

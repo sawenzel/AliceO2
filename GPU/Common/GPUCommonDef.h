@@ -32,9 +32,6 @@
 
 #if (!(defined(__CINT__) || defined(__ROOTCINT__)) || defined(__CLING__)) && defined(__cplusplus) && __cplusplus >= 201103L
   #define GPUCA_NOCOMPAT // C++11 + No old ROOT5 + No old OpenCL
-  #ifndef __OPENCL__
-    #define GPUCA_NOCOMPAT_ALLOPENCL // + No OpenCL at all
-  #endif
   #ifndef __CINT__
     #define GPUCA_NOCOMPAT_ALLCINT // + No ROOT CINT at all
   #endif
