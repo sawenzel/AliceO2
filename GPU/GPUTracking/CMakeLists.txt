@@ -413,8 +413,7 @@ if(ALIGPU_BUILD_TYPE STREQUAL "ALIROOT")
                       ${CMAKE_SOURCE_DIR}/GPU/GPUTracking/utils
                       ${CMAKE_SOURCE_DIR}/GPU/GPUTracking/Base/cuda
                       ${CMAKE_SOURCE_DIR}/GPU/GPUTracking/Base/hip
-                      ${CMAKE_SOURCE_DIR}/GPU/GPUTracking/Base/opencl-common
-                      ${CMAKE_SOURCE_DIR}/GPU/GPUTracking/Base/opencl2
+                      ${CMAKE_SOURCE_DIR}/GPU/GPUTracking/Base/opencl
                       ${CMAKE_SOURCE_DIR}/GPU/TPCFastTransformation)
   alice_usevc()
 
@@ -529,8 +528,7 @@ if(CUDA_ENABLED OR OPENCL_ENABLED OR HIP_ENABLED)
       add_subdirectory(Base/cuda)
     endif()
     if(OPENCL_ENABLED)
-      add_subdirectory(Base/opencl-common)
-      add_subdirectory(Base/opencl2)
+      add_subdirectory(Base/opencl)
     endif()
     if(HIP_ENABLED)
       add_subdirectory(Base/hip)

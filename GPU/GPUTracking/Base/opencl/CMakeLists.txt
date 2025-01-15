@@ -12,7 +12,7 @@
 set(MODULE GPUTrackingOCL)
 enable_language(ASM)
 
-message(STATUS "Building GPUTracking with OpenCL 2 support")
+message(STATUS "Building GPUTracking with OpenCL support")
 
 # convenience variables
 if(ALIGPU_BUILD_TYPE STREQUAL "Standalone")
@@ -20,7 +20,7 @@ if(ALIGPU_BUILD_TYPE STREQUAL "Standalone")
 else()
   set(GPUDIR ${CMAKE_SOURCE_DIR}/GPU/GPUTracking)
 endif()
-set(CL_SRC ${GPUDIR}/Base/opencl-common/GPUReconstructionOCL.cl)
+set(CL_SRC ${GPUDIR}/Base/opencl/GPUReconstructionOCL.cl)
 set(CL_BIN ${CMAKE_CURRENT_BINARY_DIR}/GPUReconstructionOCLCode)
 
 set(OCL_FLAGS -Dcl_clang_storage_class_specifiers -cl-std=CLC++2021)
@@ -36,8 +36,8 @@ set(OCL_DEFINECL "-D$<JOIN:$<TARGET_PROPERTY:O2::GPUTracking,COMPILE_DEFINITIONS
             -I${CMAKE_SOURCE_DIR}/DataFormats/Reconstruction/src
 )
 
-set(SRCS GPUReconstructionOCL2.cxx)
-set(HDRS GPUReconstructionOCL2.h GPUReconstructionOCL2Internals.h)
+set(SRCS GPUReconstructionOCL.cxx)
+set(HDRS GPUReconstructionOCL.h GPUReconstructionOCLInternals.h)
 
 if(OPENCL_ENABLED_SPIRV) # BUILD OpenCL intermediate code for SPIR-V target
   # executes clang to create llvm IL code
@@ -85,7 +85,7 @@ endif()
 if(ALIGPU_BUILD_TYPE STREQUAL "O2")
   o2_add_library(${MODULE}
                  SOURCES ${SRCS}
-                 PUBLIC_LINK_LIBRARIES O2::GPUTrackingOpenCLCommon
+                 PUBLIC_LINK_LIBRARIES OpenCL::OpenCL O2::GPUTracking
                  TARGETVARNAME targetName)
 
   target_compile_definitions(${targetName} PRIVATE $<TARGET_PROPERTY:O2::GPUTracking,COMPILE_DEFINITIONS>)
@@ -99,14 +99,14 @@ endif()
 if(ALIGPU_BUILD_TYPE STREQUAL "ALIROOT")
   # Generate the dictionary
   get_directory_property(incdirs INCLUDE_DIRECTORIES)
-  generate_dictionary("Ali${MODULE}" "" "GPUReconstructionOCL2.h" "${incdirs} .")
+  generate_dictionary("Ali${MODULE}" "" "GPUReconstructionOCL.h" "${incdirs} .")
 
   # Generate the ROOT map
   generate_rootmap("Ali${MODULE}" "" "")
 
   # Add a library to the project using the specified source files
   add_library_tested(Ali${MODULE} SHARED ${SRCS} G__Ali${MODULE}.cxx)
-  target_link_libraries(Ali${MODULE} PUBLIC AliGPUTrackingOpenCLCommon)
+  target_link_libraries(Ali${MODULE} PUBLIC OpenCL AliGPUTracking)
 
   # Installation
   install(TARGETS Ali${MODULE} ARCHIVE DESTINATION lib LIBRARY DESTINATION lib)
@@ -117,7 +117,7 @@ endif()
 
 if(ALIGPU_BUILD_TYPE STREQUAL "Standalone")
   add_library(${MODULE} SHARED ${SRCS})
-  target_link_libraries(${MODULE} GPUTrackingOpenCLCommon)
+  target_link_libraries(${MODULE} GPUTracking OpenCL)
   install(TARGETS ${MODULE})
   set(targetName ${MODULE})
 endif()
