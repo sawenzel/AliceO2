@@ -254,7 +254,8 @@ void TrackingStudySpec::process(o2::globaltracking::RecoContainer& recoData)
 
   auto fillTPCClInfo = [&recoData, this](const o2::tpc::TrackTPC& trc, o2::dataformats::TrackInfoExt& trExt, float timestampTB = -1e9) {
     const auto clRefs = recoData.getTPCTracksClusterRefs();
-    const auto shMap = recoData.clusterShMapTPC.data();
+    const auto tpcClusAcc = recoData.getTPCClusters();
+    const auto shMap = recoData.clusterShMapTPC;
     if (recoData.inputsTPCclusters) {
       uint8_t clSect = 0, clRow = 0, clRowP = -1;
       uint32_t clIdx = 0;
@@ -264,13 +265,14 @@ void TrackingStudySpec::process(o2::globaltracking::RecoContainer& recoData)
           trExt.rowCountTPC++;
           clRowP = clRow;
         }
-        if (shMap[clRefs[ic + trc.getClusterRef().getFirstEntry()]]) {
+        unsigned int absoluteIndex = tpcClusAcc.clusterOffset[clSect][clRow] + clIdx;
+        if (shMap[absoluteIndex] & GPUCA_NAMESPACE::gpu::GPUTPCGMMergedTrackHit::flagShared) {
           trExt.nClTPCShared++;
         }
       }
       trc.getClusterReference(clRefs, trc.getNClusterReferences() - 1, clSect, clRow, clIdx);
       trExt.rowMinTPC = clRow;
-      const auto& clus = recoData.inputsTPCclusters->clusterIndex.clusters[clSect][clRow][clIdx];
+      const auto& clus = tpcClusAcc.clusters[clSect][clRow][clIdx];
       this->mTPCCorrMapsLoader.Transform(clSect, clRow, clus.getPad(), clus.getTime(), trExt.innerTPCPos0[0], trExt.innerTPCPos0[1], trExt.innerTPCPos0[2], trc.getTime0()); // nominal time of the track
       if (timestampTB > -1e8) {
         this->mTPCCorrMapsLoader.Transform(clSect, clRow, clus.getPad(), clus.getTime(), trExt.innerTPCPos[0], trExt.innerTPCPos[1], trExt.innerTPCPos[2], timestampTB); // time assigned from the global track track
@@ -284,7 +286,6 @@ void TrackingStudySpec::process(o2::globaltracking::RecoContainer& recoData)
 
   auto getTPCPairSharing = [&recoData, this](const o2::tpc::TrackTPC& trc0, const o2::tpc::TrackTPC& trc1) {
     const auto clRefs = recoData.getTPCTracksClusterRefs();
-    const auto shMap = recoData.clusterShMapTPC.data();
     uint8_t nsh = 0, nshRows = 0, lastSharedRow = -1;
     if (recoData.inputsTPCclusters) {
       uint8_t clSect0 = 0, clRow0 = 0, clSect1 = 0, clRow1 = 0;
