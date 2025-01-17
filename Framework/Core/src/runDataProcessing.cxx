@@ -491,6 +491,7 @@ void websocket_callback(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf)
   } catch (WSError& e) {
     LOG(error) << "Error while parsing request: " << e.message;
     handler->error(e.code, e.message.c_str());
+    free(buf->base);
   }
 }
 
