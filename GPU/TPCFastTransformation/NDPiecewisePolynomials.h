@@ -22,6 +22,7 @@
 
 #if !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE)
 #include <vector>
+#include <functional>
 #endif
 
 class TFile;
