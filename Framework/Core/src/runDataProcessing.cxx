@@ -978,16 +978,16 @@ void doDPLException(RuntimeErrorRef& e, char const* processName)
   if (err.maxBacktrace != 0) {
     LOGP(fatal,
          "Unhandled o2::framework::runtime_error reached the top of main of {}, device shutting down."
-         " Reason: {}"
-         "\n Backtrace follow: \n",
+         " Reason: {}",
          processName, err.what);
+    LOGP(error, "Backtrace follow:");
     BacktraceHelpers::demangled_backtrace_symbols(err.backtrace, err.maxBacktrace, STDERR_FILENO);
   } else {
     LOGP(fatal,
          "Unhandled o2::framework::runtime_error reached the top of main of {}, device shutting down."
-         " Reason: {}"
-         "\n Recompile with DPL_ENABLE_BACKTRACE=1 to get more information.",
+         " Reason: {}",
          processName, err.what);
+    LOGP(error, "Recompile with DPL_ENABLE_BACKTRACE=1 to get more information.");
   }
 }
 
