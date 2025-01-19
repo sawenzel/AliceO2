@@ -73,8 +73,8 @@ class GPUCommonMath
   GPUd() static float Log(float x);
   GPUd() static float Exp(float x);
   GPUhdni() static float Copysign(float x, float y);
-  GPUd() static CONSTEXPR float TwoPi() { return 6.2831853f; }
-  GPUd() static CONSTEXPR float Pi() { return 3.1415927f; }
+  GPUd() static constexpr float TwoPi() { return 6.2831853f; }
+  GPUd() static constexpr float Pi() { return 3.1415927f; }
   GPUd() static float Round(float x);
   GPUd() static float Floor(float x);
   GPUd() static uint32_t Float2UIntReint(const float& x);
@@ -143,12 +143,12 @@ class GPUCommonMath
   GPUd() static float FMulRZ(float a, float b);
 
   template <int32_t I, class T>
-  GPUd() CONSTEXPR static T nextMultipleOf(T val);
+  GPUd() constexpr static T nextMultipleOf(T val);
 
   template <typename... Args>
   GPUdi() static float Sum2(float w, Args... args)
   {
-    if CONSTEXPR (sizeof...(Args) == 0) {
+    if constexpr (sizeof...(Args) == 0) {
       return w * w;
     } else {
       return w * w + Sum2(args...);
@@ -181,9 +181,9 @@ typedef GPUCommonMath CAMath;
 #endif // clang-format on
 
 template <int32_t I, class T>
-GPUdi() CONSTEXPR T GPUCommonMath::nextMultipleOf(T val)
+GPUdi() constexpr T GPUCommonMath::nextMultipleOf(T val)
 {
-  if CONSTEXPR (I & (I - 1)) {
+  if constexpr (I & (I - 1)) {
     T tmp = val % I;
     if (tmp) {
       val += I - tmp;

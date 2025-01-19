@@ -194,7 +194,7 @@ class GPUTRDTracker_t : public GPUProcessor
   float mAngleToDyC; // parameterization for conversion track angle -> tracklet deflection
   /// ---- end error parametrization ----
   bool mDebugOutput;                  // store debug output
-  static CONSTEXPR const float sRadialOffset = -0.1f;             // due to (possible) mis-calibration of t0 -> will become obsolete when tracklet conversion is done outside of the tracker
+  static constexpr const float sRadialOffset = -0.1f;             // due to (possible) mis-calibration of t0 -> will become obsolete when tracklet conversion is done outside of the tracker
   float mMaxEta;                                                  // TPC tracks with higher eta are ignored
   float mRoadZ;                       // in z, a constant search road is used
   float mZCorrCoefNRC;                // tracklet z-position depends linearly on track dip angle

@@ -40,13 +40,6 @@
   #endif
 #endif
 
-// Definitions for C++11 features
-#if defined(__cplusplus) && __cplusplus >= 201703L
-  #define CONSTEXPR constexpr
-#else
-  #define CONSTEXPR
-#endif
-
 // Set AliRoot / O2 namespace
 #if defined(GPUCA_STANDALONE) || (defined(GPUCA_O2_LIB) && !defined(GPUCA_O2_INTERFACE)) || defined(GPUCA_ALIROOT_LIB) || defined (GPUCA_GPUCODE)
   #define GPUCA_ALIGPUCODE

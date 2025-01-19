@@ -60,7 +60,7 @@ class GPUTPCGeometry // TODO: Make values constexpr
   const float mPadHeight[10] = {.75f, .75f, .75f, .75f, 1.f, 1.f, 1.2f, 1.2f, 1.5f, 1.5f};
   const float mPadWidth[10] = {.416f, .420f, .420f, .436f, .6f, .6f, .608f, .588f, .604f, .607f};
 
-  static CONSTEXPR float FACTOR_T2Z = 250.f / 512.f; // Used in compression, must remain constant at 250cm, 512 time bins!
+  static constexpr float FACTOR_T2Z = 250.f / 512.f; // Used in compression, must remain constant at 250cm, 512 time bins!
 
  public:
   GPUd() int32_t GetRegion(int32_t row) const { return mRegion[row]; }
@@ -90,7 +90,7 @@ class GPUTPCGeometry // TODO: Make values constexpr
   const float mPadHeight[3] = {.75f, 1.f, 1.5f};
   const float mPadWidth[3] = {.4f, .6f, .6f};
 
-  static CONSTEXPR float FACTOR_T2Z = 250.f / 1024.f; // Used in compression, must remain constant at 250cm, 1024 time bins!
+  static constexpr float FACTOR_T2Z = 250.f / 1024.f; // Used in compression, must remain constant at 250cm, 1024 time bins!
 
  public:
   GPUd() int32_t GetRegion(int32_t row) const { return (row < 63 ? 0 : row < 63 + 64 ? 1 : 2); }
@@ -102,10 +102,10 @@ class GPUTPCGeometry // TODO: Make values constexpr
   GPUd() int32_t EndOROC2() const { return GPUCA_ROW_COUNT; }
 #endif
  private:
-  static CONSTEXPR float FACTOR_Z2T = 1.f / FACTOR_T2Z;
+  static constexpr float FACTOR_Z2T = 1.f / FACTOR_T2Z;
 
  public:
-  GPUd() static CONSTEXPR float TPCLength() { return 250.f - 0.275f; }
+  GPUd() static constexpr float TPCLength() { return 250.f - 0.275f; }
   GPUd() float Row2X(int32_t row) const { return (mX[row]); }
   GPUd() float PadHeight(int32_t row) const { return (mPadHeight[GetRegion(row)]); }
   GPUd() float PadHeightByRegion(int32_t region) const { return (mPadHeight[region]); }

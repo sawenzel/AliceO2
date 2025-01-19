@@ -55,9 +55,9 @@ class GPUTPCGMPolynomialField
 
   void Print() const;
 
-  static CONSTEXPR const int32_t NTPCM = 10; // number of coefficients
-  static CONSTEXPR const int32_t NTRDM = 20; // number of coefficients for the TRD field
-  static CONSTEXPR const int32_t NITSM = 10; // number of coefficients for the ITS field
+  static constexpr const int32_t NTPCM = 10; // number of coefficients
+  static constexpr const int32_t NTRDM = 20; // number of coefficients for the TRD field
+  static constexpr const int32_t NITSM = 10; // number of coefficients for the ITS field
 
   GPUd() static void GetPolynomsTpc(float x, float y, float z, float f[NTPCM]);
   GPUd() static void GetPolynomsTrd(float x, float y, float z, float f[NTRDM]);

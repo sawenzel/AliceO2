@@ -45,7 +45,7 @@ class GPUSettings
                               RejectionStrategyA = 1,
                               RejectionStrategyB = 2 };
 
-  static CONSTEXPR const uint32_t TPC_MAX_TF_TIME_BIN = ((256 * 3564 + 2 * 8 - 2) / 8);
+  static constexpr const uint32_t TPC_MAX_TF_TIME_BIN = ((256 * 3564 + 2 * 8 - 2) / 8);
 };
 
 // Settings describing the global run parameters

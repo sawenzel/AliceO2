@@ -116,7 +116,7 @@ GPUdi() float GPUParam::GetSystematicClusterErrorC122(float x, float y, uint8_t 
   if (dx > occupancyTotal * rec.tpc.sysClusErrorC12Box) {
     return 0.f;
   }
-  CONSTEXPR float dEdgeInv = 18.f / CAMath::Pi();
+  constexpr float dEdgeInv = 18.f / CAMath::Pi();
   const float dy = (sector == (GPUCA_NSLICES / 2 + 1) ? 0.5f : -0.5f) * (y / x) * dEdgeInv + 0.5f;
   const float errC12 = rec.tpc.sysClusErrorC12Norm * occupancyTotal * dy;
   return errC12 * errC12;

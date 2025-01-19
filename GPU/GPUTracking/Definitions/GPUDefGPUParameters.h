@@ -632,13 +632,8 @@
   #define GPUCA_SORT_STARTHITS
 #endif
 
-#if defined(__cplusplus) && __cplusplus >= 201703L
 #define GPUCA_NEW_ALIGNMENT (std::align_val_t{GPUCA_BUFFER_ALIGNMENT})
 #define GPUCA_OPERATOR_NEW_ALIGNMENT ,GPUCA_NEW_ALIGNMENT
-#else
-#define GPUCA_NEW_ALIGNMENT
-#define GPUCA_OPERATOR_NEW_ALIGNMENT
-#endif
 
-// clang-format on
+    // clang-format on
 #endif

@@ -332,7 +332,7 @@ GPUdi() GPUTPCCompressionGatherKernels::Vec128* GPUTPCCompressionGatherKernels::
 template <typename T, typename S>
 GPUdi() bool GPUTPCCompressionGatherKernels::isAlignedTo(const S* ptr)
 {
-  if CONSTEXPR (alignof(S) >= alignof(T)) {
+  if constexpr (alignof(S) >= alignof(T)) {
     static_cast<void>(ptr);
     return true;
   } else {
@@ -343,10 +343,10 @@ GPUdi() bool GPUTPCCompressionGatherKernels::isAlignedTo(const S* ptr)
 template <>
 GPUdi() void GPUTPCCompressionGatherKernels::compressorMemcpy<uint8_t>(uint8_t* GPUrestrict() dst, const uint8_t* GPUrestrict() src, uint32_t size, int32_t nThreads, int32_t iThread)
 {
-  CONSTEXPR const int32_t vec128Elems = CpyVector<uint8_t, Vec128>::Size;
-  CONSTEXPR const int32_t vec64Elems = CpyVector<uint8_t, Vec64>::Size;
-  CONSTEXPR const int32_t vec32Elems = CpyVector<uint8_t, Vec32>::Size;
-  CONSTEXPR const int32_t vec16Elems = CpyVector<uint8_t, Vec16>::Size;
+  constexpr const int32_t vec128Elems = CpyVector<uint8_t, Vec128>::Size;
+  constexpr const int32_t vec64Elems = CpyVector<uint8_t, Vec64>::Size;
+  constexpr const int32_t vec32Elems = CpyVector<uint8_t, Vec32>::Size;
+  constexpr const int32_t vec16Elems = CpyVector<uint8_t, Vec16>::Size;
 
   if (size >= uint32_t(nThreads * vec128Elems)) {
     compressorMemcpyVectorised<uint8_t, Vec128>(dst, src, size, nThreads, iThread);
@@ -364,9 +364,9 @@ GPUdi() void GPUTPCCompressionGatherKernels::compressorMemcpy<uint8_t>(uint8_t* 
 template <>
 GPUdi() void GPUTPCCompressionGatherKernels::compressorMemcpy<uint16_t>(uint16_t* GPUrestrict() dst, const uint16_t* GPUrestrict() src, uint32_t size, int32_t nThreads, int32_t iThread)
 {
-  CONSTEXPR const int32_t vec128Elems = CpyVector<uint16_t, Vec128>::Size;
-  CONSTEXPR const int32_t vec64Elems = CpyVector<uint16_t, Vec64>::Size;
-  CONSTEXPR const int32_t vec32Elems = CpyVector<uint16_t, Vec32>::Size;
+  constexpr const int32_t vec128Elems = CpyVector<uint16_t, Vec128>::Size;
+  constexpr const int32_t vec64Elems = CpyVector<uint16_t, Vec64>::Size;
+  constexpr const int32_t vec32Elems = CpyVector<uint16_t, Vec32>::Size;
 
   if (size >= uint32_t(nThreads * vec128Elems)) {
     compressorMemcpyVectorised<uint16_t, Vec128>(dst, src, size, nThreads, iThread);
@@ -382,8 +382,8 @@ GPUdi() void GPUTPCCompressionGatherKernels::compressorMemcpy<uint16_t>(uint16_t
 template <>
 GPUdi() void GPUTPCCompressionGatherKernels::compressorMemcpy<uint32_t>(uint32_t* GPUrestrict() dst, const uint32_t* GPUrestrict() src, uint32_t size, int32_t nThreads, int32_t iThread)
 {
-  CONSTEXPR const int32_t vec128Elems = CpyVector<uint32_t, Vec128>::Size;
-  CONSTEXPR const int32_t vec64Elems = CpyVector<uint32_t, Vec64>::Size;
+  constexpr const int32_t vec128Elems = CpyVector<uint32_t, Vec128>::Size;
+  constexpr const int32_t vec64Elems = CpyVector<uint32_t, Vec64>::Size;
 
   if (size >= uint32_t(nThreads * vec128Elems)) {
     compressorMemcpyVectorised<uint32_t, Vec128>(dst, src, size, nThreads, iThread);
@@ -446,8 +446,8 @@ GPUdi() void GPUTPCCompressionGatherKernels::compressorMemcpyBuffered(V* buf, T*
   V* GPUrestrict() dstAligned = nullptr;
 
   T* bufT = reinterpret_cast<T*>(buf);
-  CONSTEXPR const int32_t bufSize = GPUCA_WARP_SIZE;
-  CONSTEXPR const int32_t bufTSize = bufSize * sizeof(V) / sizeof(T);
+  constexpr const int32_t bufSize = GPUCA_WARP_SIZE;
+  constexpr const int32_t bufTSize = bufSize * sizeof(V) / sizeof(T);
 
   for (uint32_t i = 0; i < nEntries; i++) {
     uint32_t srcPos = 0;

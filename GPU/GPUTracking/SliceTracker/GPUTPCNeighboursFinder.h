@@ -51,7 +51,7 @@ class GPUTPCNeighboursFinder : public GPUKernelTemplate
   };
 
   typedef GPUconstantref() GPUTPCTracker processorType;
-  GPUhdi() CONSTEXPR static GPUDataTypes::RecoStep GetRecoStep() { return GPUCA_RECO_STEP::TPCSliceTracking; }
+  GPUhdi() constexpr static GPUDataTypes::RecoStep GetRecoStep() { return GPUCA_RECO_STEP::TPCSliceTracking; }
   GPUhdi() static processorType* Processor(GPUConstantMem& processors)
   {
     return processors.tpcTrackers;
