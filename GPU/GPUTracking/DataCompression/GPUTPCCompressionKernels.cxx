@@ -69,7 +69,7 @@ GPUdii() void GPUTPCCompressionKernels::Thread<GPUTPCCompressionKernels::step0at
       }
       const ClusterNative& GPUrestrict() orgCl = clusters->clusters[hit.slice][hit.row][hit.num - clusters->clusterOffset[hit.slice][hit.row]];
       float x = param.tpcGeometry.Row2X(hit.row);
-      float y = param.tpcGeometry.LinearPad2Y(hit.slice, hit.row, orgCl.getPad());
+      float y = track.LinearPad2Y(hit.slice, orgCl.getPad(), param.tpcGeometry.PadWidth(hit.row), param.tpcGeometry.NPads(hit.row));
       float z = param.tpcGeometry.LinearTime2Z(hit.slice, orgCl.getTime());
       if (nClustersStored) {
         if ((hit.slice < GPUCA_NSLICES) ^ (lastSlice < GPUCA_NSLICES)) {
@@ -115,7 +115,7 @@ GPUdii() void GPUTPCCompressionKernels::Thread<GPUTPCCompressionKernels::step0at
         }
         c.rowDiffA[cidx] = row;
         c.sliceLegDiffA[cidx] = (hit.leg == lastLeg ? 0 : compressor.NSLICES) + slice;
-        float pad = CAMath::Max(0.f, CAMath::Min((float)param.tpcGeometry.NPads(GPUCA_ROW_COUNT - 1), param.tpcGeometry.LinearY2Pad(hit.slice, hit.row, track.Y())));
+        float pad = CAMath::Max(0.f, CAMath::Min((float)param.tpcGeometry.NPads(GPUCA_ROW_COUNT - 1), track.LinearY2Pad(hit.slice, track.Y(), param.tpcGeometry.PadWidth(hit.row), param.tpcGeometry.NPads(hit.row))));
         c.padResA[cidx] = orgCl.padPacked - orgCl.packPad(pad);
         float time = CAMath::Max(0.f, param.tpcGeometry.LinearZ2Time(hit.slice, track.Z() + zOffset));
         c.timeResA[cidx] = (orgCl.getTimePacked() - orgCl.packTime(time)) & 0xFFFFFF;
