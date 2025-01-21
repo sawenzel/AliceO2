@@ -623,6 +623,9 @@ auto makeHolders(arrow::MemoryPool* pool, size_t nRows)
 template <typename... ARGS>
 using IndexedHoldersTuple = decltype(makeHolderTypes<ARGS...>());
 
+template <typename T>
+concept ShouldNotDeconstruct = std::is_bounded_array_v<T> || std::is_arithmetic_v<T> || framework::is_base_of_template_v<std::vector, T>;
+
 /// Helper class which creates a lambda suitable for building
 /// an arrow table from a tuple. This can be used, for example
 /// to build an arrow::Table from a TDataFrame.
@@ -662,21 +665,15 @@ class TableBuilder
 
  public:
   template <typename ARG0, typename... ARGS>
-    requires(sizeof...(ARGS) == 0)
+    requires(sizeof...(ARGS) == 0) && (!ShouldNotDeconstruct<ARG0>)
   static constexpr int countColumns()
   {
-    if constexpr (std::is_bounded_array_v<ARG0> == false &&
-                  std::is_arithmetic_v<ARG0> == false &&
-                  framework::is_base_of_template_v<std::vector, ARG0> == false) {
-      using argsPack_t = decltype(tuple_to_pack(framework::to_tuple(std::declval<ARG0>())));
-      return framework::pack_size(argsPack_t{});
-    } else {
-      return 1;
-    }
+    using argsPack_t = decltype(tuple_to_pack(framework::to_tuple(std::declval<ARG0>())));
+    return framework::pack_size(argsPack_t{});
   }
 
   template <typename ARG0, typename... ARGS>
-    requires(sizeof...(ARGS) > 0)
+    requires(sizeof...(ARGS) > 0) || ShouldNotDeconstruct<ARG0>
   static constexpr int countColumns()
   {
     return 1 + sizeof...(ARGS);
@@ -698,7 +695,7 @@ class TableBuilder
   /// Creates a lambda which is suitable to persist things
   /// in an arrow::Table
   template <typename ARG0, typename... ARGS>
-    requires(sizeof...(ARGS) > 0)
+    requires(sizeof...(ARGS) > 0) || ShouldNotDeconstruct<ARG0>
   auto persist(std::array<char const*, sizeof...(ARGS) + 1> const& columnNames)
   {
     auto persister = persistTuple(framework::pack<ARG0, ARGS...>{}, columnNames);
@@ -711,31 +708,15 @@ class TableBuilder
   // Special case for a single parameter to handle the serialization of struct
   // which can be decomposed
   template <typename ARG0, typename... ARGS>
-    requires(sizeof...(ARGS) == 0)
+    requires(sizeof...(ARGS) == 0) && (!ShouldNotDeconstruct<ARG0>)
   auto persist(std::array<char const*, countColumns<ARG0, ARGS...>()> const& columnNames)
   {
-    if constexpr (std::is_bounded_array_v<ARG0> == false &&
-                  std::is_arithmetic_v<ARG0> == false &&
-                  framework::is_base_of_template_v<std::vector, ARG0> == false) {
-      using argsPack_t = decltype(tuple_to_pack(framework::to_tuple(std::declval<ARG0>())));
-      auto persister = persistTuple(argsPack_t{}, columnNames);
-      return [persister = persister](unsigned int slot, ARG0 const& obj) -> void {
-        auto t = to_tuple(obj);
-        persister(slot, t);
-      };
-    } else if constexpr ((std::is_bounded_array_v<ARG0> == true ||
-                          framework::is_base_of_template_v<std::vector, ARG0> == true)) {
-      auto persister = persistTuple(framework::pack<ARG0>{}, columnNames);
-      // Callback used to fill the builders
-      return [persister = persister](unsigned int slot, typename BuilderMaker<ARG0>::FillType const& arg) -> void {
-        persister(slot, std::forward_as_tuple(arg));
-      };
-    } else {
-      auto persister = persistTuple(framework::pack<ARG0>{}, columnNames);
-      return [persister = persister](unsigned int slot, typename BuilderMaker<ARG0>::FillType const& arg) -> void {
-        persister(slot, std::forward_as_tuple(arg));
-      };
-    }
+    using argsPack_t = decltype(tuple_to_pack(framework::to_tuple(std::declval<ARG0>())));
+    auto persister = persistTuple(argsPack_t{}, columnNames);
+    return [persister = persister](unsigned int slot, ARG0 const& obj) -> void {
+      auto t = to_tuple(obj);
+      persister(slot, t);
+    };
   }
 
   /// Same a the above, but use a tuple to persist stuff.
