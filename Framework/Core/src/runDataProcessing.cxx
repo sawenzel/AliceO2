@@ -64,7 +64,6 @@
 #include "Framework/DataTakingContext.h"
 #include "Framework/CommonServices.h"
 #include "Framework/DefaultsHelpers.h"
-#include "ControlServiceHelpers.h"
 #include "ProcessingPoliciesHelpers.h"
 #include "DriverServerContext.h"
 #include "HTTPParser.h"
@@ -848,9 +847,7 @@ void processChildrenOutput(uv_loop_t* loop,
   // TODO: have multiple display modes
   // TODO: graphical view of the processing?
   assert(infos.size() == controls.size());
-  std::match_results<std::string_view::const_iterator> match;
   ParsedMetricMatch metricMatch;
-  ParsedConfigMatch configMatch;
 
   int processed = 0;
   for (size_t di = 0, de = infos.size(); di < de; ++di) {
@@ -881,11 +878,7 @@ void processChildrenOutput(uv_loop_t* loop,
       // in the GUI.
       // Then we check if it is part of our Poor man control system
       // if yes, we execute the associated command.
-      if (logLevel == LogParsingHelpers::LogLevel::Info && ControlServiceHelpers::parseControl(token, match)) {
-        throw runtime_error("stdout is not supported anymore as a driver backend. Please use ws://");
-      } else if (logLevel == LogParsingHelpers::LogLevel::Info && DeviceConfigHelper::parseConfig(token.substr(16), configMatch)) {
-        throw runtime_error("stdout is not supported anymore as a driver backend. Please use ws://");
-      } else if (!control.quiet && (token.find(control.logFilter) != std::string::npos) && logLevel >= info.logLevel) {
+      if (!control.quiet && (token.find(control.logFilter) != std::string::npos) && logLevel >= info.logLevel) {
         assert(info.historyPos >= 0);
         assert(info.historyPos < info.history.size());
         info.history[info.historyPos] = token;
