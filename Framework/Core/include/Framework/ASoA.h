@@ -1024,6 +1024,9 @@ concept can_bind = requires(T&& t) {
   { t.B::mColumnIterator };
 };
 
+template <typename... C>
+concept has_index = (is_indexing_column<C> || ...);
+
 template <typename D, typename O, typename IP, typename... C>
 struct TableIterator : IP, C... {
  public:
@@ -1031,8 +1034,6 @@ struct TableIterator : IP, C... {
   using policy_t = IP;
   using all_columns = framework::pack<C...>;
   using persistent_columns_t = framework::selected_pack<soa::is_persistent_column_t, C...>;
-  using indexing_columns_t = framework::selected_pack<is_indexing_t, C...>;
-  constexpr inline static bool has_index_v = framework::pack_size(indexing_columns_t{}) > 0;
   using external_index_columns_t = framework::selected_pack<soa::is_external_index_t, C...>;
   using internal_index_columns_t = framework::selected_pack<soa::is_self_index_t, C...>;
   using bindings_pack_t = decltype([]<typename... Cs>(framework::pack<Cs...>) -> framework::pack<typename Cs::binding_t...> {}(external_index_columns_t{})); // decltype(extractBindings(external_index_columns_t{}));
@@ -1042,13 +1043,19 @@ struct TableIterator : IP, C... {
       C(columnData[framework::has_type_at_v<C>(all_columns{})])...
   {
     bind();
+  }
+
+  TableIterator(arrow::ChunkedArray* columnData[sizeof...(C)], IP&& policy)
+    requires(has_index<C...>)
+    : IP{policy},
+      C(columnData[framework::has_type_at_v<C>(all_columns{})])...
+  {
+    bind();
     // In case we have an index column might need to constrain the actual
     // number of rows in the view to the range provided by the index.
     // FIXME: we should really understand what happens to an index when we
     // have a RowViewFiltered.
-    if constexpr (has_index_v) {
-      this->limitRange(this->rangeStart(), this->rangeEnd());
-    }
+    this->limitRange(this->rangeStart(), this->rangeEnd());
   }
 
   TableIterator() = default;
@@ -1192,7 +1199,7 @@ struct TableIterator : IP, C... {
       [this]<typename T>(T*) -> void {},
     };
     (f(static_cast<C*>(nullptr)), ...);
-    if constexpr (has_index_v) {
+    if constexpr (has_index<C...>) {
       this->setIndices(this->getIndices());
       this->setOffsets(this->getOffsets());
     }
