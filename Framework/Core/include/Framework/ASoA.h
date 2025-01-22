@@ -1626,7 +1626,7 @@ auto select(T const& t, framework::expressions::Filter const& f)
   return Filtered<T>({t.asArrowTable()}, selectionToVector(framework::expressions::createSelection(t.asArrowTable(), f)));
 }
 
-arrow::ChunkedArray* getIndexFromLabel(arrow::Table* table, const char* label);
+arrow::ChunkedArray* getIndexFromLabel(arrow::Table* table, std::string_view label);
 
 template <typename D, typename O, typename IP, typename... C>
 consteval auto base_iter(framework::pack<C...>&&) -> TableIterator<D, O, IP, C...>
