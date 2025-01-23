@@ -786,27 +786,31 @@ struct Index : o2::soa::IndexColumn<Index<START, END>> {
   static constexpr const char* mLabel = "Index";
   using type = int64_t;
 
-  using bindings_t = typename o2::framework::pack<>;
-  std::tuple<> boundIterators;
   std::tuple<int64_t const*, int64_t const*> rowIndices;
   /// The offsets within larger tables. Currently only
   /// one level of nesting is supported.
   std::tuple<uint64_t const*> rowOffsets;
 };
 
-template <typename D>
-concept is_indexing_column = requires {
-  []<int64_t S, int64_t E>(o2::soa::Index<S, E>*) {}(std::declval<D*>());
+template <typename C>
+concept is_indexing_column = requires(C& c) {
+  c.rowIndices;
+  c.rowOffsets;
 };
 
-template <typename T>
-concept is_dynamic_column = framework::base_of_template<soa::DynamicColumn, T>;
+template <typename C>
+concept is_dynamic_column = requires(C& c) {
+  c.boundIterators;
+};
+
+template <typename C>
+concept is_marker_column = requires { &C::mark; };
 
 template <typename T>
 using is_dynamic_t = std::conditional_t<is_dynamic_column<T>, std::true_type, std::false_type>;
 
 template <typename T>
-concept is_column = framework::base_of_template<soa::Column, T> || is_dynamic_column<T> || is_indexing_column<T> || framework::base_of_template<soa::MarkerColumn, T>;
+concept is_column = is_persistent_column<T> || is_dynamic_column<T> || is_indexing_column<T> || is_marker_column<T>;
 
 template <typename T>
 using is_indexing_t = std::conditional_t<is_indexing_column<T>, std::true_type, std::false_type>;
