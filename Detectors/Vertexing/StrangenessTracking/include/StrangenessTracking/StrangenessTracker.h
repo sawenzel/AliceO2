@@ -279,20 +279,20 @@ class StrangenessTracker
     for (unsigned int iClus{0}; iClus < ITSclus.size(); ++iClus) {
       auto& clus = ITSclus[iClus];
       auto pattID = clus.getPatternID();
+      auto ib = o2::its3::constants::detID::isDetITS3(clus.getChipID());
       int npix;
       o2::itsmft::ClusterPattern patt;
 
-      if (pattID == o2::itsmft::CompCluster::InvalidPatternID || mdict->isGroup(pattID)) {
+      if (pattID == o2::itsmft::CompCluster::InvalidPatternID || mdict->isGroup(pattID, ib)) {
         patt.acquirePattern(pattIt);
         npix = patt.getNPixels();
       } else {
 
-        npix = mdict->getNpixels(pattID);
-        patt = mdict->getPattern(pattID);
+        npix = mdict->getNpixels(pattID, ib);
+        patt = mdict->getPattern(pattID, ib);
       }
       clusSizeVec[iClus] = npix;
     }
-    // LOG(info) << " Patt Npixel: " << pattVec[0].getNPixels();
   }
 #endif
 
