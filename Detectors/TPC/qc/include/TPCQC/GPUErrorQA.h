@@ -18,22 +18,20 @@
 #define AliceO2_TPC_QC_GPUERRORQA_H
 
 #include <memory>
-#include <gsl/span>
+#include <string>
+#include <vector>
+#include <unordered_map>
 
 // root includes
-#include "TH1.h"
 
 // o2 includes
 // #include "DataFormatsTPC/Defs.h"
 
-namespace o2
-{
-namespace tpc
-{
-namespace qc
+class TH1;
+namespace o2::tpc::qc
 {
 
-/// @brief  TPC QC task for errors from GPU reconstruction
+/// @brief TPC QC task for errors from GPU reconstruction
 ///
 /// This class is used to retrieve and visualize GPU errors
 /// according to corresponding error code and location.
@@ -47,7 +45,7 @@ class GPUErrorQA
   GPUErrorQA() = default;
 
   /// process gpu error reported by the reconstruction workflow
-  void processErrors(gsl::span<const std::array<uint32_t, 4>> errors);
+  void processErrors(std::vector<std::array<uint32_t, 4>> errors);
 
   /// Initialize all histograms
   void initializeHistograms();
@@ -55,15 +53,17 @@ class GPUErrorQA
   /// Reset all histograms
   void resetHistograms();
 
+  /// return histograms
+  const std::unordered_map<std::string, std::unique_ptr<TH1>>& getMapHist() const { return mMapHist; };
+
   /// Dump results to a file
   void dumpToFile(std::string filename);
 
  private:
-  std::unique_ptr<TH1F> mHist;
-  ClassDefNV(GPUErrorQA, 1)
+  std::unordered_map<std::string, std::unique_ptr<TH1>> mMapHist;
+
+  ClassDefNV(GPUErrorQA, 1);
 };
-} // namespace qc
-} // namespace tpc
-} // namespace o2
+} // namespace o2::tpc::qc
 
 #endif // AliceO2_TPC_QC_GPUERRORQA_H

@@ -11,16 +11,13 @@
 
 #define _USE_MATH_DEFINES
 
-#include <cmath>
-#include <memory>
-
 // root includes
 #include "TFile.h"
-#include <TH1.h>
+#include "TH1I.h"
 
 // o2 includes
 #include "TPCQC/GPUErrorQA.h"
-#include "GPUErrors.h"
+#include "GPUDefMacros.h"
 
 ClassImp(o2::tpc::qc::GPUErrorQA);
 
@@ -30,26 +27,49 @@ using namespace o2::tpc::qc;
 void GPUErrorQA::initializeHistograms()
 {
   TH1::AddDirectory(false);
-  mHist = std::make_unique<TH1F>("ErrorCounter", "ErrorCounter", o2::gpu::GPUErrors::getMaxErrors(), 0, o2::gpu::GPUErrors::getMaxErrors());
+
+  // get gpu error names
+  // copied from GPUErrors.h
+  static std::unordered_map<uint32_t, const char*> errorNames = {
+#define GPUCA_ERROR_CODE(num, name, ...) {num, GPUCA_M_STR(name)},
+#include "GPUErrorCodes.h"
+#undef GPUCA_ERROR_CODE
+  };
+
+  // 1D histogram counting all reported errors
+  mMapHist["ErrorCounter"] = std::make_unique<TH1I>("ErrorCounter", "ErrorCounter", errorNames.size(), -0.5, errorNames.size() - 0.5);
+  mMapHist["ErrorCounter"]->GetXaxis()->SetTitle("Error Codes");
+  mMapHist["ErrorCounter"]->GetYaxis()->SetTitle("Entries");
+  // for convienence, label each bin with the error name
+  for (size_t bin = 1; bin < mMapHist["ErrorCounter"]->GetNbinsX(); bin++) {
+    auto const& it = errorNames.find(bin);
+    mMapHist["ErrorCounter"]->GetXaxis()->SetBinLabel(bin, it->second);
+  }
 }
 //______________________________________________________________________________
 void GPUErrorQA::resetHistograms()
 {
-  mHist->Reset();
+  for (const auto& pair : mMapHist) {
+    pair.second->Reset();
+  }
 }
 //______________________________________________________________________________
-void GPUErrorQA::processErrors(gsl::span<const std::array<uint32_t, 4>> errors)
+void GPUErrorQA::processErrors(std::vector<std::array<uint32_t, 4>> errors)
 {
   for (const auto& error : errors) {
     uint32_t errorCode = error[0];
-    mHist->Fill(static_cast<float>(errorCode));
+    mMapHist["ErrorCounter"]->AddBinContent(errorCode);
   }
 }
 
 //______________________________________________________________________________
 void GPUErrorQA::dumpToFile(const std::string filename)
 {
-  auto f = std::unique_ptr<TFile>(TFile::Open(filename.c_str(), "recreate"));
-  mHist->Write();
-  f->Close();
+  auto f = std::unique_ptr<TFile>(TFile::Open(filename.data(), "recreate"));
+  TObjArray arr;
+  arr.SetName("GPUErrorQA_Hists");
+  for (const auto& [name, hist] : mMapHist) {
+    arr.Add(hist.get());
+  }
+  arr.Write(arr.GetName(), TObject::kSingleKey);
 }
