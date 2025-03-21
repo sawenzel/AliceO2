@@ -512,6 +512,19 @@ void AODProducerWorkflowDPL::fillTrackTablesPerCollision(int collisionID,
             }
           }
 
+          // include specific selection of tpc standalone tracks if thinning is active
+          if (mThinTracks && extraInfoHolder.isTPConly && !writeQAData) { // if trackQA is written then no check has to be done
+            auto trk = data.getTPCTrack(trackIndex);
+            if (trk.getNClusters() >= mTrackQCNCls && trk.getPt() >= mTrackQCPt) {
+              o2::dataformats::DCA dcaInfo{999.f, 999.f, 999.f, 999.f, 999.f};
+              o2::dataformats::VertexBase v = mVtx.getMeanVertex(collisionID < 0 ? 0.f : data.getPrimaryVertex(collisionID).getZ());
+              if (o2::base::Propagator::Instance()->propagateToDCABxByBz(v, trk, 2., mMatCorr, &dcaInfo) && std::abs(dcaInfo.getY()) < mTrackQCDCAxy) {
+                writeQAData = true; // just setting this to not thin the track
+              }
+            }
+          }
+
+          // Skip thinning if not enabled or track is not tpc standalone or assoc. to a V0 or qa'ed
           if (mThinTracks && src == GIndex::Source::TPC && mGIDUsedBySVtx.find(trackIndex) == mGIDUsedBySVtx.end() && mGIDUsedByStr.find(trackIndex) == mGIDUsedByStr.end() && !writeQAData) {
             mGIDToTableID.emplace(trackIndex, -1); // pretend skipped tracks are stored; this is safe since they are are not written to disk and -1 indicates to all users to not use this track
             continue;
@@ -1683,6 +1696,9 @@ void AODProducerWorkflowDPL::init(InitContext& ic)
   }
   mTrackQCFraction = ic.options().get<float>("trackqc-fraction");
   mTrackQCNTrCut = ic.options().get<int64_t>("trackqc-NTrCut");
+  mTrackQCDCAxy = ic.options().get<float>("trackqc-tpc-dca");
+  mTrackQCPt = ic.options().get<float>("trackqc-tpc-pt");
+  mTrackQCNCls = ic.options().get<int>("trackqc-tpc-cls");
   if (auto seed = ic.options().get<int>("seed"); seed == 0) {
     LOGP(info, "Using random device for seeding");
     std::random_device rd;
@@ -3237,6 +3253,9 @@ DataProcessorSpec getAODProducerWorkflowSpec(GID::mask_t src, bool enableSV, boo
       ConfigParamSpec{"thin-tracks", VariantType::Bool, false, {"Produce thinned track tables"}},
       ConfigParamSpec{"trackqc-fraction", VariantType::Float, float(0.1), {"Fraction of tracks to QC"}},
       ConfigParamSpec{"trackqc-NTrCut", VariantType::Int64, 4L, {"Minimal length of the track - in amount of tracklets"}},
+      ConfigParamSpec{"trackqc-tpc-dca", VariantType::Float, 3.f, {"Keep TPC standalone track with this DCAxy to the PV"}},
+      ConfigParamSpec{"trackqc-tpc-cls", VariantType::Int, 80, {"Keep TPC standalone track with this #clusters"}},
+      ConfigParamSpec{"trackqc-tpc-pt", VariantType::Float, 0.2f, {"Keep TPC standalone track with this pt"}},
       ConfigParamSpec{"with-streamers", VariantType::String, "", {"Bit-mask to steer writing of intermediate streamer files"}},
       ConfigParamSpec{"seed", VariantType::Int, 0, {"Set seed for random generator used for sampling (0 (default) means using a random_device)"}},
     }};
