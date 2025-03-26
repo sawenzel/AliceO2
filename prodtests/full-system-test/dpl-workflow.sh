@@ -101,10 +101,14 @@ EVE_OPT=" --jsons-folder $EDJSONS_DIR"
 
 [[ "0$DISABLE_ROOT_OUTPUT" == "00" ]] && DISABLE_ROOT_OUTPUT=
 
+has_detectors_gpu TPC ITS && GPU_INPUT+=",its-clusters"
+has_detectors_gpu TPC ITS && GPU_OUTPUT+=",its-tracks"
+
 if [[ $CTFINPUT != 1 ]]; then
   GPU_OUTPUT+=",tpc-triggers"
 fi
 if [[ $SYNCMODE == 1 ]]; then
+  has_detectors_gpu TPC ITS && ITS_CONFIG_KEY+="ITSCATrackerParam.trackingMode=0;" # sets ITS gpu reco to sync
   if [[ $BEAMTYPE == "PbPb" ]]; then
     ITS_CONFIG_KEY+="fastMultConfig.cutMultClusLow=${CUT_MULT_MIN_ITS:-100};fastMultConfig.cutMultClusHigh=${CUT_MULT_MAX_ITS:-200};fastMultConfig.cutMultVtxHigh=${CUT_MULT_VTX_ITS:-20};"
     MCH_CONFIG_KEY="MCHTracking.maxCandidates=50000;MCHTracking.maxTrackingDuration=20;"
@@ -137,10 +141,12 @@ if [[ $SYNCMODE == 1 ]]; then
   has_processing_step TPC_DEDX && GPU_CONFIG_KEY+="GPU_global.rundEdx=1;"
   has_detector ITS && TRD_FILTER_CONFIG+=" --filter-trigrec"
 else
+  has_detectors_gpu TPC ITS && ITS_CONFIG_KEY+="ITSCATrackerParam.trackingMode=1;" # sets ITS gpu reco to async
   if [[ $BEAMTYPE == "pp" ]]; then
     ITS_CONFIG_KEY+="ITSVertexerParam.phiCut=0.5;ITSVertexerParam.clusterContributorsCut=3;ITSVertexerParam.tanLambdaCut=0.2;"
   elif [[ $BEAMTYPE == "PbPb" ]]; then
-    ITS_CONFIG_KEY+="ITSVertexerParam.lowMultBeamDistCut=0;ITSCATrackerParam.nROFsPerIterations=12;"
+    ITS_CONFIG_KEY+="ITSVertexerParam.lowMultBeamDistCut=0;"
+    ! has_detectors_gpu TPC ITS && ITS_CONFIG_KEY+="ITSCATrackerParam.nROFsPerIterations=12;"
   fi
 
   if [[ $IS_SIMULATED_DATA == 0 && $CTFINPUT == 1 ]]; then # Enable fixes to the MCH readout mapping for async processing of real data
@@ -497,6 +503,9 @@ fi
 # if TPC correction with IDC from CCDB was requested
 has_detector TPC && [[ ${NEED_TPC_SCALERS_WF:-} == 1 ]] && add_W o2-tpc-scaler-workflow " ${TPC_SCALERS_CONF:-} "
 
+# if ITS+TPC GPU: pass ITS CKVs to the GPU WF
+has_detectors_gpu TPC ITS && GPU_CONFIG_KEY+=$ITS_CONFIG_KEY
+
 # ---------------------------------------------------------------------------------------------------------------------
 # Raw decoder workflows - disabled in async mode
 if [[ $CTFINPUT == 0 && $DIGITINPUT == 0 ]]; then
@@ -530,7 +539,7 @@ fi
 # Common reconstruction workflows
 (has_detector_reco TPC || has_detector_ctf TPC) && ! has_detector_from_global_reader TPC && add_W o2-gpu-reco-workflow "--gpu-reconstruction \"$GPU_CONFIG_SELF\" --input-type=$GPU_INPUT $DISABLE_MC --output-type $GPU_OUTPUT $TPC_CORR_OPT --pipeline gpu-reconstruction:${N_TPCTRK:-1},gpu-reconstruction-prepare:${N_TPCTRK:-1} $GPU_CONFIG" "GPU_global.deviceType=$GPUTYPE;GPU_proc.debugLevel=0;$GPU_CONFIG_KEY;$TRACKTUNETPCINNER;$TPC_CORR_KEY"
 (has_detector_reco TOF || has_detector_ctf TOF) && ! has_detector_from_global_reader TOF && add_W o2-tof-reco-workflow "$TOF_CONFIG --input-type $TOF_INPUT --output-type $TOF_OUTPUT $DISABLE_DIGIT_ROOT_INPUT $DISABLE_ROOT_OUTPUT $DISABLE_MC --pipeline $(get_N tof-compressed-decoder TOF RAW 1),$(get_N TOFClusterer TOF REST 1)"
-has_detector_reco ITS && ! has_detector_from_global_reader ITS && add_W o2-its-reco-workflow "--trackerCA $ITS_CONFIG $DISABLE_MC $DISABLE_DIGIT_CLUSTER_INPUT $DISABLE_ROOT_OUTPUT --pipeline $(get_N its-tracker ITS REST 1 ITSTRK),$(get_N its-clusterer ITS REST 1 ITSCL)" "$ITS_CONFIG_KEY;$ITSMFT_STROBES;$ITSEXTRAERR"
+(has_detector_reco ITS && ! has_detector_gpu ITS) && ! has_detector_from_global_reader ITS && add_W o2-its-reco-workflow "--trackerCA $ITS_CONFIG $DISABLE_MC $DISABLE_DIGIT_CLUSTER_INPUT $DISABLE_ROOT_OUTPUT --pipeline $(get_N its-tracker ITS REST 1 ITSTRK),$(get_N its-clusterer ITS REST 1 ITSCL)" "$ITS_CONFIG_KEY;$ITSMFT_STROBES;$ITSEXTRAERR"
 has_detector_reco FT0 && ! has_detector_from_global_reader FT0 && add_W o2-ft0-reco-workflow "$DISABLE_DIGIT_ROOT_INPUT $DISABLE_ROOT_OUTPUT $DISABLE_MC --pipeline $(get_N ft0-reconstructor FT0 REST 1)"
 has_detector_reco TRD && ! has_detector_from_global_reader TRD && add_W o2-trd-tracklet-transformer "--disable-irframe-reader $DISABLE_DIGIT_ROOT_INPUT $DISABLE_ROOT_OUTPUT $DISABLE_MC $TRD_FILTER_CONFIG --pipeline $(get_N TRDTRACKLETTRANSFORMER TRD REST 1 TRDTRKTRANS)"
 has_detectors_reco ITS TPC && ! has_detector_from_global_reader_tracks ITS-TPC && has_detector_matching ITSTPC && add_W o2-tpcits-match-workflow "$DISABLE_ROOT_INPUT $DISABLE_ROOT_OUTPUT $DISABLE_MC $SEND_ITSTPC_DTGL  $TPC_CORR_OPT --nthreads $ITSTPC_THREADS --pipeline $(get_N itstpc-track-matcher MATCH REST $ITSTPC_THREADS TPCITS)" "$ITSTPC_CONFIG_KEY;$INTERACTION_TAG_CONFIG_KEY;$ITSMFT_STROBES;$ITSEXTRAERR;$TPC_CORR_KEY"
@@ -539,7 +548,7 @@ has_detector_reco TOF && [[ ! -z "$TOF_SOURCES" ]] && ! has_detector_from_global
 has_detectors TPC && [[ -z "$DISABLE_ROOT_OUTPUT" && "${SKIP_TPC_CLUSTERSTRACKS_OUTPUT:-}" != 1 ]] && ! has_detector_from_global_reader TPC && add_W o2-tpc-reco-workflow "--input-type pass-through --output-type clusters,tpc-triggers,tracks,send-clusters-per-sector $DISABLE_MC"
 
 # ---------------------------------------------------------------------------------------------------------------------
-# Reconstruction workflows normally active only in async mode in async mode ($LIST_OF_ASYNC_RECO_STEPS), but can be forced via $WORKFLOW_EXTRA_PROCESSING_STEPS
+# Reconstruction workflows normally active only in async mode ($LIST_OF_ASYNC_RECO_STEPS), but can be forced via $WORKFLOW_EXTRA_PROCESSING_STEPS
 has_detector MID && ! has_detector_from_global_reader MID && has_processing_step MID_RECO && add_W o2-mid-reco-workflow "$DISABLE_ROOT_OUTPUT $DISABLE_MC --pipeline $(get_N MIDClusterizer MID REST 1),$(get_N MIDTracker MID REST 1)"
 has_detector MCH && ! has_detector_from_global_reader MCH && has_processing_step MCH_RECO && add_W o2-mch-reco-workflow "$DISABLE_DIGIT_ROOT_INPUT $DISABLE_ROOT_OUTPUT $DISABLE_MC --pipeline $(get_N mch-track-finder MCH REST 1 MCHTRK),$(get_N mch-cluster-finder MCH REST 1 MCHCL),$(get_N mch-cluster-transformer MCH REST 1)" "$MCH_CONFIG_KEY"
 has_detector MFT && ! has_detector_from_global_reader MFT && has_processing_step MFT_RECO && add_W o2-mft-reco-workflow "$DISABLE_DIGIT_CLUSTER_INPUT $DISABLE_MC $DISABLE_ROOT_OUTPUT $MFT_CONFIG --pipeline $(get_N mft-tracker MFT REST 1 MFTTRK)" "$MFT_CONFIG_KEY;$ITSMFT_STROBES"
@@ -574,6 +583,7 @@ has_detector_reco MCH && ( [[ -z "$DISABLE_ROOT_OUTPUT" ]] || needs_root_output 
 has_detector_reco MCH && ( [[ -z "$DISABLE_ROOT_OUTPUT" ]] || needs_root_output o2-mch-digits-writer-workflow ) && ! has_detector_from_global_reader MCH && add_W o2-mch-digits-writer-workflow "--input-digits-data-description F-DIGITS --input-digitrofs-data-description TC-F-DIGITROFS --mch-digit-outfile mchfdigits.root" "" 0
 has_detector_reco MCH && ( [[ -z "$DISABLE_ROOT_OUTPUT" ]] || needs_root_output o2-mch-clusters-writer-workflow ) && ! has_detector_from_global_reader MCH && add_W o2-mch-clusters-writer-workflow "" "" 0
 has_detector_reco MCH && ( [[ -z "$DISABLE_ROOT_OUTPUT" ]] || needs_root_output o2-mch-preclusters-writer-workflow ) && ! has_detector_from_global_reader MCH && add_W o2-mch-preclusters-writer-workflow "" "" 0
+has_detector_reco ITS && has_detector_gpu ITS TPC && [[ -z "$DISABLE_ROOT_OUTPUT" ]] && ! has_detector_from_global_reader ITS && add_W o2-its-track-writer-workflow "$DISABLE_MC" "" 0
 
 # always run vertexing if requested and if there are some sources, but in cosmic mode we work in pass-trough mode (create record for non-associated tracks)
 ( [[ $BEAMTYPE == "cosmic" ]] || ! has_detector_reco ITS) && PVERTEX_CONFIG+=" --skip"
