@@ -38,8 +38,6 @@ class GPUReconstructionCPUBackend : public GPUReconstructionProcessing
   void runKernelBackend(const gpu_reconstruction_kernels::krnlSetupArgs<T, I, Args...>& args);
   template <class T, int32_t I = 0, typename... Args>
   void runKernelBackendInternal(const gpu_reconstruction_kernels::krnlSetupTime& _xyz, const Args&... args);
-  template <class T, int32_t I>
-  gpu_reconstruction_kernels::krnlProperties getKernelPropertiesBackend();
 };
 
 class GPUReconstructionCPU : public GPUReconstructionKernels<GPUReconstructionCPUBackend>
@@ -55,10 +53,7 @@ class GPUReconstructionCPU : public GPUReconstructionKernels<GPUReconstructionCP
   template <class S, int32_t I = 0, typename... Args>
   void runKernel(krnlSetup&& setup, Args&&... args);
   template <class S, int32_t I = 0>
-  const gpu_reconstruction_kernels::krnlProperties getKernelProperties()
-  {
-    return getKernelPropertiesImpl(gpu_reconstruction_kernels::classArgument<S, I>());
-  }
+  gpu_reconstruction_kernels::krnlProperties getKernelProperties(int gpu = -1);
 
   virtual int32_t GPUDebug(const char* state = "UNKNOWN", int32_t stream = -1, bool force = false);
   int32_t GPUStuck() { return mGPUStuck; }

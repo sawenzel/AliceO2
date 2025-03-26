@@ -58,8 +58,6 @@ class GPUReconstructionOCLBackend : public GPUReconstructionDeviceBase
   int32_t AddKernel();
   template <class T, int32_t I = 0, typename... Args>
   void runKernelBackendInternal(const krnlSetupTime& _xyz, const Args&... args);
-  template <class T, int32_t I = 0>
-  gpu_reconstruction_kernels::krnlProperties getKernelPropertiesBackend();
 
   GPUReconstructionOCLInternals* mInternals;
   float mOclVersion;

@@ -9,7 +9,7 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-/// \file GPUDefGPUParameters.h
+/// \file GPUDefParametersDefault.h
 /// \author David Rohr
 
 // This files contains compile-time constants affecting the GPU performance.
@@ -17,13 +17,9 @@
 // This file also contains all constants describing memory limitations, essentially limiting the total number of tracks, etc.
 // Compile-time constants affecting the tracking algorithms / results are located in GPUDefConstantsAndSettings.h
 
-#ifndef GPUDEFGPUPARAMETERS_H
-#define GPUDEFGPUPARAMETERS_H
+#ifndef GPUDEFPARAMETERSDEFAULT_H
+#define GPUDEFPARAMETERSDEFAULT_H
 // clang-format off
-
-#ifndef GPUDEF_H
-#error Please include GPUDef.h
-#endif
 
 #include "GPUCommonDef.h"
 #include "GPUDefMacros.h"
@@ -282,7 +278,7 @@
 #endif // GPUCA_GPUCODE
 
 #ifdef GPUCA_GPUCODE
-  // Default settings, if not already set for selected GPU type
+  // Default settings for GPU, if not already set for selected GPU type
   #ifndef GPUCA_THREAD_COUNT
     #define GPUCA_THREAD_COUNT 256
   #endif
@@ -334,10 +330,10 @@
   #ifndef GPUCA_LB_GPUTPCDecompressionUtilKernels_sortPerSectorRow
     #define GPUCA_LB_GPUTPCDecompressionUtilKernels_sortPerSectorRow 256
   #endif
-    #ifndef GPUCA_LB_GPUTPCDecompressionUtilKernels_countFilteredClusters
+  #ifndef GPUCA_LB_GPUTPCDecompressionUtilKernels_countFilteredClusters
     #define GPUCA_LB_GPUTPCDecompressionUtilKernels_countFilteredClusters 256
   #endif
-    #ifndef GPUCA_LB_GPUTPCDecompressionUtilKernels_storeFilteredClusters
+  #ifndef GPUCA_LB_GPUTPCDecompressionUtilKernels_storeFilteredClusters
     #define GPUCA_LB_GPUTPCDecompressionUtilKernels_storeFilteredClusters 256
   #endif
   #ifndef GPUCA_LB_GPUTPCCFDecodeZS
@@ -487,10 +483,15 @@
   #ifndef GPUCA_LB_GPUTrackingRefitKernel_mode1asTrackParCov
     #define GPUCA_LB_GPUTrackingRefitKernel_mode1asTrackParCov 256
   #endif
+  #ifndef GPUCA_LB_GPUMemClean16
+    #define GPUCA_LB_GPUMemClean16 GPUCA_THREAD_COUNT, 1
+  #endif
+  #ifndef GPUCA_LB_GPUitoa
+    #define GPUCA_LB_GPUitoa GPUCA_THREAD_COUNT, 1
+  #endif
   #define GPUCA_GET_THREAD_COUNT(...) GPUCA_M_FIRST(__VA_ARGS__)
 #else
-  // The following defaults are needed to compile the host code
-  #define GPUCA_GET_THREAD_COUNT(...) 1
+  #define GPUCA_GET_THREAD_COUNT(...) 1 // On the host, a thread is a block, and we run 1 "device thread" per block.
 #endif
 
 #define GPUCA_GET_WARP_COUNT(...) (GPUCA_GET_THREAD_COUNT(__VA_ARGS__) / GPUCA_WARP_SIZE)
@@ -523,33 +524,33 @@
 #define GPUCA_LB_GPUTPCCompressionGatherKernels_multiBlock GPUCA_LB_COMPRESSION_GATHER
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
-#define GPUCA_SPECIALIZE_THRUST_SORTS
+  #define GPUCA_SPECIALIZE_THRUST_SORTS
 #endif
 
 #ifndef GPUCA_NEIGHBORSFINDER_REGS
-#define GPUCA_NEIGHBORSFINDER_REGS NONE, 0
+  #define GPUCA_NEIGHBORSFINDER_REGS NONE, 0
 #endif
 #ifdef GPUCA_GPUCODE
   #ifndef GPUCA_NEIGHBOURS_FINDER_MAX_NNEIGHUP
-  #define GPUCA_NEIGHBOURS_FINDER_MAX_NNEIGHUP 6
+     #define GPUCA_NEIGHBOURS_FINDER_MAX_NNEIGHUP 6
   #endif
   #ifndef GPUCA_TRACKLET_SELECTOR_HITS_REG_SIZE
-  #define GPUCA_TRACKLET_SELECTOR_HITS_REG_SIZE 12
+     #define GPUCA_TRACKLET_SELECTOR_HITS_REG_SIZE 12
   #endif
   #ifndef GPUCA_ALTERNATE_BORDER_SORT
-  #define GPUCA_ALTERNATE_BORDER_SORT 0
+     #define GPUCA_ALTERNATE_BORDER_SORT 0
   #endif
   #ifndef GPUCA_SORT_BEFORE_FIT
-  #define GPUCA_SORT_BEFORE_FIT 0
+     #define GPUCA_SORT_BEFORE_FIT 0
   #endif
   #ifndef GPUCA_MERGER_SPLIT_LOOP_INTERPOLATION
-  #define GPUCA_MERGER_SPLIT_LOOP_INTERPOLATION 0
+     #define GPUCA_MERGER_SPLIT_LOOP_INTERPOLATION 0
   #endif
   #ifndef GPUCA_COMP_GATHER_KERNEL
-  #define GPUCA_COMP_GATHER_KERNEL 0
+     #define GPUCA_COMP_GATHER_KERNEL 0
   #endif
   #ifndef GPUCA_COMP_GATHER_MODE
-  #define GPUCA_COMP_GATHER_MODE 2
+     #define GPUCA_COMP_GATHER_MODE 2
   #endif
 #else
   #define GPUCA_NEIGHBOURS_FINDER_MAX_NNEIGHUP 0
@@ -562,20 +563,20 @@
   #define GPUCA_COMP_GATHER_MODE 0
 #endif
 #ifndef GPUCA_DEDX_STORAGE_TYPE
-#define GPUCA_DEDX_STORAGE_TYPE float
+  #define GPUCA_DEDX_STORAGE_TYPE float
 #endif
 #ifndef GPUCA_MERGER_INTERPOLATION_ERROR_TYPE
-#define GPUCA_MERGER_INTERPOLATION_ERROR_TYPE float
+  #define GPUCA_MERGER_INTERPOLATION_ERROR_TYPE float
 #endif
 #define GPUCA_MERGER_INTERPOLATION_ERROR_TYPE_A GPUCA_DETERMINISTIC_CODE(float, GPUCA_MERGER_INTERPOLATION_ERROR_TYPE)
 #define GPUCA_DEDX_STORAGE_TYPE_A GPUCA_DETERMINISTIC_CODE(float, GPUCA_DEDX_STORAGE_TYPE)
 
 #ifndef GPUCA_WARP_SIZE
-#ifdef GPUCA_GPUCODE
-#define GPUCA_WARP_SIZE 32
-#else
-#define GPUCA_WARP_SIZE 1
-#endif
+  #ifdef GPUCA_GPUCODE
+    #define GPUCA_WARP_SIZE 32
+  #else
+    #define GPUCA_WARP_SIZE 1
+  #endif
 #endif
 
 #define GPUCA_MAX_THREADS 1024
@@ -602,10 +603,10 @@
 
 // #define GPUCA_KERNEL_DEBUGGER_OUTPUT
 
-// Some assertions to make sure out parameters are not invalid
-static_assert(GPUCA_MAXN >= GPUCA_NEIGHBOURS_FINDER_MAX_NNEIGHUP, "Invalid GPUCA_NEIGHBOURS_FINDER_MAX_NNEIGHUP");
-static_assert(GPUCA_ROW_COUNT >= GPUCA_TRACKLET_SELECTOR_HITS_REG_SIZE, "Invalid GPUCA_TRACKLET_SELECTOR_HITS_REG_SIZE");
-#ifdef GPUCA_GPUCODE
+// Some assertions to make sure the parameters are not invalid
+#if defined(GPUCA_GPUCODE)
+  static_assert(GPUCA_MAXN >= GPUCA_NEIGHBOURS_FINDER_MAX_NNEIGHUP, "Invalid GPUCA_NEIGHBOURS_FINDER_MAX_NNEIGHUP");
+  static_assert(GPUCA_ROW_COUNT >= GPUCA_TRACKLET_SELECTOR_HITS_REG_SIZE, "Invalid GPUCA_TRACKLET_SELECTOR_HITS_REG_SIZE");
   static_assert(GPUCA_M_FIRST(GPUCA_LB_GPUTPCCompressionKernels_step1unattached) * 2 <= GPUCA_TPC_COMP_CHUNK_SIZE, "Invalid GPUCA_TPC_COMP_CHUNK_SIZE");
 #endif
 
@@ -621,5 +622,270 @@ static_assert(GPUCA_ROW_COUNT >= GPUCA_TRACKLET_SELECTOR_HITS_REG_SIZE, "Invalid
 #define GPUCA_NEW_ALIGNMENT (std::align_val_t{GPUCA_BUFFER_ALIGNMENT})
 #define GPUCA_OPERATOR_NEW_ALIGNMENT ,GPUCA_NEW_ALIGNMENT
 
+#ifdef GPUCA_DEF_PARAMETERS_LOAD_DEFAULTS
+  // Invalid default values, must not be used, but needed for now to make the GPUDefParametersLoad() happy // TOCO: cleanup
+  #ifndef GPUCA_LB_GPUTPCCreateTrackingData
+    #define GPUCA_LB_GPUTPCCreateTrackingData 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCTrackletConstructor
+    #define GPUCA_LB_GPUTPCTrackletConstructor 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCTrackletSelector
+    #define GPUCA_LB_GPUTPCTrackletSelector 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCNeighboursFinder
+    #define GPUCA_LB_GPUTPCNeighboursFinder 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCNeighboursCleaner
+    #define GPUCA_LB_GPUTPCNeighboursCleaner 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCExtrapolationTracking
+    #define GPUCA_LB_GPUTPCExtrapolationTracking 0
+  #endif
+  #ifndef GPUCA_LB_GPUTRDTrackerKernels_gpuVersion
+    #define GPUCA_LB_GPUTRDTrackerKernels_gpuVersion 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCCreateOccupancyMap_fill
+    #define GPUCA_LB_GPUTPCCreateOccupancyMap_fill 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCCreateOccupancyMap_fold
+    #define GPUCA_LB_GPUTPCCreateOccupancyMap_fold 0
+  #endif
+  #ifndef GPUCA_LB_GPUTRDTrackerKernels_o2Version
+    #define GPUCA_LB_GPUTRDTrackerKernels_o2Version 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCConvertKernel
+    #define GPUCA_LB_GPUTPCConvertKernel 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCCompressionKernels_step0attached
+    #define GPUCA_LB_GPUTPCCompressionKernels_step0attached 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCCompressionKernels_step1unattached
+    #define GPUCA_LB_GPUTPCCompressionKernels_step1unattached 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCDecompressionKernels_step0attached
+    #define GPUCA_LB_GPUTPCDecompressionKernels_step0attached 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCDecompressionKernels_step1unattached
+    #define GPUCA_LB_GPUTPCDecompressionKernels_step1unattached 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCDecompressionUtilKernels_sortPerSectorRow
+    #define GPUCA_LB_GPUTPCDecompressionUtilKernels_sortPerSectorRow 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCDecompressionUtilKernels_countFilteredClusters
+    #define GPUCA_LB_GPUTPCDecompressionUtilKernels_countFilteredClusters 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCDecompressionUtilKernels_storeFilteredClusters
+    #define GPUCA_LB_GPUTPCDecompressionUtilKernels_storeFilteredClusters 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCCFDecodeZS
+    #define GPUCA_LB_GPUTPCCFDecodeZS 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCCFDecodeZSLink
+    #define GPUCA_LB_GPUTPCCFDecodeZSLink 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCCFDecodeZSDenseLink
+    #define GPUCA_LB_GPUTPCCFDecodeZSDenseLink 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCCFGather
+    #define GPUCA_LB_GPUTPCCFGather 0
+  #endif
+  #ifndef GPUCA_LB_COMPRESSION_GATHER
+    #define GPUCA_LB_COMPRESSION_GATHER 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerTrackFit
+    #define GPUCA_LB_GPUTPCGMMergerTrackFit 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerFollowLoopers
+    #define GPUCA_LB_GPUTPCGMMergerFollowLoopers 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerSectorRefit
+    #define GPUCA_LB_GPUTPCGMMergerSectorRefit 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerUnpackResetIds
+    #define GPUCA_LB_GPUTPCGMMergerUnpackResetIds 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerUnpackGlobal
+    #define GPUCA_LB_GPUTPCGMMergerUnpackGlobal 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerResolve_step0
+    #define GPUCA_LB_GPUTPCGMMergerResolve_step0 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerResolve_step1
+    #define GPUCA_LB_GPUTPCGMMergerResolve_step1 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerResolve_step2
+    #define GPUCA_LB_GPUTPCGMMergerResolve_step2 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerResolve_step3
+    #define GPUCA_LB_GPUTPCGMMergerResolve_step3 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerResolve_step4
+    #define GPUCA_LB_GPUTPCGMMergerResolve_step4 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerClearLinks
+    #define GPUCA_LB_GPUTPCGMMergerClearLinks 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerMergeWithinPrepare
+    #define GPUCA_LB_GPUTPCGMMergerMergeWithinPrepare 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerMergeSectorsPrepare
+    #define GPUCA_LB_GPUTPCGMMergerMergeSectorsPrepare 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerMergeBorders_step0
+    #define GPUCA_LB_GPUTPCGMMergerMergeBorders_step0 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerMergeBorders_step2
+    #define GPUCA_LB_GPUTPCGMMergerMergeBorders_step2 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerMergeCE
+    #define GPUCA_LB_GPUTPCGMMergerMergeCE 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerLinkExtrapolatedTracks
+    #define GPUCA_LB_GPUTPCGMMergerLinkExtrapolatedTracks 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerCollect
+    #define GPUCA_LB_GPUTPCGMMergerCollect 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerSortTracksPrepare
+    #define GPUCA_LB_GPUTPCGMMergerSortTracksPrepare 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerPrepareClusters_step0
+    #define GPUCA_LB_GPUTPCGMMergerPrepareClusters_step0 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerPrepareClusters_step1
+    #define GPUCA_LB_GPUTPCGMMergerPrepareClusters_step1 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerPrepareClusters_step2
+    #define GPUCA_LB_GPUTPCGMMergerPrepareClusters_step2 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerFinalize_step0
+    #define GPUCA_LB_GPUTPCGMMergerFinalize_step0 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerFinalize_step1
+    #define GPUCA_LB_GPUTPCGMMergerFinalize_step1 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerFinalize_step2
+    #define GPUCA_LB_GPUTPCGMMergerFinalize_step2 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerMergeLoopers_step0
+    #define GPUCA_LB_GPUTPCGMMergerMergeLoopers_step0 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerMergeLoopers_step1
+    #define GPUCA_LB_GPUTPCGMMergerMergeLoopers_step1 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerMergeLoopers_step2
+    #define GPUCA_LB_GPUTPCGMMergerMergeLoopers_step2 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMO2Output_prepare
+    #define GPUCA_LB_GPUTPCGMO2Output_prepare 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMO2Output_output
+    #define GPUCA_LB_GPUTPCGMO2Output_output 0
+  #endif
+  #ifndef GPUCA_LB_GPUITSFitterKernels
+    #define GPUCA_LB_GPUITSFitterKernels 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCStartHitsFinder
+    #define GPUCA_LB_GPUTPCStartHitsFinder 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCStartHitsSorter
+    #define GPUCA_LB_GPUTPCStartHitsSorter 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCCFCheckPadBaseline
+    #define GPUCA_LB_GPUTPCCFCheckPadBaseline 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCCFChargeMapFiller_fillIndexMap
+    #define GPUCA_LB_GPUTPCCFChargeMapFiller_fillIndexMap 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCCFChargeMapFiller_fillFromDigits
+    #define GPUCA_LB_GPUTPCCFChargeMapFiller_fillFromDigits 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCCFChargeMapFiller_findFragmentStart
+    #define GPUCA_LB_GPUTPCCFChargeMapFiller_findFragmentStart 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCCFPeakFinder
+    #define GPUCA_LB_GPUTPCCFPeakFinder 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCCFNoiseSuppression
+    #define GPUCA_LB_GPUTPCCFNoiseSuppression 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCCFDeconvolution
+    #define GPUCA_LB_GPUTPCCFDeconvolution 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCCFClusterizer
+    #define GPUCA_LB_GPUTPCCFClusterizer 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCNNClusterizerKernels
+    #define GPUCA_LB_GPUTPCNNClusterizerKernels 0
+  #endif
+  #ifndef GPUCA_LB_GPUTrackingRefitKernel_mode0asGPU
+    #define GPUCA_LB_GPUTrackingRefitKernel_mode0asGPU 0
+  #endif
+  #ifndef GPUCA_LB_GPUTrackingRefitKernel_mode1asTrackParCov
+    #define GPUCA_LB_GPUTrackingRefitKernel_mode1asTrackParCov 0
+  #endif
+  #ifndef GPUCA_LB_GPUMemClean16
+    #define GPUCA_LB_GPUMemClean16 0
+  #endif
+  #ifndef GPUCA_LB_GPUitoa
+    #define GPUCA_LB_GPUitoa 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCExtrapolationTrackingCopyNumbers
+    #define GPUCA_LB_GPUTPCExtrapolationTrackingCopyNumbers 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCSectorDebugSortKernels_hitData
+    #define GPUCA_LB_GPUTPCSectorDebugSortKernels_hitData 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCSectorDebugSortKernels_startHits
+    #define GPUCA_LB_GPUTPCSectorDebugSortKernels_startHits 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCSectorDebugSortKernels_sectorTracks
+    #define GPUCA_LB_GPUTPCSectorDebugSortKernels_sectorTracks 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGlobalDebugSortKernels_clearIds
+    #define GPUCA_LB_GPUTPCGlobalDebugSortKernels_clearIds 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGlobalDebugSortKernels_sectorTracks
+    #define GPUCA_LB_GPUTPCGlobalDebugSortKernels_sectorTracks 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGlobalDebugSortKernels_extrapolatedTracks1
+    #define GPUCA_LB_GPUTPCGlobalDebugSortKernels_extrapolatedTracks1 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGlobalDebugSortKernels_extrapolatedTracks2
+    #define GPUCA_LB_GPUTPCGlobalDebugSortKernels_extrapolatedTracks2 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGlobalDebugSortKernels_borderTracks
+    #define GPUCA_LB_GPUTPCGlobalDebugSortKernels_borderTracks 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerUnpackSaveNumber
+    #define GPUCA_LB_GPUTPCGMMergerUnpackSaveNumber 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerMergeBorders_step1
+    #define GPUCA_LB_GPUTPCGMMergerMergeBorders_step1 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerMergeBorders_variant
+    #define GPUCA_LB_GPUTPCGMMergerMergeBorders_variant 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerSortTracks
+    #define GPUCA_LB_GPUTPCGMMergerSortTracks 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMMergerSortTracksQPt
+    #define GPUCA_LB_GPUTPCGMMergerSortTracksQPt 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMO2Output_sort
+    #define GPUCA_LB_GPUTPCGMO2Output_sort 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCGMO2Output_mc
+    #define GPUCA_LB_GPUTPCGMO2Output_mc 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCCFMCLabelFlattener_setRowOffsets
+    #define GPUCA_LB_GPUTPCCFMCLabelFlattener_setRowOffsets 0
+  #endif
+  #ifndef GPUCA_LB_GPUTPCCFMCLabelFlattener_flatten
+    #define GPUCA_LB_GPUTPCCFMCLabelFlattener_flatten 0
+  #endif
+#endif // GPUCA_DEF_PARAMETERS_LOAD_DEFAULTS
+
 // clang-format on
-#endif
+#endif // GPUDEFPARAMETERSDEFAULT_H

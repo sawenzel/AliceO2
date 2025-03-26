@@ -129,7 +129,7 @@ set(HDRS_INSTALL
     DataTypes/GPUTriggerOutputs.h
     Debug/GPUROOTDump.h
     Definitions/GPUDefConstantsAndSettings.h
-    Definitions/GPUDefGPUParameters.h
+    Definitions/GPUDefParametersDefault.h
     Definitions/GPUDef.h
     Definitions/GPUDefMacros.h
     Definitions/GPULogging.h
@@ -247,10 +247,18 @@ file(GENERATE
      OUTPUT include_gpu_onthefly/GPUNoFastMathKernels.h
      INPUT cmake/GPUNoFastMathKernels.template.h
 )
+file(GENERATE
+     OUTPUT include_gpu_onthefly/GPUDefParameters.h
+     INPUT Definitions/GPUDefParameters.template.h
+)
+file(GENERATE
+     OUTPUT include_gpu_onthefly/GPUDefParametersLoad.inc
+     INPUT Definitions/GPUDefParametersLoad.template.inc
+)
 if(NOT ALIGPU_BUILD_TYPE STREQUAL "O2")
   include_directories(${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly)
 endif()
-set(HDRS_INSTALL ${HDRS_INSTALL} ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/GPUReconstructionKernelList.h)
+set(HDRS_INSTALL ${HDRS_INSTALL} ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/GPUReconstructionKernelList.h ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/GPUDefParameters.h)
 include(kernels.cmake)
 
 # Optional sources depending on optional dependencies

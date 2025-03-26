@@ -12,10 +12,34 @@
 /// \file GPUReconstructionProcessing.cxx
 /// \author David Rohr
 
+#define GPUCA_DEF_PARAMETERS_LOAD_DEFAULTS
+#include "GPUDefParametersDefault.h"
+#include "GPUDefParametersLoad.inc"
+
 #include "GPUReconstructionProcessing.h"
 #include "GPUReconstructionThreading.h"
 
 using namespace o2::gpu;
+
+GPUReconstructionProcessing::GPUReconstructionProcessing(const GPUSettingsDeviceBackend& cfg) : GPUReconstruction(cfg)
+{
+  if (mMaster == nullptr) {
+    mParCPU = new GPUDefParameters(o2::gpu::internal::GPUDefParametersLoad());
+    mParDevice = new GPUDefParameters();
+  } else {
+    GPUReconstructionProcessing* master = dynamic_cast<GPUReconstructionProcessing*>(mMaster);
+    mParCPU = master->mParCPU;
+    mParDevice = master->mParDevice;
+  }
+}
+
+GPUReconstructionProcessing::~GPUReconstructionProcessing()
+{
+  if (mMaster == nullptr) {
+    delete mParCPU;
+    delete mParDevice;
+  }
+}
 
 int32_t GPUReconstructionProcessing::getNKernelHostThreads(bool splitCores)
 {

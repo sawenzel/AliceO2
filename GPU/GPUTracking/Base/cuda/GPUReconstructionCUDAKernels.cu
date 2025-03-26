@@ -83,16 +83,13 @@ void GPUReconstructionCUDABackend::runKernelBackend(const krnlSetupArgs<T, I, Ar
 #define GPUCA_KRNL_REG(args) __launch_bounds__(GPUCA_M_MAX2_3(GPUCA_M_STRIP(args)))
 
 #if defined(GPUCA_KERNEL_COMPILE_MODE) && GPUCA_KERNEL_COMPILE_MODE == 1 // ---------- COMPILE_MODE = perkernel ----------
-#define GPUCA_KRNL(x_class, x_attributes, x_arguments, x_forward, x_types) \
-  GPUCA_KRNL_PROP(x_class, x_attributes)                                   \
-  template void GPUReconstructionCUDABackend::runKernelBackend<GPUCA_M_KRNL_TEMPLATE(x_class)>(const krnlSetupArgs<GPUCA_M_KRNL_TEMPLATE(x_class) GPUCA_M_STRIP(x_types)>& args);
+#define GPUCA_KRNL(x_class, x_attributes, x_arguments, x_forward, x_types) template void GPUReconstructionCUDABackend::runKernelBackend<GPUCA_M_KRNL_TEMPLATE(x_class)>(const krnlSetupArgs<GPUCA_M_KRNL_TEMPLATE(x_class) GPUCA_M_STRIP(x_types)>& args);
 #else // ---------- COMPILE_MODE = onefile | rdc ----------
 #if defined(GPUCA_KERNEL_COMPILE_MODE) && GPUCA_KERNEL_COMPILE_MODE == 2
 #define GPUCA_KRNL_DEFONLY // COMPILE_MODE = rdc
 #endif
 
 #define GPUCA_KRNL(x_class, x_attributes, x_arguments, x_forward, x_types) \
-  GPUCA_KRNL_PROP(x_class, x_attributes)                                   \
   GPUCA_KRNL_HOST(x_class, x_attributes, x_arguments, x_forward, x_types)  \
   template void GPUReconstructionCUDABackend::runKernelBackend<GPUCA_M_KRNL_TEMPLATE(x_class)>(const krnlSetupArgs<GPUCA_M_KRNL_TEMPLATE(x_class) GPUCA_M_STRIP(x_types)>& args);
 

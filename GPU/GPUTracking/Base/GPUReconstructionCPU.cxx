@@ -16,7 +16,7 @@
 #include "GPUReconstructionIncludes.h"
 #include "GPUReconstructionThreading.h"
 #include "GPUChain.h"
-
+#include "GPUDefParameters.h"
 #include "GPUTPCClusterData.h"
 #include "GPUTPCSectorOutCluster.h"
 #include "GPUTPCGMMergedTrack.h"
@@ -120,15 +120,27 @@ void GPUReconstructionCPUBackend::runKernelBackend(const krnlSetupArgs<T, I, Arg
 #pragma GCC diagnostic push
 }
 
-template <class T, int32_t I>
-krnlProperties GPUReconstructionCPUBackend::getKernelPropertiesBackend()
+template <class S, int32_t I>
+gpu_reconstruction_kernels::krnlProperties GPUReconstructionCPU::getKernelProperties(int gpu)
 {
-  return krnlProperties{1, 1};
+  if (gpu == -1) {
+    gpu = IsGPU();
+  }
+  const auto num = GetKernelNum<S, I>();
+  const auto* p = gpu ? mParDevice : mParCPU;
+  gpu_reconstruction_kernels::krnlProperties ret = {p->par_LB_maxThreads[num], p->par_LB_minBlocks[num], p->par_LB_forceBlocks[num]};
+  if (ret.nThreads == 0) {
+    ret.nThreads = gpu ? mThreadCount : 1u;
+  }
+  if (ret.minBlocks == 0) {
+    ret.minBlocks = 1;
+  }
+  return ret;
 }
 
 #define GPUCA_KRNL(x_class, x_attributes, x_arguments, x_forward, x_types)                                                                                                       \
   template void GPUReconstructionCPUBackend::runKernelBackend<GPUCA_M_KRNL_TEMPLATE(x_class)>(const krnlSetupArgs<GPUCA_M_KRNL_TEMPLATE(x_class) GPUCA_M_STRIP(x_types)>& args); \
-  template krnlProperties GPUReconstructionCPUBackend::getKernelPropertiesBackend<GPUCA_M_KRNL_TEMPLATE(x_class)>();
+  template krnlProperties GPUReconstructionCPU::getKernelProperties<GPUCA_M_KRNL_TEMPLATE(x_class)>(int gpu);
 #include "GPUReconstructionKernelList.h"
 #undef GPUCA_KRNL
 

@@ -9,20 +9,19 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-/// \file GPUNoFastMathKernels.h
+/// \file GPUDefParameters.h
 /// \author David Rohr
 
-#ifndef GPUNOFASTMATHKERNELS_H
-#define GPUNOFASTMATHKERNELS_H
+#ifndef GPUDEFPARAMETERS_H
+#define GPUDEFPARAMETERS_H
 
-#include <unordered_set>
-#include <string>
-
-namespace o2::gpu::internal
+namespace o2::gpu
 {
-// clang-format off
-static const std::unordered_set<std::string> noFastMathKernels = {$<JOIN:$<LIST:TRANSFORM,$<LIST:TRANSFORM,$<LIST:REMOVE_DUPLICATES,$<TARGET_PROPERTY:O2_GPU_KERNELS,O2_GPU_KERNEL_NO_FAST_MATH>>,APPEND,">,PREPEND,">,$<COMMA> >};
-// clang-format on
-} // namespace o2::gpu::internal
+struct GPUDefParameters {  // clang-format off
+  int32_t par_LB_maxThreads[$<LIST:LENGTH,$<TARGET_PROPERTY:O2_GPU_KERNELS,O2_GPU_KERNEL_NAMES>>] = {};
+  int32_t par_LB_minBlocks[$<LIST:LENGTH,$<TARGET_PROPERTY:O2_GPU_KERNELS,O2_GPU_KERNEL_NAMES>>] = {};
+  int32_t par_LB_forceBlocks[$<LIST:LENGTH,$<TARGET_PROPERTY:O2_GPU_KERNELS,O2_GPU_KERNEL_NAMES>>] = {};
+};  // clang-format on
+}  // namespace o2::gpu
 
 #endif

@@ -13,8 +13,13 @@
 /// \author David Rohr
 
 #define GPUCA_GPUCODE_HOSTONLY
-#include "GPUReconstructionCUDAIncludesHost.h"
 
+#define GPUCA_DEF_PARAMETERS_LOAD_DEFAULTS
+#include "GPUReconstructionCUDADef.h"
+#include "GPUDefParametersDefault.h"
+#include "GPUDefParametersLoad.inc"
+
+#include "GPUReconstructionCUDAIncludesHost.h"
 #include <cuda_profiler_api.h>
 
 #include "GPUReconstructionCUDA.h"
@@ -51,11 +56,14 @@ GPUReconstructionCUDABackend::GPUReconstructionCUDABackend(const GPUSettingsDevi
 {
   if (mMaster == nullptr) {
     mInternals = new GPUReconstructionCUDAInternals;
+    *mParDevice = o2::gpu::internal::GPUDefParametersLoad();
   }
+  mDeviceBackendSettings.deviceType = DeviceType::CUDA;
 }
 
 GPUReconstructionCUDABackend::~GPUReconstructionCUDABackend()
 {
+  Exit(); // Make sure we destroy everything (in particular the ITS tracker) before we exit CUDA
   if (mMaster == nullptr) {
     delete mInternals;
   }
@@ -69,7 +77,6 @@ int32_t GPUReconstructionCUDABackend::GPUChkErrInternal(const int64_t error, con
 
 GPUReconstructionCUDA::GPUReconstructionCUDA(const GPUSettingsDeviceBackend& cfg) : GPUReconstructionKernels(cfg)
 {
-  mDeviceBackendSettings.deviceType = DeviceType::CUDA;
 #ifndef __HIPCC__ // CUDA
   mRtcSrcExtension = ".cu";
   mRtcBinExtension = ".fatbin";
@@ -78,11 +85,7 @@ GPUReconstructionCUDA::GPUReconstructionCUDA(const GPUSettingsDeviceBackend& cfg
   mRtcBinExtension = ".o";
 #endif
 }
-
-GPUReconstructionCUDA::~GPUReconstructionCUDA()
-{
-  Exit(); // Make sure we destroy everything (in particular the ITS tracker) before we exit CUDA
-}
+GPUReconstructionCUDA::~GPUReconstructionCUDA() {}
 
 GPUReconstruction* GPUReconstruction_Create_CUDA(const GPUSettingsDeviceBackend& cfg) { return new GPUReconstructionCUDA(cfg); }
 

@@ -95,14 +95,10 @@ class GPUReconstructionKernels : public T
   template <class S, int32_t I = 0, typename... Args>
   using krnlSetupArgs = gpu_reconstruction_kernels::krnlSetupArgs<S, I, Args...>;
 
-#define GPUCA_KRNL(x_class, x_attributes, x_arguments, x_forward, x_types)                                                                              \
-  virtual void runKernelImpl(const krnlSetupArgs<GPUCA_M_KRNL_TEMPLATE(x_class) GPUCA_M_STRIP(x_types)>& args)                                          \
-  {                                                                                                                                                     \
-    T::template runKernelBackend<GPUCA_M_KRNL_TEMPLATE(x_class)>(args);                                                                                 \
-  }                                                                                                                                                     \
-  virtual gpu_reconstruction_kernels::krnlProperties getKernelPropertiesImpl(gpu_reconstruction_kernels::classArgument<GPUCA_M_KRNL_TEMPLATE(x_class)>) \
-  {                                                                                                                                                     \
-    return T::template getKernelPropertiesBackend<GPUCA_M_KRNL_TEMPLATE(x_class)>();                                                                    \
+#define GPUCA_KRNL(x_class, x_attributes, x_arguments, x_forward, x_types)                                     \
+  virtual void runKernelImpl(const krnlSetupArgs<GPUCA_M_KRNL_TEMPLATE(x_class) GPUCA_M_STRIP(x_types)>& args) \
+  {                                                                                                            \
+    T::template runKernelBackend<GPUCA_M_KRNL_TEMPLATE(x_class)>(args);                                        \
   }
 #include "GPUReconstructionKernelList.h"
 #undef GPUCA_KRNL
