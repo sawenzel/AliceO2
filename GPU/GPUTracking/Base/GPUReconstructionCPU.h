@@ -72,7 +72,7 @@ class GPUReconstructionCPU : public GPUReconstructionKernels<GPUReconstructionCP
 
   GPUReconstructionCPU(const GPUSettingsDeviceBackend& cfg) : GPUReconstructionKernels(cfg) {}
 
-#define GPUCA_KRNL(x_class, x_attributes, x_arguments, x_forward, x_types)                                                                                                                   \
+#define GPUCA_KRNL(x_class, x_attributes, x_arguments, x_forward, x_types, ...)                                                                                                              \
   inline void runKernelImplWrapper(gpu_reconstruction_kernels::classArgument<GPUCA_M_KRNL_TEMPLATE(x_class)>, bool cpuFallback, double& timer, krnlSetup&& setup GPUCA_M_STRIP(x_arguments)) \
   {                                                                                                                                                                                          \
     if (cpuFallback) {                                                                                                                                                                       \

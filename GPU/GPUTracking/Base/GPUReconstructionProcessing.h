@@ -80,7 +80,7 @@ class GPUReconstructionProcessing : public GPUReconstruction
   static const char* GetKernelName();
   const std::string& GetKernelName(int32_t i) const { return mKernelNames[i]; }
   template <class T, int32_t I = 0>
-  static uint32_t GetKernelNum(int32_t k = -1);
+  static uint32_t GetKernelNum();
 
   // Public queries for timers
   auto& getRecoStepTimer(RecoStep step) { return mTimersRecoSteps[getRecoStepNum(step)]; }
