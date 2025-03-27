@@ -105,7 +105,7 @@ int32_t GPUChainTracking::RunTPCTrackingSectors_internal()
     for (uint32_t iSector = 0; iSector < NSECTORS; iSector++) {
       processorsShadow()->tpcTrackers[iSector].GPUParametersConst()->gpumem = (char*)mRec->DeviceMemoryBase();
       // Initialize Startup Constants
-      processors()->tpcTrackers[iSector].GPUParameters()->nextStartHit = (((getKernelProperties<GPUTPCTrackletConstructor, GPUTPCTrackletConstructor::allSectors>().minBlocks * BlockCount()) + NSECTORS - 1 - iSector) / NSECTORS) * getKernelProperties<GPUTPCTrackletConstructor, GPUTPCTrackletConstructor::allSectors>().nThreads;
+      processors()->tpcTrackers[iSector].GPUParameters()->nextStartHit = (((getKernelProperties<GPUTPCTrackletConstructor>().minBlocks * BlockCount()) + NSECTORS - 1 - iSector) / NSECTORS) * getKernelProperties<GPUTPCTrackletConstructor>().nThreads;
       processorsShadow()->tpcTrackers[iSector].SetGPUTextureBase(mRec->DeviceMemoryBase());
     }
 
