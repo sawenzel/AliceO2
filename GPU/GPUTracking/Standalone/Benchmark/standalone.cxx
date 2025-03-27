@@ -53,9 +53,6 @@
 #include "GPUTPCGMMergedTrack.h"
 #include "GPUSettings.h"
 #include <vector>
-#if not(defined(__ARM_NEON) or defined(__aarch64__)) // ARM doesn't have SSE
-#include <xmmintrin.h>
-#endif
 
 #include "GPUO2DataTypes.h"
 #include "GPUChainITS.h"
@@ -84,23 +81,6 @@ std::atomic<uint32_t> nIteration, nIterationEnd;
 
 std::vector<GPUTrackingInOutPointers> ioPtrEvents;
 std::vector<GPUChainTracking::InOutMemory> ioMemEvents;
-
-void SetCPUAndOSSettings()
-{
-#if not(defined(__ARM_NEON) or defined(__aarch64__)) // ARM doesn't have SSE
-#ifdef FE_DFL_DISABLE_SSE_DENORMS_ENV                // Flush and load denormals to zero in any case
-  fesetenv(FE_DFL_DISABLE_SSE_DENORMS_ENV);
-#else
-#ifndef _MM_FLUSH_ZERO_ON
-#define _MM_FLUSH_ZERO_ON 0x8000
-#endif
-#ifndef _MM_DENORMALS_ZERO_ON
-#define _MM_DENORMALS_ZERO_ON 0x0040
-#endif
-  _mm_setcsr(_mm_getcsr() | (_MM_FLUSH_ZERO_ON | _MM_DENORMALS_ZERO_ON));
-#endif
-#endif // ARM
-}
 
 int32_t ReadConfiguration(int argc, char** argv)
 {
@@ -739,8 +719,6 @@ int32_t RunBenchmark(GPUReconstruction* recUse, GPUChainTracking* chainTrackingU
 int32_t main(int argc, char** argv)
 {
   std::unique_ptr<GPUReconstruction> recUnique, recUniqueAsync, recUniquePipeline;
-
-  SetCPUAndOSSettings();
 
   if (ReadConfiguration(argc, argv)) {
     return 1;
