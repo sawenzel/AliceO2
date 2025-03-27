@@ -84,7 +84,7 @@ add_custom_target(${MODULE}_CUDA_SRC_CHK ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}
 
 add_custom_command(
     OUTPUT ${GPU_RTC_BIN}.command
-    COMMAND echo -n "${CMAKE_CUDA_COMPILER} -forward-unknown-to-host-compiler ${GPU_RTC_DEFINES} ${GPU_RTC_FLAGS_SEPARATED} -x cu -fatbin" > ${GPU_RTC_BIN}.command
+    COMMAND echo -n "${CMAKE_CUDA_COMPILER} -forward-unknown-to-host-compiler ${GPU_RTC_DEFINES} ${GPU_RTC_FLAGS_SEPARATED} -x cu -fatbin -Xcudafe --diag_suppress=177" > ${GPU_RTC_BIN}.command
     COMMAND_EXPAND_LISTS VERBATIM
     COMMENT "Preparing CUDA RTC command file ${GPU_RTC_BIN}.command"
 )
