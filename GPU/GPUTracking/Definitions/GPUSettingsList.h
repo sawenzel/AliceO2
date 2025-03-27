@@ -203,7 +203,6 @@ AddHelp("help", 'h')
 EndConfig()
 
 #ifndef __OPENCL__
-// Settings steering the processing once the device was selected, only available on the host
 BeginSubConfig(GPUSettingsProcessingRTC, rtc, configStandalone.proc, "RTC", 0, "Processing settings", proc_rtc)
 AddOption(cacheOutput, bool, false, "", 0, "Cache RTC compilation results")
 AddOption(optConstexpr, bool, true, "", 0, "Replace constant variables by static constexpr expressions")
@@ -253,6 +252,7 @@ AddOption(nnSigmoidTrafoClassThreshold, int, 1, "", 0, "If true (default), then 
 AddHelp("help", 'h')
 EndConfig()
 
+// Settings steering the processing once the device was selected, only available on the host
 BeginSubConfig(GPUSettingsProcessing, proc, configStandalone, "PROC", 0, "Processing settings", proc)
 AddOption(deviceNum, int32_t, -1, "gpuDevice", 0, "Set GPU device to use (-1: automatic, -2: for round-robin usage in timeslice-pipeline)")
 AddOption(gpuDeviceOnly, bool, false, "", 0, "Use only GPU as device (i.e. no CPU for OpenCL)")

@@ -18,7 +18,7 @@ endif()
 message(STATUS "Building GPUTracking with CUDA support ${TMP_TARGET}")
 
 set(SRCS GPUReconstructionCUDA.cu GPUReconstructionCUDAGenRTC.cxx GPUReconstructionCUDAKernels.cu)
-set(HDRS GPUReconstructionCUDA.h GPUReconstructionCUDAInternals.h GPUReconstructionCUDAHelpers.inc GPUReconstructionCUDADef.h GPUReconstructionCUDAIncludesHost.h)
+set(HDRS GPUReconstructionCUDA.h GPUReconstructionCUDAInternals.h GPUReconstructionCUDAHelpers.inc GPUReconstructionCUDADef.h GPUReconstructionCUDAIncludesSystem.h)
 # -------------------------------- Prepare RTC -------------------------------------------------------
 enable_language(ASM)
 if(ALIGPU_BUILD_TYPE STREQUAL "O2")
@@ -67,8 +67,8 @@ set(GPU_RTC_BIN ${CMAKE_CURRENT_BINARY_DIR}/GPUReconstructionCUDArtc)
 # cmake-format: off
 add_custom_command(
     OUTPUT ${GPU_RTC_BIN}.src
-    COMMAND cp ${GPUDIR}/Base/cuda/GPUReconstructionCUDAIncludesHost.h ${GPU_RTC_BIN}.src
-    COMMAND ${CMAKE_CXX_COMPILER} ${GPU_RTC_DEFINES} ${GPU_RTC_INCLUDES} -std=c++${CMAKE_CUDA_STANDARD} -D__CUDA_ARCH__=${RTC_CUDA_ARCH} -D__CUDACC__ -x c++ -nostdinc -E ${GPU_RTC_SRC} >> ${GPU_RTC_BIN}.src
+    COMMAND cp ${GPUDIR}/Base/cuda/GPUReconstructionCUDAIncludesSystem.h ${GPU_RTC_BIN}.src
+    COMMAND ${CMAKE_CXX_COMPILER} ${GPU_RTC_DEFINES} ${GPU_RTC_INCLUDES} -std=c++${CMAKE_CUDA_STANDARD} -D__CUDA_ARCH__=${RTC_CUDA_ARCH} -D__CUDACC__ -x c++ -nostdinc -E -P ${GPU_RTC_SRC} >> ${GPU_RTC_BIN}.src
     MAIN_DEPENDENCY ${GPU_RTC_SRC}
     IMPLICIT_DEPENDS CXX ${GPU_RTC_SRC}
     COMMAND_EXPAND_LISTS

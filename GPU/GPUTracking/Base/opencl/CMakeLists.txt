@@ -76,7 +76,7 @@ if(OPENCL_ENABLED) # BUILD OpenCL source code for runtime compilation target
               ${OCL_DEFINECL}
               -cl-no-stdinc
               -nostdinc
-              -E ${CL_SRC} > ${CL_BIN}.src
+              -E -P ${CL_SRC} > ${CL_BIN}.src
       MAIN_DEPENDENCY ${CL_SRC}
       IMPLICIT_DEPENDS CXX ${CL_SRC}
       COMMAND_EXPAND_LISTS

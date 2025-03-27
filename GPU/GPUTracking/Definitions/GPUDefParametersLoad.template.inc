@@ -31,20 +31,20 @@ static GPUDefParameters GPUDefParametersLoad()
   };
 }
 
-#define GPUCA_EXPORT_KERNEL(name)                                      \
-  if (par.par_LB_maxThreads[i] > 0) {                                  \
-    o << "#define " GPUCA_M_STR(name) " " << par.par_LB_maxThreads[i]; \
-    if (par.par_LB_minBlocks[i] > 0) {                                 \
-      o << ", " << par.par_LB_minBlocks[i];                            \
-    }                                                                  \
-    if (par.par_LB_forceBlocks[i] > 0) {                               \
-      o << ", " << par.par_LB_forceBlocks[i];                          \
-    }                                                                  \
-    o << "\n";                                                         \
-  }                                                                    \
+#define GPUCA_EXPORT_KERNEL(name)                                                                                  \
+  if (par.par_LB_maxThreads[i] > 0) {                                                                              \
+    o << "#define GPUCA_" << (forRTC ? "RTC_" : "") << "LB_" << GPUCA_M_STR(name) " " << par.par_LB_maxThreads[i]; \
+    if (par.par_LB_minBlocks[i] > 0) {                                                                             \
+      o << ", " << par.par_LB_minBlocks[i];                                                                        \
+    }                                                                                                              \
+    if (par.par_LB_forceBlocks[i] > 0) {                                                                           \
+      o << ", " << par.par_LB_forceBlocks[i];                                                                      \
+    }                                                                                                              \
+    o << "\n";                                                                                                     \
+  }                                                                                                                \
   i++;
 
-static std::string GPUDefParametersExport(const GPUDefParameters& par)
+static std::string GPUDefParametersExport(const GPUDefParameters& par, bool forRTC)
 {
   std::stringstream o; // clang-format off
   int32_t i = 0;

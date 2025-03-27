@@ -12,7 +12,8 @@
 /// \file GPUReconstructionCUDAKernels.cu
 /// \author David Rohr
 
-#include "GPUReconstructionCUDAIncludesHost.h"
+#include "GPUReconstructionCUDAIncludesSystem.h"
+#include "GPUReconstructionCUDADef.h"
 
 #include "GPUReconstructionCUDA.h"
 #include "GPUReconstructionCUDAInternals.h"
@@ -108,13 +109,6 @@ void GPUReconstructionCUDABackend::runKernelBackend(const krnlSetupArgs<T, I, Ar
 #include "GPUReconstructionKernelList.h"
 #undef GPUCA_KRNL
 
-void GPUReconstructionCUDABackend::getRTCKernelCalls(std::vector<std::string>& kernels)
-{
-#define GPUCA_KRNL(...) kernels.emplace_back(GPUCA_M_STR(GPUCA_KRNLGPU(__VA_ARGS__)));
-#include "GPUReconstructionKernelList.h"
-#undef GPUCA_KRNL
-}
-
 #ifndef GPUCA_NO_CONSTANT_MEMORY
 static GPUReconstructionDeviceBase::deviceConstantMemRegistration registerConstSymbol([]() {
   void* retVal = nullptr;
@@ -124,3 +118,14 @@ static GPUReconstructionDeviceBase::deviceConstantMemRegistration registerConstS
   return retVal;
 });
 #endif
+
+void GPUReconstructionCUDABackend::getRTCKernelCalls(std::vector<std::string>& kernels)
+{
+#undef GPUCA_KRNL_LB
+#undef __launch_bounds__
+#define GPUCA_KRNL(...) kernels.emplace_back(GPUCA_M_STR(GPUCA_KRNLGPU(__VA_ARGS__)));
+#define GPUCA_KRNL_LB(x_class, x_attributes, ...) GPUCA_KRNL(x_class, (REG, (GPUCA_M_CAT(GPUCA_RTC_LB_, GPUCA_M_KRNL_NAME(x_class))), GPUCA_M_STRIP(x_attributes)), __VA_ARGS__)
+#include "GPUReconstructionKernelList.h"
+#undef GPUCA_KRNL
+#undef GPUCA_KRNL_LB
+}

@@ -19,7 +19,8 @@
 #include "GPUDefParametersDefault.h"
 #include "GPUDefParametersLoad.inc"
 
-#include "GPUReconstructionCUDAIncludesHost.h"
+#include "GPUReconstructionCUDAIncludesSystem.h"
+#include "GPUReconstructionCUDADef.h"
 #include <cuda_profiler_api.h>
 
 #include "GPUReconstructionCUDA.h"
