@@ -59,6 +59,23 @@ int32_t GPUReconstructionCUDA::genRTC(std::string& filename, uint32_t& nCompile)
   std::string baseCommand = (mProcessingSettings.rtctech.prependCommand != "" ? (mProcessingSettings.rtctech.prependCommand + " ") : "");
   baseCommand += (getenv("O2_GPU_RTC_OVERRIDE_CMD") ? std::string(getenv("O2_GPU_RTC_OVERRIDE_CMD")) : std::string(_binary_GPUReconstructionCUDArtc_command_start, _binary_GPUReconstructionCUDArtc_command_len));
   baseCommand += std::string(" ") + (mProcessingSettings.rtctech.overrideArchitecture != "" ? mProcessingSettings.rtctech.overrideArchitecture : std::string(_binary_GPUReconstructionCUDArtc_command_arch_start, _binary_GPUReconstructionCUDArtc_command_arch_len));
+
+  if (mProcessingSettings.rtctech.loadLaunchBoundsFromFile.size()) {
+    FILE* fp = fopen(mProcessingSettings.rtctech.loadLaunchBoundsFromFile.c_str(), "rb");
+    if (fp == nullptr) {
+      throw std::runtime_error("Cannot open launch bounds parameter module file");
+    }
+    fseek(fp, 0, SEEK_END);
+    size_t size = ftell(fp);
+    if (size != sizeof(*mParDevice)) {
+      throw std::runtime_error("launch bounds parameter file has incorrect size");
+    }
+    fseek(fp, 0, SEEK_SET);
+    if (fread(mParDevice, 1, size, fp) != size) {
+      throw std::runtime_error("Error reading launch bounds parameter file");
+    }
+    fclose(fp);
+  }
   const std::string launchBounds = o2::gpu::internal::GPUDefParametersExport(*mParDevice, true);
   if (mProcessingSettings.rtctech.printLaunchBounds || mProcessingSettings.debugLevel >= 3) {
     GPUInfo("RTC Launch Bounds:\n%s", launchBounds.c_str());

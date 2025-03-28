@@ -228,6 +228,7 @@ AddOption(printLaunchBounds, bool, false, "", 0, "Print launch bounds used for R
 AddOption(cacheFolder, std::string, "./rtccache/", "", 0, "Folder in which the cache file is stored")
 AddOption(prependCommand, std::string, "", "", 0, "Prepend RTC compilation commands by this string")
 AddOption(overrideArchitecture, std::string, "", "", 0, "Override arhcitecture part of RTC compilation command line") // Part of cmdLine, so checked against the cache
+AddOption(loadLaunchBoundsFromFile, std::string, "", "", 0, "Load a parameter object containing the launch bounds from a file")
 AddHelp("help", 'h')
 EndConfig()
 
