@@ -114,7 +114,7 @@ int32_t GPUReconstructionCUDA::InitDevice_Runtime()
   constexpr int32_t reqVerMaj = 2;
   constexpr int32_t reqVerMin = 0;
 #endif
-  if (mProcessingSettings.rtc.enable && mProcessingSettings.rtc.runTest == 2) {
+  if (mProcessingSettings.rtc.enable && mProcessingSettings.rtctech.runTest == 2) {
     genAndLoadRTC();
     exit(0);
   }
@@ -433,14 +433,14 @@ void GPUReconstructionCUDA::genAndLoadRTC()
     throw std::runtime_error("Runtime compilation failed");
   }
   for (uint32_t i = 0; i < nCompile; i++) {
-    if (mProcessingSettings.rtc.runTest != 2) {
+    if (mProcessingSettings.rtctech.runTest != 2) {
       mInternals->kernelModules.emplace_back(std::make_unique<CUmodule>());
       GPUChkErr(cuModuleLoad(mInternals->kernelModules.back().get(), (filename + "_" + std::to_string(i) + mRtcBinExtension).c_str()));
     }
     remove((filename + "_" + std::to_string(i) + mRtcSrcExtension).c_str());
     remove((filename + "_" + std::to_string(i) + mRtcBinExtension).c_str());
   }
-  if (mProcessingSettings.rtc.runTest == 2) {
+  if (mProcessingSettings.rtctech.runTest == 2) {
     return;
   }
   loadKernelModules(mProcessingSettings.rtc.compilePerKernel);
