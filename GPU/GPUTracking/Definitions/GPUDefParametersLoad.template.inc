@@ -37,7 +37,7 @@ static GPUDefParameters GPUDefParametersLoad()
     if (par.par_LB_minBlocks[i] > 0) {                                                                             \
       o << ", " << par.par_LB_minBlocks[i];                                                                        \
     }                                                                                                              \
-    if (par.par_LB_forceBlocks[i] > 0) {                                                                           \
+    if (!forRTC && par.par_LB_forceBlocks[i] > 0) {                                                                \
       o << ", " << par.par_LB_forceBlocks[i];                                                                      \
     }                                                                                                              \
     o << "\n";                                                                                                     \

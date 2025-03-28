@@ -24,6 +24,8 @@
 #include "GPUCommonDef.h"
 #include "GPUDefMacros.h"
 
+// Launch bound definition, 3 optional parameters: maxThreads per block, minBlocks per multiprocessor, force number of blocks (not passed to compiler as launch bounds)
+
 // GPU Run Configuration
 #ifdef GPUCA_GPUCODE
 #if defined(GPUCA_GPUTYPE_MI2xx)
