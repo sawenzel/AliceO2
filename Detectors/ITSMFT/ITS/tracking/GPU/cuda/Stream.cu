@@ -10,10 +10,8 @@
 // or submit itself to any jurisdiction.
 ///
 
-#include <cuda_runtime.h>
 #include "ITStrackingGPU/Stream.h"
-#include "ITStrackingGPU/Utils.h"
-#include "GPUCommonLogger.h"
+#include "GPUCommonHelpers.h"
 
 namespace o2
 {
@@ -21,16 +19,15 @@ namespace its
 {
 namespace gpu
 {
-using utils::checkGPUError;
 
 Stream::Stream()
 {
-  checkGPUError(cudaStreamCreate(&mStream));
+  GPUChkErrS(cudaStreamCreate(&mStream));
 }
+
 Stream::~Stream()
 {
-  LOGP(info, "Destroying stream");
-  checkGPUError(cudaStreamDestroy(mStream));
+  GPUChkErrS(cudaStreamDestroy(mStream));
 }
 
 const GPUStream& Stream::get() const

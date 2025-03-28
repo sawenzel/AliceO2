@@ -18,16 +18,11 @@
 
 #include "ITStracking/Definitions.h"
 
-namespace o2
-{
-namespace its
-{
-namespace gpu
+namespace o2::its::gpu
 {
 
 class Stream final
 {
-
  public:
   Stream();
   ~Stream();
@@ -37,8 +32,5 @@ class Stream final
  private:
   GPUStream mStream;
 };
-} // namespace gpu
-} // namespace its
-} // namespace o2
-
-#endif /* TRAKINGITSU_INCLUDE_GPU_STREAM_H_ */
+} // namespace o2::its::gpu
+#endif
