@@ -1740,7 +1740,7 @@ GPUd() void GPUTPCGMMerger::CollectMergedTracks(int32_t nBlocks, int32_t nThread
     p1.DzDs() = p2.DzDs();
     p1.QPt() = p2.QPt();
     mergedTrack.SetAlpha(p2.Alpha());
-    if (CAMath::Abs(Param().polynomialField.GetNominalBz()) < (0.01f * gpu_common_constants::kCLight)) {
+    if (CAMath::Abs(Param().polynomialField.GetNominalBz()) < (0.013f * gpu_common_constants::kCLight)) {
       p1.QPt() = 100.f / Param().rec.bz0Pt10MeV;
     }
 
