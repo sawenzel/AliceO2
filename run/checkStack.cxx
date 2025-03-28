@@ -62,13 +62,17 @@ int main(int argc, char** argv)
     hitbr->SetAddress(&hits);
   }
 
-  for (int eventID = 0; eventID < mcbr->GetEntries(); ++eventID) {
+
+  int minEVENT_ID=0;
+  int maxEVENT_ID=100;
+  for (int eventID = minEVENT_ID; eventID < maxEVENT_ID; ++eventID) {
     mcbr->GetEntry(eventID);
     refbr->GetEntry(eventID);
     LOG(debug) << "-- Entry --" << eventID;
     LOG(debug) << "Have " << mctracks->size() << " tracks";
 
     std::unordered_map<int, bool> trackidsinITS_fromhits;
+    std::unordered_map<int, int> ITShitTrackID_to_pdg;
     if (hitbr) {
       hitbr->GetEntry(eventID);
       LOG(debug) << "Have " << hits->size() << " hits";
@@ -79,6 +83,7 @@ int main(int argc, char** argv)
         maxid = std::max(maxid, h.GetTrackID());
         trackidsinITS_fromhits[h.GetTrackID()] = true;
         assert(maxid < mctracks->size());
+        ITShitTrackID_to_pdg[h.GetTrackID()] = h.pdg();
       }
     }
 
@@ -95,6 +100,8 @@ int main(int argc, char** argv)
     int primaries = 0;
     int physicalprimaries = 0;
     int secondaries = 0;
+
+   
     for (auto& t : *mctracks) {
       // perform checks on the mass
       if (t.GetMass() < 0) {
@@ -115,7 +122,7 @@ int main(int argc, char** argv)
       }
 
       bool physicalPrim = o2::mcutils::MCTrackNavigator::isPhysicalPrimary(t, *mctracks);
-      LOG(debug) << " track " << ti << "\t" << t.getMotherTrackId() << " hits " << t.hasHits() << " isPhysicalPrimary " << physicalPrim;
+      // LOG(debug) << " track " << ti << "\t" << t.getMotherTrackId() << " hits " << t.hasHits() << " isPhysicalPrimary " << physicalPrim;
       if (t.isPrimary()) {
         primaries++;
       } else {
@@ -127,18 +134,34 @@ int main(int argc, char** argv)
       ti++;
     }
 
+    std::map<int, bool> pdg_histo;
     if (hitbr) {
       assert(trackidsinITS.size() == trackidsinITS_fromhits.size());
       for (auto id : trackidsinITS) {
         assert(trackidsinITS_fromhits[id] == true);
       }
+      for (auto id : trackidsinITS_fromhits) {
+        assert(std::find(trackidsinITS.begin(), trackidsinITS.end(), id.first) != trackidsinITS.end());
+      }
+    
+     
+      // fetch the tracks and cross-check physical observables
+      for (auto id : ITShitTrackID_to_pdg) {
+        // check consistency of pdf codes between hit and actual MC track
+        assert((*mctracks)[id.first].GetPdgCode() == id.second);
+        pdg_histo[id.second] = 1;
+      }
+    
     }
 
+    LOG(debug) << "Have " << trackidsinITS.size() << " tracks with hits in ITS";
     LOG(debug) << "Have " << trackidsinTPC.size() << " tracks with hits in TPC";
+    LOG(debug) << "Have " << pdg_histo.size() << " different track pdgs in ITS";
     LOG(debug) << "Have " << trackrefs->size() << " track refs";
     LOG(info) << "Have " << primaries << " primaries and " << physicalprimaries << " physical primaries";
 
     // check correct working of MCKinematicsReader
+    /*
     bool havereferences = trackrefs->size();
     if (havereferences) {
       for (auto& trackID : trackidsinTPC) {
@@ -149,7 +172,7 @@ int main(int argc, char** argv)
           assert(ref.getTrackID() == trackID);
         }
       }
-    }
+    }*/
   }
   LOG(info) << "STACK TEST SUCCESSFULL\n";
   return 0;

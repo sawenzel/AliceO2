@@ -396,9 +396,10 @@ Bool_t Detector::ProcessHits(FairVolume* vol)
     fMC->CurrentVolOffID(5, halfbarrel);
     int chipindex = mGeometryTGeo->getChipIndex(lay, halfbarrel, stave, halfstave, module, chipinmodule);
 
+    auto pdg = stack->GetCurrentTrack()->GetPdgCode();
     Hit* p = addHit(stack->GetCurrentTrackNumber(), chipindex, mTrackData.mPositionStart.Vect(), positionStop.Vect(),
                     mTrackData.mMomentumStart.Vect(), mTrackData.mMomentumStart.E(), positionStop.T(),
-                    mTrackData.mEnergyLoss, mTrackData.mTrkStatusStart, status);
+                    mTrackData.mEnergyLoss, mTrackData.mTrkStatusStart, status, pdg);
     // p->SetTotalEnergy(vmc->Etot());
 
     // RS: not sure this is needed
@@ -1359,9 +1360,9 @@ void Detector::fillParallelWorld() const
 
 Hit* Detector::addHit(int trackID, int detID, const TVector3& startPos, const TVector3& endPos,
                       const TVector3& startMom, double startE, double endTime, double eLoss, unsigned char startStatus,
-                      unsigned char endStatus)
+                      unsigned char endStatus, int pdg)
 {
-  mHits->emplace_back(trackID, detID, startPos, endPos, startMom, startE, endTime, eLoss, startStatus, endStatus);
+  mHits->emplace_back(trackID, detID, startPos, endPos, startMom, startE, endTime, eLoss, startStatus, endStatus, pdg);
   return &(mHits->back());
 }
 

@@ -54,7 +54,7 @@ class Hit : public o2::BasicXYZEHit<Float_t, Float_t>
   /// \param startStatus: status at entrance
   /// \param endStatus: status at exit
   inline Hit(int trackID, unsigned short detID, const TVector3& startPos, const TVector3& pos, const TVector3& mom, double startE,
-             double endTime, double eLoss, unsigned char statusStart, unsigned char status);
+             double endTime, double eLoss, unsigned char statusStart, unsigned char status, int pdg=0);
 
   // Entrance position getters
   math_utils::Point3D<Float_t> GetPosStart() const { return mPosStart; }
@@ -94,6 +94,8 @@ class Hit : public o2::BasicXYZEHit<Float_t, Float_t>
   Bool_t IsStoppedStart() const { return mTrackStatusStart & kTrackStopped; }
   Bool_t IsAliveStart() const { return mTrackStatusStart & kTrackAlive; }
 
+  int pdg() const { return mPDG; }
+
   // Entrance position setter
   void SetPosStart(const math_utils::Point3D<Float_t>& p) { mPosStart = p; }
 
@@ -117,18 +119,20 @@ class Hit : public o2::BasicXYZEHit<Float_t, Float_t>
   Float_t mE;                              ///< total energy at entrance
   UChar_t mTrackStatusEnd;                 ///< MC status flag at exit
   UChar_t mTrackStatusStart;               ///< MC status at starting point
+  int mPDG; ///< PDG of the track
 
   ClassDefNV(Hit, 3);
 };
 
 Hit::Hit(int trackID, unsigned short detID, const TVector3& startPos, const TVector3& endPos, const TVector3& startMom,
-         double startE, double endTime, double eLoss, unsigned char startStatus, unsigned char endStatus)
+         double startE, double endTime, double eLoss, unsigned char startStatus, unsigned char endStatus, int pdg)
   : BasicXYZEHit(endPos.X(), endPos.Y(), endPos.Z(), endTime, eLoss, trackID, detID),
     mMomentum(startMom.Px(), startMom.Py(), startMom.Pz()),
     mPosStart(startPos.X(), startPos.Y(), startPos.Z()),
     mE(startE),
     mTrackStatusEnd(endStatus),
-    mTrackStatusStart(startStatus)
+    mTrackStatusStart(startStatus),
+    mPDG{pdg}
 {
 }
 

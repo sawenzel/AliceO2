@@ -151,7 +151,7 @@ class Detector : public o2::base::DetImpl<Detector>
   /// This method is an example of how to add your own point of type Hit to the clones array
   o2::itsmft::Hit* addHit(int trackID, int detID, const TVector3& startPos, const TVector3& endPos,
                           const TVector3& startMom, double startE, double endTime, double eLoss,
-                          unsigned char startStatus, unsigned char endStatus);
+                          unsigned char startStatus, unsigned char endStatus, int pdg);
 
   /// Set per wrapper volume parameters
   void defineWrapperVolume(Int_t id, Double_t rmin, Double_t rmax, Double_t zspan) override;
