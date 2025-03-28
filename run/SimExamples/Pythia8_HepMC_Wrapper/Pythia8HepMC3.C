@@ -10,7 +10,8 @@ using namespace o2::eventgen;
 class HepMC3_Pythia8Wrapper : public GeneratorPythia8
 {
  public:
-  HepMC3_Pythia8Wrapper(std::string filename = "pythia8.hepmc") : GeneratorPythia8(), mFileName(filename) {
+  HepMC3_Pythia8Wrapper(std::string filename = "pythia8.hepmc") : GeneratorPythia8(), mFileName(filename)
+  {
     // HepMC conversion object.
     mToHepMC = std::make_unique<Pythia8::Pythia8ToHepMC>();
     mToHepMC->setNewFile((filename == "" ? "pythia.hepmc" : filename));
@@ -30,12 +31,12 @@ class HepMC3_Pythia8Wrapper : public GeneratorPythia8
   };
 
  private:
-   std::string mFileName = "pythia8.hepmc";
-   std::unique_ptr<Pythia8::Pythia8ToHepMC> mToHepMC;
+  std::string mFileName = "pythia8.hepmc";
+  std::unique_ptr<Pythia8::Pythia8ToHepMC> mToHepMC;
 };
 
-FairGenerator *
-hepmc_pythia8(std::string filename = "pythia8.hepmc")
+FairGenerator*
+  hepmc_pythia8(std::string filename = "pythia8.hepmc")
 {
   std::cout << "HepMC3_Pythia8Wrapper initialising with filename: " << filename << std::endl;
   auto py8 = new HepMC3_Pythia8Wrapper(filename);
