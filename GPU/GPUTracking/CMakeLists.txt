@@ -231,7 +231,7 @@ if(ALIGPU_BUILD_TYPE STREQUAL "O2")
 endif()
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly)
-file(GENERATE
+file(GENERATE # TODO: Do this as a list
      OUTPUT include_gpu_onthefly/GPUReconstructionKernelList.h
      INPUT Base/GPUReconstructionKernelList.template.h
 )
@@ -255,10 +255,19 @@ file(GENERATE
      OUTPUT include_gpu_onthefly/GPUDefParametersLoad.inc
      INPUT Definitions/GPUDefParametersLoad.template.inc
 )
-if(NOT ALIGPU_BUILD_TYPE STREQUAL "O2")
-  include_directories(${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly)
-endif()
-set(HDRS_INSTALL ${HDRS_INSTALL} ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/GPUReconstructionKernelList.h ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/GPUDefParameters.h ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/GPUDefParametersLoad.inc)
+file(GENERATE
+     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/GPUDefParametersLoadPrepareBase
+     CONTENT "$<JOIN:$<LIST:TRANSFORM,$<TARGET_PROPERTY:O2_GPU_KERNELS,O2_GPU_KERNEL_NAMES>,REPLACE,[^A-Za-z0-9]+,_>,\n>"
+)
+add_custom_command(
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/GPUDefParametersLoadPrepare.h
+  COMMAND awk "{print(\"#ifndef GPUCA_LB_\" $0 \"\\n#define GPUCA_LB_\" $0 \" 0\\n#endif\")}" ${CMAKE_CURRENT_BINARY_DIR}/GPUDefParametersLoadPrepareBase > ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/GPUDefParametersLoadPrepare.h
+  COMMENT "Generating GPUDefParametersLoadPrepare.h"
+  VERBATIM
+  COMMAND_EXPAND_LISTS
+)
+
+set(HDRS_INSTALL ${HDRS_INSTALL} ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/GPUReconstructionKernelList.h ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/GPUDefParameters.h ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/GPUDefParametersLoad.inc ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/GPUDefParametersLoadPrepare.h)
 include(kernels.cmake)
 
 # Optional sources depending on optional dependencies
@@ -396,6 +405,12 @@ set_source_files_properties(Base/GPUReconstructionLibrary.cxx
                             PROPERTIES
                             INCLUDE_DIRECTORIES "${CMAKE_CURRENT_BINARY_DIR}")
 
+# Make sure header files generated with add_custom_command are built
+target_sources(${targetName}
+               PRIVATE FILE_SET "generatedHeaders"
+               TYPE HEADERS
+               FILES ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/GPUDefParametersLoadPrepare.h # TODO: build file list for this
+               BASE_DIRS ${CMAKE_CURRENT_BINARY_DIR})
 
 # Add compile definitions and libraries depending on available optional dependencies
 if(GPUCA_QA)

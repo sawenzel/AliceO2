@@ -12,9 +12,7 @@
 /// \file GPUReconstructionOCL.cxx
 /// \author David Rohr
 
-#define GPUCA_DEF_PARAMETERS_LOAD_DEFAULTS
 #include "GPUReconstructionOCLIncludesHost.h"
-#include "GPUDefParametersDefault.h"
 #include "GPUDefParametersLoad.inc"
 
 #include <map>

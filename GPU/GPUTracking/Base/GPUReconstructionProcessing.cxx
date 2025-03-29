@@ -12,12 +12,9 @@
 /// \file GPUReconstructionProcessing.cxx
 /// \author David Rohr
 
-#define GPUCA_DEF_PARAMETERS_LOAD_DEFAULTS
-#include "GPUDefParametersDefault.h"
-#include "GPUDefParametersLoad.inc"
-
 #include "GPUReconstructionProcessing.h"
 #include "GPUReconstructionThreading.h"
+#include "GPUDefParametersLoad.inc"
 
 using namespace o2::gpu;
 

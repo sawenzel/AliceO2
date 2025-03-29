@@ -13,13 +13,10 @@
 /// \author David Rohr
 
 #define GPUCA_GPUCODE_HOSTONLY
-#define GPUCA_DEF_PARAMETERS_LOAD_DEFAULTS
-#include "GPUDefParametersDefault.h"
-#include "GPUDefParametersLoad.inc"
 
 #include "GPUReconstructionCUDA.h"
 #include "GPUParamRTC.h"
-#include "GPUDefMacros.h"
+#include "GPUDefParametersLoad.inc"
 #include <unistd.h>
 #include "Framework/SHA1.h"
 #include <sys/stat.h>

@@ -14,11 +14,6 @@
 
 #define GPUCA_GPUCODE_HOSTONLY
 
-#define GPUCA_DEF_PARAMETERS_LOAD_DEFAULTS
-#include "GPUReconstructionCUDADef.h"
-#include "GPUDefParametersDefault.h"
-#include "GPUDefParametersLoad.inc"
-
 #include "GPUReconstructionCUDAIncludesSystem.h"
 #include "GPUReconstructionCUDADef.h"
 #include <cuda_profiler_api.h>
@@ -28,6 +23,7 @@
 #include "GPUReconstructionIncludes.h"
 #include "GPUParamRTC.h"
 #include "GPUReconstructionCUDAHelpers.inc"
+#include "GPUDefParametersLoad.inc"
 
 #if defined(GPUCA_KERNEL_COMPILE_MODE) && GPUCA_KERNEL_COMPILE_MODE == 1
 #include "utils/qGetLdBinarySymbols.h"

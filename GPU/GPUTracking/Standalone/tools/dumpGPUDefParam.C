@@ -18,7 +18,6 @@
 // Logic for testing to load the default parameters
 /*#define GPUCA_GPUCODE
 #define GPUCA_GPUTYPE_AMPERE
-#define GPUCA_DEF_PARAMETERS_LOAD_DEFAULTS
 #define GPUCA_MAXN 40
 #define GPUCA_ROW_COUNT 152
 #define GPUCA_TPC_COMP_CHUNK_SIZE 1024
