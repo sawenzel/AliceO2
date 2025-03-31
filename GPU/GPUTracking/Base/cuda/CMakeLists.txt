@@ -110,11 +110,10 @@ set(SRCS ${SRCS} ${GPU_RTC_BIN}.src.o ${GPU_RTC_BIN}.command.o ${GPU_RTC_BIN}.co
 # -------------------------------- End RTC -------------------------------------------------------
 
 if(ALIGPU_BUILD_TYPE STREQUAL "O2")
-  set(TMP_BASELIB O2::GPUTracking)
   o2_add_library(
     ${MODULE}
     SOURCES ${SRCS}
-    PUBLIC_LINK_LIBRARIES ${TMP_BASELIB} O2::ITStrackingCUDA
+    PUBLIC_LINK_LIBRARIES O2::GPUTracking O2::ITStrackingCUDA
     PRIVATE_INCLUDE_DIRECTORIES
       ${CMAKE_SOURCE_DIR}/Detectors/Base/src
       ${CMAKE_SOURCE_DIR}/Detectors/TRD/base/src
@@ -127,10 +126,9 @@ endif()
 
 if(ALIGPU_BUILD_TYPE STREQUAL "Standalone")
   set(targetName "${MODULE}")
-  set(TMP_BASELIB GPUTracking)
   add_library(${MODULE} SHARED ${SRCS})
   add_library(O2::${MODULE} ALIAS ${MODULE})
-  target_link_libraries(${MODULE} PUBLIC ${TMP_BASELIB})
+  target_link_libraries(${MODULE} PUBLIC O2::GPUTracking)
   install(TARGETS GPUTrackingCUDA)
   include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 endif()

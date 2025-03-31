@@ -148,11 +148,10 @@ set(SRCS ${SRCS} ${GPU_RTC_BIN}.src.o ${GPU_RTC_BIN}.command.o ${GPU_RTC_BIN}.co
 # -------------------------------- End RTC -------------------------------------------------------
 
 if(ALIGPU_BUILD_TYPE STREQUAL "O2")
-  set(TMP_BASELIB O2::GPUTracking)
   o2_add_library(
     ${MODULE}
     SOURCES ${SRCS}
-    PUBLIC_LINK_LIBRARIES ${TMP_BASELIB} O2::ITStrackingHIP
+    PUBLIC_LINK_LIBRARIES O2::GPUTracking O2::ITStrackingHIP
     PRIVATE_INCLUDE_DIRECTORIES
       ${CMAKE_SOURCE_DIR}/Detectors/Base/src
       ${CMAKE_SOURCE_DIR}/Detectors/TRD/base/src
@@ -171,10 +170,9 @@ endif()
 
 if(ALIGPU_BUILD_TYPE STREQUAL "Standalone")
   set(targetName "${MODULE}")
-  set(TMP_BASELIB GPUTracking)
   add_library(${MODULE} SHARED ${SRCS})
   add_library(O2::${MODULE} ALIAS ${MODULE})
-  target_link_libraries(${MODULE} PUBLIC ${TMP_BASELIB})
+  target_link_libraries(${MODULE} PUBLIC O2::GPUTracking)
   install(TARGETS GPUTrackingHIP)
   include_directories(${GPUCA_HIP_SOURCE_DIR})
 endif()
@@ -182,9 +180,9 @@ endif()
 target_compile_definitions(${targetName} PRIVATE $<TARGET_PROPERTY:O2::GPUTracking,COMPILE_DEFINITIONS>)
 
 add_library(${MODULE}_CXX OBJECT ${SRCS_CXX}) # Adding a C++ library for the .cxx code of the HIP library, such that it does not link to HIP libraries, and CMake HIP Language doesn't add HIP compile flags.
-target_compile_definitions(${MODULE}_CXX PRIVATE $<TARGET_PROPERTY:${TMP_BASELIB},COMPILE_DEFINITIONS>)
-target_include_directories(${MODULE}_CXX PRIVATE $<TARGET_PROPERTY:${TMP_BASELIB},INCLUDE_DIRECTORIES>)
-target_link_libraries(${MODULE}_CXX PRIVATE $<TARGET_PROPERTY:${TMP_BASELIB},LINK_LIBRARIES>)
+target_compile_definitions(${MODULE}_CXX PRIVATE $<TARGET_PROPERTY:O2::GPUTracking,COMPILE_DEFINITIONS>)
+target_include_directories(${MODULE}_CXX PRIVATE $<TARGET_PROPERTY:O2::GPUTracking,INCLUDE_DIRECTORIES>)
+target_link_libraries(${MODULE}_CXX PRIVATE $<TARGET_PROPERTY:O2::GPUTracking,LINK_LIBRARIES>)
 add_dependencies(${MODULE}_CXX O2::GPUTracking)
 target_link_libraries(${targetName} PRIVATE ${MODULE}_CXX)
 
