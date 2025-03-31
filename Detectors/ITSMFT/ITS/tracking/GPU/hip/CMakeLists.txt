@@ -15,7 +15,6 @@ if(HIP_ENABLED)
   o2_add_hipified_library(ITStrackingHIP
                  SOURCES ../cuda/ClusterLinesGPU.cu
                          ../cuda/TimeFrameGPU.cu
-                         ../cuda/Stream.cu
                          ../cuda/TrackerTraitsGPU.cxx
                          ../cuda/TracerGPU.cu
                          ../cuda/TrackingKernels.cu

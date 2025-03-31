@@ -26,19 +26,4 @@
   do {                 \
   } while (0)
 #endif
-
-#if defined(__CUDACC__) || defined(__HIPCC__)
-#ifdef __CUDACC__
-typedef cudaStream_t GPUStream;
-#else // __HIPCC__
-#ifndef GPUCA_GPUCODE_DEVICE
-#include <hip/hip_runtime.h>
-#endif
-typedef hipStream_t GPUStream;
-#endif
-#else
-typedef struct __dummyStream {
-} GPUStream;
-#endif
-
 #endif

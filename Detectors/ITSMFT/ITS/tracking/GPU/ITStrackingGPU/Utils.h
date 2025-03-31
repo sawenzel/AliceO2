@@ -17,7 +17,6 @@
 #define ITSTRACKINGGPU_UTILS_H_
 
 #include "GPUCommonDef.h"
-#include "Stream.h"
 
 namespace o2
 {

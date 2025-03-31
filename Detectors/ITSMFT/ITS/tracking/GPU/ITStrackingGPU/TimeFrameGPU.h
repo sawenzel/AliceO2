@@ -17,7 +17,6 @@
 #include "ITStracking/Configuration.h"
 
 #include "ITStrackingGPU/ClusterLinesGPU.h"
-#include "ITStrackingGPU/Stream.h"
 #include "ITStrackingGPU/Utils.h"
 
 #include <gsl/gsl>
@@ -28,6 +27,7 @@ namespace its
 {
 namespace gpu
 {
+class Stream;
 
 class DefaultGPUAllocator : public ExternalAllocator
 {
@@ -87,7 +87,7 @@ class TimeFrameGPU : public TimeFrame
   template <Task task>
   Stream& getStream(const size_t stream)
   {
-    return mGpuStreams[stream];
+    return *mGpuStreams[stream];
   }
   void wipe(const int);
 
@@ -199,7 +199,7 @@ class TimeFrameGPU : public TimeFrame
   const TrackingFrameInfo** mTrackingFrameInfoDeviceArray;
 
   // State
-  std::vector<Stream> mGpuStreams;
+  std::vector<Stream*> mGpuStreams;
   size_t mAvailMemGB;
   bool mFirstInit = true;
 

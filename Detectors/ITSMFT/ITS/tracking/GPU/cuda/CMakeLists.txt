@@ -17,7 +17,6 @@ message(STATUS "Building ITS CUDA tracker")
 # add_compile_definitions(ITS_MEASURE_GPU_TIME)
 o2_add_library(ITStrackingCUDA
                SOURCES ClusterLinesGPU.cu
-                       Stream.cu
                        TrackerTraitsGPU.cxx
                        TimeFrameGPU.cu
                        TracerGPU.cu
