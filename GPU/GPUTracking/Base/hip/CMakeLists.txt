@@ -184,6 +184,8 @@ target_compile_definitions(${targetName} PRIVATE $<TARGET_PROPERTY:O2::GPUTracki
 add_library(${MODULE}_CXX OBJECT ${SRCS_CXX}) # Adding a C++ library for the .cxx code of the HIP library, such that it does not link to HIP libraries, and CMake HIP Language doesn't add HIP compile flags.
 target_compile_definitions(${MODULE}_CXX PRIVATE $<TARGET_PROPERTY:${TMP_BASELIB},COMPILE_DEFINITIONS>)
 target_include_directories(${MODULE}_CXX PRIVATE $<TARGET_PROPERTY:${TMP_BASELIB},INCLUDE_DIRECTORIES>)
+target_link_libraries(${MODULE}_CXX PRIVATE $<TARGET_PROPERTY:${TMP_BASELIB},LINK_LIBRARIES>)
+add_dependencies(${MODULE}_CXX O2::GPUTracking)
 target_link_libraries(${targetName} PRIVATE ${MODULE}_CXX)
 
 if(NOT DEFINED GPUCA_HIP_HIPIFY_FROM_CUDA OR "${GPUCA_HIP_HIPIFY_FROM_CUDA}")
@@ -213,6 +215,7 @@ elseif(GPUCA_HIP_COMPILE_MODE STREQUAL "perkernel")
   target_compile_definitions(${targetName} PRIVATE GPUCA_KERNEL_COMPILE_MODE=1)
   target_compile_definitions(GPUTrackingHIPKernels PRIVATE $<TARGET_PROPERTY:${targetName},COMPILE_DEFINITIONS>)
   target_include_directories(GPUTrackingHIPKernels PRIVATE $<TARGET_PROPERTY:${targetName},INCLUDE_DIRECTORIES>)
+  target_link_libraries(GPUTrackingHIPKernels PRIVATE $<TARGET_PROPERTY:${targetName},LINK_LIBRARIES>)
   if(NOT DEFINED GPUCA_HIP_HIPIFY_FROM_CUDA OR "${GPUCA_HIP_HIPIFY_FROM_CUDA}")
     add_dependencies(GPUTrackingHIPKernels ${MODULE}_HIPIFIED)
   endif()
@@ -249,6 +252,7 @@ target_compile_options(GPUTrackingHIPExternalProvider PRIVATE $<$<COMPILE_LANGUA
 target_link_options(GPUTrackingHIPExternalProvider PRIVATE $<$<COMPILE_LANGUAGE:HIP>:-fgpu-rdc>)
 target_compile_definitions(GPUTrackingHIPExternalProvider PRIVATE $<TARGET_PROPERTY:${targetName},COMPILE_DEFINITIONS>)
 target_include_directories(GPUTrackingHIPExternalProvider PRIVATE $<TARGET_PROPERTY:${targetName},INCLUDE_DIRECTORIES>)
+add_dependencies(GPUTrackingHIPExternalProvider O2::GPUTracking) # must not depend on GPU backend to avoid cyclic dependencies
 if(NOT DEFINED GPUCA_HIP_HIPIFY_FROM_CUDA OR "${GPUCA_HIP_HIPIFY_FROM_CUDA}")
   add_dependencies(GPUTrackingHIPExternalProvider ${MODULE}_HIPIFIED)
 endif()

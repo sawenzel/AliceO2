@@ -158,6 +158,7 @@ elseif(GPUCA_CUDA_COMPILE_MODE STREQUAL "perkernel")
   target_compile_definitions(${targetName} PRIVATE GPUCA_KERNEL_COMPILE_MODE=1)
   target_compile_definitions(GPUTrackingCUDAKernels PRIVATE $<TARGET_PROPERTY:${targetName},COMPILE_DEFINITIONS>)
   target_include_directories(GPUTrackingCUDAKernels PRIVATE $<TARGET_PROPERTY:${targetName},INCLUDE_DIRECTORIES>)
+  target_link_libraries(GPUTrackingCUDAKernels PRIVATE $<TARGET_PROPERTY:${targetName},LINK_LIBRARIES>)
   file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/cuda_kernel_module_fatbin)
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/GPUTrackingCUDAKernelModules.o
@@ -189,3 +190,4 @@ add_library(O2::GPUTrackingCUDAExternalProvider ALIAS GPUTrackingCUDAExternalPro
 set_property(TARGET GPUTrackingCUDAExternalProvider PROPERTY CUDA_SEPARABLE_COMPILATION ON)
 target_compile_definitions(GPUTrackingCUDAExternalProvider PRIVATE $<TARGET_PROPERTY:${targetName},COMPILE_DEFINITIONS>)
 target_include_directories(GPUTrackingCUDAExternalProvider PRIVATE $<TARGET_PROPERTY:${targetName},INCLUDE_DIRECTORIES>)
+add_dependencies(GPUTrackingCUDAExternalProvider O2::GPUTracking) # must not depend on GPU backend to avoid cyclic dependencies
