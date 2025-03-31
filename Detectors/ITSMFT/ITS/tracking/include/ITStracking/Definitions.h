@@ -29,10 +29,11 @@
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
 #ifdef __CUDACC__
-#include <cuda_runtime.h>
 typedef cudaStream_t GPUStream;
 #else // __HIPCC__
+#ifndef GPUCA_GPUCODE_DEVICE
 #include <hip/hip_runtime.h>
+#endif
 typedef hipStream_t GPUStream;
 #endif
 #else
