@@ -495,16 +495,14 @@ bool initializeCache(ProcessingContext& context, T& cache)
 
 /// Combinations handling
 template <typename C, typename TG, typename... Ts>
-  requires(!is_combinations_generator<C>)
 void setGroupedCombination(C&, TG&, Ts&...)
 {
 }
 
 template <is_combinations_generator C, typename TG, typename... Ts>
-  requires((sizeof...(Ts) > 0) && (C::compatible(framework::pack<Ts...>{})))
 static void setGroupedCombination(C& comb, TG& grouping, std::tuple<Ts...>& associated)
 {
-  if constexpr (std::same_as<typename C::g_t, TG>) {
+  if constexpr (std::same_as<typename C::g_t, std::decay_t<TG>>) {
     comb.setTables(grouping, associated);
   }
 }
