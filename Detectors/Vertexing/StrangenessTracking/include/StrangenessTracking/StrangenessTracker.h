@@ -321,6 +321,7 @@ class StrangenessTracker
  protected:
   bool mMCTruthON = false;                             /// flag availability of MC truth
   int mNThreads = 1;                                   /// number of threads (externally driven)
+  float mGlobalChi2 = -1;                              /// global topology matching chi2
   gsl::span<const TrackITS> mInputITStracks;           // input ITS tracks
   std::vector<VBracket> mITSvtxBrackets;               // time brackets for ITS tracks
   std::vector<int> mTracksIdxTable;                    // index table for ITS tracks
