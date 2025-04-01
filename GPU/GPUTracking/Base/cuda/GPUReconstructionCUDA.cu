@@ -82,7 +82,7 @@ GPUReconstructionCUDA::GPUReconstructionCUDA(const GPUSettingsDeviceBackend& cfg
   mRtcBinExtension = ".o";
 #endif
 }
-GPUReconstructionCUDA::~GPUReconstructionCUDA() {}
+GPUReconstructionCUDA::~GPUReconstructionCUDA() = default;
 
 GPUReconstruction* GPUReconstruction_Create_CUDA(const GPUSettingsDeviceBackend& cfg) { return new GPUReconstructionCUDA(cfg); }
 
