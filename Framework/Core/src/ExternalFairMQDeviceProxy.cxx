@@ -528,7 +528,9 @@ InjectorFunction dplModelAdaptor(std::vector<OutputSpec> const& filterSpecs, DPL
       timingInfo.tfCounter = dh->tfCounter;
       LOG(debug) << msgidx << ": " << DataSpecUtils::describe(OutputSpec{dh->dataOrigin, dh->dataDescription, dh->subSpecification}) << " part " << dh->splitPayloadIndex << " of " << dh->splitPayloadParts << "  payload " << parts.At(msgidx + 1)->GetSize();
       if (dh->runNumber == 0 || dh->tfCounter == 0 || (fmqRunNumber > 0 && fmqRunNumber != dh->runNumber)) {
-        LOG(error) << "INVALID runNumber / tfCounter: runNumber " << dh->runNumber << ", tfCounter " << dh->tfCounter << ", FMQ runNumber " << fmqRunNumber;
+        LOG(error) << "INVALID runNumber / tfCounter: runNumber " << dh->runNumber
+                   << ", tfCounter " << dh->tfCounter << ", FMQ runNumber " << fmqRunNumber
+                   << " for msgidx " << msgidx << ": " << DataSpecUtils::describe(OutputSpec{dh->dataOrigin, dh->dataDescription, dh->subSpecification}) << " part " << dh->splitPayloadIndex << " of " << dh->splitPayloadParts << "  payload " << parts.At(msgidx + 1)->GetSize();
       }
 
       OutputSpec query{dh->dataOrigin, dh->dataDescription, dh->subSpecification};
