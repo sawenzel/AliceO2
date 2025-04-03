@@ -764,11 +764,8 @@ auto sendRelayerMetrics(ServiceRegistryRef registry, DataProcessingStats& stats)
   using namespace fair::mq::shmem;
   auto& spec = registry.get<DeviceSpec const>();
 
-  auto hasMetric = [&runningWorkflow](const DataProcessingStats::MetricSpec& metric) -> bool {
-    return metric.metricId == static_cast<int>(ProcessingStatsId::AVAILABLE_MANAGED_SHM_BASE) + (runningWorkflow.shmSegmentId % 512);
-  };
   // FIXME: Ugly, but we do it only every 5 seconds...
-  if (std::find_if(stats.metricSpecs.begin(), stats.metricSpecs.end(), hasMetric) != stats.metricSpecs.end()) {
+  if (stats.hasAvailSHMMetric) {
     auto device = registry.get<RawDeviceService>().device();
     long freeMemory = -1;
     try {
@@ -1104,8 +1101,12 @@ o2::framework::ServiceSpec CommonServices::dataProcessingStats()
                    .sendInitialValue = true}};
 
       for (auto& metric : metrics) {
-        if (metric.metricId == (int)ProcessingStatsId::AVAILABLE_MANAGED_SHM_BASE + (runningWorkflow.shmSegmentId % 512) && spec.name.compare("readout-proxy") != 0) {
-          continue;
+        if (metric.metricId == (int)ProcessingStatsId::AVAILABLE_MANAGED_SHM_BASE + (runningWorkflow.shmSegmentId % 512)) {
+          if (spec.name.compare("readout-proxy") == 0) {
+            stats->hasAvailSHMMetric = true;
+          } else {
+            continue;
+          }
         }
         stats->registerMetric(metric);
       }
