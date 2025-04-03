@@ -60,7 +60,7 @@ GPUd() bool GPUTPCGMTrackParam::Fit(GPUTPCGMMerger* GPUrestrict() merger, int32_
 
   const GPUParam& GPUrestrict() param = merger->Param();
 
-  GPUdEdx dEdx;
+  GPUdEdx dEdx, dEdxAlt;
   GPUTPCGMPropagator prop;
   gputpcgmmergertypes::InterpolationErrors interpolation;
   prop.SetMaterialTPC();
@@ -220,6 +220,7 @@ GPUd() bool GPUTPCGMTrackParam::Fit(GPUTPCGMMerger* GPUrestrict() merger, int32_
         dodEdx = AttachClustersPropagate(merger, cluster.sector, lastRow, cluster.row, iTrk, cluster.leg == clusters[maxN - 1].leg, prop, inFlyDirection, GPUCA_MAX_SIN_PHI, dodEdx);
         if (dodEdx) {
           dEdx.fillSubThreshold(lastRow - wayDirection);
+          dEdxAlt.fillSubThreshold(lastRow - wayDirection);
         }
       }
 
@@ -366,25 +367,33 @@ GPUd() bool GPUTPCGMTrackParam::Fit(GPUTPCGMMerger* GPUrestrict() merger, int32_
           CADEBUG(printf("Reinit linearization\n"));
           prop.SetTrack(this, prop.GetAlpha());
         }
-        if (param.par.dodEdx && param.dodEdxDownscaled && iWay == nWays - 1 && cluster.leg == clusters[maxN - 1].leg && (clusterState & param.rec.tpc.dEdxClusterRejectionFlagMask) == 0) { // TODO: Costimize flag to remove, and option to remove double-clusters
-          float qtot = 0, qmax = 0, pad = 0, relTime = 0;
-          const int32_t clusterCount = (ihit - ihitMergeFirst) * wayDirection + 1;
-          for (int32_t iTmp = ihitMergeFirst; iTmp != ihit + wayDirection; iTmp += wayDirection) {
-            if (merger->GetConstantMem()->ioPtrs.clustersNative == nullptr) {
-              qtot += clustersXYZ[ihit].amp;
-            } else {
-              const ClusterNative& cl = merger->GetConstantMem()->ioPtrs.clustersNative->clustersLinear[cluster.num];
-              qtot += cl.qTot;
-              qmax = CAMath::Max<float>(qmax, cl.qMax);
-              pad += cl.getPad();
-              relTime += cl.getTime();
+        if (param.par.dodEdx && param.dodEdxDownscaled && iWay == nWays - 1 && cluster.leg == clusters[maxN - 1].leg) { // TODO: Costimize flag to remove, and option to remove double-clusters
+          bool acc = (clusterState & param.rec.tpc.dEdxClusterRejectionFlagMask) == 0, accAlt = (clusterState & param.rec.tpc.dEdxClusterRejectionFlagMaskAlt) == 0;
+          if (acc || accAlt) {
+            float qtot = 0, qmax = 0, pad = 0, relTime = 0;
+            const int32_t clusterCount = (ihit - ihitMergeFirst) * wayDirection + 1;
+            for (int32_t iTmp = ihitMergeFirst; iTmp != ihit + wayDirection; iTmp += wayDirection) {
+              if (merger->GetConstantMem()->ioPtrs.clustersNative == nullptr) {
+                qtot += clustersXYZ[ihit].amp;
+              } else {
+                const ClusterNative& cl = merger->GetConstantMem()->ioPtrs.clustersNative->clustersLinear[cluster.num];
+                qtot += cl.qTot;
+                qmax = CAMath::Max<float>(qmax, cl.qMax);
+                pad += cl.getPad();
+                relTime += cl.getTime();
+              }
+            }
+            qtot /= clusterCount; // TODO: Weighted Average
+            pad /= clusterCount;
+            relTime /= clusterCount;
+            relTime = relTime - CAMath::Round(relTime);
+            if (acc) {
+              dEdx.fillCluster(qtot, qmax, cluster.row, cluster.sector, mP[2], mP[3], merger->GetConstantMem()->calibObjects, zz, pad, relTime);
+            }
+            if (accAlt) {
+              dEdxAlt.fillCluster(qtot, qmax, cluster.row, cluster.sector, mP[2], mP[3], merger->GetConstantMem()->calibObjects, zz, pad, relTime);
             }
           }
-          qtot /= clusterCount; // TODO: Weighted Average
-          pad /= clusterCount;
-          relTime /= clusterCount;
-          relTime = relTime - CAMath::Round(relTime);
-          dEdx.fillCluster(qtot, qmax, cluster.row, cluster.sector, mP[2], mP[3], merger->GetConstantMem()->calibObjects, zz, pad, relTime);
         }
       } else if (retVal >= GPUTPCGMPropagator::updateErrorClusterRejected) { // cluster far away form the track
         if (allowModification) {
@@ -419,6 +428,7 @@ GPUd() bool GPUTPCGMTrackParam::Fit(GPUTPCGMMerger* GPUrestrict() merger, int32_
 
   if (param.par.dodEdx && param.dodEdxDownscaled) {
     dEdx.computedEdx(merger->OutputTracksdEdx()[iTrk], param);
+    dEdxAlt.computedEdx(merger->OutputTracksdEdxAlt()[iTrk], param);
   }
   Alpha = prop.GetAlpha();
   MoveToReference(prop, param, Alpha);

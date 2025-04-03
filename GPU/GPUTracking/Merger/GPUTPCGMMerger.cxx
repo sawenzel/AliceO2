@@ -299,6 +299,7 @@ void* GPUTPCGMMerger::SetPointersOutput(void* mem)
   computePointerWithAlignment(mem, mOutputTracks, mNMaxTracks);
   if (mRec->GetParam().dodEdxDownscaled) {
     computePointerWithAlignment(mem, mOutputTracksdEdx, mNMaxTracks);
+    computePointerWithAlignment(mem, mOutputTracksdEdxAlt, mNMaxTracks);
   }
   computePointerWithAlignment(mem, mClusters, mNMaxOutputTrackClusters);
   if (mRec->GetParam().par.earlyTpcTransform) {
