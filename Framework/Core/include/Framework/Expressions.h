@@ -404,6 +404,8 @@ inline Node ifnode(Node&& condition_, Configurable<L1> const& then_, Configurabl
 
 /// A struct, containing the root of the expression tree
 struct Filter {
+  Filter() = default;
+
   Filter(Node&& node_) : node{std::make_unique<Node>(std::forward<Node>(node_))}
   {
     (void)designateSubtrees(node.get());
@@ -413,7 +415,14 @@ struct Filter {
   {
     (void)designateSubtrees(node.get());
   }
-  std::unique_ptr<Node> node;
+
+  Filter& operator=(Filter&& other) noexcept
+  {
+    node = std::move(other.node);
+    return *this;
+  }
+
+  std::unique_ptr<Node> node = nullptr;
 
   size_t designateSubtrees(Node* node, size_t index = 0);
 };

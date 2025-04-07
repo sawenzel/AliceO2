@@ -576,7 +576,7 @@ DataProcessorSpec adaptAnalysisTask(ConfigContext const& ctx, Args&&... args)
     homogeneous_apply_refs([&ic](auto&& element) { return analysis_task_parsers::prepareService(ic, element); }, *task.get());
 
     auto& callbacks = ic.services().get<CallbackService>();
-    auto endofdatacb = [task](EndOfStreamContext& eosContext) {
+    auto eoscb = [task](EndOfStreamContext& eosContext) {
       homogeneous_apply_refs([&eosContext](auto& element) {
           analysis_task_parsers::postRunService(eosContext, element);
           analysis_task_parsers::postRunOutput(eosContext, element);
@@ -585,13 +585,13 @@ DataProcessorSpec adaptAnalysisTask(ConfigContext const& ctx, Args&&... args)
       eosContext.services().get<ControlService>().readyToQuit(QuitRequest::Me);
     };
 
-    callbacks.set<CallbackService::Id::EndOfStream>(endofdatacb);
+    callbacks.set<CallbackService::Id::EndOfStream>(eoscb);
 
     /// update configurables in filters and partitions
     homogeneous_apply_refs(
       [&ic](auto& element) -> bool { return analysis_task_parsers::updatePlaceholders(ic, element); },
       *task.get());
-    /// create for filters gandiva trees matched to schemas and store the pointers into expressionInfos
+    /// create expression trees for filters gandiva trees matched to schemas and store the pointers into expressionInfos
     homogeneous_apply_refs([&expressionInfos](auto& element) {
       return analysis_task_parsers::createExpressionTrees(expressionInfos, element);
     },

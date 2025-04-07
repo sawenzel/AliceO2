@@ -247,6 +247,9 @@ struct TableTransform {
 template <typename T>
 concept is_spawnable = soa::has_metadata<aod::MetadataTrait<o2::aod::Hash<T::ref.desc_hash>>> && soa::has_extension<typename aod::MetadataTrait<o2::aod::Hash<T::ref.desc_hash>>::metadata>;
 
+template <typename T>
+concept is_dynamically_spawnable = soa::has_metadata<aod::MetadataTrait<o2::aod::Hash<T::ref.desc_hash>>> && soa::has_configurable_extension<typename aod::MetadataTrait<o2::aod::Hash<T::ref.desc_hash>>::metadata>;
+
 template <is_spawnable T>
 constexpr auto transformBase()
 {
@@ -282,12 +285,60 @@ struct Spawns : decltype(transformBase<T>()) {
   }
   std::shared_ptr<typename T::table_t> table = nullptr;
   std::shared_ptr<extension_t> extension = nullptr;
+  std::shared_ptr<gandiva::Projector> projector = nullptr;
 };
 
 template <typename T>
 concept is_spawns = requires(T t) {
   typename T::metadata;
   requires std::same_as<decltype(t.pack()), typename T::expression_pack_t>;
+  requires std::same_as<decltype(t.projector), std::shared_ptr<gandiva::Projector>>;
+};
+
+/// This helper struct allows you to declare extended tables with dynamically-supplied
+/// expressions to be created by the task
+/// The actual expressions have to be set in init() for the configurable expression
+/// columns, used to define the table
+
+template <is_dynamically_spawnable T>
+struct Defines : decltype(transformBase<T>()) {
+  using spawnable_t = T;
+  using metadata = decltype(transformBase<T>())::metadata;
+  using extension_t = typename metadata::extension_table_t;
+  using base_table_t = typename metadata::base_table_t;
+  using placeholders_pack_t = typename metadata::placeholders_pack_t;
+  static constexpr size_t N = framework::pack_size(placeholders_pack_t{});
+
+  constexpr auto pack()
+  {
+    return placeholders_pack_t{};
+  }
+
+  typename T::table_t* operator->()
+  {
+    return table.get();
+  }
+  typename T::table_t const& operator*() const
+  {
+    return *table;
+  }
+
+  auto asArrowTable()
+  {
+    return extension->asArrowTable();
+  }
+  std::shared_ptr<typename T::table_t> table = nullptr;
+  std::shared_ptr<extension_t> extension = nullptr;
+
+  std::array<o2::framework::expressions::Projector, N> projectors;
+  std::shared_ptr<gandiva::Projector> projector = nullptr;
+};
+
+template <typename T>
+concept is_defines = requires(T t) {
+  typename T::metadata;
+  requires std::same_as<decltype(t.pack()), typename T::placeholders_pack_t>;
+  requires std::same_as<decltype(t.projector), std::shared_ptr<gandiva::Projector>>;
 };
 
 /// Policy to control index building
@@ -744,7 +795,8 @@ template <soa::is_table T, soa::is_spawnable_column... Cs>
 auto Extend(T const& table)
 {
   using output_t = Join<T, soa::Table<o2::aod::Hash<"JOIN"_h>, o2::aod::Hash<"JOIN/0"_h>, o2::aod::Hash<"JOIN"_h>, Cs...>>;
-  return output_t{{o2::framework::spawner(framework::pack<Cs...>{}, {table.asArrowTable()}, "dynamicExtension"), table.asArrowTable()}, 0};
+  static std::shared_ptr<gandiva::Projector> projector = nullptr;
+  return output_t{{o2::framework::spawner(framework::pack<Cs...>{}, {table.asArrowTable()}, "dynamicExtension", projector), table.asArrowTable()}, 0};
 }
 
 /// Template function to attach dynamic columns on-the-fly (e.g. inside
