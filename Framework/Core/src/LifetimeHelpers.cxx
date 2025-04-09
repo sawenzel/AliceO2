@@ -423,7 +423,7 @@ ExpirationHandler::Handler LifetimeHelpers::enumerate(ConcreteDataMatcher const&
     dh.payloadSerializationMethod = gSerializationMethodNone;
     dh.tfCounter = timestamp;
     try {
-      dh.runNumber = atoi(services.get<DataTakingContext>().runNumber.c_str());
+      dh.runNumber = strtoull(services.get<RawDeviceService>().device()->fConfig->GetProperty<std::string>("runNumber", "0").c_str(), nullptr, 10);
     } catch (...) {
       dh.runNumber = 0;
     }
