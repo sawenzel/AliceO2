@@ -230,31 +230,21 @@ if(ALIGPU_BUILD_TYPE STREQUAL "O2")
       Interface/GPUO2InterfaceConfigurableParam.cxx)
 endif()
 
+set(TEMPLATE_HEADER_LIST Base/GPUReconstructionKernelList.template.h
+                         Base/GPUReconstructionKernelIncludes.template.h
+                         Base/GPUReconstructionIncludesDeviceAll.template.h
+                         cmake/GPUNoFastMathKernels.template.h
+                         Definitions/GPUDefParameters.template.h
+                         Definitions/GPUDefParametersLoad.template.inc)
+set(GENERATED_HEADERS_LIST "")
+
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly)
-file(GENERATE # TODO: Do this as a list
-     OUTPUT include_gpu_onthefly/GPUReconstructionKernelList.h
-     INPUT Base/GPUReconstructionKernelList.template.h
-)
-file(GENERATE
-     OUTPUT include_gpu_onthefly/GPUReconstructionKernelIncludes.h
-     INPUT Base/GPUReconstructionKernelIncludes.template.h
-)
-file(GENERATE
-     OUTPUT include_gpu_onthefly/GPUReconstructionIncludesDeviceAll.h
-     INPUT Base/GPUReconstructionIncludesDeviceAll.template.h
-)
-file(GENERATE
-     OUTPUT include_gpu_onthefly/GPUNoFastMathKernels.h
-     INPUT cmake/GPUNoFastMathKernels.template.h
-)
-file(GENERATE
-     OUTPUT include_gpu_onthefly/GPUDefParameters.h
-     INPUT Definitions/GPUDefParameters.template.h
-)
-file(GENERATE
-     OUTPUT include_gpu_onthefly/GPUDefParametersLoad.inc
-     INPUT Definitions/GPUDefParametersLoad.template.inc
-)
+foreach(TEMPLATE_FILE ${TEMPLATE_HEADER_LIST})
+  get_filename_component(OUTPUT_FILE_NAME ${TEMPLATE_FILE} NAME)
+  string(REPLACE ".template" "" OUTPUT_FILE_NAME ${OUTPUT_FILE_NAME})
+  file(GENERATE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/${OUTPUT_FILE_NAME} INPUT ${TEMPLATE_FILE})
+  list(APPEND GENERATED_HEADERS_LIST ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/${OUTPUT_FILE_NAME})
+endforeach()
 file(GENERATE
      OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/GPUDefParametersLoadPrepareBase
      CONTENT "$<JOIN:$<LIST:TRANSFORM,$<TARGET_PROPERTY:O2_GPU_KERNELS,O2_GPU_KERNEL_NAMES>,REPLACE,[^A-Za-z0-9]+,_>,\n>"
@@ -266,6 +256,7 @@ add_custom_command(
   VERBATIM
   COMMAND_EXPAND_LISTS
 )
+list(APPEND GENERATED_HEADERS_LIST ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/GPUDefParametersLoadPrepare.h)
 
 set(HDRS_INSTALL ${HDRS_INSTALL} ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/GPUReconstructionKernelList.h ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/GPUDefParameters.h ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/GPUDefParametersLoad.inc ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/GPUDefParametersLoadPrepare.h)
 include(kernels.cmake)
@@ -405,11 +396,11 @@ set_source_files_properties(Base/GPUReconstructionLibrary.cxx
                             PROPERTIES
                             INCLUDE_DIRECTORIES "${CMAKE_CURRENT_BINARY_DIR}")
 
-# Make sure header files generated with add_custom_command are built
+# Make sure header files generated with add_custom_command are built before being used
 target_sources(${targetName}
                PRIVATE FILE_SET "generatedHeaders"
                TYPE HEADERS
-               FILES ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/GPUDefParametersLoadPrepare.h # TODO: build file list for this
+               FILES ${GENERATED_HEADERS_LIST}
                BASE_DIRS ${CMAKE_CURRENT_BINARY_DIR})
 
 # Add compile definitions and libraries depending on available optional dependencies
