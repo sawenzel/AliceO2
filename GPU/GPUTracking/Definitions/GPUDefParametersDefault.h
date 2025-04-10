@@ -594,13 +594,10 @@
 #define GPUCA_MAX_CLUSTERS           ((size_t)     1024 * 1024 * 1024) // Maximum number of TPC clusters
 #define GPUCA_MAX_TRD_TRACKLETS      ((size_t)             128 * 1024) // Maximum number of TRD tracklets
 #define GPUCA_MAX_ITS_FIT_TRACKS     ((size_t)              96 * 1024) // Max number of tracks for ITS track fit
-#define GPUCA_TRACKER_CONSTANT_MEM   ((size_t)              63 * 1024) // Amount of Constant Memory to reserve
 #define GPUCA_MEMORY_SIZE            ((size_t) 6 * 1024 * 1024 * 1024) // Size of memory allocated on Device
 #define GPUCA_HOST_MEMORY_SIZE       ((size_t) 1 * 1024 * 1024 * 1024) // Size of memory allocated on Host
 #define GPUCA_GPU_STACK_SIZE         ((size_t)               8 * 1024) // Stack size per GPU thread
 #define GPUCA_GPU_HEAP_SIZE          ((size_t)       16 * 1025 * 1024) // Stack size per GPU thread
-
-#define GPUCA_MAX_SECTOR_NTRACK (2 << 24)                               // Maximum number of tracks per sector (limited by track id format)
 
 // #define GPUCA_KERNEL_DEBUGGER_OUTPUT
 
@@ -614,14 +611,10 @@
 // Derived parameters
 #ifdef GPUCA_USE_TEXTURES
   #define GPUCA_TEXTURE_FETCH_CONSTRUCTOR                              // Fetch data through texture cache
-  #define GPUCA_TEXTURE_FETCH_NEIGHBORS                                // Fetch also in Neighbours Finder
 #endif
 #if defined(GPUCA_SORT_STARTHITS_GPU) && defined(GPUCA_GPUCODE)
   #define GPUCA_SORT_STARTHITS
 #endif
-
-#define GPUCA_NEW_ALIGNMENT (std::align_val_t{GPUCA_BUFFER_ALIGNMENT})
-#define GPUCA_OPERATOR_NEW_ALIGNMENT ,GPUCA_NEW_ALIGNMENT
 
 // clang-format on
 #endif // GPUDEFPARAMETERSDEFAULT_H
