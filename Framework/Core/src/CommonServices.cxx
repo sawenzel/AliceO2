@@ -848,7 +848,9 @@ auto flushMetrics(ServiceRegistryRef registry, DataProcessingStats& stats) -> vo
     }
     monitoring.send(std::move(metric));
   });
-  relayer.sendContextState();
+  if (DefaultsHelpers::onlineDeploymentMode() == false) {
+    relayer.sendContextState();
+  }
   monitoring.flushBuffer();
   O2_SIGNPOST_END(monitoring_service, sid, "flush", "done flushing metrics");
 };
