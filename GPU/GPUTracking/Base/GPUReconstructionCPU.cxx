@@ -16,7 +16,7 @@
 #include "GPUReconstructionIncludes.h"
 #include "GPUReconstructionThreading.h"
 #include "GPUChain.h"
-#include "GPUDefParameters.h"
+#include "GPUDefParametersRuntime.h"
 #include "GPUTPCClusterData.h"
 #include "GPUTPCSectorOutCluster.h"
 #include "GPUTPCGMMergedTrack.h"

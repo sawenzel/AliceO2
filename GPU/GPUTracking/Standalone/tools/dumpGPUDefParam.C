@@ -16,14 +16,15 @@
 // ROOT_INCLUDE_PATH="`pwd`/include" root -l -q -b src/GPU/GPUTracking/Standalone/tools/dumpGPUDefParam.C'()'
 
 // Logic for testing to load the default parameters
-/*#define GPUCA_GPUCODE
+/* #define GPUCA_GPUCODE
 #define GPUCA_GPUTYPE_AMPERE
 #define GPUCA_MAXN 40
 #define GPUCA_ROW_COUNT 152
 #define GPUCA_TPC_COMP_CHUNK_SIZE 1024
-#include "GPUDefParametersDefault.h"*/
+#include "GPUDefParametersConstants.h"
+#include "GPUDefParametersDefaults.h" */
 
-// Load file that sets GPUDefParameters
+// Alternatively, logic to load file that sets GPUDefParameters
 #include "testParam.h"
 
 #include "GPUDefParametersLoad.inc"

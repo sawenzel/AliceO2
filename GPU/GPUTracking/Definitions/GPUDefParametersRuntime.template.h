@@ -9,11 +9,11 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-/// \file GPUDefParameters.h
+/// \file GPUDefParametersRuntime.h
 /// \author David Rohr
 
-#ifndef GPUDEFPARAMETERS_H
-#define GPUDEFPARAMETERS_H
+#ifndef GPUDEFPARAMETERSRUNTIME_H
+#define GPUDEFPARAMETERSRUNTIME_H
 
 namespace o2::gpu
 {
@@ -24,4 +24,4 @@ struct GPUDefParameters {  // clang-format off
 };  // clang-format on
 }  // namespace o2::gpu
 
-#endif
+#endif  // GPUDEFPARAMETERSRUNTIME_H

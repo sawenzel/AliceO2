@@ -9,20 +9,14 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-/// \file GPUDefParametersDefault.h
+/// \file GPUDefParametersDefaults.h
 /// \author David Rohr
 
-// This files contains compile-time constants affecting the GPU performance.
-// Many of these constants are GPU-architecture specific.
-// This file also contains all constants describing memory limitations, essentially limiting the total number of tracks, etc.
-// Compile-time constants affecting the tracking algorithms / results are located in GPUDefConstantsAndSettings.h
+// This file contains compile-time constants affecting the GPU performance.
 
-#ifndef GPUDEFPARAMETERSDEFAULT_H
-#define GPUDEFPARAMETERSDEFAULT_H
+#ifndef GPUDEFPARAMETERSDEFAULTS_H
+#define GPUDEFPARAMETERSDEFAULTS_H
 // clang-format off
-
-#include "GPUCommonDef.h"
-#include "GPUDefMacros.h"
 
 // Launch bound definition, 3 optional parameters: maxThreads per block, minBlocks per multiprocessor, force number of blocks (not passed to compiler as launch bounds)
 
@@ -30,7 +24,7 @@
 #ifdef GPUCA_GPUCODE
 #if defined(GPUCA_GPUTYPE_MI2xx)
   #define GPUCA_WARP_SIZE 64
-  #define GPUCA_THREAD_COUNT 256
+  #define GPUCA_THREAD_COUNT_DEFAULT 256
   #define GPUCA_LB_GPUTPCCreateTrackingData 256
   #define GPUCA_LB_GPUTPCStartHitsSorter 512, 1
   #define GPUCA_LB_GPUTPCStartHitsFinder 1024
@@ -93,7 +87,7 @@
   #define GPUCA_COMP_GATHER_MODE 3
 #elif defined(GPUCA_GPUTYPE_VEGA)
   #define GPUCA_WARP_SIZE 64
-  #define GPUCA_THREAD_COUNT 256
+  #define GPUCA_THREAD_COUNT_DEFAULT 256
   #define GPUCA_LB_GPUTPCCreateTrackingData 128
   #define GPUCA_LB_GPUTPCStartHitsSorter 1024, 2
   #define GPUCA_LB_GPUTPCStartHitsFinder 1024
@@ -156,7 +150,7 @@
   #define GPUCA_COMP_GATHER_MODE 3
 #elif defined(GPUCA_GPUTYPE_AMPERE)
   #define GPUCA_WARP_SIZE 32
-  #define GPUCA_THREAD_COUNT 512
+  #define GPUCA_THREAD_COUNT_DEFAULT 512
   #define GPUCA_LB_GPUTPCCreateTrackingData 384
   #define GPUCA_LB_GPUTPCStartHitsSorter 512, 1
   #define GPUCA_LB_GPUTPCStartHitsFinder 512
@@ -219,7 +213,7 @@
   #define GPUCA_COMP_GATHER_MODE 3
 #elif defined(GPUCA_GPUTYPE_TURING)
   #define GPUCA_WARP_SIZE 32
-  #define GPUCA_THREAD_COUNT 512
+  #define GPUCA_THREAD_COUNT_DEFAULT 512
   #define GPUCA_LB_GPUTPCCreateTrackingData 256
   #define GPUCA_LB_GPUTPCStartHitsSorter 512, 1
   #define GPUCA_LB_GPUTPCStartHitsFinder 512
@@ -281,8 +275,8 @@
 
 #ifdef GPUCA_GPUCODE
   // Default settings for GPU, if not already set for selected GPU type
-  #ifndef GPUCA_THREAD_COUNT
-    #define GPUCA_THREAD_COUNT 256
+  #ifndef GPUCA_THREAD_COUNT_DEFAULT
+    #define GPUCA_THREAD_COUNT_DEFAULT 256
   #endif
   #ifndef GPUCA_LB_GPUTPCCreateTrackingData
     #define GPUCA_LB_GPUTPCCreateTrackingData 256
@@ -486,13 +480,11 @@
     #define GPUCA_LB_GPUTrackingRefitKernel_mode1asTrackParCov 256
   #endif
   #ifndef GPUCA_LB_GPUMemClean16
-    #define GPUCA_LB_GPUMemClean16 GPUCA_THREAD_COUNT, 1
+    #define GPUCA_LB_GPUMemClean16 GPUCA_THREAD_COUNT_DEFAULT, 1
   #endif
   #ifndef GPUCA_LB_GPUitoa
-    #define GPUCA_LB_GPUitoa GPUCA_THREAD_COUNT, 1
+    #define GPUCA_LB_GPUitoa GPUCA_THREAD_COUNT_DEFAULT, 1
   #endif
-  #define GPUCA_GET_THREAD_COUNT(...) GPUCA_M_FIRST(__VA_ARGS__)
-
   // These kernel launch-bounds are derrived from one of the constants set above
   #define GPUCA_LB_GPUTPCCFNoiseSuppression_noiseSuppression GPUCA_LB_GPUTPCCFNoiseSuppression
   #define GPUCA_LB_GPUTPCCFNoiseSuppression_updatePeaks GPUCA_LB_GPUTPCCFNoiseSuppression
@@ -516,105 +508,7 @@
   #define GPUCA_LB_GPUTPCCompressionGatherKernels_buffered64 GPUCA_LB_COMPRESSION_GATHER
   #define GPUCA_LB_GPUTPCCompressionGatherKernels_buffered128 GPUCA_LB_COMPRESSION_GATHER
   #define GPUCA_LB_GPUTPCCompressionGatherKernels_multiBlock GPUCA_LB_COMPRESSION_GATHER
-#else
-  #define GPUCA_GET_THREAD_COUNT(...) 1 // On the host, a thread is a block, and we run 1 "device thread" per block.
-#endif
-
-#define GPUCA_GET_WARP_COUNT(...) (GPUCA_GET_THREAD_COUNT(__VA_ARGS__) / GPUCA_WARP_SIZE)
-
-#define GPUCA_THREAD_COUNT_SCAN 512 // TODO: WARNING!!! Must not be GPUTYPE-dependent right now! // TODO: Fix!
-
-#if defined(__CUDACC__) || defined(__HIPCC__)
-  #define GPUCA_SPECIALIZE_THRUST_SORTS
-#endif
-
-#ifndef GPUCA_NEIGHBORSFINDER_REGS
-  #define GPUCA_NEIGHBORSFINDER_REGS NONE, 0
-#endif
-#ifdef GPUCA_GPUCODE
-  #ifndef GPUCA_NEIGHBOURS_FINDER_MAX_NNEIGHUP
-     #define GPUCA_NEIGHBOURS_FINDER_MAX_NNEIGHUP 6
-  #endif
-  #ifndef GPUCA_TRACKLET_SELECTOR_HITS_REG_SIZE
-     #define GPUCA_TRACKLET_SELECTOR_HITS_REG_SIZE 12
-  #endif
-  #ifndef GPUCA_ALTERNATE_BORDER_SORT
-     #define GPUCA_ALTERNATE_BORDER_SORT 0
-  #endif
-  #ifndef GPUCA_SORT_BEFORE_FIT
-     #define GPUCA_SORT_BEFORE_FIT 0
-  #endif
-  #ifndef GPUCA_MERGER_SPLIT_LOOP_INTERPOLATION
-     #define GPUCA_MERGER_SPLIT_LOOP_INTERPOLATION 0
-  #endif
-  #ifndef GPUCA_COMP_GATHER_KERNEL
-     #define GPUCA_COMP_GATHER_KERNEL 0
-  #endif
-  #ifndef GPUCA_COMP_GATHER_MODE
-     #define GPUCA_COMP_GATHER_MODE 2
-  #endif
-#else
-  #define GPUCA_NEIGHBOURS_FINDER_MAX_NNEIGHUP 0
-  #define GPUCA_TRACKLET_SELECTOR_HITS_REG_SIZE 0
-  #define GPUCA_ALTERNATE_BORDER_SORT 0
-  #define GPUCA_SORT_BEFORE_FIT 0
-  #define GPUCA_MERGER_SPLIT_LOOP_INTERPOLATION 0
-  #define GPUCA_THREAD_COUNT_FINDER 1
-  #define GPUCA_COMP_GATHER_KERNEL 0
-  #define GPUCA_COMP_GATHER_MODE 0
-#endif
-#ifndef GPUCA_DEDX_STORAGE_TYPE
-  #define GPUCA_DEDX_STORAGE_TYPE float
-#endif
-#ifndef GPUCA_MERGER_INTERPOLATION_ERROR_TYPE
-  #define GPUCA_MERGER_INTERPOLATION_ERROR_TYPE float
-#endif
-#define GPUCA_MERGER_INTERPOLATION_ERROR_TYPE_A GPUCA_DETERMINISTIC_CODE(float, GPUCA_MERGER_INTERPOLATION_ERROR_TYPE)
-#define GPUCA_DEDX_STORAGE_TYPE_A GPUCA_DETERMINISTIC_CODE(float, GPUCA_DEDX_STORAGE_TYPE)
-
-#ifndef GPUCA_WARP_SIZE
-  #ifdef GPUCA_GPUCODE
-    #define GPUCA_WARP_SIZE 32
-  #else
-    #define GPUCA_WARP_SIZE 1
-  #endif
-#endif
-
-#define GPUCA_MAX_THREADS 1024
-#define GPUCA_MAX_STREAMS 36
-
-#define GPUCA_SORT_STARTHITS_GPU                                       // Sort the start hits when running on GPU
-#define GPUCA_ROWALIGNMENT 16                                          // Align of Row Hits and Grid
-#define GPUCA_BUFFER_ALIGNMENT 64                                      // Alignment of buffers obtained from SetPointers
-#define GPUCA_MEMALIGN (64 * 1024)                                     // Alignment of allocated memory blocks
-
-// #define GPUCA_TRACKLET_CONSTRUCTOR_DO_PROFILE                       // Output Profiling Data for Tracklet Constructor Tracklet Scheduling
-
-// Default maximum numbers
-#define GPUCA_MAX_CLUSTERS           ((size_t)     1024 * 1024 * 1024) // Maximum number of TPC clusters
-#define GPUCA_MAX_TRD_TRACKLETS      ((size_t)             128 * 1024) // Maximum number of TRD tracklets
-#define GPUCA_MAX_ITS_FIT_TRACKS     ((size_t)              96 * 1024) // Max number of tracks for ITS track fit
-#define GPUCA_MEMORY_SIZE            ((size_t) 6 * 1024 * 1024 * 1024) // Size of memory allocated on Device
-#define GPUCA_HOST_MEMORY_SIZE       ((size_t) 1 * 1024 * 1024 * 1024) // Size of memory allocated on Host
-#define GPUCA_GPU_STACK_SIZE         ((size_t)               8 * 1024) // Stack size per GPU thread
-#define GPUCA_GPU_HEAP_SIZE          ((size_t)       16 * 1025 * 1024) // Stack size per GPU thread
-
-// #define GPUCA_KERNEL_DEBUGGER_OUTPUT
-
-// Some assertions to make sure the parameters are not invalid
-#if defined(GPUCA_GPUCODE)
-  static_assert(GPUCA_MAXN >= GPUCA_NEIGHBOURS_FINDER_MAX_NNEIGHUP, "Invalid GPUCA_NEIGHBOURS_FINDER_MAX_NNEIGHUP");
-  static_assert(GPUCA_ROW_COUNT >= GPUCA_TRACKLET_SELECTOR_HITS_REG_SIZE, "Invalid GPUCA_TRACKLET_SELECTOR_HITS_REG_SIZE");
-  static_assert(GPUCA_M_FIRST(GPUCA_LB_GPUTPCCompressionKernels_step1unattached) * 2 <= GPUCA_TPC_COMP_CHUNK_SIZE, "Invalid GPUCA_TPC_COMP_CHUNK_SIZE");
-#endif
-
-// Derived parameters
-#ifdef GPUCA_USE_TEXTURES
-  #define GPUCA_TEXTURE_FETCH_CONSTRUCTOR                              // Fetch data through texture cache
-#endif
-#if defined(GPUCA_SORT_STARTHITS_GPU) && defined(GPUCA_GPUCODE)
-  #define GPUCA_SORT_STARTHITS
 #endif
 
 // clang-format on
-#endif // GPUDEFPARAMETERSDEFAULT_H
+#endif // GPUDEFPARAMETERSDEFAULTS_H

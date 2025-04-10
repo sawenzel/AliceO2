@@ -129,7 +129,9 @@ set(HDRS_INSTALL
     DataTypes/GPUTriggerOutputs.h
     Debug/GPUROOTDump.h
     Definitions/GPUDefConstantsAndSettings.h
-    Definitions/GPUDefParametersDefault.h
+    Definitions/GPUDefParametersWrapper.h
+    Definitions/GPUDefParametersConstants.h
+    Definitions/GPUDefParametersDefaults.h
     Definitions/GPUDef.h
     Definitions/GPUDefMacros.h
     Definitions/GPULogging.h
@@ -234,7 +236,7 @@ set(TEMPLATE_HEADER_LIST Base/GPUReconstructionKernelList.template.h
                          Base/GPUReconstructionKernelIncludes.template.h
                          Base/GPUReconstructionIncludesDeviceAll.template.h
                          cmake/GPUNoFastMathKernels.template.h
-                         Definitions/GPUDefParameters.template.h
+                         Definitions/GPUDefParametersRuntime.template.h
                          Definitions/GPUDefParametersLoad.template.inc)
 set(GENERATED_HEADERS_LIST "")
 
@@ -258,7 +260,7 @@ add_custom_command(
 )
 list(APPEND GENERATED_HEADERS_LIST ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/GPUDefParametersLoadPrepare.h)
 
-set(HDRS_INSTALL ${HDRS_INSTALL} ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/GPUReconstructionKernelList.h ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/GPUDefParameters.h ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/GPUDefParametersLoad.inc ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/GPUDefParametersLoadPrepare.h)
+set(HDRS_INSTALL ${HDRS_INSTALL} ${GENERATED_HEADERS_LIST})
 include(kernels.cmake)
 
 # Optional sources depending on optional dependencies

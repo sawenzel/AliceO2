@@ -18,7 +18,7 @@
 #define GPUCA_M_LB_EMPTY_1(...) __VA_ARGS__
 #define GPUCA_M_LB_EMPTY0(...) GPUCA_M_CAT(GPUCA_M_LB_EMPTY_, __VA_OPT__(1))(__VA_ARGS__)
 
-#include "GPUDefParameters.h"
+#include "GPUDefParametersRuntime.h"
 #include "GPUDefMacros.h"
 #include <sstream>
 #include <string>
