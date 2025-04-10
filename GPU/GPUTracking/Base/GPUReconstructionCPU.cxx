@@ -68,7 +68,7 @@ inline void GPUReconstructionCPUBackend::runKernelBackendInternal(const krnlSetu
   int32_t nThreads = getNKernelHostThreads(false);
   if (nThreads > 1) {
     if (mProcessingSettings.debugLevel >= 5) {
-      printf("Running %d Threads\n", nThreads);
+      printf("Running %d Threads\n", mThreading->activeThreads->max_concurrency());
     }
     tbb::this_task_arena::isolate([&] {
       mThreading->activeThreads->execute([&] {
@@ -91,10 +91,10 @@ inline void GPUReconstructionCPUBackend::runKernelBackendInternal(const krnlSetu
 template <>
 inline void GPUReconstructionCPUBackend::runKernelBackendInternal<GPUMemClean16, 0>(const krnlSetupTime& _xyz, void* const& ptr, uint64_t const& size)
 {
-  int32_t nnThreads = std::max<int32_t>(1, std::min<int32_t>(size / (16 * 1024 * 1024), getNKernelHostThreads(true)));
-  if (nnThreads > 1) {
-    tbb::parallel_for(0, nnThreads, [&](int iThread) {
-      size_t threadSize = size / nnThreads;
+  int32_t nThreads = std::max<int32_t>(1, std::min<int32_t>(size / (16 * 1024 * 1024), getNKernelHostThreads(true)));
+  if (nThreads > 1) {
+    tbb::parallel_for(0, nThreads, [&](int iThread) {
+      size_t threadSize = size / nThreads;
       if (threadSize % 4096) {
         threadSize += 4096 - threadSize % 4096;
       }

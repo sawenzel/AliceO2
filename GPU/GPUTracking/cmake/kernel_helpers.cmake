@@ -76,7 +76,6 @@ function(o2_gpu_add_kernel kernel_name kernel_files)
   set_property(TARGET O2_GPU_KERNELS APPEND PROPERTY O2_GPU_KERNEL_NAMES "${kernel_name}")
   set_property(TARGET O2_GPU_KERNELS APPEND PROPERTY O2_GPU_KERNEL_INCLUDES "${TMP_KERNEL_CLASS_FILE}")
   set_property(TARGET O2_GPU_KERNELS APPEND PROPERTY O2_GPU_KERNEL_FILES "${TMP_KERNEL_CLASS_FILE}.cxx")
-  # add_custom_command OUTPUT option does not support target-dependend generator expressions, thus this workaround
 
   set(O2_GPU_KERNEL_TEMPLATE_FILES "GPUConstantMem.h")
   if (GPUCA_BUILD_DEBUG)
@@ -102,6 +101,7 @@ function(o2_gpu_add_kernel kernel_name kernel_files)
   list(TRANSFORM O2_GPU_KERNEL_TEMPLATE_FILES PREPEND "#include \"")
   list(JOIN O2_GPU_KERNEL_TEMPLATE_FILES "\n" O2_GPU_KERNEL_TEMPLATE_FILES)
 
+  # add_custom_command OUTPUT option does not support target-dependend generator expressions, thus this workaround to create CUDA and HIP files
   string(REPLACE ", " "_" TMP_FILENAME "${kernel_name}")
   if(CUDA_ENABLED)
     set(TMP_FILENAMEA "${O2_GPU_KERNEL_WRAPPER_FOLDER}/krnl_${TMP_FILENAME}.cu")

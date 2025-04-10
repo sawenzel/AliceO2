@@ -77,8 +77,8 @@ add_custom_command(
 create_binary_resource(${GPU_RTC_BIN}.src ${GPU_RTC_BIN}.src.o)
 
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${MODULE}_CUDA_SRC_CHK.done
-                    COMMAND ! grep "# [0-9]* \"\\(/usr/\\|.*GCC-Toolchain\\)" ${GPU_RTC_BIN}.src > ${CMAKE_CURRENT_BINARY_DIR}/${MODULE}_CUDA_SRC_CHK.done || bash -c "echo ERROR: CUDA RTC sources contain standard headers 1>&2 && exit 1"
-                    COMMENT "Checking CUDA RTC File ${GPU_RTC_BIN}.src"
+                    COMMAND ! grep "# [0-9]* \"\\(/usr/\\|.*GCC-Toolchain\\)" ${GPU_RTC_BIN}.src > ${CMAKE_CURRENT_BINARY_DIR}/${MODULE}_CUDA_SRC_CHK.done || bash -c "echo ERROR: CUDA RTC sources contain system headers 1>&2 && exit 1"
+                    COMMENT "Checking CUDA RTC File ${GPU_RTC_BIN}.src for system headers"
                     DEPENDS ${GPU_RTC_BIN}.src VERBATIM)
 add_custom_target(${MODULE}_CUDA_SRC_CHK ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${MODULE}_CUDA_SRC_CHK.done)
 
