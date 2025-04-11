@@ -13,7 +13,6 @@
 
 #include "Framework/ASoA.h"
 #include "Framework/DataAllocator.h"
-#include "Framework/ExpressionHelpers.h"
 #include "Framework/IndexBuilderHelpers.h"
 #include "Framework/InputSpec.h"
 #include "Framework/Output.h"
@@ -29,13 +28,57 @@
 namespace o2::soa
 {
 template <TableRef R>
+constexpr auto tableRef2ConfigParamSpec()
+{
+  return o2::framework::ConfigParamSpec{
+    std::string{"input:"} + o2::aod::label<R>(),
+    framework::VariantType::String,
+    aod::sourceSpec<R>(),
+    {"\"\""}};
+}
+
+namespace
+{
+template <soa::with_sources T>
+inline constexpr auto getSources()
+{
+  return []<size_t N, std::array<soa::TableRef, N> refs>() {
+    return []<size_t... Is>(std::index_sequence<Is...>) {
+      return std::vector{soa::tableRef2ConfigParamSpec<refs[Is]>()...};
+    }(std::make_index_sequence<N>());
+  }.template operator()<T::sources.size(), T::sources>();
+}
+
+template <soa::with_sources T>
+constexpr auto getInputMetadata() -> std::vector<framework::ConfigParamSpec>
+{
+  std::vector<framework::ConfigParamSpec> inputMetadata;
+  auto inputSources = getSources<T>();
+  std::sort(inputSources.begin(), inputSources.end(), [](framework::ConfigParamSpec const& a, framework::ConfigParamSpec const& b) { return a.name < b.name; });
+  auto last = std::unique(inputSources.begin(), inputSources.end(), [](framework::ConfigParamSpec const& a, framework::ConfigParamSpec const& b) { return a.name == b.name; });
+  inputSources.erase(last, inputSources.end());
+  inputMetadata.insert(inputMetadata.end(), inputSources.begin(), inputSources.end());
+  return inputMetadata;
+}
+
+template <typename T>
+  requires(!soa::with_sources<T>)
+constexpr auto getInputMetadata() -> std::vector<framework::ConfigParamSpec>
+{
+  return {};
+}
+}  // namespace
+
+template <TableRef R>
 constexpr auto tableRef2InputSpec()
 {
   return framework::InputSpec{
     o2::aod::label<R>(),
     o2::aod::origin<R>(),
     o2::aod::description(o2::aod::signature<R>()),
-    R.version};
+    R.version,
+    framework::Lifetime::Timeframe,
+    getInputMetadata<typename o2::aod::MetadataTrait<o2::aod::Hash<R.desc_hash>>::metadata>()};
 }
 
 template <TableRef R>
@@ -63,16 +106,6 @@ constexpr auto tableRef2OutputRef()
   return framework::OutputRef{
     o2::aod::label<R>(),
     R.version};
-}
-
-template <TableRef R>
-constexpr auto tableRef2ConfigParamSpec()
-{
-  return o2::framework::ConfigParamSpec{
-    std::string{"input:"} + o2::aod::label<R>(),
-    framework::VariantType::String,
-    aod::sourceSpec<R>(),
-    {"\"\""}};
 }
 }  // namespace o2::soa
 
