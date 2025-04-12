@@ -11,9 +11,9 @@
 
 #include "ITS3Workflow/RecoWorkflow.h"
 #include "ITS3Workflow/ClustererSpec.h"
-#include "ITS3Workflow/ClusterWriterSpec.h"
 #include "ITS3Workflow/TrackerSpec.h"
-#include "ITS3Workflow/TrackWriterSpec.h"
+#include "ITSWorkflow/ClusterWriterSpec.h"
+#include "ITSWorkflow/TrackWriterSpec.h"
 #include "ITS3Workflow/DigitReaderSpec.h"
 #include "Framework/Logger.h"
 
@@ -34,14 +34,14 @@ framework::WorkflowSpec getWorkflow(bool useMC, const std::string& trmode, o2::g
   }
 
   if (!disableRootOutput) {
-    specs.emplace_back(o2::its3::getClusterWriterSpec(useMC));
+    specs.emplace_back(o2::its::getClusterWriterSpec(useMC));
   }
 
   if (trmode != "off") {
     specs.emplace_back(o2::its3::getTrackerSpec(useMC, useGeom, useTrig, trmode, overrideBeamPosition, dtype));
 
     if (!disableRootOutput) {
-      specs.emplace_back(o2::its3::getTrackWriterSpec(useMC));
+      specs.emplace_back(o2::its::getTrackWriterSpec(useMC));
     }
   }
 
