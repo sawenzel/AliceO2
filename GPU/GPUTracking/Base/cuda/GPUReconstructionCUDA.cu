@@ -111,6 +111,7 @@ int32_t GPUReconstructionCUDA::InitDevice_Runtime()
   constexpr int32_t reqVerMin = 0;
 #endif
   if (mProcessingSettings.rtc.enable && mProcessingSettings.rtctech.runTest == 2) {
+    mWarpSize = GPUCA_WARP_SIZE;
     genAndLoadRTC();
     exit(0);
   }
@@ -244,16 +245,12 @@ int32_t GPUReconstructionCUDA::InitDevice_Runtime()
       GPUInfo("\ttextureAlignment = %ld", (uint64_t)deviceProp.textureAlignment);
       GPUInfo(" ");
     }
-    if (deviceProp.warpSize != GPUCA_WARP_SIZE) {
+    if (deviceProp.warpSize != GPUCA_WARP_SIZE && !mProcessingSettings.rtc.enable) {
       throw std::runtime_error("Invalid warp size on GPU");
     }
+    mWarpSize = deviceProp.warpSize;
     mBlockCount = deviceProp.multiProcessorCount;
     mMaxBackendThreads = std::max<int32_t>(mMaxBackendThreads, deviceProp.maxThreadsPerBlock * mBlockCount);
-#ifndef __HIPCC__ // CUDA
-    mWarpSize = 32;
-#else // HIP
-    mWarpSize = 64;
-#endif
     mDeviceName = deviceProp.name;
     mDeviceName += " (CUDA GPU)";
 

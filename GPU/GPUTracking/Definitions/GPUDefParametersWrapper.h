@@ -38,14 +38,6 @@
 #define GPUCA_MERGER_INTERPOLATION_ERROR_TYPE_A GPUCA_DETERMINISTIC_CODE(float, GPUCA_MERGER_INTERPOLATION_ERROR_TYPE)
 #define GPUCA_DEDX_STORAGE_TYPE_A GPUCA_DETERMINISTIC_CODE(float, GPUCA_DEDX_STORAGE_TYPE)
 
-#ifndef GPUCA_WARP_SIZE
-  #ifdef GPUCA_GPUCODE
-    #define GPUCA_WARP_SIZE 32
-  #else
-    #define GPUCA_WARP_SIZE 1
-  #endif
-#endif
-
 // #define GPUCA_TRACKLET_CONSTRUCTOR_DO_PROFILE                       // Output Profiling Data for Tracklet Constructor Tracklet Scheduling
 
 // #define GPUCA_KERNEL_DEBUGGER_OUTPUT

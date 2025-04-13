@@ -275,6 +275,9 @@
 
 #ifdef GPUCA_GPUCODE
   // Default settings for GPU, if not already set for selected GPU type
+  #ifndef GPUCA_WARP_SIZE
+    #define GPUCA_WARP_SIZE 32
+  #endif
   #ifndef GPUCA_THREAD_COUNT_DEFAULT
     #define GPUCA_THREAD_COUNT_DEFAULT 256
   #endif
