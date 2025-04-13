@@ -27,13 +27,16 @@
 #endif
 #include "GPUDefParametersConstants.h"
 
-#ifdef GPUCA_GPUCODE
-  #define GPUCA_GET_THREAD_COUNT(...) GPUCA_M_FIRST(__VA_ARGS__)
+namespace o2::gpu
+{
+#if defined(GPUCA_GPUCODE)
+  GPUhdi() static constexpr uint32_t GPUCA_GET_THREAD_COUNT(uint32_t val, ...) { return val; }
+  GPUhdi() static constexpr uint32_t GPUCA_GET_WARP_COUNT(uint32_t val, ...) { return val / GPUCA_WARP_SIZE; }
 #else
-  #define GPUCA_GET_THREAD_COUNT(...) 1 // On the host, a thread is a block, and we run 1 "device thread" per block.
+  static constexpr uint32_t GPUCA_WARP_SIZE = 1; // On the host, a thread is a block is a warp, and we run 1 "device thread" per block.
+  #define GPUCA_GET_THREAD_COUNT(...) 1          // This must be a define not a constexpr function
+  #define GPUCA_GET_WARP_COUNT(...) 1            // since launch bound constants are not defined in host-code, and must evaluate to 1!
 #endif
-
-#define GPUCA_GET_WARP_COUNT(...) (GPUCA_GET_THREAD_COUNT(__VA_ARGS__) / GPUCA_WARP_SIZE)
 
 #define GPUCA_MERGER_INTERPOLATION_ERROR_TYPE_A GPUCA_DETERMINISTIC_CODE(float, GPUCA_MERGER_INTERPOLATION_ERROR_TYPE)
 #define GPUCA_DEDX_STORAGE_TYPE_A GPUCA_DETERMINISTIC_CODE(float, GPUCA_DEDX_STORAGE_TYPE)
@@ -46,13 +49,15 @@
 #if defined(GPUCA_GPUCODE)
   static_assert(GPUCA_MAXN >= GPUCA_NEIGHBOURS_FINDER_MAX_NNEIGHUP, "Invalid GPUCA_NEIGHBOURS_FINDER_MAX_NNEIGHUP");
   static_assert(GPUCA_ROW_COUNT >= GPUCA_TRACKLET_SELECTOR_HITS_REG_SIZE, "Invalid GPUCA_TRACKLET_SELECTOR_HITS_REG_SIZE");
-  static_assert(GPUCA_M_FIRST(GPUCA_LB_GPUTPCCompressionKernels_step1unattached) * 2 <= GPUCA_TPC_COMP_CHUNK_SIZE, "Invalid GPUCA_TPC_COMP_CHUNK_SIZE");
+  static_assert(GPUCA_GET_THREAD_COUNT(GPUCA_LB_GPUTPCCompressionKernels_step1unattached) * 2 <= GPUCA_TPC_COMP_CHUNK_SIZE, "Invalid GPUCA_TPC_COMP_CHUNK_SIZE");
 #endif
 
 // Derived parameters
 #ifdef GPUCA_USE_TEXTURES
   #define GPUCA_TEXTURE_FETCH_CONSTRUCTOR                              // Fetch data through texture cache
 #endif
+
+} // namespace o2::gpu
 
 // clang-format on
 #endif // GPUDEFPARAMETERSWRAPPER_H
