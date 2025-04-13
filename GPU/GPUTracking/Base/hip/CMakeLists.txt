@@ -30,14 +30,24 @@ if(NOT DEFINED GPUCA_HIP_HIPIFY_FROM_CUDA OR "${GPUCA_HIP_HIPIFY_FROM_CUDA}")
   foreach(file ${GPUCA_HIP_FILE_LIST})
     get_filename_component(ABS_CUDA_SORUCE ../cuda/${file} ABSOLUTE)
     get_filename_component(CUDA_SOURCE ${file} NAME)
+    get_filename_component(CUDA_SOURCE_EXT ${file} EXT)
     string(REPLACE ".cu" ".hip" HIP_SOURCE1 ${CUDA_SOURCE})
     string(REPLACE "CUDA" "HIP" HIP_SOURCE ${HIP_SOURCE1})
-    add_custom_command(
-      OUTPUT ${GPUCA_HIP_SOURCE_DIR}/${HIP_SOURCE}
-      COMMAND ${hip_HIPIFY_PERL_EXECUTABLE} --quiet-warnings ${ABS_CUDA_SORUCE} | sed -e 's/CUDA/HIP/g' -e 's/cuda/hip/g' > ${GPUCA_HIP_SOURCE_DIR}/${HIP_SOURCE}
-      DEPENDS ${ABS_CUDA_SORUCE}
-      COMMENT "Hippifying ${HIP_SOURCE}"
-    )
+    if(CUDA_SOURCE_EXT STREQUAL ".cu" OR CUDA_SOURCE_EXT STREQUAL ".h")
+      add_custom_command(
+        OUTPUT ${GPUCA_HIP_SOURCE_DIR}/${HIP_SOURCE}
+        COMMAND ${hip_HIPIFY_PERL_EXECUTABLE} --quiet-warnings ${ABS_CUDA_SORUCE} | sed -e 's/CUDA/HIP/g' -e 's/cuda/hip/g' > ${GPUCA_HIP_SOURCE_DIR}/${HIP_SOURCE}
+        DEPENDS ${ABS_CUDA_SORUCE}
+        COMMENT "Hippifying ${HIP_SOURCE}"
+      )
+    else()
+      add_custom_command(
+        OUTPUT ${GPUCA_HIP_SOURCE_DIR}/${HIP_SOURCE}
+        COMMAND sed -e 's/CUDA/HIP/g' -e 's/cuda/hip/g' ${ABS_CUDA_SORUCE} > ${GPUCA_HIP_SOURCE_DIR}/${HIP_SOURCE}
+        DEPENDS ${ABS_CUDA_SORUCE}
+        COMMENT "Generating HIP source ${HIP_SOURCE}"
+      )
+    endif()
     list(APPEND HIP_SOURCES "${GPUCA_HIP_SOURCE_DIR}/${HIP_SOURCE}")
   endforeach()
   foreach(file ${GPUCA_HIP_LOCAL_FILE_LIST})
