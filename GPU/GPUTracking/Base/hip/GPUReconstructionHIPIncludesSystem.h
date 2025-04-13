@@ -12,8 +12,8 @@
 /// \file GPUReconstructionHIPIncludesSystem.h
 /// \author David Rohr
 
-#ifndef O2_GPU_RECONSTRUCTIONHIPINCLUDES_H
-#define O2_GPU_RECONSTRUCTIONHIPINCLUDES_H
+#ifndef O2_GPU_RECONSTRUCTIONHIPINCLUDESSYSTEM_H
+#define O2_GPU_RECONSTRUCTIONHIPINCLUDESSYSTEM_H
 
 #include <hip/hip_runtime.h>
 #include <hip/hip_ext.h>
@@ -25,4 +25,4 @@
 #include <thrust/device_ptr.h>
 #pragma GCC diagnostic pop
 
-#endif
+#endif // O2_GPU_RECONSTRUCTIONHIPINCLUDESSYSTEM_H

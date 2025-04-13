@@ -17,7 +17,7 @@ if(DEFINED CUDA_COMPUTETARGET)
 endif()
 message(STATUS "Building GPUTracking with CUDA support ${TMP_TARGET}")
 
-set(SRCS GPUReconstructionCUDA.cu GPUReconstructionCUDAGenRTC.cxx GPUReconstructionCUDAKernels.cu)
+set(SRCS GPUReconstructionCUDA.cu GPUReconstructionCUDAGenRTC.cxx GPUReconstructionCUDAKernels.cu GPUReconstructionCUDARTCCalls.cu)
 set(HDRS GPUReconstructionCUDA.h GPUReconstructionCUDAInternals.h GPUReconstructionCUDAHelpers.inc GPUReconstructionCUDADef.h GPUReconstructionCUDAIncludesSystem.h)
 # -------------------------------- Prepare RTC -------------------------------------------------------
 enable_language(ASM)

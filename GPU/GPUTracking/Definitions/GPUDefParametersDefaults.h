@@ -14,7 +14,7 @@
 
 // This file contains compile-time constants affecting the GPU performance.
 
-#ifndef GPUDEFPARAMETERSDEFAULTS_H
+#if !defined(GPUDEFPARAMETERSDEFAULTS_H) && !defined(GPUCA_GPUCODE_GENRTC) && !defined(GPUCA_GPUCODE_NO_LAUNCH_BOUNDS) // Avoid including for RTC generation besides normal include protection.
 #define GPUDEFPARAMETERSDEFAULTS_H
 // clang-format off
 

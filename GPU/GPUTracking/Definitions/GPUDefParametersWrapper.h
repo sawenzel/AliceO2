@@ -22,14 +22,14 @@
 #include "GPUCommonDef.h"
 #include "GPUDefMacros.h"
 
-#ifndef GPUCA_GPUCODE_GENRTC
+#if defined(GPUCA_GPUCODE)
 #include "GPUDefParametersDefaults.h"
 #endif
 #include "GPUDefParametersConstants.h"
 
 namespace o2::gpu
 {
-#if defined(GPUCA_GPUCODE)
+#if defined(GPUCA_GPUCODE) && !defined(GPUCA_GPUCODE_NO_LAUNCH_BOUNDS)
   GPUhdi() static constexpr uint32_t GPUCA_GET_THREAD_COUNT(uint32_t val, ...) { return val; }
   GPUhdi() static constexpr uint32_t GPUCA_GET_WARP_COUNT(uint32_t val, ...) { return val / GPUCA_WARP_SIZE; }
 #else

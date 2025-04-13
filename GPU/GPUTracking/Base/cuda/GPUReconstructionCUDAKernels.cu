@@ -118,14 +118,3 @@ static GPUReconstructionDeviceBase::deviceConstantMemRegistration registerConstS
   return retVal;
 });
 #endif
-
-void GPUReconstructionCUDABackend::getRTCKernelCalls(std::vector<std::string>& kernels)
-{
-#undef GPUCA_KRNL_LB
-#undef __launch_bounds__
-#define GPUCA_KRNL(...) kernels.emplace_back(GPUCA_M_STR(GPUCA_KRNLGPU(__VA_ARGS__)));
-#define GPUCA_KRNL_LB(x_class, x_attributes, ...) GPUCA_KRNL(x_class, (REG, (GPUCA_M_CAT(GPUCA_RTC_LB_, GPUCA_M_KRNL_NAME(x_class))), GPUCA_M_STRIP(x_attributes)), __VA_ARGS__)
-#include "GPUReconstructionKernelList.h"
-#undef GPUCA_KRNL
-#undef GPUCA_KRNL_LB
-}

@@ -12,8 +12,8 @@
 /// \file GPUReconstructionCUDAIncludesSystem.h
 /// \author David Rohr
 
-#ifndef O2_GPU_GPURECONSTRUCTIONCUDAINCLUDES_H
-#define O2_GPU_GPURECONSTRUCTIONCUDAINCLUDES_H
+#ifndef O2_GPU_GPURECONSTRUCTIONCUDAINCLUDESSYSTEM_H
+#define O2_GPU_GPURECONSTRUCTIONCUDAINCLUDESSYSTEM_H
 
 #include <cstdint>
 #include <type_traits>
@@ -32,4 +32,4 @@
 #include <sm_20_atomic_functions.h>
 #include <cuda_fp16.h>
 
-#endif
+#endif // O2_GPU_GPURECONSTRUCTIONCUDAINCLUDESSYSTEM_H
