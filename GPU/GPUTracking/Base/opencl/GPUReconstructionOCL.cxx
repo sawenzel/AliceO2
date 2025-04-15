@@ -60,11 +60,6 @@ int32_t GPUReconstructionOCLBackend::GPUChkErrInternal(const int64_t error, cons
   return error != CL_SUCCESS;
 }
 
-void GPUReconstructionOCLBackend::UpdateAutomaticProcessingSettings()
-{
-  GPUCA_GPUReconstructionUpdateDefaults();
-}
-
 int32_t GPUReconstructionOCLBackend::InitDevice_Runtime()
 {
   if (mMaster == nullptr) {

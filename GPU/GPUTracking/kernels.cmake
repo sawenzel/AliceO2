@@ -134,3 +134,16 @@ o2_gpu_add_kernel("GPUTPCCFDecodeZSDenseLink"                         "GPUTPCCFD
 o2_gpu_add_kernel("GPUTPCCFGather"                                    "="                                                     LB o2::tpc::ClusterNative* dest)
 o2_gpu_add_kernel("GPUTrackingRefitKernel, mode0asGPU"                "= GLOBALREFIT "                                        LB)
 o2_gpu_add_kernel("GPUTrackingRefitKernel, mode1asTrackParCov"        "= GLOBALREFIT "                                        LB)
+
+o2_gpu_kernel_add_parameter(NEIGHBOURS_FINDER_MAX_NNEIGHUP
+                            TRACKLET_SELECTOR_HITS_REG_SIZE
+                            ALTERNATE_BORDER_SORT
+                            SORT_BEFORE_FIT
+                            MERGER_SPLIT_LOOP_INTERPOLATION
+                            NO_ATOMIC_PRECHECK
+                            COMP_GATHER_KERNEL
+                            COMP_GATHER_MODE
+                            SORT_STARTHITS)
+
+o2_gpu_kernel_add_string_parameter(DEDX_STORAGE_TYPE
+                                   MERGER_INTERPOLATION_ERROR_TYPE)

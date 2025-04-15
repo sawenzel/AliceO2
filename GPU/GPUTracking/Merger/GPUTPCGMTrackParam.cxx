@@ -309,7 +309,7 @@ GPUd() bool GPUTPCGMTrackParam::Fit(GPUTPCGMMerger* GPUrestrict() merger, int32_
       } else {
         int8_t rejectChi2 = attempt ? 0 : ((param.rec.tpc.mergerInterpolateErrors && CAMath::Abs(ihit - ihitMergeFirst) <= 1) ? (refit ? (GPUTPCGMPropagator::rejectInterFill + ((nWays - iWay) & 1)) : 0) : (allowModification && goodRows > 5));
 #if EXTRACT_RESIDUALS == 1
-        if (iWay == nWays - 1 && interpolation.hit[ihit].errorY > (GPUCA_MERGER_INTERPOLATION_ERROR_TYPE_A)0) {
+        if (iWay == nWays - 1 && interpolation.hit[ihit].errorY > (GPUCA_PAR_MERGER_INTERPOLATION_ERROR_TYPE_A)0) {
           const float Iz0 = interpolation.hit[ihit].posY - mP[0];
           const float Iz1 = interpolation.hit[ihit].posZ - mP[1];
           float Iw0 = mC[2] + (float)interpolation.hit[ihit].errorZ;
@@ -631,7 +631,7 @@ GPUd() float GPUTPCGMTrackParam::AttachClusters(const GPUTPCGMMerger* GPUrestric
     for (uint32_t ih = hitFst; ih < hitLst; ih++) {
       int32_t id = idOffset + ids[ih];
       GPUAtomic(uint32_t)* const weight = weights + id;
-#if !defined(GPUCA_NO_ATOMIC_PRECHECK) && GPUCA_NO_ATOMIC_PRECHECK < 1
+#if GPUCA_NO_ATOMIC_PRECHECK == 0
       if (myWeight <= *weight) {
         continue;
       }
@@ -757,7 +757,8 @@ GPUdic(0, 1) int32_t GPUTPCGMTrackParam::FollowCircle(const GPUTPCGMMerger* GPUr
   if (Merger->Param().rec.tpc.disableRefitAttachment & 4) {
     return 1;
   }
-  if (Merger->Param().rec.tpc.looperInterpolationInExtraPass && phase2 == false) {
+  const bool inExtraPass = Merger->Param().rec.tpc.looperInterpolationInExtraPass == -1 ? GPUCA_PAR_MERGER_SPLIT_LOOP_INTERPOLATION : Merger->Param().rec.tpc.looperInterpolationInExtraPass;
+  if (inExtraPass && phase2 == false) {
     StoreAttachMirror(Merger, sector, iRow, iTrack, toAlpha, toY, toX, toSector, toRow, inFlyDirection, prop.GetAlpha());
     return 1;
   }
@@ -862,7 +863,8 @@ GPUdni() void GPUTPCGMTrackParam::AttachClustersMirror(const GPUTPCGMMerger* GPU
   if (Merger->Param().rec.tpc.disableRefitAttachment & 8) {
     return;
   }
-  if (Merger->Param().rec.tpc.looperInterpolationInExtraPass && phase2 == false) {
+  const bool inExtraPass = Merger->Param().rec.tpc.looperInterpolationInExtraPass == -1 ? GPUCA_PAR_MERGER_SPLIT_LOOP_INTERPOLATION : Merger->Param().rec.tpc.looperInterpolationInExtraPass;
+  if (inExtraPass && phase2 == false) {
     StoreAttachMirror(Merger, sector, iRow, iTrack, 0, toY, 0, -1, 0, 0, prop.GetAlpha());
     return;
   }

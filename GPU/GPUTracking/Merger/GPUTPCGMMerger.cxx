@@ -37,6 +37,7 @@
 #include "TPCFastTransform.h"
 #include "GPUTPCConvertImpl.h"
 #include "GPUTPCGeometry.h"
+#include "GPUDefParametersRuntime.h"
 
 #include "GPUCommonMath.h"
 #include "GPUCommonAlgorithm.h"
@@ -288,7 +289,8 @@ void* GPUTPCGMMerger::SetPointersMemory(void* mem)
 void* GPUTPCGMMerger::SetPointersRefitScratch(void* mem)
 {
   computePointerWithAlignment(mem, mTrackOrderAttach, mNMaxTracks);
-  if (mRec->GetProcessingSettings().mergerSortTracks) {
+  const bool mergerSortTracks = mRec->GetProcessingSettings().mergerSortTracks == -1 ? mRec->getGPUParameters(mRec->GetRecoStepsGPU() & GPUDataTypes::RecoStep::TPCMerging).par_SORT_BEFORE_FIT : mRec->GetProcessingSettings().mergerSortTracks;
+  if (mergerSortTracks) {
     computePointerWithAlignment(mem, mTrackOrderProcess, mNMaxTracks);
   }
   return mem;

@@ -101,6 +101,7 @@ class GPUReconstructionProcessing : public GPUReconstruction
     uint32_t countToGPU = 0;
     uint32_t countToHost = 0;
   };
+  const GPUDefParameters& getGPUParameters(bool doGPU) const override { return *(doGPU ? mParDevice : mParCPU); }
 
  protected:
   GPUReconstructionProcessing(const GPUSettingsDeviceBackend& cfg);

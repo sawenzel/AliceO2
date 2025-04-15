@@ -292,8 +292,6 @@ int32_t GPUReconstruction::InitPhaseBeforeDevice()
     mProcessingSettings.delayedOutput = false;
   }
 
-  UpdateAutomaticProcessingSettings();
-  GPUCA_GPUReconstructionUpdateDefaults();
   if (!mProcessingSettings.rtc.enable) {
     mProcessingSettings.rtc.optConstexpr = false;
   }

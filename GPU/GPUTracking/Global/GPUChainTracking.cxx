@@ -40,6 +40,7 @@
 #include "GPUTrackingInputProvider.h"
 #include "GPUNewCalibValues.h"
 #include "GPUTriggerOutputs.h"
+#include "GPUDefParametersRuntime.h"
 
 #include "GPUTPCClusterStatistics.h"
 #include "GPUHostDataTypes.h"
@@ -254,6 +255,7 @@ bool GPUChainTracking::ValidateSteps()
 
 bool GPUChainTracking::ValidateSettings()
 {
+  int32_t gatherMode = mRec->GetProcessingSettings().tpcCompressionGatherMode == -1 ? mRec->getGPUParameters(mRec->GetRecoStepsGPU() & GPUDataTypes::RecoStep::TPCCompression).par_COMP_GATHER_MODE : mRec->GetProcessingSettings().tpcCompressionGatherMode;
   if ((param().rec.tpc.nWays & 1) == 0) {
     GPUError("nWay setting musst be odd number!");
     return false;
@@ -270,7 +272,7 @@ bool GPUChainTracking::ValidateSettings()
     GPUError("NStreams of %d insufficient for %d nTPCClustererLanes", mRec->NStreams(), (int32_t)GetProcessingSettings().nTPCClustererLanes);
     return false;
   }
-  if (GetProcessingSettings().noGPUMemoryRegistration && GetProcessingSettings().tpcCompressionGatherMode != 3) {
+  if (GetProcessingSettings().noGPUMemoryRegistration && gatherMode != 3) {
     GPUError("noGPUMemoryRegistration only possible with gather mode 3");
     return false;
   }
@@ -286,7 +288,7 @@ bool GPUChainTracking::ValidateSettings()
       GPUError("Must use external output for double pipeline mode");
       return false;
     }
-    if (GetProcessingSettings().tpcCompressionGatherMode == 1) {
+    if (gatherMode == 1) {
       GPUError("Double pipeline incompatible to compression mode 1");
       return false;
     }
@@ -295,7 +297,7 @@ bool GPUChainTracking::ValidateSettings()
       return false;
     }
   }
-  if ((GetRecoStepsGPU() & GPUDataTypes::RecoStep::TPCCompression) && !(GetRecoStepsGPU() & GPUDataTypes::RecoStep::TPCCompression) && (GetProcessingSettings().tpcCompressionGatherMode == 1 || GetProcessingSettings().tpcCompressionGatherMode == 3)) {
+  if ((GetRecoStepsGPU() & GPUDataTypes::RecoStep::TPCCompression) && !(GetRecoStepsGPU() & GPUDataTypes::RecoStep::TPCCompression) && (gatherMode == 1 || gatherMode == 3)) {
     GPUError("Invalid tpcCompressionGatherMode for compression on CPU");
     return false;
   }

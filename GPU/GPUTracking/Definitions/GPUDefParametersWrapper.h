@@ -22,9 +22,7 @@
 #include "GPUCommonDef.h"
 #include "GPUDefMacros.h"
 
-#if defined(GPUCA_GPUCODE)
 #include "GPUDefParametersDefaults.h"
-#endif
 #include "GPUDefParametersConstants.h"
 
 namespace o2::gpu
@@ -38,8 +36,8 @@ namespace o2::gpu
   #define GPUCA_GET_WARP_COUNT(...) 1            // since launch bound constants are not defined in host-code, and must evaluate to 1!
 #endif
 
-#define GPUCA_MERGER_INTERPOLATION_ERROR_TYPE_A GPUCA_DETERMINISTIC_CODE(float, GPUCA_MERGER_INTERPOLATION_ERROR_TYPE)
-#define GPUCA_DEDX_STORAGE_TYPE_A GPUCA_DETERMINISTIC_CODE(float, GPUCA_DEDX_STORAGE_TYPE)
+#define GPUCA_PAR_MERGER_INTERPOLATION_ERROR_TYPE_A GPUCA_DETERMINISTIC_CODE(float, GPUCA_PAR_MERGER_INTERPOLATION_ERROR_TYPE)
+#define GPUCA_PAR_DEDX_STORAGE_TYPE_A GPUCA_DETERMINISTIC_CODE(float, GPUCA_PAR_DEDX_STORAGE_TYPE)
 
 // #define GPUCA_TRACKLET_CONSTRUCTOR_DO_PROFILE                       // Output Profiling Data for Tracklet Constructor Tracklet Scheduling
 

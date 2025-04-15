@@ -13,7 +13,7 @@
 /// \author David Rohr
 
 // This files contains compile-time constants affecting the GPU algorithms / reconstruction results.
-// Architecture-dependant compile-time constants affecting the performance without changing the results are stored in GPUDefParameters.h
+// Architecture-dependant compile-time constants affecting the performance without changing the results are stored in GPUDefParameters*.h
 
 #ifndef GPUDEFCONSTANTSANDSETTINGS_H
 #define GPUDEFCONSTANTSANDSETTINGS_H

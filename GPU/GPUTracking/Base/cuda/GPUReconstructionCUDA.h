@@ -59,7 +59,6 @@ class GPUReconstructionCUDA : public GPUReconstructionKernels<GPUReconstructionC
  protected:
   int32_t InitDevice_Runtime() override;
   int32_t ExitDevice_Runtime() override;
-  void UpdateAutomaticProcessingSettings() override;
 
   std::unique_ptr<gpu_reconstruction_kernels::threadContext> GetThreadContext() override;
   void SynchronizeGPU() override;

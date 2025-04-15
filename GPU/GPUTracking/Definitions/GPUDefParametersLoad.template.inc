@@ -32,29 +32,38 @@ static GPUDefParameters GPUDefParametersLoad()
     // clang-format off
     {$<JOIN:$<LIST:TRANSFORM,$<LIST:TRANSFORM,$<LIST:TRANSFORM,$<TARGET_PROPERTY:O2_GPU_KERNELS,O2_GPU_KERNEL_NAMES>,REPLACE,[^A-Za-z0-9]+,_>,PREPEND,GPUCA_M_LB_EMPTY0(GPUCA_M_FIRST(GPUCA_LB_>,APPEND,))>,$<COMMA>>},
     {$<JOIN:$<LIST:TRANSFORM,$<LIST:TRANSFORM,$<LIST:TRANSFORM,$<TARGET_PROPERTY:O2_GPU_KERNELS,O2_GPU_KERNEL_NAMES>,REPLACE,[^A-Za-z0-9]+,_>,PREPEND,GPUCA_M_FIRST(GPUCA_M_SHIFT(GPUCA_LB_>,APPEND,$<COMMA>0))>,$<COMMA>>},
-    {$<JOIN:$<LIST:TRANSFORM,$<LIST:TRANSFORM,$<LIST:TRANSFORM,$<TARGET_PROPERTY:O2_GPU_KERNELS,O2_GPU_KERNEL_NAMES>,REPLACE,[^A-Za-z0-9]+,_>,PREPEND,GPUCA_M_FIRST(GPUCA_M_SHIFT(GPUCA_M_SHIFT(GPUCA_LB_>,APPEND,$<COMMA>0$<COMMA>0)))>,$<COMMA>>}
+    {$<JOIN:$<LIST:TRANSFORM,$<LIST:TRANSFORM,$<LIST:TRANSFORM,$<TARGET_PROPERTY:O2_GPU_KERNELS,O2_GPU_KERNEL_NAMES>,REPLACE,[^A-Za-z0-9]+,_>,PREPEND,GPUCA_M_FIRST(GPUCA_M_SHIFT(GPUCA_M_SHIFT(GPUCA_LB_>,APPEND,$<COMMA>0$<COMMA>0)))>,$<COMMA>>},
+    $<JOIN:$<LIST:TRANSFORM,$<TARGET_PROPERTY:O2_GPU_KERNELS,O2_GPU_KERNEL_PARAMS>,PREPEND,GPUCA_PAR_>,$<COMMA>>,
+    $<JOIN:$<LIST:TRANSFORM,$<LIST:TRANSFORM,$<TARGET_PROPERTY:O2_GPU_KERNELS,O2_GPU_KERNEL_STRING_PARAMS>,PREPEND,GPUCA_M_STR(GPUCA_PAR_>,APPEND,)>,$<COMMA>>
     // clang-format on
   };
 }
 
-#define GPUCA_EXPORT_KERNEL(name)                                                  \
-  if (par.par_LB_maxThreads[i] > 0) {                                              \
-    o << "#define GPUCA_LB_" << GPUCA_M_STR(name) " " << par.par_LB_maxThreads[i]; \
-    if (par.par_LB_minBlocks[i] > 0) {                                             \
-      o << ", " << par.par_LB_minBlocks[i];                                        \
-    }                                                                              \
-    if (!forRTC && par.par_LB_forceBlocks[i] > 0) {                                \
-      o << ", " << par.par_LB_forceBlocks[i];                                      \
-    }                                                                              \
-    o << "\n";                                                                     \
-  }                                                                                \
+#define GPUCA_EXPORT_KERNEL_LB(name)                                            \
+  if (par.par_LB_maxThreads[i] > 0) {                                           \
+    o << "#define GPUCA_LB_" GPUCA_M_STR(name) " " << par.par_LB_maxThreads[i]; \
+    if (par.par_LB_minBlocks[i] > 0) {                                          \
+      o << ", " << par.par_LB_minBlocks[i];                                     \
+    }                                                                           \
+    if (!forRTC && par.par_LB_forceBlocks[i] > 0) {                             \
+      o << ", " << par.par_LB_forceBlocks[i];                                   \
+    }                                                                           \
+    o << "\n";                                                                  \
+  }                                                                             \
   i++;
+
+#define GPUCA_EXPORT_KERNEL_PARAM(name) \
+  o << "#define GPUCA_PAR_" GPUCA_M_STR(name) " " << GPUCA_M_CAT(par.par_, name) << "\n";
 
 static std::string GPUDefParametersExport(const GPUDefParameters& par, bool forRTC)
 {
   std::stringstream o; // clang-format off
   int32_t i = 0;
-  $<JOIN:$<LIST:TRANSFORM,$<LIST:TRANSFORM,$<LIST:TRANSFORM,$<TARGET_PROPERTY:O2_GPU_KERNELS,O2_GPU_KERNEL_NAMES>,REPLACE,[^A-Za-z0-9]+,_>,PREPEND,GPUCA_EXPORT_KERNEL(>,APPEND,)>,
+  $<JOIN:$<LIST:TRANSFORM,$<LIST:TRANSFORM,$<LIST:TRANSFORM,$<TARGET_PROPERTY:O2_GPU_KERNELS,O2_GPU_KERNEL_NAMES>,REPLACE,[^A-Za-z0-9]+,_>,PREPEND,GPUCA_EXPORT_KERNEL_LB(>,APPEND,)>,
+  >
+  $<JOIN:$<LIST:TRANSFORM,$<LIST:TRANSFORM,$<TARGET_PROPERTY:O2_GPU_KERNELS,O2_GPU_KERNEL_PARAMS>,PREPEND,GPUCA_EXPORT_KERNEL_PARAM(>,APPEND,)>,
+  >
+  $<JOIN:$<LIST:TRANSFORM,$<LIST:TRANSFORM,$<TARGET_PROPERTY:O2_GPU_KERNELS,O2_GPU_KERNEL_STRING_PARAMS>,PREPEND,GPUCA_EXPORT_KERNEL_PARAM(>,APPEND,)>,
   >
   return o.str(); // clang-format on
 }

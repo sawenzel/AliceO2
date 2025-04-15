@@ -37,7 +37,6 @@ class GPUReconstructionOCLBackend : public GPUReconstructionDeviceBase
 
   int32_t InitDevice_Runtime() override;
   int32_t ExitDevice_Runtime() override;
-  void UpdateAutomaticProcessingSettings() override;
 
   virtual int32_t GPUChkErrInternal(const int64_t error, const char* file, int32_t line) const override;
 

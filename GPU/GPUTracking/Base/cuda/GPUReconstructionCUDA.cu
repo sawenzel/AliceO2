@@ -99,11 +99,6 @@ void GPUReconstructionCUDA::GetITSTraits(std::unique_ptr<o2::its::TrackerTraits>
   }
 }
 
-void GPUReconstructionCUDA::UpdateAutomaticProcessingSettings()
-{
-  GPUCA_GPUReconstructionUpdateDefaults();
-}
-
 int32_t GPUReconstructionCUDA::InitDevice_Runtime()
 {
 #ifndef __HIPCC__ // CUDA
