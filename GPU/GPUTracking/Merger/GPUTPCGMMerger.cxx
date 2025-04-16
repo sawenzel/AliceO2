@@ -378,8 +378,8 @@ void GPUTPCGMMerger::SetMaxData(const GPUTrackingInOutPointers& io)
     }
   }
   mNMaxOutputTrackClusters = mRec->MemoryScalers()->NTPCMergedTrackHits(mNClusters);
-  if (CAMath::Abs(Param().polynomialField.GetNominalBz()) < (0.01f * gpu_common_constants::kCLight)) {
-    mNMaxTracks = mRec->MemoryScalers()->getValue(mNTotalSectorTracks, mNTotalSectorTracks);
+  if (CAMath::Abs(Param().polynomialField.GetNominalBz()) < (0.013f * gpu_common_constants::kCLight)) {
+    mNMaxTracks = mRec->MemoryScalers()->getValue(mNTotalSectorTracks, mNTotalSectorTracks); // 0 magnetic field
   } else {
     mNMaxTracks = mRec->MemoryScalers()->NTPCMergedTracks(mNTotalSectorTracks);
   }
