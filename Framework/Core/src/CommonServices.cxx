@@ -44,6 +44,7 @@
 #include "Framework/DeviceConfig.h"
 #include "Framework/DefaultsHelpers.h"
 #include "Framework/Signpost.h"
+#include "Framework/DriverConfig.h"
 
 #include "TextDriverClient.h"
 #include "WSDriverClient.h"
@@ -800,6 +801,9 @@ auto sendRelayerMetrics(ServiceRegistryRef registry, DataProcessingStats& stats)
 
 auto flushStates(ServiceRegistryRef registry, DataProcessingStates& states) -> void
 {
+  if (!registry.get<DriverConfig const>().driverHasGUI) {
+    return;
+  }
   states.flushChangedStates([&states, registry](std::string const& spec, int64_t timestamp, std::string_view value) mutable -> void {
     auto& client = registry.get<ControlService>();
     client.push(spec, value, timestamp);
