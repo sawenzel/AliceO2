@@ -76,6 +76,7 @@ GPUdii() void GPUTPCNeighboursFinder::Thread<0>(int32_t /*nBlocks*/, int32_t nTh
   }
 
   static constexpr uint32_t UNROLL_GLOBAL = 4;
+  static_assert(GPUCA_MAXN % UNROLL_GLOBAL == 0);
   static constexpr uint32_t MAX_SHARED = GPUCA_PAR_NEIGHBOURS_FINDER_MAX_NNEIGHUP;
   static constexpr uint32_t MAX_GLOBAL = (MAX_SHARED < GPUCA_MAXN) ? (((GPUCA_MAXN - MAX_SHARED - 1) / UNROLL_GLOBAL + 1) * UNROLL_GLOBAL) : 0;
   static constexpr uint32_t MAX_TOTAL = MAX_SHARED + MAX_GLOBAL;
