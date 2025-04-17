@@ -378,7 +378,7 @@ void GPUTPCGMMerger::SetMaxData(const GPUTrackingInOutPointers& io)
     }
   }
   mNMaxOutputTrackClusters = mRec->MemoryScalers()->NTPCMergedTrackHits(mNClusters);
-  if (CAMath::Abs(Param().polynomialField.GetNominalBz()) < (0.013f * gpu_common_constants::kCLight)) {
+  if (CAMath::Abs(Param().polynomialField.GetNominalBz()) < (gpu_common_constants::kZeroFieldCut * gpu_common_constants::kCLight)) {
     mNMaxTracks = mRec->MemoryScalers()->getValue(mNTotalSectorTracks, mNTotalSectorTracks); // 0 magnetic field
   } else {
     mNMaxTracks = mRec->MemoryScalers()->NTPCMergedTracks(mNTotalSectorTracks);
@@ -1743,7 +1743,7 @@ GPUd() void GPUTPCGMMerger::CollectMergedTracks(int32_t nBlocks, int32_t nThread
     p1.DzDs() = p2.DzDs();
     p1.QPt() = p2.QPt();
     mergedTrack.SetAlpha(p2.Alpha());
-    if (CAMath::Abs(Param().polynomialField.GetNominalBz()) < (0.013f * gpu_common_constants::kCLight)) {
+    if (CAMath::Abs(Param().polynomialField.GetNominalBz()) < (gpu_common_constants::kZeroFieldCut * gpu_common_constants::kCLight)) {
       p1.QPt() = 100.f / Param().rec.bz0Pt10MeV;
     }
 
