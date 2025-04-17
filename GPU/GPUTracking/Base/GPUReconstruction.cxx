@@ -263,7 +263,7 @@ int32_t GPUReconstruction::InitPhaseBeforeDevice()
   }
   if (mProcessingSettings.deterministicGPUReconstruction) {
 #ifndef GPUCA_DETERMINISTIC_MODE
-    GPUError("Warning, deterministicGPUReconstruction needs GPUCA_DETERMINISTIC_MODE for being fully deterministic, without only most indeterminism by concurrency is removed, but floating point effects remain!");
+    GPUError("WARNING, deterministicGPUReconstruction needs GPUCA_DETERMINISTIC_MODE for being fully deterministic, without only most indeterminism by concurrency is removed, but floating point effects remain!");
 #endif
     mProcessingSettings.overrideClusterizerFragmentLen = TPC_MAX_FRAGMENT_LEN_GPU;
     param().rec.tpc.nWaysOuter = true;
@@ -274,6 +274,10 @@ int32_t GPUReconstruction::InitPhaseBeforeDevice()
       mProcessingSettings.createO2Output = 1;
     }
     mProcessingSettings.rtc.deterministic = 1;
+  } else {
+#ifdef GPUCA_DETERMINISTIC_MODE
+    GPUError("WARNING, compiled with GPUCA_DETERMINISTIC_MODE but deterministicGPUReconstruction not set, only compile-time determinism and deterministic math enforced, not fully deterministic!");
+#endif
   }
   if (mProcessingSettings.deterministicGPUReconstruction && mProcessingSettings.debugLevel >= 6) {
     mProcessingSettings.nTPCClustererLanes = 1;

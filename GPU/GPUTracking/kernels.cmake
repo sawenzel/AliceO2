@@ -136,6 +136,8 @@ o2_gpu_add_kernel("GPUTrackingRefitKernel, mode0asGPU"                "= GLOBALR
 o2_gpu_add_kernel("GPUTrackingRefitKernel, mode1asTrackParCov"        "= GLOBALREFIT "                                        LB)
 
 o2_gpu_kernel_add_parameter(NEIGHBOURS_FINDER_MAX_NNEIGHUP
+                            NEIGHBOURS_FINDER_UNROLL_GLOBAL
+                            NEIGHBOURS_FINDER_UNROLL_SHARED
                             TRACKLET_SELECTOR_HITS_REG_SIZE
                             ALTERNATE_BORDER_SORT
                             SORT_BEFORE_FIT
