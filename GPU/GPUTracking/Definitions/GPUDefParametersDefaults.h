@@ -574,6 +574,9 @@
   #ifndef GPUCA_PAR_COMP_GATHER_MODE
     #define GPUCA_PAR_COMP_GATHER_MODE 0
   #endif
+  #ifndef GPUCA_PAR_NO_ATOMIC_PRECHECK
+    #define GPUCA_PAR_NO_ATOMIC_PRECHECK 0
+  #endif
   #ifndef GPUCA_PAR_DEDX_STORAGE_TYPE
     #define GPUCA_PAR_DEDX_STORAGE_TYPE float
   #endif

@@ -631,11 +631,11 @@ GPUd() float GPUTPCGMTrackParam::AttachClusters(const GPUTPCGMMerger* GPUrestric
     for (uint32_t ih = hitFst; ih < hitLst; ih++) {
       int32_t id = idOffset + ids[ih];
       GPUAtomic(uint32_t)* const weight = weights + id;
-#if GPUCA_NO_ATOMIC_PRECHECK == 0
-      if (myWeight <= *weight) {
-        continue;
+      if constexpr (GPUCA_PAR_NO_ATOMIC_PRECHECK == 0) {
+        if (myWeight <= *weight) {
+          continue;
+        }
       }
-#endif
       const cahit2 hh = CA_TEXTURE_FETCH(cahit2, gAliTexRefu2, hits, ih);
       const float y = y0 + hh.x * stepY;
       const float z = z0 + hh.y * stepZ;
