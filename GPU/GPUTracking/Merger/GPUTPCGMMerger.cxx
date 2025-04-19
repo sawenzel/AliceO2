@@ -757,7 +757,7 @@ struct MergeBorderTracks_compMin {
 } // namespace o2::gpu::internal
 
 template <>
-inline void GPUCA_M_CAT3(GPUReconstruction, GPUCA_GPUTYPE, Backend)::runKernelBackendInternal<GPUTPCGMMergerMergeBorders, 3>(const krnlSetupTime& _xyz, GPUTPCGMBorderRange* const& range, int32_t const& N, int32_t const& cmpMax)
+inline void GPUCA_M_CAT(GPUReconstruction, GPUCA_GPUTYPE)::runKernelBackendInternal<GPUTPCGMMergerMergeBorders, 3>(const krnlSetupTime& _xyz, GPUTPCGMBorderRange* const& range, int32_t const& N, int32_t const& cmpMax)
 {
   if (cmpMax) {
     GPUCommonAlgorithm::sortOnDevice(this, _xyz.x.stream, range, N, MergeBorderTracks_compMax());
@@ -1839,13 +1839,13 @@ struct GPUTPCGMMergerSortTracksQPt_comp {
 } // namespace o2::gpu::internal
 
 template <>
-inline void GPUCA_M_CAT3(GPUReconstruction, GPUCA_GPUTYPE, Backend)::runKernelBackendInternal<GPUTPCGMMergerSortTracks, 0>(const krnlSetupTime& _xyz)
+inline void GPUCA_M_CAT(GPUReconstruction, GPUCA_GPUTYPE)::runKernelBackendInternal<GPUTPCGMMergerSortTracks, 0>(const krnlSetupTime& _xyz)
 {
   GPUCommonAlgorithm::sortOnDevice(this, _xyz.x.stream, mProcessorsShadow->tpcMerger.TrackOrderProcess(), processors()->tpcMerger.NOutputTracks(), GPUTPCGMMergerSortTracks_comp(mProcessorsShadow->tpcMerger.OutputTracks()));
 }
 
 template <>
-inline void GPUCA_M_CAT3(GPUReconstruction, GPUCA_GPUTYPE, Backend)::runKernelBackendInternal<GPUTPCGMMergerSortTracksQPt, 0>(const krnlSetupTime& _xyz)
+inline void GPUCA_M_CAT(GPUReconstruction, GPUCA_GPUTYPE)::runKernelBackendInternal<GPUTPCGMMergerSortTracksQPt, 0>(const krnlSetupTime& _xyz)
 {
   GPUCommonAlgorithm::sortOnDevice(this, _xyz.x.stream, mProcessorsShadow->tpcMerger.TrackSort(), processors()->tpcMerger.NOutputTracks(), GPUTPCGMMergerSortTracksQPt_comp(mProcessorsShadow->tpcMerger.OutputTracks()));
 }
@@ -2065,7 +2065,7 @@ struct GPUTPCGMMergerMergeLoopers_comp {
 } // namespace o2::gpu::internal
 
 template <>
-inline void GPUCA_M_CAT3(GPUReconstruction, GPUCA_GPUTYPE, Backend)::runKernelBackendInternal<GPUTPCGMMergerMergeLoopers, 1>(const krnlSetupTime& _xyz)
+inline void GPUCA_M_CAT(GPUReconstruction, GPUCA_GPUTYPE)::runKernelBackendInternal<GPUTPCGMMergerMergeLoopers, 1>(const krnlSetupTime& _xyz)
 {
   GPUCommonAlgorithm::sortOnDevice(this, _xyz.x.stream, mProcessorsShadow->tpcMerger.LooperCandidates(), processors()->tpcMerger.Memory()->nLooperMatchCandidates, GPUTPCGMMergerMergeLoopers_comp());
 }

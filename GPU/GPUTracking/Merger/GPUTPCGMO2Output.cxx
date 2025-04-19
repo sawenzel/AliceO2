@@ -102,7 +102,7 @@ struct GPUTPCGMO2OutputSort_comp {
 };
 
 template <>
-inline void GPUCA_M_CAT3(GPUReconstruction, GPUCA_GPUTYPE, Backend)::runKernelBackendInternal<GPUTPCGMO2Output, GPUTPCGMO2Output::sort>(const krnlSetupTime& _xyz)
+inline void GPUCA_M_CAT(GPUReconstruction, GPUCA_GPUTYPE)::runKernelBackendInternal<GPUTPCGMO2Output, GPUTPCGMO2Output::sort>(const krnlSetupTime& _xyz)
 {
   GPUCommonAlgorithm::sortOnDevice(this, _xyz.x.stream, mProcessorsShadow->tpcMerger.TrackSortO2(), processors()->tpcMerger.NOutputTracksTPCO2(), GPUTPCGMO2OutputSort_comp());
 }

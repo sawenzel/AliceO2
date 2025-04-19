@@ -19,7 +19,7 @@
 #include "GPUGeneralKernels.h"
 #include "GPUConstantMem.h"
 #include "GPUTPCClusterFinder.h"
-#include "Array2D.h"
+#include "CfArray2D.h"
 #include "PackedCharge.h"
 #include "GPUTPCNNClusterizer.h"
 
@@ -47,7 +47,7 @@ class GPUTPCNNClusterizerKernels : public GPUKernelTemplate
   static constexpr size_t SCRATCH_PAD_WORK_GROUP_SIZE = GPUCA_GET_THREAD_COUNT(GPUCA_LB_GPUTPCNNClusterizerKernels_runCfClusterizer);
   struct GPUSharedMemory {
     // Regular cluster finder
-    ChargePos posBcast[SCRATCH_PAD_WORK_GROUP_SIZE];
+    CfChargePos posBcast[SCRATCH_PAD_WORK_GROUP_SIZE];
     PackedCharge buf[SCRATCH_PAD_WORK_GROUP_SIZE * SCRATCH_PAD_BUILD_N];
     uint8_t innerAboveThreshold[SCRATCH_PAD_WORK_GROUP_SIZE];
   };

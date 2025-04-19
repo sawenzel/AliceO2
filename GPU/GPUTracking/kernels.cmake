@@ -128,7 +128,7 @@ o2_gpu_add_kernel("GPUTPCCFStreamCompaction, scanStart"               "= TPCCLUS
 o2_gpu_add_kernel("GPUTPCCFStreamCompaction, scanUp"                  "= TPCCLUSTERFINDER"                                    LB int32_t iBuf int32_t nElems)
 o2_gpu_add_kernel("GPUTPCCFStreamCompaction, scanTop"                 "= TPCCLUSTERFINDER"                                    LB int32_t iBuf int32_t nElems)
 o2_gpu_add_kernel("GPUTPCCFStreamCompaction, scanDown"                "= TPCCLUSTERFINDER"                                    LB int32_t iBuf "uint32_t" offset int32_t nElems)
-o2_gpu_add_kernel("GPUTPCCFStreamCompaction, compactDigits"           "= TPCCLUSTERFINDER"                                    LB int32_t iBuf int32_t stage ChargePos* in ChargePos* out)
+o2_gpu_add_kernel("GPUTPCCFStreamCompaction, compactDigits"           "= TPCCLUSTERFINDER"                                    LB int32_t iBuf int32_t stage CfChargePos* in CfChargePos* out)
 o2_gpu_add_kernel("GPUTPCCFDecodeZS"                                  "= TPCCLUSTERFINDER"                                    LB int32_t firstHBF)
 o2_gpu_add_kernel("GPUTPCCFDecodeZSLink"                              "GPUTPCCFDecodeZS"                                      LB int32_t firstHBF)
 o2_gpu_add_kernel("GPUTPCCFDecodeZSDenseLink"                         "GPUTPCCFDecodeZS"                                      LB int32_t firstHBF)

@@ -15,6 +15,7 @@
 #include "GPUReconstruction.h"
 #include "ML/3rdparty/GPUORTFloat16.h"
 #include "GPUTPCNNClusterizer.h"
+#include "GPUSettings.h"
 
 using namespace o2::gpu;
 

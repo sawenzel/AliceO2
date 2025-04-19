@@ -20,6 +20,16 @@
 #include "GPUTrackingInputProvider.h"
 #include "GPUTPCClusterOccupancyMap.h"
 #include "GPUDefParametersRuntime.h"
+#include "GPUTPCExtrapolationTracking.h"
+#include "GPUTPCCreateOccupancyMap.h"
+#include "GPUTPCCreateTrackingData.h"
+#include "GPUTPCNeighboursFinder.h"
+#include "GPUTPCNeighboursCleaner.h"
+#include "GPUTPCStartHitsFinder.h"
+#include "GPUTPCStartHitsSorter.h"
+#include "GPUTPCTrackletConstructor.h"
+#include "GPUTPCTrackletSelector.h"
+#include "GPUTPCSectorDebugSortKernels.h"
 #include "utils/strtag.h"
 #include <fstream>
 

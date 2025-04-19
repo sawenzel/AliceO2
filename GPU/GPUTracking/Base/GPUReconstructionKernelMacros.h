@@ -65,7 +65,7 @@
 // GPU Host wrappers for kernel
 #define GPUCA_KRNL_HOST(x_class, ...) \
   GPUCA_KRNLGPU(x_class, __VA_ARGS__) \
-  template <> class GPUCA_M_CAT3(GPUReconstruction, GPUCA_GPUTYPE, Backend)::backendInternal<GPUCA_M_KRNL_TEMPLATE(x_class)> { \
+  template <> class GPUCA_M_CAT(GPUReconstruction, GPUCA_GPUTYPE)::backendInternal<GPUCA_M_KRNL_TEMPLATE(x_class)> { \
    public: \
     template <typename T, typename... Args> \
     static inline void runKernelBackendMacro(const krnlSetupTime& _xyz, T* me, const Args&... args) \

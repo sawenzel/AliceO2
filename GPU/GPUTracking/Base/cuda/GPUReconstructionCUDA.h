@@ -16,6 +16,7 @@
 #define GPURECONSTRUCTIONCUDA_H
 
 #include "GPUReconstructionDeviceBase.h"
+#include "GPUCommonAlgorithm.h"
 #include <vector>
 #include <string>
 
@@ -34,38 +35,31 @@ namespace o2::gpu
 {
 struct GPUReconstructionCUDAInternals;
 
-class GPUReconstructionCUDABackend : public GPUReconstructionDeviceBase
+class GPUReconstructionCUDA : public GPUReconstructionProcessing::KernelInterface<GPUReconstructionCUDA, GPUReconstructionDeviceBase>
 {
  public:
-  ~GPUReconstructionCUDABackend() override;
-
- protected:
-  GPUReconstructionCUDABackend(const GPUSettingsDeviceBackend& cfg);
+  GPUReconstructionCUDA(const GPUSettingsDeviceBackend& cfg);
+  ~GPUReconstructionCUDA() override;
 
   void PrintKernelOccupancies() override;
   virtual int32_t GPUChkErrInternal(const int64_t error, const char* file, int32_t line) const override;
 
   template <class T, int32_t I = 0, typename... Args>
   void runKernelBackend(const krnlSetupArgs<T, I, Args...>& args);
-  template <class T, int32_t I = 0, typename... Args>
-  void runKernelBackendInternal(const krnlSetupTime& _xyz, const Args&... args);
 
   template <class T, class S>
   friend GPUh() void GPUCommonAlgorithm::sortOnDevice(auto* rec, int32_t stream, T* begin, size_t N, const S& comp);
-  GPUReconstructionCUDAInternals* mInternals;
-};
-
-class GPUReconstructionCUDA : public GPUReconstructionKernels<GPUReconstructionCUDABackend>
-{
- public:
-  ~GPUReconstructionCUDA() override;
-  GPUReconstructionCUDA(const GPUSettingsDeviceBackend& cfg);
 
  protected:
+  GPUReconstructionCUDAInternals* mInternals;
+
+  template <class T, int32_t I = 0, typename... Args>
+  void runKernelBackendInternal(const krnlSetupTime& _xyz, const Args&... args);
+
   int32_t InitDevice_Runtime() override;
   int32_t ExitDevice_Runtime() override;
 
-  std::unique_ptr<gpu_reconstruction_kernels::threadContext> GetThreadContext() override;
+  std::unique_ptr<threadContext> GetThreadContext() override;
   void SynchronizeGPU() override;
   int32_t GPUDebug(const char* state = "UNKNOWN", int32_t stream = -1, bool force = false) override;
   void SynchronizeStream(int32_t stream) override;

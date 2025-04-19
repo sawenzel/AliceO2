@@ -17,6 +17,11 @@
 #include "GPUDefParametersRuntime.h"
 #include "GPUO2DataTypes.h"
 #include "GPUQA.h"
+#include "GPUTPCGMMerger.h"
+#include "GPUConstantMem.h"
+#include "GPUTPCGMMergerGPU.h"
+#include "GPUTPCGMO2Output.h"
+#include "GPUTPCGlobalDebugSortKernels.h"
 #include "utils/strtag.h"
 #include <fstream>
 

@@ -9,23 +9,28 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-/// \file GPUChainTrackingDefs.h
+/// \file GPUDisplayInfo.inc
 /// \author David Rohr
 
-#ifndef GPUCHAINTRACKINGDEFS_H
-#define GPUCHAINTRACKINGDEFS_H
+#ifndef GPUDISPLAYINFO_INC_H
+#define GPUDISPLAYINFO_INC_H
 
-#include <mutex>
-#include <condition_variable>
+#include "GPUDisplay.h"
+#include "GPULogging.h"
 
 namespace o2::gpu
 {
-struct GPUChainTrackingFinalContext {
-  GPUReconstruction* rec = nullptr;
-  std::mutex mutex;
-  std::condition_variable cond;
-  bool ready = false;
-};
+template <typename... Args>
+void GPUDisplay::SetInfo(Args... args)
+{
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-security"
+#pragma GCC diagnostic ignored "-Wformat-truncation"
+  snprintf(mInfoText2, 1024, args...);
+#pragma GCC diagnostic pop
+  GPUInfo("%s", mInfoText2);
+  mInfoText2Timer.ResetStart();
+}
 } // namespace o2::gpu
 
 #endif

@@ -19,6 +19,9 @@
 #include "GPUTPCCFChainContext.h"
 #include "TPCClusterDecompressor.h"
 #include "GPUDefParametersRuntime.h"
+#include "GPUConstantMem.h" // TODO: Try to get rid of as many GPUConstantMem includes as possible!
+#include "GPUTPCCompressionKernels.h"
+#include "GPUTPCDecompressionKernels.h"
 #include "utils/strtag.h"
 
 #include <numeric>

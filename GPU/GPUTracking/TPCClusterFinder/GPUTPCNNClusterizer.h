@@ -15,7 +15,7 @@
 #ifndef O2_GPUTPCNNCLUSTERIZER_H
 #define O2_GPUTPCNNCLUSTERIZER_H
 
-#include "ChargePos.h"
+#include "CfChargePos.h"
 #include "GPUProcessor.h"
 
 namespace o2::OrtDataType

@@ -13,6 +13,7 @@
 /// \author David Rohr
 
 #include "GPUChainITS.h"
+#include "GPUConstantMem.h"
 #include "DataFormatsITS/TrackITS.h"
 #include "ITStracking/ExternalAllocator.h"
 #include "GPUReconstructionIncludesITS.h"
