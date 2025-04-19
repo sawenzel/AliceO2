@@ -216,7 +216,6 @@ class GPUChain
 
   inline GPUChain* GetNextChainInQueue() { return mRec->GetNextChainInQueue(); }
 
-  virtual int32_t PrepareTextures() { return 0; }
   virtual int32_t DoStuckProtection(int32_t stream, deviceEvent event) { return 0; }
 
   template <class T, class S, typename... Args>

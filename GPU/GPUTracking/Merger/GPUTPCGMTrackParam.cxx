@@ -580,10 +580,8 @@ GPUd() float GPUTPCGMTrackParam::AttachClusters(const GPUTPCGMMerger* GPUrestric
   }
   const GPUTPCTracker& GPUrestrict() tracker = *(Merger -> GetConstantMem()->tpcTrackers + sector);
   const GPUTPCRow& GPUrestrict() row = tracker.Row(iRow);
-#ifndef GPUCA_TEXTURE_FETCH_CONSTRUCTOR
   GPUglobalref() const cahit2* hits = tracker.HitData(row);
   GPUglobalref() const calink* firsthit = tracker.FirstHitInBin(row);
-#endif //! GPUCA_TEXTURE_FETCH_CONSTRUCTOR
   if (row.NHits() == 0) {
     return -1e6f;
   }
@@ -626,8 +624,8 @@ GPUd() float GPUTPCGMTrackParam::AttachClusters(const GPUTPCGMMerger* GPUrestric
   }
   for (int32_t k = 0; k <= nz; k++) {
     const int32_t mybin = bin + k * nBinsY;
-    const uint32_t hitFst = CA_TEXTURE_FETCH(calink, gAliTexRefu, firsthit, mybin);
-    const uint32_t hitLst = CA_TEXTURE_FETCH(calink, gAliTexRefu, firsthit, mybin + ny + 1);
+    const uint32_t hitFst = firsthit[mybin];
+    const uint32_t hitLst = firsthit[mybin + ny + 1];
     for (uint32_t ih = hitFst; ih < hitLst; ih++) {
       int32_t id = idOffset + ids[ih];
       GPUAtomic(uint32_t)* const weight = weights + id;
@@ -636,7 +634,7 @@ GPUd() float GPUTPCGMTrackParam::AttachClusters(const GPUTPCGMMerger* GPUrestric
           continue;
         }
       }
-      const cahit2 hh = CA_TEXTURE_FETCH(cahit2, gAliTexRefu2, hits, ih);
+      const cahit2 hh = hits[ih];
       const float y = y0 + hh.x * stepY;
       const float z = z0 + hh.y * stepZ;
       const float dy = y - uncorrectedY;

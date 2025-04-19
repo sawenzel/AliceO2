@@ -103,17 +103,6 @@ int32_t GPUChainTracking::RunTPCTrackingSectors_internal()
   int32_t streamInitAndOccMap = mRec->NStreams() - 1;
 
   if (doGPU) {
-    for (uint32_t iSector = 0; iSector < NSECTORS; iSector++) {
-      processorsShadow()->tpcTrackers[iSector].GPUParametersConst()->gpumem = (char*)mRec->DeviceMemoryBase();
-      // Initialize Startup Constants
-      processors()->tpcTrackers[iSector].GPUParameters()->nextStartHit = (((getKernelProperties<GPUTPCTrackletConstructor>().minBlocks * BlockCount()) + NSECTORS - 1 - iSector) / NSECTORS) * getKernelProperties<GPUTPCTrackletConstructor>().nThreads;
-      processorsShadow()->tpcTrackers[iSector].SetGPUTextureBase(mRec->DeviceMemoryBase());
-    }
-
-    if (PrepareTextures()) {
-      return (2);
-    }
-
     // Copy Tracker Object to GPU Memory
     if (GetProcessingSettings().debugLevel >= 3) {
       GPUInfo("Copying Tracker objects to GPU");

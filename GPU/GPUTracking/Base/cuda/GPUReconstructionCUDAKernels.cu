@@ -20,11 +20,6 @@
 
 using namespace o2::gpu;
 
-#ifdef GPUCA_USE_TEXTURES
-texture<cahit2, cudaTextureType1D, cudaReadModeElementType> gAliTexRefu2;
-texture<calink, cudaTextureType1D, cudaReadModeElementType> gAliTexRefu;
-#endif
-
 #include "GPUReconstructionIncludesDeviceAll.h"
 
 #if defined(__HIPCC__) && defined(GPUCA_HAS_GLOBAL_SYMBOL_CONSTANT_MEM)

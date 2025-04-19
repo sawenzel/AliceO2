@@ -267,7 +267,6 @@
     #define GPUCA_PAR_COMP_GATHER_MODE 3
     #define GPUCA_PAR_DEDX_STORAGE_TYPE uint16_t
     #define GPUCA_PAR_MERGER_INTERPOLATION_ERROR_TYPE half
-    // #define GPUCA_USE_TEXTURES
   #elif defined(GPUCA_GPUTYPE_OPENCL)
   #else
     #error GPU TYPE NOT SET

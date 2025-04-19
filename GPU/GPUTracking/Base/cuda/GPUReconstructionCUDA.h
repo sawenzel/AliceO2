@@ -79,7 +79,6 @@ class GPUReconstructionCUDA : public GPUReconstructionKernels<GPUReconstructionC
 
 #ifndef __HIPCC__ // CUDA
   bool CanQueryMaxMemory() override { return true; }
-  int32_t PrepareTextures() override;
   void startGPUProfiling() override;
   void endGPUProfiling() override;
 #else // HIP

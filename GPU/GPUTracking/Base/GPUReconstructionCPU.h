@@ -112,7 +112,6 @@ class GPUReconstructionCPU : public GPUReconstructionKernels<GPUReconstructionCP
   int32_t ExitDevice() override;
   int32_t GetThread();
 
-  virtual int32_t PrepareTextures() { return 0; }
   virtual int32_t DoStuckProtection(int32_t stream, deviceEvent event) { return 0; }
 
   // Pointers to tracker classes

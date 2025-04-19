@@ -254,12 +254,6 @@ int32_t GPUReconstructionCUDA::InitDevice_Runtime()
       return (1);
     }
 
-#ifdef GPUCA_USE_TEXTURES
-    if (GPUCA_SECTOR_DATA_MEMORY * NSECTORS > (size_t)deviceProp.maxTexture1DLinear) {
-      GPUError("Invalid maximum texture size of device: %ld < %ld\n", (int64_t)deviceProp.maxTexture1DLinear, (int64_t)(GPUCA_SECTOR_DATA_MEMORY * NSECTORS));
-      return (1);
-    }
-#endif
 #ifndef GPUCA_NO_CONSTANT_MEMORY
     if (gGPUConstantMemBufferSize > deviceProp.totalConstMem) {
       GPUError("Insufficient constant memory available on GPU %d < %d!", (int32_t)deviceProp.totalConstMem, (int32_t)gGPUConstantMemBufferSize);
@@ -627,18 +621,6 @@ void GPUReconstructionCUDA::loadKernelModules(bool perKernel)
 }
 
 #ifndef __HIPCC__ // CUDA
-int32_t GPUReconstructionCUDA::PrepareTextures()
-{
-#ifdef GPUCA_USE_TEXTURES
-  cudaChannelFormatDesc channelDescu2 = cudaCreateChannelDesc<cahit2>();
-  size_t offset;
-  GPUChkErr(cudaBindTexture(&offset, &gAliTexRefu2, mProcessorsShadow->tpcTrackers[0].Data().Memory(), &channelDescu2, NSECTORS * GPUCA_SECTOR_DATA_MEMORY));
-  cudaChannelFormatDesc channelDescu = cudaCreateChannelDesc<calink>();
-  GPUChkErr(cudaBindTexture(&offset, &gAliTexRefu, mProcessorsShadow->tpcTrackers[0].Data().Memory(), &channelDescu, NSECTORS * GPUCA_SECTOR_DATA_MEMORY));
-#endif
-  return (0);
-}
-
 void GPUReconstructionCUDA::startGPUProfiling()
 {
   GPUChkErr(cudaProfilerStart());
