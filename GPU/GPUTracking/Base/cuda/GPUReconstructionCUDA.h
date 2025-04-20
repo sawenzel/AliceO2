@@ -48,6 +48,8 @@ class GPUReconstructionCUDA : public GPUReconstructionProcessing::KernelInterfac
   void runKernelBackend(const krnlSetupTime& _xyz, const Args&... args);
   template <class T, int32_t I = 0, typename... Args>
   void runKernelBackendTimed(const krnlSetupTime& _xyz, const Args&... args);
+  template <class T, int32_t I>
+  struct kernelBackendMacro;
 
   template <class T, class S>
   friend GPUh() void GPUCommonAlgorithm::sortOnDevice(auto* rec, int32_t stream, T* begin, size_t N, const S& comp);

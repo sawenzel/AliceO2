@@ -35,7 +35,7 @@ inline void GPUReconstructionCUDA::runKernelBackendTimed(const krnlSetupTime& _x
 {
 #if !defined(GPUCA_KERNEL_COMPILE_MODE) || GPUCA_KERNEL_COMPILE_MODE != 1
   if (!GetProcessingSettings().rtc.enable) {
-    backendInternal<T, I>::runKernelBackendMacro(_xyz, this, args...);
+    kernelBackendMacro<T, I>::run(_xyz, this, args...);
   } else
 #endif
   {
@@ -82,9 +82,6 @@ inline void GPUReconstructionCUDA::runKernelBackend(const krnlSetupTime& _xyz, c
     #define GPUCA_KRNL_DEFONLY // COMPILE_MODE = rdc
   #endif
 
-  #define GPUCA_KRNL(x_class, x_attributes, x_arguments, x_forward, x_types, ...) \
-    GPUCA_KRNL_HOST(x_class, x_attributes, x_arguments, x_forward, x_types, __VA_ARGS__)
-
   #ifndef __HIPCC__ // CUDA version
     #define GPUCA_KRNL_CALL(x_class, ...) \
       GPUCA_M_CAT(krnl_, GPUCA_M_KRNL_NAME(x_class))<<<x.nBlocks, x.nThreads, 0, me->mInternals->Streams[x.stream]>>>(GPUCA_CONSMEM_CALL y.index, args...);
@@ -94,6 +91,18 @@ inline void GPUReconstructionCUDA::runKernelBackend(const krnlSetupTime& _xyz, c
     #define GPUCA_KRNL_CALL(x_class, ...) \
       hipLaunchKernelGGL(HIP_KERNEL_NAME(GPUCA_M_CAT(krnl_, GPUCA_M_KRNL_NAME(x_class))), dim3(x.nBlocks), dim3(x.nThreads), 0, me->mInternals->Streams[x.stream], GPUCA_CONSMEM_CALL y.index, args...);
   #endif // __HIPCC__
+
+  #define GPUCA_KRNL(x_class, x_attributes, x_arguments, x_forward, x_types, ...) \
+    GPUCA_KRNLGPU(x_class, x_attributes, x_arguments, x_forward, x_types, __VA_ARGS__) \
+    template <> struct GPUReconstructionCUDA::kernelBackendMacro<GPUCA_M_KRNL_TEMPLATE(x_class)> { \
+      template <typename... Args> \
+      static inline void run(const GPUReconstructionProcessing::krnlSetupTime& _xyz, auto* me, const Args&... args) \
+      { \
+        auto& x = _xyz.x; \
+        auto& y = _xyz.y; \
+        GPUCA_KRNL_CALL(x_class, x_attributes, x_arguments, x_forward, x_types, __VA_ARGS__) \
+      } \
+    };
 
   #include "GPUReconstructionKernelList.h"
   #undef GPUCA_KRNL
