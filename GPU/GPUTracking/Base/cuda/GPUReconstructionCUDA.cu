@@ -37,6 +37,10 @@
 #undef GPUCA_KRNL
 #endif
 
+#ifdef GPUCA_HAS_ONNX
+#include <onnxruntime_cxx_api.h>
+#endif
+
 static constexpr size_t REQUIRE_MIN_MEMORY = 1024L * 1024 * 1024;
 static constexpr size_t REQUIRE_MEMORY_RESERVED = 512L * 1024 * 1024;
 static constexpr size_t REQUIRE_FREE_MEMORY_RESERVED_PER_SM = 40L * 1024 * 1024;
@@ -630,12 +634,50 @@ void GPUReconstructionCUDA::endGPUProfiling()
 {
   GPUChkErr(cudaProfilerStop());
 }
+
+void GPUReconstructionCUDA::SetONNXGPUStream(Ort::SessionOptions& session_options, int32_t stream, int32_t* deviceId)
+{
+#ifdef ORT_CUDA_BUILD
+  cudaGetDevice(deviceId);
+  OrtCUDAProviderOptionsV2* cuda_options = nullptr;
+  CreateCUDAProviderOptions(&cuda_options);
+
+  // std::vector<const char*> keys{"device_id", "gpu_mem_limit", "arena_extend_strategy", "cudnn_conv_algo_search", "do_copy_in_default_stream", "cudnn_conv_use_max_workspace", "cudnn_conv1d_pad_to_nc1d"};
+  // std::vector<const char*> values{"0", "2147483648", "kSameAsRequested", "DEFAULT", "1", "1", "1"};
+  // UpdateCUDAProviderOptions(cuda_options, keys.data(), values.data(), keys.size());
+
+  // this implicitly sets "has_user_compute_stream"
+  cuda_options.has_user_compute_stream = 1;
+  UpdateCUDAProviderOptionsWithValue(cuda_options, "user_compute_stream", mInternals->Streams[stream]);
+  session_options.AppendExecutionProvider_CUDA_V2(cuda_options);
+
+  // Finally, don't forget to release the provider options
+  ReleaseCUDAProviderOptions(cuda_options);
+#endif // ORT_CUDA_BUILD
+}
+
 #else  // HIP
 void* GPUReconstructionHIP::getGPUPointer(void* ptr)
 {
   void* retVal = nullptr;
   GPUChkErr(hipHostGetDevicePointer(&retVal, ptr, 0));
   return retVal;
+}
+
+void GPUReconstructionHIP::SetONNXGPUStream(Ort::SessionOptions& session_options, int32_t stream, int32_t* deviceId)
+{
+#ifdef ORT_ROCM_BUILD
+  // Create ROCm provider options
+  cudaGetDevice(deviceId);
+  // const auto& api = Ort::GetApi();
+  // api.GetCurrentGpuDeviceId(deviceId);
+  OrtROCMProviderOptions rocm_options;
+  rocm_options.has_user_compute_stream = 1; // Indicate that we are passing a user stream
+  rocm_options.arena_extend_strategy = 0;   // kNextPowerOfTwo = 0, kSameAsRequested = 1 -> https://github.com/search?q=repo%3Amicrosoft%2Fonnxruntime%20kSameAsRequested&type=code
+  // rocm_options.gpu_mem_limit = 1073741824; // 0 means no limit
+  rocm_options.user_compute_stream = mInternals->Streams[stream];
+  session_options.AppendExecutionProvider_ROCM(rocm_options);
+#endif // ORT_ROCM_BUILD
 }
 #endif // __HIPCC__
 

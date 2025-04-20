@@ -248,7 +248,8 @@ AddOption(applyNNclusterizer, int, 0, "", 0, "(bool, default = 0), if the neural
 AddOption(nnInferenceDevice, std::string, "CPU", "", 0, "(std::string) Specify inference device (cpu (default), rocm, cuda)")
 AddOption(nnInferenceDeviceId, unsigned int, 0, "", 0, "(unsigned int) Specify inference device id")
 AddOption(nnInferenceAllocateDevMem, int, 0, "", 0, "(bool, default = 0), if the device memory should be allocated for inference")
-AddOption(nnInferenceDtype, std::string, "fp32", "", 0, "(std::string) Specify the datatype for which inference is performed (fp32: default, fp16)") // fp32 or fp16
+AddOption(nnInferenceInputDType, std::string, "FP32", "", 0, "(std::string) Specify the datatype for which inference is performed (FP32: default, fp16)") // fp32 or fp16
+AddOption(nnInferenceOutputDType, std::string, "FP32", "", 0, "(std::string) Specify the datatype for which inference is performed (fp32: default, fp16)") // fp32 or fp16
 AddOption(nnInferenceIntraOpNumThreads, int, 1, "", 0, "Number of threads used to evaluate one neural network (ONNX: SetIntraOpNumThreads). 0 = auto-detect, can lead to problems on SLURM systems.")
 AddOption(nnInferenceInterOpNumThreads, int, 1, "", 0, "Number of threads used to evaluate one neural network (ONNX: SetInterOpNumThreads). 0 = auto-detect, can lead to problems on SLURM systems.")
 AddOption(nnInferenceEnableOrtOptimization, unsigned int, 99, "", 0, "Enables graph optimizations in ONNX Runtime. Can be [0, 1, 2, 99] -> see https://github.com/microsoft/onnxruntime/blob/3f71d637a83dc3540753a8bb06740f67e926dc13/include/onnxruntime/core/session/onnxruntime_c_api.h#L347")
@@ -269,6 +270,17 @@ AddOption(nnClassificationPath, std::string, "network_class.onnx", "", 0, "The c
 AddOption(nnClassThreshold, float, 0.5, "", 0, "The cutoff at which clusters will be accepted / rejected.")
 AddOption(nnRegressionPath, std::string, "network_reg.onnx", "", 0, "The regression network path")
 AddOption(nnSigmoidTrafoClassThreshold, int, 1, "", 0, "If true (default), then the classification threshold is transformed by an inverse sigmoid function. This depends on how the network was trained (with a sigmoid as acitvation function in the last layer or not).")
+AddOption(nnEvalMode, std::string, "c1:r1", "", 0, "Concatention of modes, e.g. c1:r1 (classification class 1, regression class 1)")
+// CCDB
+AddOption(nnLoadFromCCDB, int, 1, "", 0, "If 1 networks are fetched from ccdb, else locally")
+AddOption(nnLocalFolder, std::string, ".", "", 0, "Local folder in which the networks will be fetched")
+AddOption(nnCCDBURL, std::string, "http://ccdb-test.cern.ch:8080", "", 0, "The CCDB URL from where the network files are fetched")
+AddOption(nnCCDBPath, std::string, "Users/c/csonnabe/TPC/Clusterization", "", 0, "Folder path containing the networks")
+AddOption(nnCCDBWithMomentum, int, 1, "", 0, "Distinguishes between the network with and without momentum output for the regression")
+AddOption(nnCCDBClassificationLayerType, std::string, "FC", "", 0, "Distinguishes between network with different layer types. Options: FC, CNN")
+AddOption(nnCCDBRegressionLayerType, std::string, "CNN", "", 0, "Distinguishes between network with different layer types. Options: FC, CNN")
+AddOption(nnCCDBBeamType, std::string, "PbPb", "", 0, "Distinguishes between networks trained for different beam types. Options: PbPb, pp")
+AddOption(nnCCDBInteractionRate, int, 50, "", 0, "Distinguishes between networks for different interaction rates [kHz].")
 AddHelp("help", 'h')
 EndConfig()
 

@@ -25,6 +25,11 @@ extern "C" __declspec(dllexport) o2::gpu::GPUReconstruction* GPUReconstruction_C
 extern "C" o2::gpu::GPUReconstruction* GPUReconstruction_Create_CUDA(const o2::gpu::GPUSettingsDeviceBackend& cfg);
 #endif
 
+namespace Ort
+{
+struct SessionOptions;
+}
+
 namespace o2::gpu
 {
 struct GPUReconstructionCUDAInternals;
@@ -74,6 +79,7 @@ class GPUReconstructionCUDA : public GPUReconstructionKernels<GPUReconstructionC
   size_t GPUMemCpy(void* dst, const void* src, size_t size, int32_t stream, int32_t toGPU, deviceEvent* ev = nullptr, deviceEvent* evList = nullptr, int32_t nEvents = 1) override;
   void ReleaseEvent(deviceEvent ev) override;
   void RecordMarker(deviceEvent* ev, int32_t stream) override;
+  void SetONNXGPUStream(Ort::SessionOptions& session_options, int32_t stream, int32_t* deviceId) override;
 
   void GetITSTraits(std::unique_ptr<o2::its::TrackerTraits>* trackerTraits, std::unique_ptr<o2::its::VertexerTraits>* vertexerTraits, std::unique_ptr<o2::its::TimeFrame>* timeFrame) override;
 

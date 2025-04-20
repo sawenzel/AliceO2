@@ -162,12 +162,18 @@ if(ALIGPU_BUILD_TYPE STREQUAL "O2")
     ${MODULE}
     SOURCES ${SRCS}
     PUBLIC_LINK_LIBRARIES O2::GPUTracking O2::ITStrackingHIP
+    PRIVATE_LINK_LIBRARIES ONNXRuntime::ONNXRuntime
     PRIVATE_INCLUDE_DIRECTORIES
       ${CMAKE_SOURCE_DIR}/Detectors/Base/src
       ${CMAKE_SOURCE_DIR}/Detectors/TRD/base/src
       ${CMAKE_SOURCE_DIR}/DataFormats/Reconstruction/src
       ${GPUCA_HIP_SOURCE_DIR}
     TARGETVARNAME targetName)
+
+  target_compile_definitions(${targetName} PRIVATE
+    GPUCA_HAS_ONNX=1
+    $<$<BOOL:${ORT_ROCM_BUILD}>:ORT_ROCM_BUILD>
+    $<$<BOOL:${ORT_MIGRAPHX_BUILD}>:ORT_MIGRAPHX_BUILD>)
 
   install(FILES ${HDRS} DESTINATION include/GPU)
 

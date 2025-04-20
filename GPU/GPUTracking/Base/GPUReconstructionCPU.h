@@ -24,6 +24,11 @@
 #include "GPUReconstructionKernelIncludes.h"
 #include "GPUReconstructionKernels.h"
 
+namespace Ort
+{
+struct SessionOptions;
+}
+
 namespace o2::gpu
 {
 
@@ -107,6 +112,9 @@ class GPUReconstructionCPU : public GPUReconstructionKernels<GPUReconstructionCP
   virtual size_t GPUMemCpyAlways(bool onGpu, void* dst, const void* src, size_t size, int32_t stream, int32_t toGPU, deviceEvent* ev = nullptr, deviceEvent* evList = nullptr, int32_t nEvents = 1);
   size_t WriteToConstantMemory(size_t offset, const void* src, size_t size, int32_t stream = -1, deviceEvent* ev = nullptr) override;
   virtual size_t TransferMemoryInternal(GPUMemoryResource* res, int32_t stream, deviceEvent* ev, deviceEvent* evList, int32_t nEvents, bool toGPU, const void* src, void* dst);
+
+  // ONNX runtime
+  virtual void SetONNXGPUStream(Ort::SessionOptions&, int32_t, int32_t*) {}
 
   int32_t InitDevice() override;
   int32_t ExitDevice() override;

@@ -22,6 +22,11 @@
 #include <functional>
 #include <atomic>
 
+namespace Ort
+{
+struct SessionOptions;
+}
+
 namespace o2::gpu
 {
 

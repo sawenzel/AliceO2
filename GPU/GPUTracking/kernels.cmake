@@ -116,6 +116,7 @@ o2_gpu_add_kernel("GPUTPCCFClusterizer"                               "= TPCCLUS
 if(NOT ALIGPU_BUILD_TYPE STREQUAL "Standalone")
 o2_gpu_add_kernel("GPUTPCNNClusterizerKernels, runCfClusterizer"        "= TPCNNCLUSTERFINDER"                                LB uint8_t sector int8_t dtype int8_t onlyMC uint batchStart)
 o2_gpu_add_kernel("GPUTPCNNClusterizerKernels, fillInputNN"             "= TPCNNCLUSTERFINDER"                                LB uint8_t sector int8_t dtype int8_t onlyMC uint batchStart)
+o2_gpu_add_kernel("GPUTPCNNClusterizerKernels, fillInputNNSingleElement"             "= TPCNNCLUSTERFINDER"                                LB uint8_t sector int8_t dtype int8_t onlyMC uint batchStart)
 o2_gpu_add_kernel("GPUTPCNNClusterizerKernels, determineClass1Labels"   "= TPCNNCLUSTERFINDER"                                LB uint8_t sector int8_t dtype int8_t onlyMC uint batchStart)
 o2_gpu_add_kernel("GPUTPCNNClusterizerKernels, determineClass2Labels"   "= TPCNNCLUSTERFINDER"                                LB uint8_t sector int8_t dtype int8_t onlyMC uint batchStart)
 o2_gpu_add_kernel("GPUTPCNNClusterizerKernels, publishClass1Regression" "= TPCNNCLUSTERFINDER"                                LB uint8_t sector int8_t dtype int8_t onlyMC uint batchStart)
