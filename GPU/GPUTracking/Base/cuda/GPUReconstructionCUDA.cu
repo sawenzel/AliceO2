@@ -24,7 +24,8 @@
 #include "GPUParamRTC.h"
 #include "GPUReconstructionCUDAHelpers.inc"
 #include "GPUDefParametersLoad.inc"
-#include "GPUReconstructionProcessingKernels.inc"
+#include "GPUReconstructionKernelIncludes.h"
+#include "GPUConstantMem.h"
 
 #if defined(GPUCA_KERNEL_COMPILE_MODE) && GPUCA_KERNEL_COMPILE_MODE == 1
 #include "utils/qGetLdBinarySymbols.h"

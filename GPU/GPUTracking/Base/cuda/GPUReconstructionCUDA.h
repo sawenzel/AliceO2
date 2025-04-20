@@ -45,16 +45,15 @@ class GPUReconstructionCUDA : public GPUReconstructionProcessing::KernelInterfac
   virtual int32_t GPUChkErrInternal(const int64_t error, const char* file, int32_t line) const override;
 
   template <class T, int32_t I = 0, typename... Args>
-  void runKernelBackend(const krnlSetupArgs<T, I, Args...>& args);
+  void runKernelBackend(const krnlSetupTime& _xyz, const Args&... args);
+  template <class T, int32_t I = 0, typename... Args>
+  void runKernelBackendTimed(const krnlSetupTime& _xyz, const Args&... args);
 
   template <class T, class S>
   friend GPUh() void GPUCommonAlgorithm::sortOnDevice(auto* rec, int32_t stream, T* begin, size_t N, const S& comp);
 
  protected:
   GPUReconstructionCUDAInternals* mInternals;
-
-  template <class T, int32_t I = 0, typename... Args>
-  void runKernelBackendInternal(const krnlSetupTime& _xyz, const Args&... args);
 
   int32_t InitDevice_Runtime() override;
   int32_t ExitDevice_Runtime() override;

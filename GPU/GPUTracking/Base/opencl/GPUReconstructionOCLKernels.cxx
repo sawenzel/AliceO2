@@ -16,9 +16,11 @@
 #include "GPUReconstructionKernelIncludes.h"
 
 #include "GPUReconstructionOCLKernelsSpecialize.inc"
+#include "GPUReconstructionProcessingKernels.inc"
+template void GPUReconstructionProcessing::KernelInterface<GPUReconstructionOCL, GPUReconstructionDeviceBase>::runKernelVirtual(const int num, const void* args);
 
 template <class T, int32_t I, typename... Args>
-inline void GPUReconstructionOCL::runKernelBackendInternal(const krnlSetupTime& _xyz, const Args&... args)
+inline void GPUReconstructionOCL::runKernelBackend(const krnlSetupTime& _xyz, const Args&... args)
 {
   cl_kernel k = getKernelObject<cl_kernel, T, I>();
   auto& x = _xyz.x;
@@ -46,12 +48,6 @@ inline void GPUReconstructionOCL::runKernelBackendInternal(const krnlSetupTime& 
       GPUChkErr(clReleaseEvent(ev));
     }
   }
-}
-
-template <class T, int32_t I, typename... Args>
-void GPUReconstructionOCL::runKernelBackend(const krnlSetupArgs<T, I, Args...>& args)
-{
-  std::apply([this, &args](auto&... vals) { runKernelBackendInternal<T, I, Args...>(args.s, vals...); }, args.v);
 }
 
 template <class T, int32_t I>
@@ -86,7 +82,3 @@ int32_t GPUReconstructionOCL::AddKernels()
 #undef GPUCA_KRNL
   return 0;
 }
-
-#define GPUCA_KRNL(x_class, x_attributes, x_arguments, x_forward, x_types, ...) template void GPUReconstructionOCL::runKernelBackend<GPUCA_M_KRNL_TEMPLATE(x_class)>(const krnlSetupArgs<GPUCA_M_KRNL_TEMPLATE(x_class) GPUCA_M_STRIP(x_types)>& args);
-#include "GPUReconstructionKernelList.h"
-#undef GPUCA_KRNL

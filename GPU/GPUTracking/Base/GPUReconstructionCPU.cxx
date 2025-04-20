@@ -54,7 +54,7 @@ GPUReconstructionCPU::~GPUReconstructionCPU()
 }
 
 template <class T, int32_t I, typename... Args>
-inline void GPUReconstructionCPU::runKernelBackendInternal(const krnlSetupTime& _xyz, const Args&... args)
+inline void GPUReconstructionCPU::runKernelBackend(const krnlSetupTime& _xyz, const Args&... args)
 {
   auto& x = _xyz.x;
   auto& y = _xyz.y;
@@ -88,7 +88,7 @@ inline void GPUReconstructionCPU::runKernelBackendInternal(const krnlSetupTime& 
 }
 
 template <>
-inline void GPUReconstructionCPU::runKernelBackendInternal<GPUMemClean16, 0>(const krnlSetupTime& _xyz, void* const& ptr, uint64_t const& size)
+inline void GPUReconstructionCPU::runKernelBackend<GPUMemClean16, 0>(const krnlSetupTime& _xyz, void* const& ptr, uint64_t const& size)
 {
   int32_t nThreads = std::max<int32_t>(1, std::min<int32_t>(size / (16 * 1024 * 1024), getNKernelHostThreads(true)));
   if (nThreads > 1) {
@@ -106,17 +106,6 @@ inline void GPUReconstructionCPU::runKernelBackendInternal<GPUMemClean16, 0>(con
   } else {
     memset(ptr, 0, size);
   }
-}
-
-template <class T, int32_t I, typename... Args>
-void GPUReconstructionCPU::runKernelBackend(const krnlSetupArgs<T, I, Args...>& args)
-{
-#pragma GCC diagnostic push
-#if defined(__clang__)
-#pragma GCC diagnostic ignored "-Wunused-lambda-capture" // this is not alway captured below
-#endif
-  std::apply([this, &args](auto&... vals) { runKernelBackendInternal<T, I, Args...>(args.s, vals...); }, args.v);
-#pragma GCC diagnostic push
 }
 
 template <class S, int32_t I>
@@ -137,8 +126,7 @@ GPUReconstructionProcessing::krnlProperties GPUReconstructionCPU::getKernelPrope
   return ret;
 }
 
-#define GPUCA_KRNL(x_class, x_attributes, x_arguments, x_forward, x_types, ...)                                                                                           \
-  template void GPUReconstructionCPU::runKernelBackend<GPUCA_M_KRNL_TEMPLATE(x_class)>(const krnlSetupArgs<GPUCA_M_KRNL_TEMPLATE(x_class) GPUCA_M_STRIP(x_types)>& args); \
+#define GPUCA_KRNL(x_class, x_attributes, x_arguments, x_forward, x_types, ...) \
   template GPUReconstructionProcessing::krnlProperties GPUReconstructionCPU::getKernelProperties<GPUCA_M_KRNL_TEMPLATE(x_class)>(int gpu);
 #include "GPUReconstructionKernelList.h"
 #undef GPUCA_KRNL

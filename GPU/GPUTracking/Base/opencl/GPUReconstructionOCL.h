@@ -34,7 +34,7 @@ class GPUReconstructionOCL : public GPUReconstructionProcessing::KernelInterface
   ~GPUReconstructionOCL() override;
 
   template <class T, int32_t I = 0, typename... Args>
-  void runKernelBackend(const krnlSetupArgs<T, I, Args...>& args);
+  void runKernelBackend(const krnlSetupTime& _xyz, const Args&... args);
 
  protected:
   int32_t InitDevice_Runtime() override;
@@ -57,8 +57,6 @@ class GPUReconstructionOCL : public GPUReconstructionProcessing::KernelInterface
 
   template <class T, int32_t I = 0>
   int32_t AddKernel();
-  template <class T, int32_t I = 0, typename... Args>
-  void runKernelBackendInternal(const krnlSetupTime& _xyz, const Args&... args);
 
   GPUReconstructionOCLInternals* mInternals;
   float mOclVersion;

@@ -13,8 +13,8 @@
 /// \author David Rohr
 
 #include "GPUReconstructionOCLIncludesHost.h"
-#include "GPUReconstructionProcessingKernels.inc"
 #include "GPUDefParametersLoad.inc"
+#include "GPUConstantMem.h"
 
 #include <map>
 

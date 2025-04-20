@@ -40,7 +40,7 @@ class GPUReconstructionCPU : public GPUReconstructionProcessing::KernelInterface
   template <class S, int32_t I = 0>
   krnlProperties getKernelProperties(int gpu = -1);
   template <class T, int32_t I = 0, typename... Args>
-  void runKernelBackend(const krnlSetupArgs<T, I, Args...>& args);
+  void runKernelBackend(const krnlSetupTime& _xyz, const Args&... args);
 
   virtual int32_t GPUDebug(const char* state = "UNKNOWN", int32_t stream = -1, bool force = false);
   int32_t GPUStuck() { return mGPUStuck; }
@@ -58,9 +58,6 @@ class GPUReconstructionCPU : public GPUReconstructionProcessing::KernelInterface
   };
 
   GPUReconstructionCPU(const GPUSettingsDeviceBackend& cfg) : GPUReconstructionProcessing::KernelInterface<GPUReconstructionCPU, GPUReconstructionProcessing>(cfg) {}
-
-  template <class T, int32_t I = 0, typename... Args>
-  void runKernelBackendInternal(const krnlSetupTime& _xyz, const Args&... args);
 
   int32_t registerMemoryForGPU_internal(const void* ptr, size_t size) override { return 0; }
   int32_t unregisterMemoryForGPU_internal(const void* ptr) override { return 0; }

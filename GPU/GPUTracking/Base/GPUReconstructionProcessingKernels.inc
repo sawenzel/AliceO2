@@ -21,6 +21,11 @@
 namespace o2::gpu
 {
 
+#pragma GCC diagnostic push
+#if defined(__clang__)
+#pragma GCC diagnostic ignored "-Wunused-lambda-capture" // this is not alway captured below
+#endif
+
 template <class T, class S>
 void GPUReconstructionProcessing::KernelInterface<T, S>::runKernelVirtual(const int num, const void* args)
 {
@@ -28,13 +33,15 @@ void GPUReconstructionProcessing::KernelInterface<T, S>::runKernelVirtual(const 
 #define GPUCA_KRNL(x_class, x_attributes, x_arguments, x_forward, x_types, x_num)                             \
     case x_num: {                                                                                             \
       const auto& args2 = *(const krnlSetupArgs<GPUCA_M_KRNL_TEMPLATE(x_class) GPUCA_M_STRIP(x_types)>*)args; \
-      ((T*)this)->template runKernelBackend<GPUCA_M_KRNL_TEMPLATE(x_class)>(args2);                                    \
+      std::apply([this, &args2](auto&... vals) { ((T*)this)->template runKernelBackend<GPUCA_M_KRNL_TEMPLATE(x_class) GPUCA_M_STRIP(x_types)>(args2.s, vals...); }, args2.v); \
       break;                                                                                                  \
     }
 #include "GPUReconstructionKernelList.h"
 #undef GPUCA_KRNL
   } // clang-format on
 }
+
+#pragma GCC diagnostic push
 
 } // namespace o2::gpu
 
