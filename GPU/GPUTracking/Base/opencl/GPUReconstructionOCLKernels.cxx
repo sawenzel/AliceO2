@@ -15,12 +15,7 @@
 #include "GPUReconstructionOCLIncludesHost.h"
 #include "GPUReconstructionKernelIncludes.h"
 
-template <>
-inline void GPUReconstructionOCL::runKernelBackendInternal<GPUMemClean16, 0>(const krnlSetupTime& _xyz, void* const& ptr, uint64_t const& size)
-{
-  cl_int4 val0 = {0, 0, 0, 0};
-  GPUChkErr(clEnqueueFillBuffer(mInternals->command_queue[_xyz.x.stream], mInternals->mem_gpu, &val0, sizeof(val0), (char*)ptr - (char*)mDeviceMemoryBase, (size + sizeof(val0) - 1) & ~(sizeof(val0) - 1), _xyz.z.evList == nullptr ? 0 : _xyz.z.nEvents, _xyz.z.evList->getEventList<cl_event>(), _xyz.z.ev->getEventList<cl_event>()));
-}
+#include "GPUReconstructionOCLKernelsSpecialize.inc"
 
 template <class T, int32_t I, typename... Args>
 inline void GPUReconstructionOCL::runKernelBackendInternal(const krnlSetupTime& _xyz, const Args&... args)

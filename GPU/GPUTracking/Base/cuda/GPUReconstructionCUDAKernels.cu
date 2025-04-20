@@ -22,15 +22,11 @@ using namespace o2::gpu;
 
 #include "GPUReconstructionIncludesDeviceAll.h"
 
+#include "GPUReconstructionCUDAKernelsSpecialize.inc"
+
 #if defined(__HIPCC__) && defined(GPUCA_HAS_GLOBAL_SYMBOL_CONSTANT_MEM)
 __global__ void gGPUConstantMemBuffer_dummy(int32_t* p) { *p = *(int32_t*)&gGPUConstantMemBuffer; }
 #endif
-
-template <>
-inline void GPUReconstructionCUDA::runKernelBackendInternal<GPUMemClean16, 0>(const krnlSetupTime& _xyz, void* const& ptr, uint64_t const& size)
-{
-  GPUChkErr(cudaMemsetAsync(ptr, 0, size, mInternals->Streams[_xyz.x.stream]));
-}
 
 template <class T, int32_t I, typename... Args>
 inline void GPUReconstructionCUDA::runKernelBackendInternal(const krnlSetupTime& _xyz, const Args&... args)
