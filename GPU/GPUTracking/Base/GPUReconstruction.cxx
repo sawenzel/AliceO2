@@ -712,9 +712,6 @@ size_t GPUReconstruction::AllocateRegisteredMemory(int16_t ires, GPUOutputContro
 
 void* GPUReconstruction::AllocateDirectMemory(size_t size, int32_t type)
 {
-  if (type != GPUMemoryResource::MEMORY_HOST && (!IsGPU() || type != GPUMemoryResource::MEMORY_GPU)) {
-    throw std::runtime_error("Requested invalid memory typo for unmanaged allocation");
-  }
   if (GetProcessingSettings().memoryAllocationStrategy == GPUMemoryResource::ALLOCATION_INDIVIDUAL) {
     char* retVal = new (std::align_val_t(GPUCA_BUFFER_ALIGNMENT)) char[size];
     if ((type & GPUMemoryResource::MEMORY_STACK)) {
@@ -723,25 +720,35 @@ void* GPUReconstruction::AllocateDirectMemory(size_t size, int32_t type)
       mDirectMemoryChunks.emplace_back(retVal, alignedDeleter());
     }
     return retVal;
-  } else {
-    if (mVolatileMemoryStart && !mDeviceMemoryAsVolatile && (type & GPUMemoryResource::MEMORY_GPU) && !(type & GPUMemoryResource::MEMORY_STACK)) {
-      GPUError("Must not allocate direct memory while volatile chunks are allocated");
-      throw std::bad_alloc();
-    }
-    void*& pool = type == GPUMemoryResource::MEMORY_GPU ? mDeviceMemoryPool : mHostMemoryPool;
-    void*& poolend = type == GPUMemoryResource::MEMORY_GPU ? mDeviceMemoryPoolEnd : mHostMemoryPoolEnd;
-    char* retVal;
-    GPUProcessor::computePointerWithAlignment(pool, retVal, size);
-    if (pool > poolend) {
-      GPUError("Insufficient unmanaged memory: missing %ld bytes", ptrDiff(pool, poolend));
-      throw std::bad_alloc();
-    }
-    UpdateMaxMemoryUsed();
-    if (GetProcessingSettings().allocDebugLevel >= 2) {
-      std::cout << "Allocated (unmanaged " << (type == GPUMemoryResource::MEMORY_GPU ? "gpu" : "host") << "): " << size << " - available: " << ptrDiff(poolend, pool) << "\n";
-    }
-    return retVal;
   }
+
+  if ((type & ~(GPUMemoryResource::MEMORY_HOST | GPUMemoryResource::MEMORY_GPU | GPUMemoryResource::MEMORY_STACK)) || ((type & GPUMemoryResource::MEMORY_HOST) && (type & GPUMemoryResource::MEMORY_GPU))) {
+    throw std::runtime_error("Requested invalid memory typo for direct allocation");
+  }
+  if (mVolatileMemoryStart && !mDeviceMemoryAsVolatile && (type & GPUMemoryResource::MEMORY_GPU) && !(type & GPUMemoryResource::MEMORY_STACK)) {
+    GPUError("Must not allocate direct memory while volatile chunks are allocated");
+    throw std::bad_alloc();
+  }
+
+  void*& pool = (type & GPUMemoryResource::MEMORY_GPU) ? mDeviceMemoryPool : mHostMemoryPool;
+  void*& poolend = (type & GPUMemoryResource::MEMORY_GPU) ? mDeviceMemoryPoolEnd : mHostMemoryPoolEnd;
+  char* retVal;
+  if ((type & GPUMemoryResource::MEMORY_STACK)) {
+    poolend = (char*)poolend - size;
+    poolend = (char*)poolend - GPUProcessor::getAlignmentMod<GPUCA_MEMALIGN>(poolend);
+    retVal = (char*)poolend;
+  } else {
+    GPUProcessor::computePointerWithAlignment(pool, retVal, size);
+  }
+  if (pool > poolend) {
+    GPUError("Insufficient unmanaged memory: missing %ld bytes", ptrDiff(pool, poolend));
+    throw std::bad_alloc();
+  }
+  UpdateMaxMemoryUsed();
+  if (GetProcessingSettings().allocDebugLevel >= 2) {
+    std::cout << "Allocated (unmanaged " << (type == GPUMemoryResource::MEMORY_GPU ? "gpu" : "host") << "): " << size << " - available: " << ptrDiff(poolend, pool) << "\n";
+  }
+  return retVal;
 }
 
 void* GPUReconstruction::AllocateVolatileDeviceMemory(size_t size)
