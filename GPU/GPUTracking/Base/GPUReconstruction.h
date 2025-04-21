@@ -166,9 +166,10 @@ class GPUReconstruction
 
   size_t AllocateRegisteredMemory(int16_t res, GPUOutputControl* control = nullptr);
   void AllocateRegisteredForeignMemory(int16_t res, GPUReconstruction* rec, GPUOutputControl* control = nullptr);
-  void* AllocateUnmanagedMemory(size_t size, int32_t type);
+  void* AllocateDirectMemory(size_t size, int32_t type);
   void* AllocateVolatileDeviceMemory(size_t size);
   void* AllocateVolatileMemory(size_t size, bool device);
+  void MakeFutureDeviceMemoryAllocationsVolatile();
   void FreeRegisteredMemory(GPUProcessor* proc, bool freeCustom = false, bool freePermanent = false);
   void FreeRegisteredMemory(int16_t res);
   void ClearAllocatedMemory(bool clearOutputs = true);
@@ -326,14 +327,15 @@ class GPUReconstruction
   void* mHostMemoryPoolBlocked = nullptr;   // Ptr to end of pool
   size_t mHostMemorySize = 0;               // Size of host memory buffer
   size_t mHostMemoryUsedMax = 0;            // Maximum host memory size used over time
-  void* mDeviceMemoryBase = nullptr;        //
-  void* mDeviceMemoryPermanent = nullptr;   //
-  void* mDeviceMemoryPool = nullptr;        //
-  void* mDeviceMemoryPoolEnd = nullptr;     //
-  void* mDeviceMemoryPoolBlocked = nullptr; //
-  size_t mDeviceMemorySize = 0;             //
+  void* mDeviceMemoryBase = nullptr;        // Same for device ...
+  void* mDeviceMemoryPermanent = nullptr;   // ...
+  void* mDeviceMemoryPool = nullptr;        // ...
+  void* mDeviceMemoryPoolEnd = nullptr;     // ...
+  void* mDeviceMemoryPoolBlocked = nullptr; // ...
+  size_t mDeviceMemorySize = 0;             // ...
+  size_t mDeviceMemoryUsedMax = 0;          // ...
   void* mVolatileMemoryStart = nullptr;     // Ptr to beginning of temporary volatile memory allocation, nullptr if uninitialized
-  size_t mDeviceMemoryUsedMax = 0;          //
+  bool mDeviceMemoryAsVolatile = false;     // Make device memory allocations volatile
 
   std::unordered_set<const void*> mRegisteredMemoryPtrs; // List of pointers registered for GPU
 

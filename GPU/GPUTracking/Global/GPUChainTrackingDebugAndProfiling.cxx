@@ -34,7 +34,7 @@ static inline uint32_t RGB(uint8_t r, uint8_t g, uint8_t b) { return (uint32_t)r
 int32_t GPUChainTracking::PrepareProfile()
 {
 #ifdef GPUCA_TRACKLET_CONSTRUCTOR_DO_PROFILE
-  char* tmpMem = (char*)mRec->AllocateUnmanagedMemory(PROFILE_MAX_SIZE, GPUMemoryResource::MEMORY_GPU);
+  char* tmpMem = (char*)mRec->AllocateDirectMemory(PROFILE_MAX_SIZE, GPUMemoryResource::MEMORY_GPU);
   processorsShadow()->tpcTrackers[0].mStageAtSync = tmpMem;
   runKernel<GPUMemClean16>({{BlockCount(), ThreadCount(), -1}}, tmpMem, PROFILE_MAX_SIZE);
 #endif

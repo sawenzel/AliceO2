@@ -538,6 +538,10 @@ size_t GPUReconstruction::AllocateRegisteredPermanentMemory()
   if (GetProcessingSettings().debugLevel >= 5) {
     GPUInfo("Allocating Permanent Memory");
   }
+  if (mVolatileMemoryStart) {
+    GPUError("Must not allocate permanent memory while volatile chunks are allocated");
+    throw std::bad_alloc();
+  }
   int32_t total = 0;
   for (uint32_t i = 0; i < mMemoryResources.size(); i++) {
     if ((mMemoryResources[i].mType & GPUMemoryResource::MEMORY_PERMANENT) && mMemoryResources[i].mPtr == nullptr) {
@@ -669,6 +673,10 @@ void GPUReconstruction::AllocateRegisteredMemoryInternal(GPUMemoryResource* res,
         GPUError("Device Processor not set (%s)", res->mName);
         throw std::bad_alloc();
       }
+      if (mVolatileMemoryStart && !mDeviceMemoryAsVolatile && !(res->mType & GPUMemoryResource::MEMORY_STACK)) {
+        GPUError("Must not allocate non-stacked device memory while volatile chunks are allocated");
+        throw std::bad_alloc();
+      }
       size_t size = AllocateRegisteredMemoryHelper(res, res->mPtrDevice, recPool->mDeviceMemoryPool, recPool->mDeviceMemoryBase, recPool->mDeviceMemorySize, &GPUMemoryResource::SetDevicePointers, recPool->mDeviceMemoryPoolEnd, " gpu");
 
       if (!(res->mType & GPUMemoryResource::MEMORY_HOST) || (res->mType & GPUMemoryResource::MEMORY_EXTERNAL)) {
@@ -702,7 +710,7 @@ size_t GPUReconstruction::AllocateRegisteredMemory(int16_t ires, GPUOutputContro
   return res->mReuse >= 0 ? 0 : res->mSize;
 }
 
-void* GPUReconstruction::AllocateUnmanagedMemory(size_t size, int32_t type)
+void* GPUReconstruction::AllocateDirectMemory(size_t size, int32_t type)
 {
   if (type != GPUMemoryResource::MEMORY_HOST && (!IsGPU() || type != GPUMemoryResource::MEMORY_GPU)) {
     throw std::runtime_error("Requested invalid memory typo for unmanaged allocation");
@@ -711,6 +719,10 @@ void* GPUReconstruction::AllocateUnmanagedMemory(size_t size, int32_t type)
     mUnmanagedChunks.emplace_back(new char[size + GPUCA_BUFFER_ALIGNMENT]);
     return GPUProcessor::alignPointer<GPUCA_BUFFER_ALIGNMENT>(mUnmanagedChunks.back().get());
   } else {
+    if (mVolatileMemoryStart && !mDeviceMemoryAsVolatile && (type & GPUMemoryResource::MEMORY_GPU) && !(type & GPUMemoryResource::MEMORY_STACK)) {
+      GPUError("Must not allocate direct memory while volatile chunks are allocated");
+      throw std::bad_alloc();
+    }
     void*& pool = type == GPUMemoryResource::MEMORY_GPU ? mDeviceMemoryPool : mHostMemoryPool;
     void*& poolend = type == GPUMemoryResource::MEMORY_GPU ? mDeviceMemoryPoolEnd : mHostMemoryPoolEnd;
     char* retVal;
@@ -745,7 +757,6 @@ void* GPUReconstruction::AllocateVolatileDeviceMemory(size_t size)
   if (GetProcessingSettings().allocDebugLevel >= 2) {
     std::cout << "Allocated (volatile GPU): " << size << " - available: " << ptrDiff(mDeviceMemoryPoolEnd, mDeviceMemoryPool) << "\n";
   }
-
   return retVal;
 }
 
@@ -756,6 +767,30 @@ void* GPUReconstruction::AllocateVolatileMemory(size_t size, bool device)
   }
   mVolatileChunks.emplace_back(new char[size + GPUCA_BUFFER_ALIGNMENT]);
   return GPUProcessor::alignPointer<GPUCA_BUFFER_ALIGNMENT>(mVolatileChunks.back().get());
+}
+
+void GPUReconstruction::MakeFutureDeviceMemoryAllocationsVolatile()
+{
+  mDeviceMemoryAsVolatile = true;
+  AllocateVolatileDeviceMemory(0);
+}
+
+void GPUReconstruction::ReturnVolatileDeviceMemory()
+{
+  mDeviceMemoryAsVolatile = false;
+  if (mVolatileMemoryStart) {
+    mDeviceMemoryPool = mVolatileMemoryStart;
+    mVolatileMemoryStart = nullptr;
+  }
+  if (GetProcessingSettings().allocDebugLevel >= 2) {
+    std::cout << "Freed (volatile GPU) - available: " << ptrDiff(mDeviceMemoryPoolEnd, mDeviceMemoryPool) << "\n";
+  }
+}
+
+void GPUReconstruction::ReturnVolatileMemory()
+{
+  ReturnVolatileDeviceMemory();
+  mVolatileChunks.clear();
 }
 
 void GPUReconstruction::ResetRegisteredMemoryPointers(GPUProcessor* proc)
@@ -812,23 +847,6 @@ void GPUReconstruction::FreeRegisteredMemory(GPUMemoryResource* res)
   }
   res->mPtr = nullptr;
   res->mPtrDevice = nullptr;
-}
-
-void GPUReconstruction::ReturnVolatileDeviceMemory()
-{
-  if (mVolatileMemoryStart) {
-    mDeviceMemoryPool = mVolatileMemoryStart;
-    mVolatileMemoryStart = nullptr;
-  }
-  if (GetProcessingSettings().allocDebugLevel >= 2) {
-    std::cout << "Freed (volatile GPU) - available: " << ptrDiff(mDeviceMemoryPoolEnd, mDeviceMemoryPool) << "\n";
-  }
-}
-
-void GPUReconstruction::ReturnVolatileMemory()
-{
-  ReturnVolatileDeviceMemory();
-  mVolatileChunks.clear();
 }
 
 void GPUReconstruction::PushNonPersistentMemory(uint64_t tag)

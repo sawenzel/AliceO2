@@ -43,7 +43,7 @@ int32_t GPUChainTracking::RunTPCCompression()
   }
 
   if (gatherMode == 3) {
-    mRec->AllocateVolatileDeviceMemory(0); // make future device memory allocation volatile
+    mRec->MakeFutureDeviceMemoryAllocationsVolatile();
   }
   SetupGPUProcessor(&Compressor, true);
   new (Compressor.mMemory) GPUTPCCompression::memory;

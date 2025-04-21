@@ -28,7 +28,7 @@ class GPUFrameworkExternalAllocator final : public o2::its::ExternalAllocator
  public:
   void* allocate(size_t size) override
   {
-    return mFWReco->AllocateUnmanagedMemory(size, GPUMemoryResource::MEMORY_GPU);
+    return mFWReco->AllocateDirectMemory(size, GPUMemoryResource::MEMORY_GPU);
   }
 
   void setReconstructionFramework(o2::gpu::GPUReconstruction* fwr) { mFWReco = fwr; }
@@ -86,7 +86,7 @@ o2::its::TimeFrame* GPUChainITS::GetITSTimeframe()
   }
 #if !defined(GPUCA_STANDALONE)
   if (mITSTimeFrame->mIsGPU) {
-    auto doFWExtAlloc = [this](size_t size) -> void* { return rec()->AllocateUnmanagedMemory(size, GPUMemoryResource::MEMORY_GPU); };
+    auto doFWExtAlloc = [this](size_t size) -> void* { return rec()->AllocateDirectMemory(size, GPUMemoryResource::MEMORY_GPU); };
 
     mFrameworkAllocator.reset(new o2::its::GPUFrameworkExternalAllocator);
     mFrameworkAllocator->setReconstructionFramework(rec());

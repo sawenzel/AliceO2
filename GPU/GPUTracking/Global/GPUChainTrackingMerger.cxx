@@ -297,7 +297,7 @@ int32_t GPUChainTracking::RunTPCTrackingMerger(bool synchronizeOutput)
     SynchronizeEventAndRelease(mEvents->single, doGPU);
 
     if (GetProcessingSettings().clearO2OutputFromGPU) {
-      mRec->AllocateVolatileDeviceMemory(0); // make future device memory allocation volatile
+      mRec->MakeFutureDeviceMemoryAllocationsVolatile();
     }
     AllocateRegisteredMemory(Merger.MemoryResOutputO2(), mSubOutputControls[GPUTrackingOutputs::getIndex(&GPUTrackingOutputs::tpcTracksO2)]);
     AllocateRegisteredMemory(Merger.MemoryResOutputO2Clus(), mSubOutputControls[GPUTrackingOutputs::getIndex(&GPUTrackingOutputs::tpcTracksO2ClusRefs)]);
