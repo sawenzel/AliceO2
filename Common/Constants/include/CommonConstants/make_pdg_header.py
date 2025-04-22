@@ -119,6 +119,8 @@ class Pdg(Enum):
     kPhi = 333
     kSigmaC0 = 4112
     kSigmaCPlusPlus = 4222
+    kSigmaCStar0 = 4114
+    kSigmaCStarPlusPlus = 4224
     kX3872 = 9920443
     kXi0 = 3322
     kXiB0 = 5232
