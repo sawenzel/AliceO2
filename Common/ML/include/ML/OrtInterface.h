@@ -22,6 +22,7 @@
 #include <memory>
 #include <map>
 #include <thread>
+#include <unordered_map>
 
 // O2 includes
 #include "Framework/Logger.h"

@@ -29,7 +29,7 @@ using namespace o2::gpu;
 void GPUTPCNNClusterizerHost::init(const GPUSettingsProcessingNNclusterizer& settings)
 {
   std::string class_model_path = settings.nnClassificationPath, reg_model_path = settings.nnRegressionPath;
-  std::vector<std::string> reg_model_paths;
+  std::vector<std::string> reg_model_paths_local;
   std::vector<std::string> evalMode = o2::utils::Str::tokenize(settings.nnEvalMode, ':');
 
   if (settings.nnLoadFromCCDB) {
@@ -60,20 +60,20 @@ void GPUTPCNNClusterizerHost::init(const GPUSettingsProcessingNNclusterizer& set
   model_class.initOptions(OrtOptions);
   modelsUsed[0] = true;
 
-  reg_model_paths = o2::utils::Str::tokenize(reg_model_path, ':');
+  reg_model_paths_local = o2::utils::Str::tokenize(reg_model_path, ':');
 
   if (!settings.nnClusterizerUseCfRegression) {
-    if (reg_model_paths.size() == 1) {
-      OrtOptions["model-path"] = reg_model_paths[0];
+    if (reg_model_paths_local.size() == 1) {
+      OrtOptions["model-path"] = reg_model_paths_local[0];
       OrtOptions["onnx-environment-name"] = "r1";
       model_reg_1.initOptions(OrtOptions);
       modelsUsed[1] = true;
     } else {
-      OrtOptions["model-path"] = reg_model_paths[0];
+      OrtOptions["model-path"] = reg_model_paths_local[0];
       OrtOptions["onnx-environment-name"] = "r1";
       model_reg_1.initOptions(OrtOptions);
       modelsUsed[1] = true;
-      OrtOptions["model-path"] = reg_model_paths[1];
+      OrtOptions["model-path"] = reg_model_paths_local[1];
       OrtOptions["onnx-environment-name"] = "r2";
       model_reg_2.initOptions(OrtOptions);
       modelsUsed[2] = true;
@@ -154,6 +154,7 @@ MockedOrtAllocator::MockedOrtAllocator(GPUReconstruction* r, OrtMemoryInfo* info
 MockedOrtAllocator::~MockedOrtAllocator()
 {
   // Ort::GetApi().ReleaseMemoryInfo(memory_info);
+  (void)0; // Suppress warning for empty destructor
 }
 
 void* MockedOrtAllocator::Alloc(size_t size)
@@ -191,8 +192,9 @@ size_t MockedOrtAllocator::NumReserveAllocations() const
 
 void MockedOrtAllocator::LeakCheck()
 {
-  if (memory_inuse.load())
+  if (memory_inuse.load()) {
     LOG(warning) << "memory leak!!!";
+  }
 }
 
 void GPUTPCNNClusterizerHost::volatileOrtAllocator(Ort::Env* env, Ort::MemoryInfo* memInfo, GPUReconstruction* rec, bool recreate)

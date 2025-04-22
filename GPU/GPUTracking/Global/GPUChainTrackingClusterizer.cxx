@@ -980,12 +980,12 @@ int32_t GPUChainTracking::RunTPCClusterizer(bool synchronizeOutput)
             DoDebugAndDump(RecoStep::TPCClusterFinding, 262144 << 4, clusterer, &GPUTPCClusterFinder::DumpChargeMap, *mDebugFile, "Split Charges");
           }
 
-          float time_clusterizer = 0, time_fill = 0, time_networks = 0;
+          // float time_clusterizer = 0, time_fill = 0, time_networks = 0;
           for (int batch = 0; batch < std::ceil((float)clusterer.mPmemory->counters.nClusters / clustererNNShadow.nnClusterizerBatchedMode); batch++) {
             uint batchStart = batch * clustererNNShadow.nnClusterizerBatchedMode;
             size_t iSize = CAMath::Min((uint)clustererNNShadow.nnClusterizerBatchedMode, (uint)(clusterer.mPmemory->counters.nClusters - batchStart));
 
-            auto start0 = std::chrono::high_resolution_clock::now();
+            // auto start0 = std::chrono::high_resolution_clock::now();
             runKernel<GPUTPCNNClusterizerKernels, GPUTPCNNClusterizerKernels::fillInputNNSingleElement>({GetGrid(iSize * clustererNNShadow.nnClusterizerElementSize, lane), krnlRunRangeNone}, iSector, clustererNNShadow.nnInferenceInputDType, withMC, batchStart); // Filling the data
 
             // auto stop0 = std::chrono::high_resolution_clock::now();

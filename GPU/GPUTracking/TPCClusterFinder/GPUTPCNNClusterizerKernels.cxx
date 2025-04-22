@@ -124,7 +124,7 @@ GPUdii() void GPUTPCNNClusterizerKernels::Thread<GPUTPCNNClusterizerKernels::fil
   CfChargePos peak = clusterer.mPfilteredPeakPositions[base_idx + batchStart];
   int row = static_cast<int>(peak.row()), pad = static_cast<int>(peak.pad());
 
-  if (clustererNN.nnClusterizerAddIndexData && transient_index == (clustererNN.nnClusterizerElementSize - 1)) {
+  if (clustererNN.nnClusterizerAddIndexData && (int32_t)transient_index == (clustererNN.nnClusterizerElementSize - 1)) {
     uint top_idx = (base_idx + 1) * clustererNN.nnClusterizerElementSize;
     for (uint16_t i = 0; i < 8; i++) {
       Delta2 d = cfconsts::InnerNeighbors[i];
@@ -141,7 +141,7 @@ GPUdii() void GPUTPCNNClusterizerKernels::Thread<GPUTPCNNClusterizerKernels::fil
       clustererNN.inputData_32[top_idx - 2] = row / 152.f;
       clustererNN.inputData_32[top_idx - 1] = static_cast<float>(pad) / GPUTPCGeometry::NPads(row);
     }
-  } else if (transient_index < (clustererNN.nnClusterizerElementSize - 3)) {
+  } else if ((int32_t)transient_index < (clustererNN.nnClusterizerElementSize - 3)) {
     int time = static_cast<int>(peak.time());
     int r = CAMath::Floor(transient_index / ((2 * clustererNN.nnClusterizerSizeInputPad + 1) * (2 * clustererNN.nnClusterizerSizeInputTime + 1))) - clustererNN.nnClusterizerSizeInputRow;
     bool is_row_boundary = ((row + r) > (o2::tpc::constants::MAXGLOBALPADROW - 1)) || ((row + r) < 0);
@@ -197,7 +197,7 @@ GPUdii() void GPUTPCNNClusterizerKernels::Thread<GPUTPCNNClusterizerKernels::det
   uint elem_iterator = glo_idx * clustererNN.nnClusterizerModelClassNumOutputNodes;
   float current_max_prob = 0.f; // If the neural network doesn't contain the softmax as a last layer, the outputs can range in [-infty, infty]
   uint class_label = 0;
-  for (int pIdx = elem_iterator; pIdx < elem_iterator + clustererNN.nnClusterizerModelClassNumOutputNodes; pIdx++) {
+  for (uint pIdx = elem_iterator; pIdx < elem_iterator + clustererNN.nnClusterizerModelClassNumOutputNodes; pIdx++) {
     if (pIdx == elem_iterator) {
       if (dtype == 0) {
         current_max_prob = static_cast<float>(clustererNN.modelProbabilities_16[pIdx]);

@@ -19,6 +19,8 @@
 // ONNX includes
 #include <onnxruntime_cxx_api.h>
 
+#include <sstream>
+
 namespace o2
 {
 
@@ -139,7 +141,6 @@ void OrtModel::initSession()
 
 void OrtModel::memoryOnDevice(int32_t deviceIndex)
 {
-#if (defined(ORT_ROCM_BUILD) || defined(ORT_MIGRAPHX_BUILD) || defined(ORT_CUDA_BUILD) || defined(ORT_TENSORRT_BUILD))
   if (deviceIndex >= 0) {
     (pImplOrt->runOptions).AddConfigEntry("disable_synchronize_execution_providers", "1");
     (pImplOrt->sessionOptions).AddConfigEntry("session.use_device_allocator_for_initializers", "1"); // See kOrtSessionOptionsUseDeviceAllocatorForInitializers, https://github.com/microsoft/onnxruntime/blob/main/include/onnxruntime/core/session/onnxruntime_session_options_config_keys.h
@@ -161,7 +162,6 @@ void OrtModel::memoryOnDevice(int32_t deviceIndex)
       LOG(info) << "(ORT) Memory info set to on-device memory for device type " << deviceType << " with ID " << deviceIndex << " and pImplOrt pointer " << pImplOrt;
     }
   }
-#endif
 }
 
 void OrtModel::resetSession()
