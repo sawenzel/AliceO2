@@ -643,9 +643,8 @@ void GPUReconstructionCUDA::SetONNXGPUStream(Ort::SessionOptions& session_option
   // UpdateCUDAProviderOptions(cuda_options, keys.data(), values.data(), keys.size());
 
   // this implicitly sets "has_user_compute_stream"
-  cuda_options->has_user_compute_stream = 1;
   ORTCHK(api->UpdateCUDAProviderOptionsWithValue(cuda_options, "user_compute_stream", mInternals->Streams[stream]));
-  session_options.AppendExecutionProvider_CUDA_V2(cuda_options);
+  ORTCHK(api->SessionOptionsAppendExecutionProvider_CUDA_V2(session_options, cuda_options));
 
   // Finally, don't forget to release the provider options
   api->ReleaseCUDAProviderOptions(cuda_options);

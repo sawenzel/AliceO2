@@ -162,7 +162,6 @@ if(ALIGPU_BUILD_TYPE STREQUAL "O2")
     ${MODULE}
     SOURCES ${SRCS}
     PUBLIC_LINK_LIBRARIES O2::GPUTracking O2::ITStrackingHIP
-    PRIVATE_LINK_LIBRARIES onnxruntime::onnxruntime
     PRIVATE_INCLUDE_DIRECTORIES
       ${CMAKE_SOURCE_DIR}/Detectors/Base/src
       ${CMAKE_SOURCE_DIR}/Detectors/TRD/base/src
@@ -194,6 +193,7 @@ if (onnxruntime_FOUND)
   target_compile_definitions(${targetName} PRIVATE
                                            $<$<BOOL:${ORT_ROCM_BUILD}>:ORT_ROCM_BUILD>
                                            $<$<BOOL:${ORT_MIGRAPHX_BUILD}>:ORT_MIGRAPHX_BUILD>)
+  target_link_libraries(${targetName} PRIVATE onnxruntime::onnxruntime)
 endif()
 
 add_library(${MODULE}_CXX OBJECT ${SRCS_CXX}) # Adding a C++ library for the .cxx code of the HIP library, such that it does not link to HIP libraries, and CMake HIP Language doesn't add HIP compile flags.
