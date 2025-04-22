@@ -170,11 +170,6 @@ if(ALIGPU_BUILD_TYPE STREQUAL "O2")
       ${GPUCA_HIP_SOURCE_DIR}
     TARGETVARNAME targetName)
 
-  target_compile_definitions(${targetName} PRIVATE
-    GPUCA_HAS_ONNX=1
-    $<$<BOOL:${ORT_ROCM_BUILD}>:ORT_ROCM_BUILD>
-    $<$<BOOL:${ORT_MIGRAPHX_BUILD}>:ORT_MIGRAPHX_BUILD>)
-
   install(FILES ${HDRS} DESTINATION include/GPU)
 
 #  o2_add_test(GPUsortHIP NAME test_GPUsortHIP
@@ -194,6 +189,12 @@ if(ALIGPU_BUILD_TYPE STREQUAL "Standalone")
 endif()
 
 target_compile_definitions(${targetName} PRIVATE $<TARGET_PROPERTY:O2::GPUTracking,COMPILE_DEFINITIONS>)
+
+if (onnxruntime_FOUND)
+  target_compile_definitions(${targetName} PRIVATE
+                                           $<$<BOOL:${ORT_ROCM_BUILD}>:ORT_ROCM_BUILD>
+                                           $<$<BOOL:${ORT_MIGRAPHX_BUILD}>:ORT_MIGRAPHX_BUILD>)
+endif()
 
 add_library(${MODULE}_CXX OBJECT ${SRCS_CXX}) # Adding a C++ library for the .cxx code of the HIP library, such that it does not link to HIP libraries, and CMake HIP Language doesn't add HIP compile flags.
 target_compile_definitions(${MODULE}_CXX PRIVATE $<TARGET_PROPERTY:O2::GPUTracking,COMPILE_DEFINITIONS>)

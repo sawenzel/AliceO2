@@ -25,7 +25,7 @@
 #include <unordered_map>
 
 // O2 includes
-#include "Framework/Logger.h"
+#include "GPUCommonLogger.h"
 
 namespace Ort
 {
