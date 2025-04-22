@@ -343,7 +343,7 @@ if(ALIGPU_BUILD_TYPE STREQUAL "O2")
                                        O2::DetectorsRaw
                                        O2::Steer
                                        O2::ML
-                 PRIVATE_LINK_LIBRARIES ONNXRuntime::ONNXRuntime
+                 PRIVATE_LINK_LIBRARIES onnxruntime::onnxruntime
                  PUBLIC_INCLUDE_DIRECTORIES ${INCDIRS}
                  SOURCES ${SRCS} ${SRCS_NO_CINT} ${SRCS_NO_H})
 
