@@ -89,6 +89,7 @@ class Pdg(Enum):
     kB0 = 511
     kB0Bar = -511
     kBPlus = 521
+    kBCPlus = 541
     kBS = 531
     kBSBar = -531
     kD0 = 421

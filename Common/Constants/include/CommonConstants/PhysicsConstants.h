@@ -34,6 +34,7 @@ enum Pdg {
   kB0 = 511,
   kB0Bar = -511,
   kBPlus = 521,
+  kBCPlus = 541,
   kBS = 531,
   kBSBar = -531,
   kD0 = 421,
@@ -84,6 +85,7 @@ enum Pdg {
 constexpr double MassB0 = 5.27966;
 constexpr double MassB0Bar = 5.27966;
 constexpr double MassBPlus = 5.27934;
+constexpr double MassBCPlus = 6.27447;
 constexpr double MassBS = 5.36692;
 constexpr double MassBSBar = 5.36692;
 constexpr double MassD0 = 1.86484;
