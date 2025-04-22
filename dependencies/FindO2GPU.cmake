@@ -103,6 +103,9 @@ endif()
 
 # ---------------------------------- CUDA ----------------------------------
 if(ENABLE_CUDA)
+  if(CUDA_COMPUTETARGET)
+    set(CMAKE_CUDA_ARCHITECTURES ${CUDA_COMPUTETARGET} CACHE STRING "" FORCE)
+  endif()
   set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
   set(CMAKE_CUDA_STANDARD_REQUIRED TRUE)
   include(CheckLanguage)
@@ -227,6 +230,9 @@ endif()
 
 # ---------------------------------- HIP ----------------------------------
 if(ENABLE_HIP)
+  if(HIP_AMDGPUTARGET)
+    set(CMAKE_HIP_ARCHITECTURES "${HIP_AMDGPUTARGET}" CACHE STRING "" FORCE)
+  endif()
   if(NOT "$ENV{CMAKE_PREFIX_PATH}" MATCHES "rocm" AND NOT CMAKE_PREFIX_PATH MATCHES "rocm" AND EXISTS "/opt/rocm/lib/cmake/")
     list(APPEND CMAKE_PREFIX_PATH "/opt/rocm/lib/cmake")
   endif()
@@ -300,7 +306,7 @@ if(ENABLE_HIP)
     endif()
     string(REGEX REPLACE "(gfx1[0-9]+;?)" "" CMAKE_HIP_ARCHITECTURES "${CMAKE_HIP_ARCHITECTURES}") # ROCm currently doesn’t support integrated graphics
     if(HIP_AMDGPUTARGET)
-      set(CMAKE_HIP_ARCHITECTURES "${HIP_AMDGPUTARGET}") # If GPU build is enforced we override autodetection
+      set(CMAKE_HIP_ARCHITECTURES "${HIP_AMDGPUTARGET}")
     endif()
   else()
     set(HIP_ENABLED OFF)
