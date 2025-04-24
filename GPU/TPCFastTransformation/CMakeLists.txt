@@ -114,8 +114,8 @@ if(${ALIGPU_BUILD_TYPE} STREQUAL "O2")
                            LABELS gpu tpc)
   endforeach()
 
-  install (FILES macro/TPCFastTransformInit.C
-           DESTINATION share/macro/)
+  install(FILES macro/TPCFastTransformInit.C
+          DESTINATION share/macro/)
 endif()
 
 if(ALIGPU_BUILD_TYPE STREQUAL "Standalone")
