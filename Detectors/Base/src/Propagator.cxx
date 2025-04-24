@@ -189,14 +189,14 @@ GPUd() bool PropagatorImpl<value_T>::PropagateToXBxByBz(TrackParCov_t& track, va
           res = false;
         }
         if (tofInfo) {
-          tofInfo->addStep(mb.length, track.getP2Inv()); // fill L,ToF info using already calculated step length
+          tofInfo->addStep(mb.length, track.getQ2P2()); // fill L,ToF info using already calculated step length
           tofInfo->addX2X0(mb.meanX2X0);
           tofInfo->addXRho(mb.getXRho(signCorr));
         }
       } else if (tofInfo) { // if tofInfo filling was requested w/o material correction, we need to calculate the step lenght
         auto xyz1 = track.getXYZGlo();
         math_utils::Vector3D<value_type> stepV(xyz1.X() - xyz0.X(), xyz1.Y() - xyz0.Y(), xyz1.Z() - xyz0.Z());
-        tofInfo->addStep(stepV.R(), track.getP2Inv());
+        tofInfo->addStep(stepV.R(), track.getQ2P2());
       }
       return res;
     };
@@ -258,14 +258,14 @@ GPUd() bool PropagatorImpl<value_T>::PropagateToXBxByBz(TrackPar_t& track, value
           res = false;
         }
         if (tofInfo) {
-          tofInfo->addStep(mb.length, track.getP2Inv()); // fill L,ToF info using already calculated step length
+          tofInfo->addStep(mb.length, track.getQ2P2()); // fill L,ToF info using already calculated step length
           tofInfo->addX2X0(mb.meanX2X0);
           tofInfo->addXRho(mb.getXRho(signCorr));
         }
       } else if (tofInfo) { // if tofInfo filling was requested w/o material correction, we need to calculate the step lenght
         auto xyz1 = track.getXYZGlo();
         math_utils::Vector3D<value_type> stepV(xyz1.X() - xyz0.X(), xyz1.Y() - xyz0.Y(), xyz1.Z() - xyz0.Z());
-        tofInfo->addStep(stepV.R(), track.getP2Inv());
+        tofInfo->addStep(stepV.R(), track.getQ2P2());
       }
       return res;
     };
@@ -324,14 +324,14 @@ GPUd() bool PropagatorImpl<value_T>::propagateToX(TrackParCov_t& track, value_ty
           res = false;
         }
         if (tofInfo) {
-          tofInfo->addStep(mb.length, track.getP2Inv()); // fill L,ToF info using already calculated step length
+          tofInfo->addStep(mb.length, track.getQ2P2()); // fill L,ToF info using already calculated step length
           tofInfo->addX2X0(mb.meanX2X0);
           tofInfo->addXRho(mb.getXRho(signCorr));
         }
       } else if (tofInfo) { // if tofInfo filling was requested w/o material correction, we need to calculate the step lenght
         auto xyz1 = track.getXYZGlo();
         math_utils::Vector3D<value_type> stepV(xyz1.X() - xyz0.X(), xyz1.Y() - xyz0.Y(), xyz1.Z() - xyz0.Z());
-        tofInfo->addStep(stepV.R(), track.getP2Inv());
+        tofInfo->addStep(stepV.R(), track.getQ2P2());
       }
       return res;
     };
@@ -390,14 +390,14 @@ GPUd() bool PropagatorImpl<value_T>::propagateToX(TrackPar_t& track, value_type 
           res = false;
         }
         if (tofInfo) {
-          tofInfo->addStep(mb.length, track.getP2Inv()); // fill L,ToF info using already calculated step length
+          tofInfo->addStep(mb.length, track.getQ2P2()); // fill L,ToF info using already calculated step length
           tofInfo->addX2X0(mb.meanX2X0);
           tofInfo->addXRho(mb.getXRho(signCorr));
         }
       } else if (tofInfo) { // if tofInfo filling was requested w/o material correction, we need to calculate the step lenght
         auto xyz1 = track.getXYZGlo();
         math_utils::Vector3D<value_type> stepV(xyz1.X() - xyz0.X(), xyz1.Y() - xyz0.Y(), xyz1.Z() - xyz0.Z());
-        tofInfo->addStep(stepV.R(), track.getP2Inv());
+        tofInfo->addStep(stepV.R(), track.getQ2P2());
       }
       return res;
     };
@@ -717,7 +717,7 @@ GPUd() value_T PropagatorImpl<value_T>::estimateLTFast(o2::track::TrackLTIntegra
   // since we assume the track or its parent comes from the beam-line or decay, add XY(?) distance to it
   value_T dcaT = math_utils::detail::sqrt<value_type>(xdca * xdca + ydca * ydca);
   length += dcaT;
-  lt.addStep(length, trc.getP2Inv());
+  lt.addStep(length, trc.getQ2P2());
   return dcaT;
 }
 

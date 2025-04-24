@@ -191,6 +191,7 @@ class TrackParametrization
   GPUd() value_t getPhi() const;
   GPUd() value_t getPhiPos() const;
 
+  GPUd() value_t getQ2P2() const;
   GPUd() value_t getPtInv() const;
   GPUd() value_t getP2Inv() const;
   GPUd() value_t getP2() const;
@@ -553,6 +554,18 @@ GPUdi() auto TrackParametrization<value_T>::getPhiPos() const -> value_t
   value_t phi = gpu::CAMath::ATan2(getY(), getX()) + getAlpha();
   math_utils::detail::bringTo02Pi<value_t>(phi);
   return phi;
+}
+
+//____________________________________________________________
+template <typename value_T>
+GPUdi() auto TrackParametrization<value_T>::getQ2P2() const -> value_t
+{
+  // return the (q/p)^2
+  value_t q2pt2 = mP[kQ2Pt] * mP[kQ2Pt];
+  if (q2pt2 < MinPTInv * MinPTInv) {
+    q2pt2 = MinPTInv * MinPTInv;
+  }
+  return q2pt2 / (1.f + getTgl() * getTgl());
 }
 
 //____________________________________________________________
