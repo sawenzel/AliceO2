@@ -151,6 +151,7 @@ AddOptionRTC(forceEarlyTransform, int8_t, -1, "", 0, "Force early TPC transforma
 AddOptionRTC(dropLoopers, uint8_t, 0, "", 0, "Drop looping tracks starting from second loop")
 AddOptionRTC(mergerCovSource, uint8_t, 2, "", 0, "Method to obtain covariance in track merger: 0 = simple filterErrors method, 1 = use cov from track following, 2 = refit (default)")
 AddOptionRTC(mergerInterpolateErrors, uint8_t, 1, "", 0, "Use interpolation instead of extrapolation for chi2 based cluster rejection")
+AddOptionRTC(mergerInterpolateRejectAlsoOnCurrentPosition, uint8_t, 1, "", 0, "When using mergerInterpolateErrors, reject based on chi2 twice computed with interpolated and current track position")
 AddOptionRTC(mergeCE, uint8_t, 1, "", 0, "Merge tracks accross the central electrode")
 AddOptionRTC(retryRefit, int8_t, 1, "", 0, "Retry refit with seeding errors and without cluster rejection when fit fails (=2 means retry in same kernel, =1 for separate kernel")
 AddOptionRTC(looperInterpolationInExtraPass, int8_t, -1, "", 0, "Perform looper interpolation in an extra pass")
