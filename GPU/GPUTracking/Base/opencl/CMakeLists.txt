@@ -96,8 +96,6 @@ if(ALIGPU_BUILD_TYPE STREQUAL "O2")
   # the compile_defitions are not propagated automatically on purpose (they are
   # declared PRIVATE) so we are not leaking them outside of the GPU**
   # directories
-
-  install(FILES ${HDRS} DESTINATION include/GPU)
 endif()
 
 if(ALIGPU_BUILD_TYPE STREQUAL "Standalone")
@@ -106,6 +104,8 @@ if(ALIGPU_BUILD_TYPE STREQUAL "Standalone")
   install(TARGETS ${MODULE})
   set(targetName ${MODULE})
 endif()
+
+install(FILES ${HDRS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/GPU)
 
 if(OPENCL_ENABLED_SPIRV)
   target_compile_definitions(${targetName} PRIVATE OPENCL_ENABLED_SPIRV)

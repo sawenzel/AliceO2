@@ -13,7 +13,7 @@
 /// \author David Rohr
 
 // Run e.g. as:
-// ROOT_INCLUDE_PATH="`pwd`/include" root -l -q -b src/GPU/GPUTracking/Standalone/tools/dumpGPUDefParam.C'()'
+// ROOT_INCLUDE_PATH="`pwd`/include/GPU" root -l -q -b src/GPU/GPUTracking/Standalone/tools/dumpGPUDefParam.C'()'
 
 // Logic for testing to load the default parameters
 /* #define GPUCA_GPUCODE

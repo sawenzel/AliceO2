@@ -242,12 +242,13 @@ set(TEMPLATE_HEADER_LIST Base/GPUReconstructionKernelList.template.h
                          Definitions/GPUDefParametersLoad.template.inc)
 set(GENERATED_HEADERS_LIST "")
 
-file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly)
+set(ON_THE_FLY_DIR ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly)
+file(MAKE_DIRECTORY ${ON_THE_FLY_DIR})
 foreach(TEMPLATE_FILE ${TEMPLATE_HEADER_LIST})
   get_filename_component(OUTPUT_FILE_NAME ${TEMPLATE_FILE} NAME)
   string(REPLACE ".template" "" OUTPUT_FILE_NAME ${OUTPUT_FILE_NAME})
-  file(GENERATE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/${OUTPUT_FILE_NAME} INPUT ${TEMPLATE_FILE})
-  list(APPEND GENERATED_HEADERS_LIST ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/${OUTPUT_FILE_NAME})
+  file(GENERATE OUTPUT ${ON_THE_FLY_DIR}/${OUTPUT_FILE_NAME} INPUT ${TEMPLATE_FILE})
+  list(APPEND GENERATED_HEADERS_LIST ${ON_THE_FLY_DIR}/${OUTPUT_FILE_NAME})
 endforeach()
 set(GPUDEFPARAMETERSLBLIST "$<JOIN:$<LIST:TRANSFORM,$<LIST:TRANSFORM,$<TARGET_PROPERTY:O2_GPU_KERNELS,O2_GPU_KERNEL_NAMES>,REPLACE,[^A-Za-z0-9]+,_>,PREPEND,LB_>,\n>\n")
 string(APPEND GPUDEFPARAMETERSLBLIST "$<JOIN:$<LIST:TRANSFORM,$<TARGET_PROPERTY:O2_GPU_KERNELS,O2_GPU_KERNEL_PARAMS>,PREPEND,PAR_>,\n>\n")
@@ -256,14 +257,14 @@ file(GENERATE
      OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/GPUDefParametersLoadPrepareBase
      CONTENT ${GPUDEFPARAMETERSLBLIST})
 add_custom_command(
-  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/GPUDefParametersLoadPrepare.h
-  COMMAND awk "{print(\"#ifndef GPUCA_\" $0 \"\\n#define GPUCA_\" $0 \" 0\\n#endif\")}" ${CMAKE_CURRENT_BINARY_DIR}/GPUDefParametersLoadPrepareBase > ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/GPUDefParametersLoadPrepare.h
+  OUTPUT ${ON_THE_FLY_DIR}/GPUDefParametersLoadPrepare.h
+  COMMAND awk "{print(\"#ifndef GPUCA_\" $0 \"\\n#define GPUCA_\" $0 \" 0\\n#endif\")}" ${CMAKE_CURRENT_BINARY_DIR}/GPUDefParametersLoadPrepareBase > ${ON_THE_FLY_DIR}/GPUDefParametersLoadPrepare.h
   COMMENT "Generating GPUDefParametersLoadPrepare.h"
   DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/GPUDefParametersLoadPrepareBase
   VERBATIM
   COMMAND_EXPAND_LISTS
 )
-list(APPEND GENERATED_HEADERS_LIST ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly/GPUDefParametersLoadPrepare.h)
+list(APPEND GENERATED_HEADERS_LIST ${ON_THE_FLY_DIR}/GPUDefParametersLoadPrepare.h)
 
 set(HDRS_INSTALL ${HDRS_INSTALL} ${GENERATED_HEADERS_LIST})
 include(kernels.cmake)
@@ -306,7 +307,7 @@ set(INCDIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/Debug
     ${CMAKE_CURRENT_SOURCE_DIR}/DataCompression
     ${CMAKE_CURRENT_SOURCE_DIR}/TPCClusterFinder
-    ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly)
+    ${ON_THE_FLY_DIR})
 
 # Main CMake part for O2
 if(ALIGPU_BUILD_TYPE STREQUAL "O2")
@@ -356,12 +357,6 @@ if(ALIGPU_BUILD_TYPE STREQUAL "O2")
                             HEADERS ${HDRS_CINT_O2} ${HDRS_CINT_O2_ADDITIONAL}
                             LINKDEF GPUTrackingLinkDef_O2.h)
 
-  install(FILES ${HDRS_SRCS} ${HDRS_CINT_O2} ${HDRS_CINT_DATATYPES} ${HDRS_INSTALL}
-          DESTINATION include/GPU)
-  install(DIRECTORY utils
-          DESTINATION include/GPU
-          FILES_MATCHING PATTERN *.h)
-
   o2_add_test_root_macro(Standalone/tools/createGeo.C
                          PUBLIC_LINK_LIBRARIES O2::GPUTracking
                          LABELS its COMPILE_ONLY)
@@ -390,12 +385,14 @@ if(ALIGPU_BUILD_TYPE STREQUAL "Standalone")
   else()
     target_compile_definitions(${targetName} PRIVATE GPUCA_NO_ROOT)
   endif()
-  install(FILES ${HDRS_SRCS} ${HDRS_CINT_O2} ${HDRS_CINT_DATATYPES} ${HDRS_INSTALL}
-          DESTINATION include)
-  install(DIRECTORY utils
-          DESTINATION include
-          FILES_MATCHING PATTERN *.h)
 endif()
+
+install(FILES ${HDRS_SRCS} ${HDRS_CINT_O2} ${HDRS_CINT_DATATYPES} ${HDRS_INSTALL}
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/GPU)
+install(DIRECTORY utils
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/GPU
+        FILES_MATCHING PATTERN *.h)
+
 
 # GPUReconstructionLibrary needs to know which GPU backends are enabled for proper error messages
 configure_file(Base/GPUReconstructionAvailableBackends.template.h ${CMAKE_CURRENT_BINARY_DIR}/GPUReconstructionAvailableBackends.h)

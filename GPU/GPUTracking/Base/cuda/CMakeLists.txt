@@ -120,7 +120,6 @@ if(ALIGPU_BUILD_TYPE STREQUAL "O2")
       ${CMAKE_SOURCE_DIR}/DataFormats/Reconstruction/src
       ${CMAKE_CURRENT_SOURCE_DIR}
     TARGETVARNAME targetName)
-  install(FILES ${HDRS} DESTINATION include/GPU)
 endif()
 
 if(ALIGPU_BUILD_TYPE STREQUAL "Standalone")
@@ -131,6 +130,8 @@ if(ALIGPU_BUILD_TYPE STREQUAL "Standalone")
   install(TARGETS GPUTrackingCUDA)
   include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 endif()
+
+install(FILES ${HDRS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/GPU)
 
 target_compile_definitions(${targetName} PRIVATE $<TARGET_PROPERTY:O2::GPUTracking,COMPILE_DEFINITIONS>)
 

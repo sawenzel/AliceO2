@@ -133,8 +133,6 @@ if(ALIGPU_BUILD_TYPE STREQUAL "O2")
 
   target_compile_definitions(${targetName} PRIVATE GPUCA_BUILD_EVENT_DISPLAY_GLFW GPUCA_DISPLAY_GL3W GPUCA_DISPLAY_OPENGL_CORE)
 
-  install(FILES ${HDRS} ${HDRS_INSTALL} DESTINATION include/GPU)
-
   o2_add_executable(field-uniform-exporter
           TARGETVARNAME exporterName
           COMPONENT_NAME gpu
@@ -156,6 +154,8 @@ if(ALIGPU_BUILD_TYPE STREQUAL "Standalone")
   configure_file(filterMacros/setinclude.sh.in setinclude.sh @ONLY)
   install(FILES ${CMAKE_CURRENT_BINARY_DIR}/setinclude.sh PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE DESTINATION displayTrackFilter)
 endif()
+
+install(FILES ${HDRS} ${HDRS_INSTALL} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/GPU)
 
 target_compile_definitions(${targetName} PRIVATE $<TARGET_PROPERTY:O2::GPUTracking,COMPILE_DEFINITIONS>)
 
