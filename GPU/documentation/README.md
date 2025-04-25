@@ -11,3 +11,6 @@
 
 [run-time-compilation.md](https://github.com/AliceO2Group/AliceO2/blob/dev/GPU/documentation/run-time-compilation.md) :
 - Instructions how to use run time compilation (RTC) for the GPU code.
+
+[tpc-tracking-qa.md](https://github.com/AliceO2Group/AliceO2/blob/dev/GPU/documentation/tpc-tracking-qa.md) :
+- Instructions how to run the QA for TPC tracking (efficiency, resolution, etc.).
