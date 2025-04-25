@@ -16,7 +16,7 @@ If you just want to test a small dataset, you can skip the following steps, and 
     - I'd suggest to do a first small test with 1-5 events to check the machinery, 100 events is already a good size which should not exhaust the memory, I'd go to 600 only after 100 works.
 1. Compile O2 with GPU support, in addition you need O2sim, DataDistribution, and Readout (latest versions from alidist will do).
  GPUs for O2 should be auto-detected, but you can set the environment variables ALIBUILD_ENABLE_CUDA / ALIBUILD_ENABLE_HIP to enforce it (and get a failure when detection fails). Look for CMake log messages "Building GPUTracking with CUDA support" (etc) to verify.
- For more information, see https://github.com/AliceO2Group/AliceO2/blob/dev/GPU/documentation/build.md
+ For more information, see https://github.com/AliceO2Group/AliceO2/blob/dev/GPU/documentation/build-O2.md
 1. Optionally place some binary configuration files in the simulation folder. Default objects will be used if no such files are placed. There are instructions at the end of this post how to generate these files. (Currently, these files are: matbud.root, ITSdictionary.bin, ctf_dictionary.root, tpctransform.root, dedxsplines.root, and tpcpadgaincalib.root)
 1. Load the O2sim environment (`alienv enter O2sim/latest`) and run the following full system test script for a full simulation and digits to raw conversion (this will already include 1 CPU reconstruction run):
     ```
@@ -37,7 +37,7 @@ If you just want to test a small dataset, you can skip the following steps, and 
         ```
 This will use 4 GPU with the HIP backend and allocate 22 GB of scratch memory on the GPU (should be sufficient for 128 orbit TF). You can change the GPU type as indicated in the linked README.md above, e.g. `GPUTYPE=CUDA NGPUS=1` for 1 CUDA GPU.
 1. With this, the full chain is running inside O2 DPL. Next we are adding DataDistribution.
-    1. Ceate the TF files as explained in the subtask (https://github.com/AliceO2Group/AliceO2/blob/dev/prodtests/full-system-test/documentation/raw-data-simulation.md). For convenience, there is a script that should do it automatically, from a shell that has loaded both DataDistribution and Readout: `$O2_ROOT/prodtests/full-system-test/convert-raw-to-tf-file.sh`.
+    1. Ceate the TF files as explained in the subtask ([raw-tf-conversion.md](https://github.com/AliceO2Group/AliceO2/blob/dev/prodtests/full-system-test/documentation/raw-tf-conversion.md)). For convenience, there is a script that should do it automatically, from a shell that has loaded both DataDistribution and Readout: `$O2_ROOT/prodtests/full-system-test/convert-raw-to-tf-file.sh`.
     1. Enter the O2 environment, and run the following script (please adjust the variables as in the test before).
         ```
         EXTINPUT=1 SHMSIZE=128000000000 GPUTYPE=CPU $O2_ROOT/prodtests/full-system-test/dpl-workflow.sh

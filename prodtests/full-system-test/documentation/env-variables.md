@@ -1,4 +1,4 @@
-The `setenv-sh` script sets the following environment options
+The [setenv-sh](https://github.com/davidrohr/O2DPG/blob/master/DATA/common/setenv.sh) script sets the following environment options
 * `NTIMEFRAMES`: Number of time frames to process.
 * `TFDELAY`: Delay in seconds between publishing time frames (1 / rate).
 * `NGPUS`: Number of GPUs to use, data distributed round-robin.
@@ -25,7 +25,7 @@ The `setenv-sh` script sets the following environment options
 * `EXTINPUT`: Receive input from raw FMQ channel instead of running o2-raw-file-reader.
   * 0: `dpl-workflow.sh` can run as standalone benchmark, and will read the input itself.
   * 1: To be used in combination with either `datadistribution.sh` or `raw-reader.sh` or with another DataDistribution instance.
-* `CTFINPUT`: Read input from CTF ROOT file. This option is incompatible to EXTINPUT=1. The CTF ROOT file can be stored via SAVECTF=1.
+* `CTFINPUT`: Read input from CTF ROOT file. This option is incompatible to `EXTINPUT=1`. The CTF ROOT file can be stored via `SAVECTF=1`.
 * `NHBPERTF`: Time frame length (in HBF)
 * `GLOBALDPLOPT`: Global DPL workflow options appended to o2-dpl-run.
 * `EPNPIPELINES`: Set default EPN pipeline multiplicities.

@@ -7,7 +7,7 @@ This is a quick summary how to run the full system test (FST) as stress test on 
   - Enter the O2PDPSuite environment either vie `alienv enter O2PDPSuite/latest Readout/latest`.
   - Go to an empty directory.
   - Run the FST simulation via: `NEvents=650 NEventsQED=10000 SHMSIZE=128000000000 TPCTRACKERSCRATCHMEMORY=40000000000 SPLITTRDDIGI=0 GENERATE_ITSMFT_DICTIONARIES=1 $O2_ROOT/prodtests/full_system_test.sh`
-  - Get a current matbud.root (e.g. from here https://alice.its.cern.ch/jira/browse/O2-2288) and place it in that folder.
+  - Material budget table (e.g. from here https://alice.its.cern.ch/jira/browse/O2-2288) now comes from CCDB, no need any more to pull it manually.
   - Create a timeframe file from the raw files: `$O2_ROOT/prodtests/full-system-test/convert-raw-to-tf-file.sh`.
   - Prepare the ramdisk folder: `mv raw/timeframe raw/timeframe-org; mkdir raw/timeframe-tmpfs; ln -s timeframe-tmpfs raw/timeframe`
 

@@ -12,17 +12,17 @@ If you just want to reproduce the GPU build locally without running it, it might
 The provisioning script of the container also demonstrates which patches need to be applied such that everything works correctly.
 
 *GPU Tracking with CUDA*
- * The CMake option -DENABLE_CUDA=ON/OFF/AUTO steers whether CUDA is forced enabled / unconditionally disabled / auto-detected.
- * The CMake option -DCUDA_COMPUTETARGET= fixes a GPU target, e.g. 61 for PASCAL or 75 for Turing (if unset, it compiles for the lowest supported architecture)
+ * The CMake option `-DENABLE_CUDA=ON/OFF/AUTO` steers whether CUDA is forced enabled / unconditionally disabled / auto-detected.
+ * The CMake option `-DCUDA_COMPUTETARGET=...` fixes a GPU target, e.g. 61 for PASCAL or 75 for Turing (if unset, it compiles for the lowest supported architecture)
  * CUDA is detected via the CMake language feature, so essentially nvcc must be in the Path.
- * We require CUDA version >= 11.2
+ * We require CUDA version >= 12.8
  * CMake will report "Building GPUTracking with CUDA support" when enabled.
 
 *GPU Tracking with HIP*
  * HIP and HCC must be installed, and CMake must be able to detect HIP via find_package(hip).
- * If HIP and HCC are not installed to /opt/rocm, the environment variables $HIP_PATH and $HCC_HOME must point to the installation directories.
+ * If HIP and HCC are not installed to /opt/rocm, the environment variables `$HIP_PATH` and `$HCC_HOME` must point to the installation directories.
  * HIP from ROCm >= 4.0 is required.
- * The CMake option -DHIP_AMDGPUTARGET= forces a GPU target, e.g. gfx906 for Radeon VII (if unset, it auto-detects the GPU).
+ * The CMake option `-DHIP_AMDGPUTARGET=...` forces a GPU target, e.g. gfx906 for Radeon VII (if unset, it auto-detects the GPU).
  * CMake will report "Building GPUTracking with HIP support" when enabled.
  * It may be that some patches must be applied to ROCm after the installation. You find the details in the provisioning script of the GPU CI container below.
 
@@ -49,14 +49,14 @@ The provisioning script of the container also demonstrates which patches need to
  * The docker images is `alisw/slc8-gpu-builder`.
  * The container exports the `ALIBUILD_O2_FORCE_GPU` env variable, which force-enables all GPU builds.
  * Note that it might not be possible out-of-the-box to run the GPU version from within the container. In case of HIP it should work when you forwards the necessary GPU devices in the container. For CUDA however, you would either need to (in addition to device forwarding) match the system CUDA driver and toolkit installation to the files present in the container, or you need to use the CUDA docker runtime, which is currently not installed in the container.
- * There are currently some patches needed to install all the GPU backends in a proper way and together. Please refer to the container provisioning script https://github.com/alisw/docks/blob/master/slc9-gpu-builder/provision.sh. If you want to reproduce the installation locally, it is recommended to follow the steps from the script.
+ * There are currently some patches needed to install all the GPU backends in a proper way and together. Please refer to the container provisioning script [provision.sh](https://github.com/alisw/docks/blob/master/slc9-gpu-builder/provision.sh). If you want to reproduce the installation locally, it is recommended to follow the steps from the script.
 
 *Summary*
 
 If you want to enforce the GPU builds on a system without GPU, please set the following CMake settings:
- * ENABLE_CUDA=ON
- * ENABLE_HIP=ON
- * ENABLE_OPENCL=ON
- * HIP_AMDGPUTARGET=gfx906;gfx908
- * CUDA_COMPUTETARGET=86 89
-Alternatively you can set the environment variables ALIBUILD_ENABLE_CUDA and ALIBUILD_ENABLE_HIP to enforce building CUDA or HIP without modifying the alidist scripts.
+ * `ENABLE_CUDA=ON`
+ * `ENABLE_HIP=ON`
+ * `ENABLE_OPENCL=ON
+ * `HIP_AMDGPUTARGET=default`
+ * `CUDA_COMPUTETARGET=default`
+Alternatively you can set the environment variables `ALIBUILD_ENABLE_CUDA=1` and `ALIBUILD_ENABLE_HIP=1` to enforce building CUDA or HIP without modifying the alidist scripts.
