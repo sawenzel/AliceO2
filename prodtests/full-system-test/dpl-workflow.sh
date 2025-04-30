@@ -355,16 +355,14 @@ has_detector_reco MID && has_detector_matching MCHMID && MFTMCHConf="FwdMatching
 if has_processing_step MUON_SYNC_RECO; then
   [[ -z ${ARGS_EXTRA_PROCESS_o2_mid_reco_workflow:-} ]] && ARGS_EXTRA_PROCESS_o2_mid_reco_workflow="--mid-tracker-keep-best"
   [[ -z ${ARGS_EXTRA_PROCESS_o2_mch_reco_workflow:-} ]] && ARGS_EXTRA_PROCESS_o2_mch_reco_workflow="--digits"
-  if [[ -z ${CONFIG_EXTRA_PROCESS_o2_mch_reco_workflow:-} ]]; then
-    if [[ $IS_SIMULATED_DATA == 1 ]]; then
-      CONFIG_EXTRA_PROCESS_o2_mch_reco_workflow="MCHTimeClusterizer.peakSearchSignalOnly=false;MCHDigitFilter.rejectBackground=false;"
-    elif [[ $RUNTYPE == "PHYSICS" && $BEAMTYPE == "pp" ]] || [[ $RUNTYPE == "COSMICS" ]]; then
-      CONFIG_EXTRA_PROCESS_o2_mch_reco_workflow="MCHTracking.chamberResolutionX=0.4;MCHTracking.chamberResolutionY=0.4;MCHTracking.sigmaCutForTracking=7.;MCHTracking.sigmaCutForImprovement=6.;"
-    fi
-    has_detector_reco ITS && [[ $RUNTYPE != "COSMICS" ]] && CONFIG_EXTRA_PROCESS_o2_mch_reco_workflow+="MCHTimeClusterizer.irFramesOnly=true;"
-    [[ ! -z ${CUT_RANDOM_FRACTION_MCH:-} ]] && CONFIG_EXTRA_PROCESS_o2_mch_reco_workflow+="MCHTimeClusterizer.rofRejectionFraction=$CUT_RANDOM_FRACTION_MCH;"
-    CONFIG_EXTRA_PROCESS_o2_mch_reco_workflow+="MCHStatusMap.useHV=false;MCHDigitFilter.statusMask=3;"
+  if [[ $IS_SIMULATED_DATA == 1 ]]; then
+    MCH_CONFIG_KEY+="MCHTimeClusterizer.peakSearchSignalOnly=false;MCHDigitFilter.rejectBackground=false;"
+  elif [[ $RUNTYPE == "PHYSICS" && $BEAMTYPE == "pp" ]] || [[ $RUNTYPE == "COSMICS" ]]; then
+    MCH_CONFIG_KEY+="MCHTracking.chamberResolutionX=0.4;MCHTracking.chamberResolutionY=0.4;MCHTracking.sigmaCutForTracking=7.;MCHTracking.sigmaCutForImprovement=6.;"
   fi
+  has_detector_reco ITS && [[ $RUNTYPE != "COSMICS" ]] && MCH_CONFIG_KEY+="MCHTimeClusterizer.irFramesOnly=true;"
+  [[ ! -z ${CUT_RANDOM_FRACTION_MCH:-} ]] && MCH_CONFIG_KEY+="MCHTimeClusterizer.rofRejectionFraction=$CUT_RANDOM_FRACTION_MCH;"
+  MCH_CONFIG_KEY+="MCHStatusMap.useHV=false;MCHDigitFilter.statusMask=3;"
   [[ $RUNTYPE == "COSMICS" ]] && [[ -z ${CONFIG_EXTRA_PROCESS_o2_mft_reco_workflow:-} ]] && CONFIG_EXTRA_PROCESS_o2_mft_reco_workflow="MFTTracking.FullClusterScan=true"
 fi
 [[ $SYNCRAWMODE == 1 ]] && [[ -z ${CONFIG_EXTRA_PROCESS_o2_zdc_digits_reco:-} ]] && CONFIG_EXTRA_PROCESS_o2_zdc_digits_reco='RecoParamZDC.tdc_calib[9]=1;RecoParamZDC.tdc_calib[0]=1;RecoParamZDC.tdc_calib[8]=1;RecoParamZDC.tdc_calib[1]=1;RecoParamZDC.tdc_calib[3]=1;RecoParamZDC.tdc_calib[6]=1;RecoParamZDC.tdc_calib[5]=1;RecoParamZDC.tdc_calib[4]=1;RecoParamZDC.tdc_calib[2]=1;RecoParamZDC.tdc_calib[7]=1;RecoParamZDC.energy_calib[13]=1;RecoParamZDC.energy_calib[12]=1;RecoParamZDC.energy_calib[11]=1;RecoParamZDC.energy_calib[6]=1;RecoParamZDC.energy_calib[25]=1;RecoParamZDC.energy_calib[14]=1;RecoParamZDC.energy_calib[20]=1;RecoParamZDC.energy_calib[5]=1;RecoParamZDC.energy_calib[0]=1;RecoParamZDC.energy_calib[19]=1;RecoParamZDC.tower_calib[1]=1;RecoParamZDC.tower_calib[2]=1;RecoParamZDC.tower_calib[3]=1;RecoParamZDC.tower_calib[4]=1;RecoParamZDC.tower_calib[24]=1;RecoParamZDC.tower_calib[21]=1;RecoParamZDC.tower_calib[22]=1;RecoParamZDC.tower_calib[23]=1;RecoParamZDC.tower_calib[18]=1;RecoParamZDC.tower_calib[16]=1;RecoParamZDC.tower_calib[17]=1;RecoParamZDC.tower_calib[15]=1;RecoParamZDC.tower_calib[8]=1;RecoParamZDC.tower_calib[9]=1;RecoParamZDC.tower_calib[7]=1;RecoParamZDC.tower_calib[10]=1'
