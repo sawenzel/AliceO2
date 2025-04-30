@@ -78,11 +78,6 @@ std::vector<BinningIndex> groupTable(const T& table, const BP<Cs...>& binningPol
 {
   std::vector<BinningIndex> groupedIndices;
 
-  // TODO: Check if this check can be now skipped
-  if (table.size() == 0) {
-    return groupedIndices;
-  }
-
   for(auto rowIterator : table) {
       auto values = binningPolicy.getBinningValues(rowIterator);
       auto val = binningPolicy.getBin(values);
