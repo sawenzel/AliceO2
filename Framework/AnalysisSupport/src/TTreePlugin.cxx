@@ -209,7 +209,7 @@ auto readBoolValues = [](uint8_t* target, ReadOps& op, TBufferFile& rootBuffer) 
   int readLast = 0;
   while (readEntries < op.rootBranchEntries) {
     auto beginValue = readLast;
-    auto readLast = op.branch->GetBulkRead().GetBulkEntries(readEntries, rootBuffer);
+    readLast = op.branch->GetBulkRead().GetBulkEntries(readEntries, rootBuffer);
     int size = readLast * op.listSize;
     readEntries += readLast;
     for (int i = beginValue; i < beginValue + size; ++i) {
