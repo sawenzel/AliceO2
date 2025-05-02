@@ -69,6 +69,7 @@ struct ExpressionInfo {
 
 namespace o2::framework::expressions
 {
+void unknownParameterUsed(const char* name);
 const char* stringType(atype::type t);
 
 template <typename... T>
@@ -147,7 +148,7 @@ struct PlaceholderNode : LiteralNode {
     if constexpr (variant_trait_v<typename std::decay<T>::type> != VariantType::Unknown) {
       retrieve = [](InitContext& context, char const* name) { return LiteralNode::var_t{context.options().get<T>(name)}; };
     } else {
-      runtime_error("Unknown parameter used in expression.");
+      unknownParameterUsed(name.c_str());
     }
   }
 
@@ -187,6 +188,19 @@ struct ParameterNode : LiteralNode {
 /// A conditional node
 struct ConditionalNode {
 };
+
+/// concepts
+template <typename T>
+concept is_literal_like = std::same_as<T, LiteralNode> || std::same_as<T, PlaceholderNode> || std::same_as<T, ParameterNode>;
+
+template <typename T>
+concept is_binding = std::same_as<T, BindingNode>;
+
+template <typename T>
+concept is_operation = std::same_as<T, OpNode>;
+
+template <typename T>
+concept is_conditional = std::same_as<T, ConditionalNode>;
 
 /// A generic tree node
 struct Node {
@@ -267,7 +281,7 @@ struct NodeRecord {
 
 /// Tree-walker helper
 template <typename L>
-void walk(Node* head, L const& pred)
+void walk(Node* head, L&& pred)
 {
   std::stack<NodeRecord> path;
   path.emplace(head, 0);
@@ -512,16 +526,15 @@ inline Node binned(std::vector<T> const& binning, std::vector<T> const& paramete
 }
 
 template <typename T>
-Node updateParameters(Node const& pexp, int bins, std::vector<T> const& parameters, int bin)
+inline Node updateParameters(Node const& pexp, int bins, std::vector<T> const& parameters, int bin)
 {
   Node result{pexp};
-  auto updateParameter = [&bins, &parameters, &bin](Node* node) {
+  walk(&result, [&bins, &parameters, &bin](Node* node) {
     if (node->self.index() == 5) {
       auto* n = std::get_if<5>(&node->self);
       n->reset(parameters[n->index * bins + bin]);
     }
-  };
-  walk(&result, updateParameter);
+  });
   return result;
 }
 
@@ -593,12 +606,6 @@ gandiva::ConditionPtr makeCondition(gandiva::NodePtr node);
 gandiva::ExpressionPtr makeExpression(gandiva::NodePtr node, gandiva::FieldPtr result);
 /// Update placeholder nodes from context
 void updatePlaceholders(Filter& filter, InitContext& context);
-
-template <typename... C>
-std::vector<expressions::Projector> makeProjectors(framework::pack<C...>)
-{
-  return {C::Projector()...};
-}
 
 std::shared_ptr<gandiva::Projector> createProjectorHelper(size_t nColumns, expressions::Projector* projectors,
                                                           std::shared_ptr<arrow::Schema> schema,
