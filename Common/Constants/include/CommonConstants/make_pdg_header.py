@@ -138,6 +138,7 @@ class Pdg(Enum):
     kTriton = 1000010030
     kHelium3 = 1000020030
     kAlpha = 1000020040
+    kLithium4 = 1000030040
     kHyperTriton = 1010010030
     kHyperHydrogen4 = 1010010040
     kHyperHelium4 = 1010020040
