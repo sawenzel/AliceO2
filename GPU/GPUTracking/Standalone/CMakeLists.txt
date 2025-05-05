@@ -139,7 +139,6 @@ endif()
 add_subdirectory(../../ GPU)
 add_library(standalone_support SHARED
             ${O2_DIR}/Common/Field/src/MagFieldFast.cxx
-            ${O2_DIR}/Common/ML/src/OrtInterface.cxx
             ${O2_DIR}/Common/Utils/src/StringUtils.cxx
             ${O2_DIR}/DataFormats/Detectors/TPC/src/CompressedClusters.cxx
             ${O2_DIR}/DataFormats/Reconstruction/src/TrackParametrization.cxx
@@ -228,6 +227,7 @@ endif()
 
 if(GPUCA_CONFIG_ONNX)
   target_link_libraries(standalone_support PRIVATE onnxruntime::onnxruntime)
+  target_sources(standalone_support PRIVATE ${O2_DIR}/Common/ML/src/OrtInterface.cxx)
 endif()
 
 if (GPUCA_BUILD_DEBUG_SANITIZE AND CMAKE_CXX_COMPILER MATCHES "clang\\+\\+")

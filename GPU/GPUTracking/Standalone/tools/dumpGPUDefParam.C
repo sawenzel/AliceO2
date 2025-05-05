@@ -13,7 +13,7 @@
 /// \author David Rohr
 
 // Run e.g. as (replacing [FILE] and [OUTPUT]:
-// echo -e '#define PARAMETER_FILE "[FILE]]"\ngInterpreter->AddIncludePath("'`pwd`'/include/GPU");\n.x share/GPU/tools/dumpGPUDefParam.C("[OUTPUT]")\n.q\n' | root -l -b
+// echo -e '#define PARAMETER_FILE "[FILE]"\ngInterpreter->AddIncludePath("'`pwd`'/include/GPU");\n.x share/GPU/tools/dumpGPUDefParam.C("[OUTPUT]")\n.q\n' | root -l -b
 // To dump the defaults for AMPERE architecture, run
 // echo -e '#define GPUCA_GPUTYPE_AMPERE\n#define PARAMETER_FILE "GPUDefParametersDefaults.h"\ngInterpreter->AddIncludePath("'`pwd`'/include/GPU");\n.x share/GPU/tools/dumpGPUDefParam.C("default_AMPERE.par")\n.q\n' | root -l -b
 
