@@ -1400,10 +1400,10 @@ namespace o2::framework
 
 struct PreslicePolicyBase {
   const std::string binding;
-  StringPair bindingKey;
+  Entry bindingKey;
 
   bool isMissing() const;
-  StringPair const& getBindingKey() const;
+  Entry const& getBindingKey() const;
 };
 
 struct PreslicePolicySorted : public PreslicePolicyBase {
@@ -1428,7 +1428,7 @@ struct PresliceBase : public Policy {
   const std::string binding;
 
   PresliceBase(expressions::BindingNode index_)
-    : Policy{PreslicePolicyBase{{o2::soa::getLabelFromTypeForKey<T, OPT>(std::string{index_.name})}, std::make_pair(o2::soa::getLabelFromTypeForKey<T, OPT>(std::string{index_.name}), std::string{index_.name})}, {}}
+    : Policy{PreslicePolicyBase{{o2::soa::getLabelFromTypeForKey<T, OPT>(std::string{index_.name})}, Entry(o2::soa::getLabelFromTypeForKey<T, OPT>(std::string{index_.name}), std::string{index_.name})}, {}}
   {
   }
 
@@ -1508,7 +1508,7 @@ auto doSliceBy(T const* table, o2::framework::PresliceBase<C, Policy, OPT> const
 {
   if constexpr (OPT) {
     if (container.isMissing()) {
-      missingOptionalPreslice(getLabelFromType<std::decay_t<T>>().data(), container.bindingKey.second.c_str());
+      missingOptionalPreslice(getLabelFromType<std::decay_t<T>>().data(), container.bindingKey.key.c_str());
     }
   }
   uint64_t offset = 0;
@@ -1545,7 +1545,7 @@ auto doSliceBy(T const* table, o2::framework::PresliceBase<C, Policy, OPT> const
 {
   if constexpr (OPT) {
     if (container.isMissing()) {
-      missingOptionalPreslice(getLabelFromType<std::decay_t<T>>().data(), container.bindingKey.second.c_str());
+      missingOptionalPreslice(getLabelFromType<std::decay_t<T>>().data(), container.bindingKey.key.c_str());
     }
   }
   auto selection = container.getSliceFor(value);
@@ -1574,7 +1574,7 @@ auto doFilteredSliceBy(T const* table, o2::framework::PresliceBase<C, framework:
 {
   if constexpr (OPT) {
     if (container.isMissing()) {
-      missingOptionalPreslice(getLabelFromType<T>().data(), container.bindingKey.second.c_str());
+      missingOptionalPreslice(getLabelFromType<T>().data(), container.bindingKey.key.c_str());
     }
   }
   uint64_t offset = 0;
