@@ -9,19 +9,6 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-#ifdef __CLING__
+#include "ITS3Simulation/ITS3DPLDigitizerParam.h"
 
-#pragma link off all globals;
-#pragma link off all classes;
-#pragma link off all functions;
-
-#pragma link C++ class o2::its3::ITS3Layer + ;
-#pragma link C++ class o2::its3::ITS3Services + ;
-#pragma link C++ class o2::its3::DescriptorInnerBarrelITS3 + ;
-#pragma link C++ class o2::its3::DigiParams + ;
-#pragma link C++ class o2::its3::Digitizer + ;
-#pragma link C++ class o2::its3::ITS3DPLDigitizerParam + ;
-#pragma link C++ class o2::its3::ChipDigitsContainer + ;
-#pragma link C++ class o2::its3::ChipSimResponse + ;
-
-#endif
+O2ParamImpl(o2::its3::ITS3DPLDigitizerParam)
