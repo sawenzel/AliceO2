@@ -203,7 +203,7 @@ void GPUTPCGMMerger::DumpRefit(std::ostream& out) const
     const auto& p = trk.GetParam();
     const auto& po = trk.OuterParam();
     out << "  Track " << i << ": OK " << trk.OK() << " Alpha " << trk.GetAlpha() << " X " << p.GetX() << " offset " << p.GetTZOffset() << " Y " << p.GetY() << " Z " << p.GetZ() << " SPhi " << p.GetSinPhi() << " Tgl " << p.GetDzDs() << " QPt " << p.GetQPt() << " NCl " << trk.NClusters() << " / " << trk.NClustersFitted() << " Cov " << p.GetErr2Y() << "/" << p.GetErr2Z()
-        << " dEdx " << (trk.OK() ? mOutputTracksdEdx[i].dEdxTotTPC : -1.f) << "/" << (trk.OK() ? mOutputTracksdEdx[i].dEdxMaxTPC : -1.f)
+        << " dEdx " << (trk.OK() && Param().dodEdxEnabled ? mOutputTracksdEdx[i].dEdxTotTPC : -1.f) << "/" << (trk.OK() && Param().dodEdxEnabled ? mOutputTracksdEdx[i].dEdxMaxTPC : -1.f)
         << " Outer " << po.P[0] << "/" << po.P[1] << "/" << po.P[2] << "/" << po.P[3] << "/" << po.P[4] << "\n";
   }
   out << std::setprecision(ss);

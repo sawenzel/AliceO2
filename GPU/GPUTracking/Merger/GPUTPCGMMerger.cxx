@@ -299,7 +299,7 @@ void* GPUTPCGMMerger::SetPointersRefitScratch(void* mem)
 void* GPUTPCGMMerger::SetPointersOutput(void* mem)
 {
   computePointerWithAlignment(mem, mOutputTracks, mNMaxTracks);
-  if (mRec->GetParam().dodEdxDownscaled) {
+  if (mRec->GetParam().dodEdxEnabled) {
     computePointerWithAlignment(mem, mOutputTracksdEdx, mNMaxTracks);
     computePointerWithAlignment(mem, mOutputTracksdEdxAlt, mNMaxTracks);
   }
