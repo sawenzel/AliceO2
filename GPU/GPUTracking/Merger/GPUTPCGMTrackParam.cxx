@@ -407,7 +407,7 @@ GPUd() bool GPUTPCGMTrackParam::Fit(GPUTPCGMMerger* GPUrestrict() merger, int32_
         break; // bad chi2 for the whole track, stop the fit
       }
     }
-    if (((nWays - iWay) & 1) && (clusters[0].sector < 18) == (clusters[maxN - 1].sector < 18)) {
+    if (((nWays - iWay) & 1) && (iWay != nWays - 1) && (clusters[0].sector < 18) == (clusters[maxN - 1].sector < 18)) {
       ShiftZ2(clusters, clustersXYZ, merger, maxN);
     }
   }
