@@ -451,7 +451,7 @@ void Detector::ConstructGeometry()
   }
 
   float pars[4];
-  pars[0] = (mGeometry->getFOCALSizeX() + 2 * mGeometry->getMiddleTowerOffset()) / 2;
+  pars[0] = (mGeometry->getFOCALSizeX() + 2 * mGeometry->getMiddleTowerOffset() + mGeometry->getDetectorOpeningRight() + mGeometry->getDetectorOpeningLeft()) / 2;
   pars[1] = mGeometry->getFOCALSizeY() / 2;
   pars[2] = mGeometry->getFOCALSizeZ() / 2;
   // Add space to place 2 SiPad layers in front of ECAL
@@ -984,7 +984,7 @@ void Detector::CreateECALGeometry()
   // Place the towers in the ECAL
   // --- Place the ECAL in FOCAL
   float fcal_pars[4];
-  fcal_pars[0] = (geom->getFOCALSizeX() + 2. * geom->getMiddleTowerOffset()) / 2.;
+  fcal_pars[0] = (geom->getFOCALSizeX() + 2. * geom->getMiddleTowerOffset() + mGeometry->getDetectorOpeningRight() + mGeometry->getDetectorOpeningLeft()) / 2.;
   fcal_pars[1] = geom->getFOCALSizeY() / 2.;
   fcal_pars[2] = geom->getECALSizeZ() / 2.;
   fcal_pars[3] = 0.;
