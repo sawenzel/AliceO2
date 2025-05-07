@@ -378,7 +378,8 @@ int32_t GPUChainTracking::Init()
   }
 
   if (GetProcessingSettings().debugLevel >= 6) {
-    mDebugFile->open(mRec->IsGPU() ? "GPU.out" : "CPU.out");
+    std::string filename = std::string(mRec->IsGPU() ? "GPU" : "CPU") + (mRec->slaveId() != -1 ? (std::string("_slave") + std::to_string(mRec->slaveId())) : std::string(mRec->slavesExist() ? "_master" : "")) + ".out";
+    mDebugFile->open(filename.c_str());
   }
 
   return 0;

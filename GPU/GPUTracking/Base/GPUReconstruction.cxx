@@ -87,6 +87,7 @@ GPUReconstruction::GPUReconstruction(const GPUSettingsDeviceBackend& cfg) : mHos
       throw std::invalid_argument("Cannot be slave to a slave");
     }
     mMaster = cfg.master;
+    mSlaveId = cfg.master->mSlaves.size();
     cfg.master->mSlaves.emplace_back(this);
   }
   param().SetDefaults(mGRPSettings.get());
