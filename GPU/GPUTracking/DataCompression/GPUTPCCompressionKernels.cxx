@@ -148,19 +148,19 @@ GPUdii() void GPUTPCCompressionKernels::Thread<GPUTPCCompressionKernels::step0at
 }
 
 template <>
-GPUd() bool GPUTPCCompressionKernels::GPUTPCCompressionKernels_Compare<0>::operator()(uint32_t a, uint32_t b) const
+GPUd() bool GPUTPCCompressionKernels::GPUTPCCompressionKernels_Compare<GPUSettings::SortTime>::operator()(uint32_t a, uint32_t b) const
 {
   return mClsPtr[a].getTimePacked() < mClsPtr[b].getTimePacked();
 }
 
 template <>
-GPUd() bool GPUTPCCompressionKernels::GPUTPCCompressionKernels_Compare<1>::operator()(uint32_t a, uint32_t b) const
+GPUd() bool GPUTPCCompressionKernels::GPUTPCCompressionKernels_Compare<GPUSettings::SortPad>::operator()(uint32_t a, uint32_t b) const
 {
   return mClsPtr[a].padPacked < mClsPtr[b].padPacked;
 }
 
 template <>
-GPUd() bool GPUTPCCompressionKernels::GPUTPCCompressionKernels_Compare<2>::operator()(uint32_t a, uint32_t b) const
+GPUd() bool GPUTPCCompressionKernels::GPUTPCCompressionKernels_Compare<GPUSettings::SortZTimePad>::operator()(uint32_t a, uint32_t b) const
 {
   if (mClsPtr[a].getTimePacked() >> 3 == mClsPtr[b].getTimePacked() >> 3) {
     return mClsPtr[a].padPacked < mClsPtr[b].padPacked;
@@ -169,12 +169,24 @@ GPUd() bool GPUTPCCompressionKernels::GPUTPCCompressionKernels_Compare<2>::opera
 }
 
 template <>
-GPUd() bool GPUTPCCompressionKernels::GPUTPCCompressionKernels_Compare<3>::operator()(uint32_t a, uint32_t b) const
+GPUd() bool GPUTPCCompressionKernels::GPUTPCCompressionKernels_Compare<GPUSettings::SortZPadTime>::operator()(uint32_t a, uint32_t b) const
 {
   if (mClsPtr[a].padPacked >> 3 == mClsPtr[b].padPacked >> 3) {
     return mClsPtr[a].getTimePacked() < mClsPtr[b].getTimePacked();
   }
   return mClsPtr[a].padPacked < mClsPtr[b].padPacked;
+}
+
+template <> // Deterministic comparison
+GPUd() bool GPUTPCCompressionKernels::GPUTPCCompressionKernels_Compare<4>::operator()(uint32_t a, uint32_t b) const
+{
+  if (mClsPtr[a].getTimePacked() != mClsPtr[b].getTimePacked()) {
+    return mClsPtr[a].getTimePacked() < mClsPtr[b].getTimePacked();
+  }
+  if (mClsPtr[a].padPacked != mClsPtr[b].padPacked) {
+    return mClsPtr[a].padPacked < mClsPtr[b].padPacked;
+  }
+  return mClsPtr[a].qTot < mClsPtr[b].qTot;
 }
 
 template <>
@@ -261,15 +273,19 @@ GPUdii() void GPUTPCCompressionKernels::Thread<GPUTPCCompressionKernels::step1un
 #ifdef GPUCA_GPUCODE
         static_assert(GPUCA_GET_THREAD_COUNT(GPUCA_LB_GPUTPCCompressionKernels_step1unattached) * 2 <= GPUCA_TPC_COMP_CHUNK_SIZE);
 #endif
-        if (param.rec.tpc.compressionSortOrder == GPUSettings::SortZPadTime) {
+        GPUCA_DETERMINISTIC_CODE( // clang-format off
           CAAlgo::sortInBlock(sortBuffer, sortBuffer + count, GPUTPCCompressionKernels_Compare<GPUSettings::SortZPadTime>(clusters->clusters[iSector][iRow]));
-        } else if (param.rec.tpc.compressionSortOrder == GPUSettings::SortZTimePad) {
-          CAAlgo::sortInBlock(sortBuffer, sortBuffer + count, GPUTPCCompressionKernels_Compare<GPUSettings::SortZTimePad>(clusters->clusters[iSector][iRow]));
-        } else if (param.rec.tpc.compressionSortOrder == GPUSettings::SortPad) {
-          CAAlgo::sortInBlock(sortBuffer, sortBuffer + count, GPUTPCCompressionKernels_Compare<GPUSettings::SortPad>(clusters->clusters[iSector][iRow]));
-        } else if (param.rec.tpc.compressionSortOrder == GPUSettings::SortTime) {
-          CAAlgo::sortInBlock(sortBuffer, sortBuffer + count, GPUTPCCompressionKernels_Compare<GPUSettings::SortTime>(clusters->clusters[iSector][iRow]));
-        }
+        , // !GPUCA_DETERMINISTIC_CODE
+          if (param.rec.tpc.compressionSortOrder == GPUSettings::SortZPadTime) {
+            CAAlgo::sortInBlock(sortBuffer, sortBuffer + count, GPUTPCCompressionKernels_Compare<GPUSettings::SortZPadTime>(clusters->clusters[iSector][iRow]));
+          } else if (param.rec.tpc.compressionSortOrder == GPUSettings::SortZTimePad) {
+            CAAlgo::sortInBlock(sortBuffer, sortBuffer + count, GPUTPCCompressionKernels_Compare<GPUSettings::SortZTimePad>(clusters->clusters[iSector][iRow]));
+          } else if (param.rec.tpc.compressionSortOrder == GPUSettings::SortPad) {
+            CAAlgo::sortInBlock(sortBuffer, sortBuffer + count, GPUTPCCompressionKernels_Compare<GPUSettings::SortPad>(clusters->clusters[iSector][iRow]));
+          } else if (param.rec.tpc.compressionSortOrder == GPUSettings::SortTime) {
+            CAAlgo::sortInBlock(sortBuffer, sortBuffer + count, GPUTPCCompressionKernels_Compare<GPUSettings::SortTime>(clusters->clusters[iSector][iRow]));
+          }
+        ) // clang-format on
         GPUbarrier();
       }
 
