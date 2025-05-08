@@ -296,6 +296,7 @@ AddOption(trdTrackModelO2, bool, false, "", 0, "Use O2 track model instead of GP
 AddOption(debugLevel, int32_t, -1, "debug", 'd', "Set debug level (-2 = silent, -1 = autoselect (-2 for O2, 0 for standalone))")
 AddOption(allocDebugLevel, int32_t, 0, "allocDebug", 0, "Some debug output for memory allocations (without messing with normal debug level)")
 AddOption(debugMask, uint32_t, 262143, "", 0, "Mask for debug output dumps to file")
+AddOption(debugLogSuffix, std::string, "", "debugSuffix", 0, "Suffix for debug log files with --debug 6")
 AddOption(serializeGPU, int8_t, 0, "", 0, "Synchronize after each kernel call (bit 1) and DMA transfer (bit 2) and identify failures")
 AddOption(recoTaskTiming, bool, 0, "", 0, "Perform summary timing after whole reconstruction tasks")
 AddOption(deterministicGPUReconstruction, int32_t, -1, "", 0, "Make CPU and GPU debug output comparable (sort / skip concurrent parts), -1 = automatic if debugLevel >= 6", def(1))
