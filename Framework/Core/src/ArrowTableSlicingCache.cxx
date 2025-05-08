@@ -11,7 +11,6 @@
 
 #include "Framework/ArrowTableSlicingCache.h"
 #include "Framework/RuntimeError.h"
-#include "Framework/Logger.h"
 
 #include <arrow/compute/api_aggregate.h>
 #include <arrow/compute/kernel.h>
@@ -20,10 +19,10 @@
 namespace o2::framework
 {
 
-void updatePairList(Cache& list, std::string const& binding, std::string const& key, bool enabled = true)
+void updatePairList(std::vector<StringPair>& list, std::string const& binding, std::string const& key)
 {
-  if (std::find_if(list.begin(), list.end(), [&binding, &key](auto const& entry) { return (entry.binding == binding) && (entry.key == key); }) == list.end()) {
-    list.emplace_back(binding, key, enabled);
+  if (std::find_if(list.begin(), list.end(), [&binding, &key](auto const& entry) { return (entry.first == binding) && (entry.second == key); }) == list.end()) {
+    list.emplace_back(binding, key);
   }
 }
 
@@ -66,17 +65,17 @@ gsl::span<const int64_t> SliceInfoUnsortedPtr::getSliceFor(int value) const
   return {(*groups)[value].data(), (*groups)[value].size()};
 }
 
-void ArrowTableSlicingCacheDef::setCaches(Cache&& bsks)
+void ArrowTableSlicingCacheDef::setCaches(std::vector<StringPair>&& bsks)
 {
   bindingsKeys = bsks;
 }
 
-void ArrowTableSlicingCacheDef::setCachesUnsorted(Cache&& bsks)
+void ArrowTableSlicingCacheDef::setCachesUnsorted(std::vector<StringPair>&& bsks)
 {
   bindingsKeysUnsorted = bsks;
 }
 
-ArrowTableSlicingCache::ArrowTableSlicingCache(Cache&& bsks, Cache&& bsksUnsorted)
+ArrowTableSlicingCache::ArrowTableSlicingCache(std::vector<StringPair>&& bsks, std::vector<StringPair>&& bsksUnsorted)
   : bindingsKeys{bsks},
     bindingsKeysUnsorted{bsksUnsorted}
 {
@@ -87,7 +86,7 @@ ArrowTableSlicingCache::ArrowTableSlicingCache(Cache&& bsks, Cache&& bsksUnsorte
   groups.resize(bindingsKeysUnsorted.size());
 }
 
-void ArrowTableSlicingCache::setCaches(Cache&& bsks, Cache&& bsksUnsorted)
+void ArrowTableSlicingCache::setCaches(std::vector<StringPair>&& bsks, std::vector<StringPair>&& bsksUnsorted)
 {
   bindingsKeys = bsks;
   bindingsKeysUnsorted = bsksUnsorted;
@@ -112,7 +111,7 @@ arrow::Status ArrowTableSlicingCache::updateCacheEntry(int pos, std::shared_ptr<
   arrow::Datum value_counts;
   auto options = arrow::compute::ScalarAggregateOptions::Defaults();
   ARROW_ASSIGN_OR_RAISE(value_counts,
-                        arrow::compute::CallFunction("value_counts", {table->GetColumnByName(bindingsKeys[pos].key)},
+                        arrow::compute::CallFunction("value_counts", {table->GetColumnByName(bindingsKeys[pos].second)},
                                                      &options));
   auto pair = static_cast<arrow::StructArray>(value_counts.array());
   values[pos].reset();
@@ -129,11 +128,7 @@ arrow::Status ArrowTableSlicingCache::updateCacheEntryUnsorted(int pos, const st
   if (table->num_rows() == 0) {
     return arrow::Status::OK();
   }
-  auto& [b, k, e] = bindingsKeysUnsorted[pos];
-  if (!e) {
-    LOG(debug) << "Update of disabled cache requested";
-    return arrow::Status::OK();
-  }
+  auto& [b, k] = bindingsKeysUnsorted[pos];
   auto column = table->GetColumnByName(k);
   auto row = 0;
   for (auto iChunk = 0; iChunk < column->num_chunks(); ++iChunk) {
@@ -144,7 +139,7 @@ arrow::Status ArrowTableSlicingCache::updateCacheEntryUnsorted(int pos, const st
         if (std::find(valuesUnsorted[pos].begin(), valuesUnsorted[pos].end(), v) == valuesUnsorted[pos].end()) {
           valuesUnsorted[pos].push_back(v);
         }
-        if ((int)groups[pos].size() <= v) {
+        if (groups[pos].size() <= v) {
           groups[pos].resize(v + 1);
         }
         (groups[pos])[v].push_back(row);
@@ -156,7 +151,7 @@ arrow::Status ArrowTableSlicingCache::updateCacheEntryUnsorted(int pos, const st
   return arrow::Status::OK();
 }
 
-std::pair<int, bool> ArrowTableSlicingCache::getCachePos(const Entry& bindingKey) const
+std::pair<int, bool> ArrowTableSlicingCache::getCachePos(const StringPair& bindingKey) const
 {
   auto pos = getCachePosSortedFor(bindingKey);
   if (pos != -1) {
@@ -166,41 +161,41 @@ std::pair<int, bool> ArrowTableSlicingCache::getCachePos(const Entry& bindingKey
   if (pos != -1) {
     return {pos, false};
   }
-  throw runtime_error_f("%s/%s not found neither in sorted or unsorted cache", bindingKey.binding.c_str(), bindingKey.key.c_str());
+  throw runtime_error_f("%s/%s not found neither in sorted or unsorted cache", bindingKey.first.c_str(), bindingKey.second.c_str());
 }
 
-int ArrowTableSlicingCache::getCachePosSortedFor(Entry const& bindingKey) const
+int ArrowTableSlicingCache::getCachePosSortedFor(StringPair const& bindingKey) const
 {
-  auto locate = std::find_if(bindingsKeys.begin(), bindingsKeys.end(), [&](Entry const& bk) { return (bindingKey.binding == bk.binding) && (bindingKey.key == bk.key); });
+  auto locate = std::find_if(bindingsKeys.begin(), bindingsKeys.end(), [&](StringPair const& bk) { return (bindingKey.first == bk.first) && (bindingKey.second == bk.second); });
   if (locate != bindingsKeys.end()) {
     return std::distance(bindingsKeys.begin(), locate);
   }
   return -1;
 }
 
-int ArrowTableSlicingCache::getCachePosUnsortedFor(Entry const& bindingKey) const
+int ArrowTableSlicingCache::getCachePosUnsortedFor(StringPair const& bindingKey) const
 {
-  auto locate_unsorted = std::find_if(bindingsKeysUnsorted.begin(), bindingsKeysUnsorted.end(), [&](Entry const& bk) { return (bindingKey.binding == bk.binding) && (bindingKey.key == bk.key); });
+  auto locate_unsorted = std::find_if(bindingsKeysUnsorted.begin(), bindingsKeysUnsorted.end(), [&](StringPair const& bk) { return (bindingKey.first == bk.first) && (bindingKey.second == bk.second); });
   if (locate_unsorted != bindingsKeysUnsorted.end()) {
     return std::distance(bindingsKeysUnsorted.begin(), locate_unsorted);
   }
   return -1;
 }
-SliceInfoPtr ArrowTableSlicingCache::getCacheFor(Entry const& bindingKey) const
+SliceInfoPtr ArrowTableSlicingCache::getCacheFor(StringPair const& bindingKey) const
 {
   auto [p, s] = getCachePos(bindingKey);
   if (!s) {
-    throw runtime_error_f("%s/%s is found in unsorted cache", bindingKey.binding.c_str(), bindingKey.key.c_str());
+    throw runtime_error_f("%s/%s is found in unsorted cache", bindingKey.first.c_str(), bindingKey.second.c_str());
   }
 
   return getCacheForPos(p);
 }
 
-SliceInfoUnsortedPtr ArrowTableSlicingCache::getCacheUnsortedFor(const Entry& bindingKey) const
+SliceInfoUnsortedPtr ArrowTableSlicingCache::getCacheUnsortedFor(const StringPair& bindingKey) const
 {
   auto [p, s] = getCachePos(bindingKey);
   if (s) {
-    throw runtime_error_f("%s/%s is found in sorted cache", bindingKey.binding.c_str(), bindingKey.key.c_str());
+    throw runtime_error_f("%s/%s is found in sorted cache", bindingKey.first.c_str(), bindingKey.second.c_str());
   }
 
   return getCacheUnsortedForPos(p);
@@ -229,9 +224,9 @@ SliceInfoUnsortedPtr ArrowTableSlicingCache::getCacheUnsortedForPos(int pos) con
   };
 }
 
-void ArrowTableSlicingCache::validateOrder(Entry const& bindingKey, const std::shared_ptr<arrow::Table>& input)
+void ArrowTableSlicingCache::validateOrder(StringPair const& bindingKey, const std::shared_ptr<arrow::Table>& input)
 {
-  auto const& [target, key, enabled] = bindingKey;
+  auto const& [target, key] = bindingKey;
   auto column = input->GetColumnByName(key);
   auto array0 = static_cast<arrow::NumericArray<arrow::Int32Type>>(column->chunk(0)->data());
   int32_t prev = 0;

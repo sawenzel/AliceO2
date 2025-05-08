@@ -66,20 +66,20 @@ concept is_enumeration = is_enumeration_v<std::decay_t<T>>;
 namespace {
 struct AnalysisDataProcessorBuilder {
   template <typename G, typename... Args>
-  static void addGroupingCandidates(Cache& bk, Cache& bku, bool enabled)
+  static void addGroupingCandidates(std::vector<StringPair>& bk, std::vector<StringPair>& bku)
   {
-    [&bk, &bku, enabled]<typename... As>(framework::pack<As...>) mutable {
+    [&bk, &bku]<typename... As>(framework::pack<As...>) mutable {
       std::string key;
       if constexpr (soa::is_iterator<std::decay_t<G>>) {
         key = std::string{"fIndex"} + o2::framework::cutString(soa::getLabelFromType<std::decay_t<G>>());
       }
-      ([&bk, &bku, &key, enabled]() mutable {
+      ([&bk, &bku, &key]() mutable {
         if constexpr (soa::relatedByIndex<std::decay_t<G>, std::decay_t<As>>()) {
           auto binding = soa::getLabelFromTypeForKey<std::decay_t<As>>(key);
           if constexpr (o2::soa::is_smallgroups<std::decay_t<As>>) {
-            framework::updatePairList(bku, binding, key, enabled);
+            framework::updatePairList(bku, binding, key);
           } else {
-            framework::updatePairList(bk, binding, key, enabled);
+            framework::updatePairList(bk, binding, key);
           }
         }
       }(),
@@ -147,7 +147,7 @@ struct AnalysisDataProcessorBuilder {
   /// helper to parse the process arguments
   /// 1. enumeration (must be the only argument)
   template <typename R, typename C, is_enumeration A>
-  static void inputsFromArgs(R (C::*)(A), const char* /*name*/, bool /*value*/, std::vector<InputSpec>& inputs, std::vector<ExpressionInfo>&, Cache&, Cache&)
+  static void inputsFromArgs(R (C::*)(A), const char* /*name*/, bool /*value*/, std::vector<InputSpec>& inputs, std::vector<ExpressionInfo>&, std::vector<StringPair>&, std::vector<StringPair>&)
   {
     std::vector<ConfigParamSpec> inputMetadata;
     // FIXME: for the moment we do not support begin, end and step.
@@ -156,17 +156,17 @@ struct AnalysisDataProcessorBuilder {
 
   /// 2. grouping case - 1st argument is an iterator
   template <typename R, typename C, soa::is_iterator A, soa::is_table... Args>
-  static void inputsFromArgs(R (C::*)(A, Args...), const char* name, bool value, std::vector<InputSpec>& inputs, std::vector<ExpressionInfo>& eInfos, Cache& bk, Cache& bku)
+  static void inputsFromArgs(R (C::*)(A, Args...), const char* name, bool value, std::vector<InputSpec>& inputs, std::vector<ExpressionInfo>& eInfos, std::vector<StringPair>& bk, std::vector<StringPair>& bku)
     requires(std::is_lvalue_reference_v<A> && (std::is_lvalue_reference_v<Args> && ...))
   {
-    addGroupingCandidates<A, Args...>(bk, bku, value);
+    addGroupingCandidates<A, Args...>(bk, bku);
     constexpr auto hash = o2::framework::TypeIdHelpers::uniqueId<R (C::*)(A, Args...)>();
     addInputsAndExpressions<typename std::decay_t<A>::parent_t, Args...>(hash, name, value, inputs, eInfos);
   }
 
   /// 3. generic case
   template <typename R, typename C, soa::is_table... Args>
-  static void inputsFromArgs(R (C::*)(Args...), const char* name, bool value, std::vector<InputSpec>& inputs, std::vector<ExpressionInfo>& eInfos, Cache&, Cache&)
+  static void inputsFromArgs(R (C::*)(Args...), const char* name, bool value, std::vector<InputSpec>& inputs, std::vector<ExpressionInfo>& eInfos, std::vector<StringPair>&, std::vector<StringPair>&)
     requires(std::is_lvalue_reference_v<Args> && ...)
   {
     constexpr auto hash = o2::framework::TypeIdHelpers::uniqueId<R (C::*)(Args...)>();
@@ -480,8 +480,8 @@ DataProcessorSpec adaptAnalysisTask(ConfigContext const& ctx, Args&&... args)
   std::vector<InputSpec> inputs;
   std::vector<ConfigParamSpec> options;
   std::vector<ExpressionInfo> expressionInfos;
-  Cache bindingsKeys;
-  Cache bindingsKeysUnsorted;
+  std::vector<StringPair> bindingsKeys;
+  std::vector<StringPair> bindingsKeysUnsorted;
 
   /// make sure options and configurables are set before expression infos are created
   homogeneous_apply_refs([&options, &hash](auto& element) { return analysis_task_parsers::appendOption(options, element); }, *task.get());
