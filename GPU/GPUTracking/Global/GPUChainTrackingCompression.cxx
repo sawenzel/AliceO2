@@ -203,6 +203,10 @@ int32_t GPUChainTracking::RunTPCCompression()
     ((GPUChainTracking*)GetNextChainInQueue())->mRec->BlockStackedMemory(mRec);
   }
   mRec->PopNonPersistentMemory(RecoStep::TPCCompression, qStr2Tag("TPCCOMPR"));
+  if (GetProcessingSettings().deterministicGPUReconstruction) {
+    SynchronizeGPU();
+    DebugSortCompressedClusters(Compressor.mOutputFlat);
+  }
   DoDebugAndDump(RecoStep::TPCCompression, GPUChainTrackingDebugFlags::TPCCompressedClusters, Compressor, &GPUTPCCompression::DumpCompressedClusters, *mDebugFile);
   return 0;
 }

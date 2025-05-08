@@ -140,7 +140,7 @@ void GPUTPCCompression::DumpCompressedClusters(std::ostream& out)
   for (uint32_t i = 0; i < NSECTORS; i++) {
     out << "Sector " << i << ": ";
     for (uint32_t j = 0; j < GPUCA_ROW_COUNT; j++) {
-      out << O.nSliceRowClusters[i * GPUCA_ROW_COUNT + j] << ", ";
+      out << (O.nSliceRowClusters ? O.nSliceRowClusters[i * GPUCA_ROW_COUNT + j] : 0) << ", ";
     }
     out << "\n";
   }
@@ -153,18 +153,20 @@ void GPUTPCCompression::DumpCompressedClusters(std::ostream& out)
   }
   out << "\n\nUnattached Clusters\n";
   uint32_t offset = 0;
-  for (uint32_t i = 0; i < NSECTORS; i++) {
-    for (uint32_t j = 0; j < GPUCA_ROW_COUNT; j++) {
-      out << "Sector " << i << " Row " << j << ": ";
-      for (uint32_t k = 0; k < O.nSliceRowClusters[i * GPUCA_ROW_COUNT + j]; k++) {
-        if (k && k % 10 == 0) {
-          out << "\n    ";
+  if (O.nSliceRowClusters) {
+    for (uint32_t i = 0; i < NSECTORS; i++) {
+      for (uint32_t j = 0; j < GPUCA_ROW_COUNT; j++) {
+        out << "Sector " << i << " Row " << j << ": ";
+        for (uint32_t k = 0; k < O.nSliceRowClusters[i * GPUCA_ROW_COUNT + j]; k++) {
+          if (k && k % 10 == 0) {
+            out << "\n    ";
+          }
+          const uint32_t l = k + offset;
+          out << "[" << (uint32_t)O.qTotU[l] << ", " << (uint32_t)O.qMaxU[l] << ", " << (uint32_t)O.flagsU[l] << ", " << (int32_t)O.padDiffU[l] << ", " << (int32_t)O.timeDiffU[l] << ", " << (uint32_t)O.sigmaPadU[l] << ", " << (uint32_t)O.sigmaTimeU[l] << "] ";
         }
-        const uint32_t l = k + offset;
-        out << "[" << (uint32_t)O.qTotU[l] << ", " << (uint32_t)O.qMaxU[l] << ", " << (uint32_t)O.flagsU[l] << ", " << (int32_t)O.padDiffU[l] << ", " << (int32_t)O.timeDiffU[l] << ", " << (uint32_t)O.sigmaPadU[l] << ", " << (uint32_t)O.sigmaTimeU[l] << "] ";
+        offset += O.nSliceRowClusters[i * GPUCA_ROW_COUNT + j];
+        out << "\n";
       }
-      offset += O.nSliceRowClusters[i * GPUCA_ROW_COUNT + j];
-      out << "\n";
     }
   }
   out << "\n\nAttached Clusters\n";
@@ -175,7 +177,7 @@ void GPUTPCCompression::DumpCompressedClusters(std::ostream& out)
       if (k && k % 10 == 0) {
         out << "\n    ";
       }
-      const uint32_t l1 = k + offset, l2 = k + offset - i;
+      const uint32_t l1 = offset + k, l2 = offset - i + k - 1;
       out << "[";
       if (k) {
         out << (int32_t)O.rowDiffA[l2] << ", " << (int32_t)O.sliceLegDiffA[l2] << ", " << (uint32_t)O.padResA[l2] << ", " << (uint32_t)O.timeResA[l2] << ", ";
