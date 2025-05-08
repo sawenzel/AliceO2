@@ -69,8 +69,21 @@ void RawDecoderSpec::endOfStream(framework::EndOfStreamContext& ec)
     o0 = TFOrbits[i];
   }
   std::cout << std::endl;
-  std::cout << "Number of missing TF:" << nmiss << std::endl;
-  std::cout << "# of IR errors:" << mDecoder.getErrorIR() << " TCR errors:" << mDecoder.getErrorTCR() << std::endl;
+  LOG(info) << " Lost due to the shift:" << mDecoder.getLostDueToShift();
+  LOG(info) << "Number of missing TF:" << nmiss << std::endl;
+  if (mDecoder.getErrorIR() || mDecoder.getErrorTCR())
+    LOG(error) << "# of IR errors:" << mDecoder.getErrorIR() << " TCR errors:" << mDecoder.getErrorTCR() << std::endl;
+  std::array<uint64_t, o2::ctp::CTP_NCLASSES> clsA = mDecoder.getClassCountersA();
+  std::array<uint64_t, o2::ctp::CTP_NCLASSES> clsB = mDecoder.getClassCountersB();
+  std::array<uint64_t, o2::ctp::CTP_NCLASSES> clsEA = mDecoder.getClassErrorsA();
+  std::array<uint64_t, o2::ctp::CTP_NCLASSES> clsEB = mDecoder.getClassErrorsB();
+
+  for (int i = 0; i < o2::ctp::CTP_NCLASSES; i++) {
+    bool print = clsA[i] > 0 || clsB[i] > 0 || clsEA[i] > 0 || clsEB[i] > 0;
+    if (clsEA[i])
+      LOG(error) << " Class without inputs:";
+    LOG(important) << "CLASS:" << i << " Cls=>Inp:" << clsA[i] << " Inp=>Cls:" << clsB[i] << "  ErrorsCls=>Inps:" << clsEA[i] << "  MissingInps=>Cls:" << clsEB[i];
+  }
 }
 void RawDecoderSpec::run(framework::ProcessingContext& ctx)
 {

@@ -55,7 +55,12 @@ class RawDataDecoder
   int init();
   static int shiftNew(const o2::InteractionRecord& irin, uint32_t TFOrbit, std::bitset<48>& inpmask, int64_t shift, int level, std::map<o2::InteractionRecord, CTPDigit>& digmap);
   static int shiftInputs(std::map<o2::InteractionRecord, CTPDigit>& digitsMap, o2::pmr::vector<CTPDigit>& digits, uint32_t TFOrbit, uint64_t trgclassmask = 0xffffffffffffffff);
-  int checkReadoutConsistentncy(o2::pmr::vector<CTPDigit>& digits, uint64_t trgclassmask = 0xffffffffffffffff);
+  int checkReadoutConsistentncy(o2::pmr::vector<CTPDigit>& digits, uint64_t trgclassmask = 0xffffffffffffffff, uint64_t trigclassmaskNoTrgDets = 0xffffffffffffffff);
+  std::array<uint64_t, o2::ctp::CTP_NCLASSES> getClassErrorsA() { return mClassErrorsA; }
+  std::array<uint64_t, o2::ctp::CTP_NCLASSES> getClassErrorsB() { return mClassErrorsB; }
+  std::array<uint64_t, o2::ctp::CTP_NCLASSES> getClassCountersA() { return mClassCountersA; }
+  std::array<uint64_t, o2::ctp::CTP_NCLASSES> getClassCountersB() { return mClassCountersB; }
+  int getLostDueToShift() { return mLostDueToShift; }
 
  private:
   static constexpr uint32_t TF_TRIGGERTYPE_MASK = 0x800;
@@ -83,8 +88,13 @@ class RawDataDecoder
   // error verbosness
   int mErrorIR = 0;
   int mErrorTCR = 0;
-  int mErrorMax = 3;
+  int mErrorMax = 5;
   bool mStickyError = false;
+  std::array<uint64_t, o2::ctp::CTP_NCLASSES> mClassErrorsA{};
+  std::array<uint64_t, o2::ctp::CTP_NCLASSES> mClassErrorsB{}; // from inputs
+  std::array<uint64_t, o2::ctp::CTP_NCLASSES> mClassCountersA{};
+  std::array<uint64_t, o2::ctp::CTP_NCLASSES> mClassCountersB{}; // from inputs
+  int mLostDueToShift = 0;
   CTPConfiguration mCTPConfig;
 };
 } // namespace ctp
