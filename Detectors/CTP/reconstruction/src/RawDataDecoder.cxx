@@ -302,8 +302,7 @@ int RawDataDecoder::decodeRaw(o2::framework::InputRecord& inputs, std::vector<o2
     }
     // std::cout << "trgclassmask:" << std::hex << trgclassmask << std::dec << std::endl;
     ret = shiftInputs(digitsMap, digits, mTFOrbit);
-    // if (mCheckConsistency) {
-    if (1) {
+    if (mCheckConsistency) {
       ret = checkReadoutConsistentncy(digits, trgclassmask, trgclassmaskNOTRGDet);
     }
   }
