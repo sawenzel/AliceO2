@@ -1594,7 +1594,7 @@ void RecoContainer::getTrackTimeITSTPCTRD(GTrackID gid, float& t, float& tErr) c
 //________________________________________________________
 void RecoContainer::getTrackTimeTPCTRD(GTrackID gid, float& t, float& tErr) const
 {
-  const auto trigTPCTRD = getITSTPCTRDTriggers();
+  const auto trigTPCTRD = getTPCTRDTriggers();
   // very slow: find the trigger this track belongs to
   for (const auto& trig : trigTPCTRD) {
     if (trig.getTrackRefs().getEntriesBound() > gid.getIndex()) {
