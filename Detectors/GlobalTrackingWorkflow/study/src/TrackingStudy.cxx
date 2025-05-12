@@ -503,6 +503,7 @@ void TrackingStudySpec::process(o2::globaltracking::RecoContainer& recoData)
               }
             }
             fillTPCClInfo(*tpcTr, trcExt, tsuse);
+            trcExt.chi2TPC = tpcTr->getChi2();
           }
           auto gidRefs = recoData.getSingleDetectorRefs(vid);
           if (gidRefs[GTrackID::ITS].isIndexSet()) {
