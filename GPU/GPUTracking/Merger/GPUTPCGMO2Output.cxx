@@ -106,6 +106,7 @@ GPUdii() void GPUTPCGMO2Output::Thread<GPUTPCGMO2Output::output>(int32_t nBlocks
   const uint32_t flagsRequired = getFlagsRequired(merger.Param().rec);
   TrackTPC* outputTracks = merger.OutputTracksTPCO2();
   uint32_t* clusRefs = merger.OutputClusRefsTPCO2();
+  const auto& param = merger.Param();
 
   GPUTPCGMMerger::tmpSort* GPUrestrict() trackSort = merger.TrackSortO2();
   uint2* GPUrestrict() tmpData = merger.ClusRefTmp();
@@ -130,9 +131,15 @@ GPUdii() void GPUTPCGMO2Output::Thread<GPUTPCGMO2Output::output>(int32_t nBlocks
 
     oTrack.setChi2(tracks[i].GetParam().GetChi2());
     auto& outerPar = tracks[i].OuterParam();
-    if (merger.Param().par.dodEdx && merger.Param().dodEdxEnabled) {
-      oTrack.setdEdx(tracksdEdx[i]);
-      oTrack.setdEdxAlt(tracksdEdxAlt[i]);
+    if GPUCA_RTC_CONSTEXPR (param.par.dodEdx) {
+      if (param.dodEdxEnabled) {
+        oTrack.setdEdx(tracksdEdx[i]);
+        if GPUCA_RTC_CONSTEXPR (param.rec.tpc.dEdxClusterRejectionFlagMask != param.rec.tpc.dEdxClusterRejectionFlagMaskAlt) {
+          oTrack.setdEdxAlt(tracksdEdxAlt[i]);
+        } else {
+          oTrack.setdEdxAlt(tracksdEdx[i]);
+        }
+      }
     }
 
     auto snpOut = outerPar.P[2];
@@ -148,9 +155,9 @@ GPUdii() void GPUTPCGMO2Output::Thread<GPUTPCGMO2Output::output>(int32_t nBlocks
        outerPar.C[6], outerPar.C[7], outerPar.C[8], outerPar.C[9], outerPar.C[10], outerPar.C[11],
        outerPar.C[12], outerPar.C[13], outerPar.C[14]}));
 
-    if (merger.Param().par.dodEdx && merger.Param().dodEdxEnabled && merger.Param().rec.tpc.enablePID) {
+    if (param.par.dodEdx && param.dodEdxEnabled && param.rec.tpc.enablePID) {
       PIDResponse pidResponse{};
-      auto pid = pidResponse.getMostProbablePID(oTrack, merger.Param().rec.tpc.PID_EKrangeMin, merger.Param().rec.tpc.PID_EKrangeMax, merger.Param().rec.tpc.PID_EPrangeMin, merger.Param().rec.tpc.PID_EPrangeMax, merger.Param().rec.tpc.PID_EDrangeMin, merger.Param().rec.tpc.PID_EDrangeMax, merger.Param().rec.tpc.PID_ETrangeMin, merger.Param().rec.tpc.PID_ETrangeMax, merger.Param().rec.tpc.PID_useNsigma, merger.Param().rec.tpc.PID_sigma);
+      auto pid = pidResponse.getMostProbablePID(oTrack, param.rec.tpc.PID_EKrangeMin, param.rec.tpc.PID_EKrangeMax, param.rec.tpc.PID_EPrangeMin, param.rec.tpc.PID_EPrangeMax, param.rec.tpc.PID_EDrangeMin, param.rec.tpc.PID_EDrangeMax, param.rec.tpc.PID_ETrangeMin, merger.Param().rec.tpc.PID_ETrangeMax, merger.Param().rec.tpc.PID_useNsigma, merger.Param().rec.tpc.PID_sigma);
       auto pidRemap = merger.Param().rec.tpc.PID_remap[pid];
       if (pidRemap >= 0) {
         pid = pidRemap;

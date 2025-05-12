@@ -301,7 +301,9 @@ void* GPUTPCGMMerger::SetPointersOutput(void* mem)
   computePointerWithAlignment(mem, mOutputTracks, mNMaxTracks);
   if (mRec->GetParam().dodEdxEnabled) {
     computePointerWithAlignment(mem, mOutputTracksdEdx, mNMaxTracks);
-    computePointerWithAlignment(mem, mOutputTracksdEdxAlt, mNMaxTracks);
+    if (mRec->GetParam().rec.tpc.dEdxClusterRejectionFlagMask != mRec->GetParam().rec.tpc.dEdxClusterRejectionFlagMaskAlt) {
+      computePointerWithAlignment(mem, mOutputTracksdEdxAlt, mNMaxTracks);
+    }
   }
   computePointerWithAlignment(mem, mClusters, mNMaxOutputTrackClusters);
   if (mRec->GetParam().par.earlyTpcTransform) {
