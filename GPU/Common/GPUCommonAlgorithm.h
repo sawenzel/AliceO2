@@ -282,30 +282,27 @@ GPUdi() void GPUCommonAlgorithm::sortInBlock(T* begin, T* end, const S& comp)
 {
 #ifndef GPUCA_GPUCODE
   GPUCommonAlgorithm::sort(begin, end, comp);
+#elif defined(GPUCA_DETERMINISTIC_MODE) // Not using GPUCA_DETERMINISTIC_CODE, which is enforced in TPC compression
+  if (get_local_id(0) == 0) {
+    GPUCommonAlgorithm::sort(begin, end, comp);
+  }
+  GPUbarrier();
 #else
-  GPUCA_DETERMINISTIC_CODE( // clang-format off
-    GPUbarrier();
-    if (get_local_id(0) == 0) {
-      GPUCommonAlgorithm::sort(begin, end, comp);
-    }
-    GPUbarrier();
-  , // !GPUCA_DETERMINISTIC_CODE
-    int32_t n = end - begin;
-    for (int32_t i = 0; i < n; i++) {
-      for (int32_t tIdx = get_local_id(0); tIdx < n; tIdx += get_local_size(0)) {
-        int32_t offset = i % 2;
-        int32_t curPos = 2 * tIdx + offset;
-        int32_t nextPos = curPos + 1;
+  int32_t n = end - begin;
+  for (int32_t i = 0; i < n; i++) {
+    for (int32_t tIdx = get_local_id(0); tIdx < n; tIdx += get_local_size(0)) {
+      int32_t offset = i % 2;
+      int32_t curPos = 2 * tIdx + offset;
+      int32_t nextPos = curPos + 1;
 
-        if (nextPos < n) {
-          if (!comp(begin[curPos], begin[nextPos])) {
-            IterSwap(&begin[curPos], &begin[nextPos]);
-          }
+      if (nextPos < n) {
+        if (!comp(begin[curPos], begin[nextPos])) {
+          IterSwap(&begin[curPos], &begin[nextPos]);
         }
       }
-      GPUbarrier();
     }
-  ) // clang-format on
+    GPUbarrier();
+  }
 #endif
 }
 
