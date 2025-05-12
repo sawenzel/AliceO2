@@ -85,11 +85,11 @@ void TableBuilder::setLabel(const char* label)
 }
 
 std::shared_ptr<arrow::Table> spawnerHelper(std::shared_ptr<arrow::Table> const& fullTable, std::shared_ptr<arrow::Schema> newSchema, size_t nColumns,
-                                            expressions::Projector* projectors, std::vector<std::shared_ptr<arrow::Field>> const& fields, const char* name,
+                                            expressions::Projector* projectors, const char* name,
                                             std::shared_ptr<gandiva::Projector>& projector)
 {
   if (projector == nullptr) {
-    projector = framework::expressions::createProjectorHelper(nColumns, projectors, fullTable->schema(), fields);
+    projector = framework::expressions::createProjectorHelper(nColumns, projectors, fullTable->schema(), newSchema->fields());
   }
 
   arrow::TableBatchReader reader(*fullTable);
