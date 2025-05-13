@@ -1948,7 +1948,7 @@ GPUd() void GPUTPCGMMerger::MergeLoopersSort(int32_t nBlocks, int32_t nThreads, 
   if (iThread || iBlock) {
     return;
   }
-  auto comp = [](const MergeLooperParam& a, const MergeLooperParam& b) { return CAMath::Abs(a.refz) < CAMath::Abs(b.refz); };
+  auto comp = [](const MergeLooperParam& a, const MergeLooperParam& b) { return GPUCA_DETERMINISTIC_CODE(CAMath::Abs(a.refz) != CAMath::Abs(b.refz) ? CAMath::Abs(a.refz) < CAMath::Abs(b.refz) : a.id < b.id, CAMath::Abs(a.refz) < CAMath::Abs(b.refz)); };
   GPUCommonAlgorithm::sortDeviceDynamic(mLooperCandidates, mLooperCandidates + mMemory->nLooperMatchCandidates, comp);
 #endif
 }

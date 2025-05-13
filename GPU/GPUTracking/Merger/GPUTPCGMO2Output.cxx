@@ -88,7 +88,7 @@ GPUdii() void GPUTPCGMO2Output::Thread<GPUTPCGMO2Output::sort>(int32_t nBlocks, 
     return;
   }
   GPUTPCGMMerger::tmpSort* GPUrestrict() trackSort = merger.TrackSortO2();
-  auto comp = [](const auto& a, const auto& b) { return (a.y > b.y); };
+  auto comp = [](const auto& a, const auto& b) { return GPUCA_DETERMINISTIC_CODE(a.y != b.y ? a.y > b.y : a.x > b.x, a.y > b.y); };
   GPUCommonAlgorithm::sortDeviceDynamic(trackSort, trackSort + merger.Memory()->nO2Tracks, comp);
 #endif
 }
