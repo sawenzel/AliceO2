@@ -204,9 +204,22 @@ void GPUTPCGMMerger::DumpRefit(std::ostream& out) const
     const auto& po = trk.OuterParam();
     out << "  Track " << i << ": OK " << trk.OK() << " Alpha " << trk.GetAlpha() << " X " << p.GetX() << " offset " << p.GetTZOffset() << " Y " << p.GetY() << " Z " << p.GetZ() << " SPhi " << p.GetSinPhi() << " Tgl " << p.GetDzDs() << " QPt " << p.GetQPt() << " NCl " << trk.NClusters() << " / " << trk.NClustersFitted() << " Cov " << p.GetErr2Y() << "/" << p.GetErr2Z()
         << " dEdx " << (trk.OK() && Param().dodEdxEnabled ? mOutputTracksdEdx[i].dEdxTotTPC : -1.f) << "/" << (trk.OK() && Param().dodEdxEnabled ? mOutputTracksdEdx[i].dEdxMaxTPC : -1.f)
-        << " Outer " << po.P[0] << "/" << po.P[1] << "/" << po.P[2] << "/" << po.P[3] << "/" << po.P[4] << "\n";
+        << " Outer " << po.P[0] << "/" << po.P[1] << "/" << po.P[2] << "/" << po.P[3] << "/" << po.P[4]
+        << " NFitted " << trk.NClustersFitted() << " legs " << (int)trk.Legs() << " flags " << (int)trk.Flags() << "\n";
   }
   out << std::setprecision(ss);
+}
+
+void GPUTPCGMMerger::DumpLoopers(std::ostream& out) const
+{
+  out << "\n TPC Merger Looper Afterburner\n";
+  for (uint32_t i = 0; i < mMemory->nMergedTracks; i++) {
+    if (i && i % 100 == 0) {
+      out << "\n";
+    }
+    out << (int)mOutputTracks[i].MergedLooper() << " ";
+  }
+  out << "\n";
 }
 
 void GPUTPCGMMerger::DumpFinal(std::ostream& out) const

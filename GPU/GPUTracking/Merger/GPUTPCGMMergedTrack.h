@@ -95,6 +95,7 @@ class GPUTPCGMMergedTrack
   GPUd() void SetFlags(uint8_t v) { mFlags = v; }
   GPUd() void SetLegs(uint8_t v) { mLegs = v; }
   GPUd() uint8_t Legs() const { return mLegs; }
+  GPUd() uint8_t Flags() const { return mFlags; }
 
   GPUd() const gputpcgmmergertypes::GPUTPCOuterParam& OuterParam() const { return mOuterParam; }
   GPUd() gputpcgmmergertypes::GPUTPCOuterParam& OuterParam() { return mOuterParam; }

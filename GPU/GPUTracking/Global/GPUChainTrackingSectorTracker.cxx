@@ -176,7 +176,9 @@ int32_t GPUChainTracking::RunTPCTrackingSectors_internal()
     }
 
     if (GetProcessingSettings().debugLevel >= 6) {
-      *mDebugFile << "\n\nReconstruction: Sector " << iSector << "/" << NSECTORS << std::endl;
+      if ((GetProcessingSettings().debugMask & 63)) {
+        *mDebugFile << "\n\nReconstruction: Sector " << iSector << "/" << NSECTORS << std::endl;
+      }
       if (GetProcessingSettings().debugMask & GPUChainTrackingDebugFlags::TPCSectorTrackingData) {
         if (doGPU) {
           TransferMemoryResourcesToHost(RecoStep::TPCSectorTracking, &trk, -1, true);
