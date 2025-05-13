@@ -615,8 +615,9 @@ int RawDataDecoder::checkReadoutConsistentncy(o2::pmr::vector<CTPDigit>& digits,
           continue;
         }
         mClassCountersA[i]++;
-        if (cls->descriptor == nullptr)
+        if (cls->descriptor == nullptr) {
           continue;
+        }
         uint64_t clsinpmask = cls->descriptor->getInputsMask();
         uint64_t diginpmask = digit.CTPInputMask.to_ullong();
         if (!((clsinpmask & diginpmask) == clsinpmask)) {
@@ -632,8 +633,9 @@ int RawDataDecoder::checkReadoutConsistentncy(o2::pmr::vector<CTPDigit>& digits,
     // if inps => class mask
     for (auto const& cls : mCTPConfig.getCTPClasses()) {
       // cls.printStream(std::cout);
-      if (cls.descriptor == nullptr)
+      if (cls.descriptor == nullptr) {
         continue;
+      }
       uint64_t clsinpmask = cls.descriptor->getInputsMask(); // class definition
       uint64_t diginpmask = digit.CTPInputMask.to_ullong();
       uint64_t digclsmask = digit.CTPClassMask.to_ullong();
