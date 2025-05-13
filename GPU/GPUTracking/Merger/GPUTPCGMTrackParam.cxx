@@ -39,6 +39,7 @@
 #include "GPUTPCConvertImpl.h"
 #include "GPUTPCGMMergerTypes.h"
 #include "GPUParam.inc"
+#include "GPUGetConstexpr.h"
 
 #ifdef GPUCA_CADEBUG_ENABLED
 #include "../utils/qconfig.h"
@@ -216,12 +217,12 @@ GPUd() bool GPUTPCGMTrackParam::Fit(GPUTPCGMMerger* GPUrestrict() merger, int32_
           continue;
         }
       } else if (allowModification && lastRow != 255 && CAMath::Abs(cluster.row - lastRow) > 1) {
-        if GPUCA_RTC_CONSTEXPR (param.par.dodEdx) {
+        if GPUCA_RTC_CONSTEXPR (GPUCA_GET_CONSTEXPR(param.par, dodEdx)) {
           bool dodEdx = param.dodEdxEnabled && param.rec.tpc.adddEdxSubThresholdClusters && iWay == nWays - 1 && CAMath::Abs(cluster.row - lastRow) == 2 && cluster.leg == clusters[maxN - 1].leg;
           dodEdx = AttachClustersPropagate(merger, cluster.sector, lastRow, cluster.row, iTrk, cluster.leg == clusters[maxN - 1].leg, prop, inFlyDirection, GPUCA_MAX_SIN_PHI, dodEdx);
           if (dodEdx) {
             dEdx.fillSubThreshold(lastRow - wayDirection);
-            if GPUCA_RTC_CONSTEXPR (param.rec.tpc.dEdxClusterRejectionFlagMask != param.rec.tpc.dEdxClusterRejectionFlagMaskAlt) {
+            if GPUCA_RTC_CONSTEXPR (GPUCA_GET_CONSTEXPR(param.rec.tpc, dEdxClusterRejectionFlagMask) != GPUCA_GET_CONSTEXPR(param.rec.tpc, dEdxClusterRejectionFlagMaskAlt)) {
               dEdxAlt.fillSubThreshold(lastRow - wayDirection);
             }
           }
@@ -371,7 +372,7 @@ GPUd() bool GPUTPCGMTrackParam::Fit(GPUTPCGMMerger* GPUrestrict() merger, int32_
           CADEBUG(printf("Reinit linearization\n"));
           prop.SetTrack(this, prop.GetAlpha());
         }
-        if GPUCA_RTC_CONSTEXPR (param.par.dodEdx) {
+        if GPUCA_RTC_CONSTEXPR (GPUCA_GET_CONSTEXPR(param.par, dodEdx)) {
           if (param.dodEdxEnabled && iWay == nWays - 1 && cluster.leg == clusters[maxN - 1].leg) { // TODO: Costimize flag to remove, and option to remove double-clusters
             bool acc = (clusterState & param.rec.tpc.dEdxClusterRejectionFlagMask) == 0, accAlt = (clusterState & param.rec.tpc.dEdxClusterRejectionFlagMaskAlt) == 0;
             if (acc || accAlt) {
@@ -395,7 +396,7 @@ GPUd() bool GPUTPCGMTrackParam::Fit(GPUTPCGMMerger* GPUrestrict() merger, int32_
               if (acc) {
                 dEdx.fillCluster(qtot, qmax, cluster.row, cluster.sector, mP[2], mP[3], merger->GetConstantMem()->calibObjects, zz, pad, relTime);
               }
-              if GPUCA_RTC_CONSTEXPR (param.rec.tpc.dEdxClusterRejectionFlagMask != param.rec.tpc.dEdxClusterRejectionFlagMaskAlt) {
+              if GPUCA_RTC_CONSTEXPR (GPUCA_GET_CONSTEXPR(param.rec.tpc, dEdxClusterRejectionFlagMask) != GPUCA_GET_CONSTEXPR(param.rec.tpc, dEdxClusterRejectionFlagMaskAlt)) {
                 if (accAlt) {
                   dEdxAlt.fillCluster(qtot, qmax, cluster.row, cluster.sector, mP[2], mP[3], merger->GetConstantMem()->calibObjects, zz, pad, relTime);
                 }
@@ -436,7 +437,7 @@ GPUd() bool GPUTPCGMTrackParam::Fit(GPUTPCGMMerger* GPUrestrict() merger, int32_
 
   if (param.par.dodEdx && param.dodEdxEnabled) {
     dEdx.computedEdx(merger->MergedTracksdEdx()[iTrk], param);
-    if GPUCA_RTC_CONSTEXPR (param.rec.tpc.dEdxClusterRejectionFlagMask != param.rec.tpc.dEdxClusterRejectionFlagMaskAlt) {
+    if GPUCA_RTC_CONSTEXPR (GPUCA_GET_CONSTEXPR(param.rec.tpc, dEdxClusterRejectionFlagMask) != GPUCA_GET_CONSTEXPR(param.rec.tpc, dEdxClusterRejectionFlagMaskAlt)) {
       dEdxAlt.computedEdx(merger->MergedTracksdEdxAlt()[iTrk], param);
     }
   }

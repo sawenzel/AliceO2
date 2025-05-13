@@ -20,6 +20,7 @@
 #include "DataFormatsTPC/PIDResponse.h"
 #include "TPCFastTransform.h"
 #include "CorrectionMapsHelper.h"
+#include "GPUGetConstexpr.h"
 
 #ifndef GPUCA_GPUCODE
 #include "SimulationDataFormat/ConstMCTruthContainer.h"
@@ -141,10 +142,10 @@ GPUdii() void GPUTPCGMO2Output::Thread<GPUTPCGMO2Output::output>(int32_t nBlocks
 
     oTrack.setChi2(tracks[i].GetParam().GetChi2());
     auto& outerPar = tracks[i].OuterParam();
-    if GPUCA_RTC_CONSTEXPR (param.par.dodEdx) {
+    if GPUCA_RTC_CONSTEXPR (GPUCA_GET_CONSTEXPR(param.par, dodEdx)) {
       if (param.dodEdxEnabled) {
         oTrack.setdEdx(tracksdEdx[i]);
-        if GPUCA_RTC_CONSTEXPR (param.rec.tpc.dEdxClusterRejectionFlagMask != param.rec.tpc.dEdxClusterRejectionFlagMaskAlt) {
+        if GPUCA_RTC_CONSTEXPR (GPUCA_GET_CONSTEXPR(param.rec.tpc, dEdxClusterRejectionFlagMask) != GPUCA_GET_CONSTEXPR(param.rec.tpc, dEdxClusterRejectionFlagMaskAlt)) {
           oTrack.setdEdxAlt(tracksdEdxAlt[i]);
         } else {
           oTrack.setdEdxAlt(tracksdEdx[i]);
