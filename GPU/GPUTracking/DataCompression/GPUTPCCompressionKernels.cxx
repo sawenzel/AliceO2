@@ -201,7 +201,7 @@ GPUdii() void GPUTPCCompressionKernels::Thread<GPUTPCCompressionKernels::step1un
     const uint32_t iSector = iSectorRow / GPUCA_ROW_COUNT;
     const uint32_t iRow = iSectorRow % GPUCA_ROW_COUNT;
     const uint32_t idOffset = clusters->clusterOffset[iSector][iRow];
-    const uint32_t idOffsetOut = clusters->clusterOffset[iSector][iRow] * compressor.mMaxClusterFactorBase1024 / 1024;
+    const uint32_t idOffsetOut = clusters->clusterOffset[iSector][iRow] * compressor.mMaxClusterFactorBase1024 / 1024;                           // 32 bit enough for number of clusters per row * 1024
     const uint32_t idOffsetOutMax = ((const uint32_t*)clusters->clusterOffset[iSector])[iRow + 1] * compressor.mMaxClusterFactorBase1024 / 1024; // Array out of bounds access is ok, since it goes to the correct nClustersTotal
     if (iThread == nThreads - 1) {
       smem.nCount = 0;
@@ -214,7 +214,7 @@ GPUdii() void GPUTPCCompressionKernels::Thread<GPUTPCCompressionKernels::step1un
     const uint32_t nn = CAMath::nextMultipleOf<GPUCA_GET_THREAD_COUNT(GPUCA_LB_GPUTPCCompressionKernels_step1unattached)>(clusters->nClusters[iSector][iRow]);
     for (uint32_t i = iThread; i < nn + nThreads; i += nThreads) {
       const int32_t idx = idOffset + i;
-      int32_t cidx = 0;
+      int32_t storeCluster = 0;
       do {
         if (i >= clusters->nClusters[iSector][iRow]) {
           break;
@@ -239,13 +239,13 @@ GPUdii() void GPUTPCCompressionKernels::Thread<GPUTPCCompressionKernels::step1un
             break;
           }
         }
-        cidx = 1;
+        storeCluster = 1;
       } while (false);
 
       GPUbarrier();
-      int32_t myIndex = work_group_scan_inclusive_add(cidx);
+      int32_t myIndex = work_group_scan_inclusive_add(storeCluster);
       int32_t storeLater = -1;
-      if (cidx) {
+      if (storeCluster) {
         if (smem.nCount + myIndex <= GPUCA_TPC_COMP_CHUNK_SIZE) {
           sortBuffer[smem.nCount + myIndex - 1] = i;
         } else {

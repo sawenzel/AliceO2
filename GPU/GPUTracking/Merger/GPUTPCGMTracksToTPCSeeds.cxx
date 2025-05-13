@@ -34,7 +34,7 @@ void GPUTPCGMTracksToTPCSeeds::CreateSeedsFromHLTTracks(TObjArray* seeds, AliTPC
   }
   seeds->Clear();
   int32_t index = 0;
-  for (int32_t i = 0; i < merger->NOutputTracks(); i++) {
+  for (int32_t i = 0; i < merger->NMergedTracks(); i++) {
     const GPUTPCGMMergedTrack& track = merger->OutputTracks()[i];
     if (!track.OK()) {
       continue;
@@ -112,7 +112,7 @@ void GPUTPCGMTracksToTPCSeeds::UpdateParamsOuter(TObjArray* seeds)
     return;
   }
   int32_t index = 0;
-  for (int32_t i = 0; i < merger->NOutputTracks(); i++) {
+  for (int32_t i = 0; i < merger->NMergedTracks(); i++) {
     const GPUTPCGMMergedTrack& track = merger->OutputTracks()[i];
     if (!track.OK()) {
       continue;
@@ -134,7 +134,7 @@ void GPUTPCGMTracksToTPCSeeds::UpdateParamsInner(TObjArray* seeds)
     return;
   }
   int32_t index = 0;
-  for (int32_t i = 0; i < merger->NOutputTracks(); i++) {
+  for (int32_t i = 0; i < merger->NMergedTracks(); i++) {
     const GPUTPCGMMergedTrack& track = merger->OutputTracks()[i];
     if (!track.OK()) {
       continue;

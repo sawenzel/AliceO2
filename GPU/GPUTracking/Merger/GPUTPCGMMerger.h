@@ -69,7 +69,7 @@ class GPUTPCGMMerger : public GPUProcessor
     GPUAtomic(uint32_t) nRetryRefit;
     GPUAtomic(uint32_t) nLoopData;
     GPUAtomic(uint32_t) nUnpackedTracks;
-    GPUAtomic(uint32_t) nOutputTracks;
+    GPUAtomic(uint32_t) nMergedTracks;
     GPUAtomic(uint32_t) nOutputTrackClusters;
     GPUAtomic(uint32_t) nO2Tracks;
     GPUAtomic(uint32_t) nO2ClusRefs;
@@ -103,7 +103,7 @@ class GPUTPCGMMerger : public GPUProcessor
   void* SetPointersOutputState(void* mem);
   void* SetPointersMemory(void* mem);
 
-  GPUhdi() int32_t NOutputTracks() const { return mMemory->nOutputTracks; }
+  GPUhdi() int32_t NMergedTracks() const { return mMemory->nMergedTracks; }
   GPUhdi() const GPUTPCGMMergedTrack* OutputTracks() const { return mOutputTracks; }
   GPUhdi() GPUTPCGMMergedTrack* OutputTracks() { return mOutputTracks; }
   GPUhdi() const GPUdEdxInfo* OutputTracksdEdx() const { return mOutputTracksdEdx; }

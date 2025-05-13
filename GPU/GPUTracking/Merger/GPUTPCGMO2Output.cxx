@@ -38,7 +38,7 @@ template <>
 GPUdii() void GPUTPCGMO2Output::Thread<GPUTPCGMO2Output::prepare>(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& smem, processorType& GPUrestrict() merger)
 {
   const GPUTPCGMMergedTrack* tracks = merger.OutputTracks();
-  const uint32_t nTracks = merger.NOutputTracks();
+  const uint32_t nTracks = merger.NMergedTracks();
   const GPUTPCGMMergedTrackHit* trackClusters = merger.Clusters();
   const GPUdEdxInfo* tracksdEdx = merger.OutputTracksdEdx();
 

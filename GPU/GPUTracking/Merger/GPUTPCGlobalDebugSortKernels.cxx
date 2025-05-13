@@ -100,7 +100,7 @@ GPUdii() void GPUTPCGlobalDebugSortKernels::Thread<GPUTPCGlobalDebugSortKernels:
     return;
   }
   int32_t* GPUrestrict() tmp = merger.TmpSortMemory();
-  const int32_t n = merger.NOutputTracks();
+  const int32_t n = merger.NMergedTracks();
   for (int32_t j = 0; j < n; j++) {
     tmp[j] = j;
   }
@@ -117,7 +117,7 @@ GPUdii() void GPUTPCGlobalDebugSortKernels::Thread<GPUTPCGlobalDebugSortKernels:
   if (iBlock) {
     return;
   }
-  const int32_t n = merger.NOutputTracks();
+  const int32_t n = merger.NMergedTracks();
   int32_t* GPUrestrict() tmp = merger.TmpSortMemory();
   int32_t* GPUrestrict() tmp2 = tmp + n;
   if (iThread == 0) {
