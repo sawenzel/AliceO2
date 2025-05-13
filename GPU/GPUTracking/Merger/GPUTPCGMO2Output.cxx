@@ -49,10 +49,10 @@ struct GPUTPCGMO2OutputSort_comp {
 template <>
 GPUdii() void GPUTPCGMO2Output::Thread<GPUTPCGMO2Output::prepare>(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& smem, processorType& GPUrestrict() merger)
 {
-  const GPUTPCGMMergedTrack* tracks = merger.OutputTracks();
+  const GPUTPCGMMergedTrack* tracks = merger.MergedTracks();
   const uint32_t nTracks = merger.NMergedTracks();
   const GPUTPCGMMergedTrackHit* trackClusters = merger.Clusters();
-  const GPUdEdxInfo* tracksdEdx = merger.OutputTracksdEdx();
+  const GPUdEdxInfo* tracksdEdx = merger.MergedTracksdEdx();
 
   constexpr uint8_t flagsReject = getFlagsReject();
   const uint32_t flagsRequired = getFlagsRequired(merger.Param().rec);
@@ -107,9 +107,9 @@ template <>
 GPUdii() void GPUTPCGMO2Output::Thread<GPUTPCGMO2Output::output>(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& smem, processorType& GPUrestrict() merger)
 {
   constexpr float MinDelta = 0.1f;
-  const GPUTPCGMMergedTrack* tracks = merger.OutputTracks();
-  GPUdEdxInfo* tracksdEdx = merger.OutputTracksdEdx();
-  GPUdEdxInfo* tracksdEdxAlt = merger.OutputTracksdEdxAlt();
+  const GPUTPCGMMergedTrack* tracks = merger.MergedTracks();
+  GPUdEdxInfo* tracksdEdx = merger.MergedTracksdEdx();
+  GPUdEdxInfo* tracksdEdxAlt = merger.MergedTracksdEdxAlt();
   const int32_t nTracks = merger.NOutputTracksTPCO2();
   const GPUTPCGMMergedTrackHit* trackClusters = merger.Clusters();
   constexpr uint8_t flagsReject = getFlagsReject();

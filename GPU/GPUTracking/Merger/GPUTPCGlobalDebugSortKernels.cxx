@@ -105,8 +105,8 @@ GPUdii() void GPUTPCGlobalDebugSortKernels::Thread<GPUTPCGlobalDebugSortKernels:
     tmp[j] = j;
   }
   GPUCommonAlgorithm::sortDeviceDynamic(tmp, tmp + n, [&merger](const int32_t& aa, const int32_t& bb) {
-    const GPUTPCGMMergedTrack& a = merger.OutputTracks()[aa];
-    const GPUTPCGMMergedTrack& b = merger.OutputTracks()[bb];
+    const GPUTPCGMMergedTrack& a = merger.MergedTracks()[aa];
+    const GPUTPCGMMergedTrack& b = merger.MergedTracks()[bb];
     return (a.GetAlpha() != b.GetAlpha()) ? (a.GetAlpha() < b.GetAlpha()) : (a.GetParam().GetX() != b.GetParam().GetX()) ? (a.GetParam().GetX() < b.GetParam().GetX()) : (a.GetParam().GetY() != b.GetParam().GetY()) ? (a.GetParam().GetY() < b.GetParam().GetY()) : (a.GetParam().GetZ() < b.GetParam().GetZ());
   });
 }
@@ -126,19 +126,19 @@ GPUdii() void GPUTPCGlobalDebugSortKernels::Thread<GPUTPCGlobalDebugSortKernels:
         tmp2[j] = j;
       } else if (tmp[j] >= 0) {
         int32_t firstIdx = j;
-        auto firstItem = merger.OutputTracks()[firstIdx];
+        auto firstItem = merger.MergedTracks()[firstIdx];
         int32_t currIdx = firstIdx;
         int32_t sourceIdx = tmp[currIdx];
         tmp2[sourceIdx] = currIdx;
         do {
           tmp[currIdx] = -1;
-          merger.OutputTracks()[currIdx] = merger.OutputTracks()[sourceIdx];
+          merger.MergedTracks()[currIdx] = merger.MergedTracks()[sourceIdx];
           currIdx = sourceIdx;
           sourceIdx = tmp[currIdx];
           tmp2[sourceIdx] = currIdx;
         } while (sourceIdx != firstIdx);
         tmp[currIdx] = -1;
-        merger.OutputTracks()[currIdx] = firstItem;
+        merger.MergedTracks()[currIdx] = firstItem;
       }
     }
   }

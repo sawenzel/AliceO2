@@ -256,10 +256,10 @@ int32_t GPUChainTracking::RunTPCTrackingMerger(bool synchronizeOutput)
           throw std::runtime_error("QA Scratch buffer exceeded");
         }
       }
-      GPUMemCpy(RecoStep::TPCMerging, Merger.OutputTracks(), MergerShadowAll.OutputTracks(), Merger.NMergedTracks() * sizeof(*Merger.OutputTracks()), outputStream, 0, nullptr, waitEvent);
+      GPUMemCpy(RecoStep::TPCMerging, Merger.MergedTracks(), MergerShadowAll.MergedTracks(), Merger.NMergedTracks() * sizeof(*Merger.MergedTracks()), outputStream, 0, nullptr, waitEvent);
       waitEvent = nullptr;
       if (param().dodEdxEnabled) {
-        GPUMemCpy(RecoStep::TPCMerging, Merger.OutputTracksdEdx(), MergerShadowAll.OutputTracksdEdx(), Merger.NMergedTracks() * sizeof(*Merger.OutputTracksdEdx()), outputStream, 0);
+        GPUMemCpy(RecoStep::TPCMerging, Merger.MergedTracksdEdx(), MergerShadowAll.MergedTracksdEdx(), Merger.NMergedTracks() * sizeof(*Merger.MergedTracksdEdx()), outputStream, 0);
       }
       GPUMemCpy(RecoStep::TPCMerging, Merger.Clusters(), MergerShadowAll.Clusters(), Merger.NOutputTrackClusters() * sizeof(*Merger.Clusters()), outputStream, 0);
       if (param().par.earlyTpcTransform) {
@@ -326,7 +326,7 @@ int32_t GPUChainTracking::RunTPCTrackingMerger(bool synchronizeOutput)
     mRec->ReturnVolatileDeviceMemory();
   }
 
-  mIOPtrs.mergedTracks = Merger.OutputTracks();
+  mIOPtrs.mergedTracks = Merger.MergedTracks();
   mIOPtrs.nMergedTracks = Merger.NMergedTracks();
   mIOPtrs.mergedTrackHits = Merger.Clusters();
   mIOPtrs.mergedTrackHitsXYZ = Merger.ClustersXYZ();
@@ -340,7 +340,7 @@ int32_t GPUChainTracking::RunTPCTrackingMerger(bool synchronizeOutput)
   mIOPtrs.outputTracksTPCO2MC = Merger.OutputTracksTPCO2MC();
 
   if (doGPU) {
-    processorsShadow()->ioPtrs.mergedTracks = MergerShadow.OutputTracks();
+    processorsShadow()->ioPtrs.mergedTracks = MergerShadow.MergedTracks();
     processorsShadow()->ioPtrs.nMergedTracks = Merger.NMergedTracks();
     processorsShadow()->ioPtrs.mergedTrackHits = MergerShadow.Clusters();
     processorsShadow()->ioPtrs.mergedTrackHitsXYZ = MergerShadow.ClustersXYZ();

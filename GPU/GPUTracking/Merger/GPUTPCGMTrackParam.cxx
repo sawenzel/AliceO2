@@ -94,10 +94,10 @@ GPUd() bool GPUTPCGMTrackParam::Fit(GPUTPCGMMerger* GPUrestrict() merger, int32_
       storeOuter = 0;
       if (iWay == nWays - 1) {
         StoreOuter(outerParam, prop, 0);
-        if (merger->OutputTracks()[iTrk].Looper()) {
+        if (merger->MergedTracks()[iTrk].Looper()) {
           storeOuter = 1;
         }
-      } else if (iWay == nWays - 2 && merger->OutputTracks()[iTrk].Looper()) {
+      } else if (iWay == nWays - 2 && merger->MergedTracks()[iTrk].Looper()) {
         storeOuter = 2;
       }
     }
@@ -435,9 +435,9 @@ GPUd() bool GPUTPCGMTrackParam::Fit(GPUTPCGMMerger* GPUrestrict() merger, int32_
   // TODO: we have looping tracks here with 0 accepted clusters in the primary leg. In that case we should refit the track using only the primary leg.
 
   if (param.par.dodEdx && param.dodEdxEnabled) {
-    dEdx.computedEdx(merger->OutputTracksdEdx()[iTrk], param);
+    dEdx.computedEdx(merger->MergedTracksdEdx()[iTrk], param);
     if GPUCA_RTC_CONSTEXPR (param.rec.tpc.dEdxClusterRejectionFlagMask != param.rec.tpc.dEdxClusterRejectionFlagMaskAlt) {
-      dEdxAlt.computedEdx(merger->OutputTracksdEdxAlt()[iTrk], param);
+      dEdxAlt.computedEdx(merger->MergedTracksdEdxAlt()[iTrk], param);
     }
   }
   Alpha = prop.GetAlpha();
@@ -596,7 +596,7 @@ GPUd() float GPUTPCGMTrackParam::AttachClusters(const GPUTPCGMMerger* GPUrestric
     return -1e6f;
   }
 
-  const float zOffset = Merger->Param().par.earlyTpcTransform ? ((Merger->OutputTracks()[iTrack].CSide() ^ (sector >= 18)) ? -mTZOffset : mTZOffset) : Merger->GetConstantMem()->calibObjects.fastTransformHelper->getCorrMap()->convVertexTimeToZOffset(sector, mTZOffset, Merger->Param().continuousMaxTimeBin);
+  const float zOffset = Merger->Param().par.earlyTpcTransform ? ((Merger->MergedTracks()[iTrack].CSide() ^ (sector >= 18)) ? -mTZOffset : mTZOffset) : Merger->GetConstantMem()->calibObjects.fastTransformHelper->getCorrMap()->convVertexTimeToZOffset(sector, mTZOffset, Merger->Param().continuousMaxTimeBin);
   const float y0 = row.Grid().YMin();
   const float stepY = row.HstepY();
   const float z0 = row.Grid().ZMin() - zOffset; // We can use our own ZOffset, since this is only used temporarily anyway
@@ -1136,7 +1136,7 @@ GPUd() void GPUTPCGMTrackParam::RefitTrack(GPUTPCGMMergedTrack& GPUrestrict() tr
     t.QPt() = 1.e-4f;
   }
 
-  CADEBUG(if (t.GetX() > 250) { printf("ERROR, Track %d at impossible X %f, Pt %f, Looper %d\n", iTrk, t.GetX(), CAMath::Abs(1.f / t.QPt()), (int32_t)merger->OutputTracks()[iTrk].Looper()); });
+  CADEBUG(if (t.GetX() > 250) { printf("ERROR, Track %d at impossible X %f, Pt %f, Looper %d\n", iTrk, t.GetX(), CAMath::Abs(1.f / t.QPt()), (int32_t)merger->MergedTracks()[iTrk].Looper()); });
 
   track.SetOK(ok);
   track.SetNClustersFitted(nTrackHits);
