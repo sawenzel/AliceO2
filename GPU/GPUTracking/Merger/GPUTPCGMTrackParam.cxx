@@ -1143,26 +1143,7 @@ GPUd() void GPUTPCGMTrackParam::RefitTrack(GPUTPCGMMergedTrack& GPUrestrict() tr
   track.Param() = t;
   track.Alpha() = Alpha;
 
-  if (track.OK()) {
-    int32_t ind = track.FirstClusterRef();
-    const GPUParam& GPUrestrict() param = merger->Param();
-    float alphaa = param.Alpha(merger->Clusters()[ind].sector);
-    float xx, yy, zz;
-    if (merger->Param().par.earlyTpcTransform) {
-      xx = merger->ClustersXYZ()[ind].x;
-      yy = merger->ClustersXYZ()[ind].y;
-      zz = merger->ClustersXYZ()[ind].z - track.Param().GetTZOffset();
-    } else {
-      const ClusterNative& GPUrestrict() cl = merger->GetConstantMem()->ioPtrs.clustersNative->clustersLinear[merger->Clusters()[ind].num];
-      merger->GetConstantMem()->calibObjects.fastTransformHelper->Transform(merger->Clusters()[ind].sector, merger->Clusters()[ind].row, cl.getPad(), cl.getTime(), xx, yy, zz, track.Param().GetTZOffset());
-    }
-    float sinA, cosA;
-    CAMath::SinCos(alphaa - track.Alpha(), sinA, cosA);
-    track.SetLastX(xx * cosA - yy * sinA);
-    track.SetLastY(xx * sinA + yy * cosA);
-    track.SetLastZ(zz);
-    // merger->DebugRefitMergedTrack(track);
-  }
+  // if (track.OK()) merger->DebugRefitMergedTrack(track);
 }
 
 GPUd() void GPUTPCGMTrackParam::Rotate(float alpha)
