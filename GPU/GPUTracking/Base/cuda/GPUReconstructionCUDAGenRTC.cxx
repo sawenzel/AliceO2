@@ -38,11 +38,7 @@ int32_t GPUReconstructionCUDA::genRTC(std::string& filename, uint32_t& nCompile)
 {
   std::string rtcparam = std::string("#define GPUCA_RTC_CODE\n") +
                          std::string(GetProcessingSettings().rtc.optSpecialCode ? "#define GPUCA_RTC_SPECIAL_CODE(...) __VA_ARGS__\n" : "#define GPUCA_RTC_SPECIAL_CODE(...)\n") +
-#ifndef GPUCA_HIP_WORKAROUND_CONSTEXPR // TODO: Fixme, once we have C++ P2280R4 in Clang
                          std::string(GetProcessingSettings().rtc.optConstexpr ? "#define GPUCA_RTC_CONSTEXPR constexpr\n" : "#define GPUCA_RTC_CONSTEXPR\n") +
-#else
-                         std::string("#define GPUCA_RTC_CONSTEXPR\n") +
-#endif
                          GPUParamRTC::generateRTCCode(param(), GetProcessingSettings().rtc.optConstexpr);
   if (filename == "") {
     filename = "/tmp/o2cagpu_rtc_";

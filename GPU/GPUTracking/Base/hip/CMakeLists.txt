@@ -270,8 +270,3 @@ add_dependencies(GPUTrackingHIPExternalProvider O2::GPUTracking) # must not depe
 if(NOT DEFINED GPUCA_HIP_HIPIFY_FROM_CUDA OR "${GPUCA_HIP_HIPIFY_FROM_CUDA}")
   add_dependencies(GPUTrackingHIPExternalProvider ${MODULE}_HIPIFIED)
 endif()
-
-set_source_files_properties("${GPUCA_HIP_SOURCE_DIR}/GPUReconstructionHIPGenRTC.cxx"
-TARGET_DIRECTORY O2::GPUTrackingHIP
-PROPERTIES
-COMPILE_DEFINITIONS "GPUCA_HIP_WORKAROUND_CONSTEXPR")
