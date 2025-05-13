@@ -93,7 +93,7 @@ class bitfield
   }
 
 #if !defined(GPUCA_GPUCODE_DEVICE)
-  static_assert(std::is_integral<S>::value, "Storage type non integral");
+  static_assert(std::is_integral_v<S>, "Storage type non integral");
   static_assert(sizeof(S) >= sizeof(T), "Storage type has insufficient capacity");
 #endif
 

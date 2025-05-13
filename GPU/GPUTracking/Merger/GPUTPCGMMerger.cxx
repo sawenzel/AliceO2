@@ -235,7 +235,7 @@ int64_t GPUTPCGMMerger::GetTrackLabelA(const S& trk) const
 {
   GPUTPCGMSectorTrack* sectorTrack = nullptr;
   int32_t nClusters = 0;
-  if constexpr (std::is_same<S, GPUTPCGMBorderTrack&>::value) {
+  if constexpr (std::is_same_v<S, GPUTPCGMBorderTrack&>) {
     sectorTrack = &mSectorTrackInfos[trk.TrackID()];
     nClusters = sectorTrack->OrigTrack()->NHits();
   } else {
@@ -244,7 +244,7 @@ int64_t GPUTPCGMMerger::GetTrackLabelA(const S& trk) const
   auto acc = GPUTPCTrkLbl<false, GPUTPCTrkLbl_ret>(resolveMCLabels<T>(GetConstantMem()->ioPtrs.clustersNative ? GetConstantMem()->ioPtrs.clustersNative->clustersMCTruth : nullptr, GetConstantMem()->ioPtrs.mcLabelsTPC), 0.5f);
   for (int32_t i = 0; i < nClusters; i++) {
     int32_t id;
-    if constexpr (std::is_same<S, GPUTPCGMBorderTrack&>::value) {
+    if constexpr (std::is_same_v<S, GPUTPCGMBorderTrack&>) {
       const GPUTPCTracker& tracker = GetConstantMem()->tpcTrackers[sectorTrack->Sector()];
       const GPUTPCHitId& ic = tracker.TrackHits()[sectorTrack->OrigTrack()->FirstHitID() + i];
       id = tracker.Data().ClusterDataIndex(tracker.Data().Row(ic.RowIndex()), ic.HitIndex()) + GetConstantMem()->ioPtrs.clustersNative->clusterOffset[sectorTrack->Sector()][0];
