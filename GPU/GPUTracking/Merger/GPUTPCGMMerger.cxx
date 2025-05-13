@@ -59,16 +59,12 @@
 #include "SimulationDataFormat/MCCompLabel.h"
 #endif
 
-namespace o2::gpu::internal
-{
-}
-using namespace o2::gpu;
-using namespace o2::gpu::internal;
-using namespace o2::tpc;
-using namespace gputpcgmmergertypes;
-
 static constexpr int32_t kMaxParts = 400;
 static constexpr int32_t kMaxClusters = GPUCA_MERGER_MAX_TRACK_CLUSTERS;
+
+using namespace o2::gpu;
+using namespace o2::tpc;
+using namespace gputpcgmmergertypes;
 
 namespace o2::gpu::internal
 {
@@ -78,7 +74,78 @@ struct MergeLooperParam {
   float y;
   uint32_t id;
 };
+
+struct MergeBorderTracks_compMax {
+  GPUd() bool operator()(const GPUTPCGMBorderRange& a, const GPUTPCGMBorderRange& b)
+  {
+    return GPUCA_DETERMINISTIC_CODE((a.fMax != b.fMax) ? (a.fMax < b.fMax) : (a.fId < b.fId), a.fMax < b.fMax);
+  }
+};
+struct MergeBorderTracks_compMin {
+  GPUd() bool operator()(const GPUTPCGMBorderRange& a, const GPUTPCGMBorderRange& b)
+  {
+    return GPUCA_DETERMINISTIC_CODE((a.fMin != b.fMin) ? (a.fMin < b.fMin) : (a.fId < b.fId), a.fMin < b.fMin);
+  }
+};
+
+struct GPUTPCGMMergerSortTracks_comp {
+  const GPUTPCGMMergedTrack* const mCmp;
+  GPUhd() GPUTPCGMMergerSortTracks_comp(GPUTPCGMMergedTrack* cmp) : mCmp(cmp) {}
+  GPUd() bool operator()(const int32_t aa, const int32_t bb)
+  {
+    const GPUTPCGMMergedTrack& GPUrestrict() a = mCmp[aa];
+    const GPUTPCGMMergedTrack& GPUrestrict() b = mCmp[bb];
+    if (a.CCE() != b.CCE()) {
+      return a.CCE() > b.CCE();
+    }
+    if (a.Legs() != b.Legs()) {
+      return a.Legs() > b.Legs();
+    }
+    GPUCA_DETERMINISTIC_CODE( // clang-format off
+      if (a.NClusters() != b.NClusters()) {
+        return a.NClusters() > b.NClusters();
+      } if (CAMath::Abs(a.GetParam().GetQPt()) != CAMath::Abs(b.GetParam().GetQPt())) {
+        return CAMath::Abs(a.GetParam().GetQPt()) > CAMath::Abs(b.GetParam().GetQPt());
+      } if (a.GetParam().GetY() != b.GetParam().GetY()) {
+        return a.GetParam().GetY() > b.GetParam().GetY();
+      }
+      return aa > bb;
+    , // !GPUCA_DETERMINISTIC_CODE
+      return a.NClusters() > b.NClusters();
+    ) // clang-format on
+  }
+};
+
+struct GPUTPCGMMergerSortTracksQPt_comp {
+  const GPUTPCGMMergedTrack* const mCmp;
+  GPUhd() GPUTPCGMMergerSortTracksQPt_comp(GPUTPCGMMergedTrack* cmp) : mCmp(cmp) {}
+  GPUd() bool operator()(const int32_t aa, const int32_t bb)
+  {
+    const GPUTPCGMMergedTrack& GPUrestrict() a = mCmp[aa];
+    const GPUTPCGMMergedTrack& GPUrestrict() b = mCmp[bb];
+    GPUCA_DETERMINISTIC_CODE( // clang-format off
+      if (CAMath::Abs(a.GetParam().GetQPt()) != CAMath::Abs(b.GetParam().GetQPt())) {
+        return CAMath::Abs(a.GetParam().GetQPt()) > CAMath::Abs(b.GetParam().GetQPt());
+      } if (a.GetParam().GetY() != b.GetParam().GetY()) {
+        return a.GetParam().GetY() > b.GetParam().GetY();
+      }
+      return a.GetParam().GetZ() > b.GetParam().GetZ();
+    , // !GPUCA_DETERMINISTIC_CODE
+      return CAMath::Abs(a.GetParam().GetQPt()) > CAMath::Abs(b.GetParam().GetQPt());
+    ) // clang-format on
+  }
+};
+
+struct GPUTPCGMMergerMergeLoopers_comp {
+  GPUd() bool operator()(const MergeLooperParam& a, const MergeLooperParam& b)
+  {
+    return GPUCA_DETERMINISTIC_CODE(CAMath::Abs(a.refz) != CAMath::Abs(b.refz) ? CAMath::Abs(a.refz) < CAMath::Abs(b.refz) : a.id < b.id, CAMath::Abs(a.refz) < CAMath::Abs(b.refz));
+  }
+};
+
 } // namespace o2::gpu::internal
+
+using namespace o2::gpu::internal;
 
 #ifndef GPUCA_GPUCODE
 
@@ -742,11 +809,11 @@ template <>
 GPUd() void GPUTPCGMMerger::MergeBorderTracks<3>(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUTPCGMBorderRange* range, int32_t N, int32_t cmpMax)
 {
 #ifndef GPUCA_SPECIALIZE_THRUST_SORTS
-  if (iThread == 0) {
+  if (iThread == 0 && iBlock == 0) {
     if (cmpMax) {
-      GPUCommonAlgorithm::sortDeviceDynamic(range, range + N, [](const GPUTPCGMBorderRange& a, const GPUTPCGMBorderRange& b) { return GPUCA_DETERMINISTIC_CODE((a.fMax != b.fMax) ? (a.fMax < b.fMax) : (a.fId < b.fId), a.fMax < b.fMax); });
+      GPUCommonAlgorithm::sortDeviceDynamic(range, range + N, MergeBorderTracks_compMax());
     } else {
-      GPUCommonAlgorithm::sortDeviceDynamic(range, range + N, [](const GPUTPCGMBorderRange& a, const GPUTPCGMBorderRange& b) { return GPUCA_DETERMINISTIC_CODE((a.fMin != b.fMin) ? (a.fMin < b.fMin) : (a.fId < b.fId), a.fMin < b.fMin); });
+      GPUCommonAlgorithm::sortDeviceDynamic(range, range + N, MergeBorderTracks_compMin());
     }
   }
 #endif
@@ -1757,60 +1824,18 @@ GPUd() void GPUTPCGMMerger::PrepareClustersForFit0(int32_t nBlocks, int32_t nThr
 GPUd() void GPUTPCGMMerger::SortTracks(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread)
 {
 #ifndef GPUCA_SPECIALIZE_THRUST_SORTS
-  if (iThread || iBlock) {
-    return;
+  if (iThread == 0 && iBlock == 0) {
+    GPUCommonAlgorithm::sortDeviceDynamic(mTrackOrderProcess, mTrackOrderProcess + mMemory->nMergedTracks, GPUTPCGMMergerSortTracks_comp(mOutputTracks));
   }
-  // TODO: Fix this: Have to duplicate sort comparison: Thrust cannot use the Lambda but OpenCL cannot use the object
-  auto comp = [cmp = mOutputTracks](const int32_t aa, const int32_t bb) {
-    const GPUTPCGMMergedTrack& GPUrestrict() a = cmp[aa];
-    const GPUTPCGMMergedTrack& GPUrestrict() b = cmp[bb];
-    if (a.CCE() != b.CCE()) {
-      return a.CCE() > b.CCE();
-    }
-    if (a.Legs() != b.Legs()) {
-      return a.Legs() > b.Legs();
-    }
-    GPUCA_DETERMINISTIC_CODE( // clang-format off
-      if (a.NClusters() != b.NClusters()) {
-        return a.NClusters() > b.NClusters();
-      } if (CAMath::Abs(a.GetParam().GetQPt()) != CAMath::Abs(b.GetParam().GetQPt())) {
-        return CAMath::Abs(a.GetParam().GetQPt()) > CAMath::Abs(b.GetParam().GetQPt());
-      } if (a.GetParam().GetY() != b.GetParam().GetY()) {
-        return a.GetParam().GetY() > b.GetParam().GetY();
-      }
-      return aa > bb;
-    , // !GPUCA_DETERMINISTIC_CODE
-      return a.NClusters() > b.NClusters();
-    ) // clang-format on
-  };
-
-  GPUCommonAlgorithm::sortDeviceDynamic(mTrackOrderProcess, mTrackOrderProcess + mMemory->nMergedTracks, comp);
 #endif
 }
 
 GPUd() void GPUTPCGMMerger::SortTracksQPt(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread)
 {
 #ifndef GPUCA_SPECIALIZE_THRUST_SORTS
-  if (iThread || iBlock) {
-    return;
+  if (iThread == 0 && iBlock == 0) {
+    GPUCommonAlgorithm::sortDeviceDynamic(mTrackSort, mTrackSort + mMemory->nMergedTracks, GPUTPCGMMergerSortTracksQPt_comp(mOutputTracks));
   }
-  // TODO: Fix this: Have to duplicate sort comparison: Thrust cannot use the Lambda but OpenCL cannot use the object
-  auto comp = [cmp = mOutputTracks](const int32_t aa, const int32_t bb) {
-    const GPUTPCGMMergedTrack& GPUrestrict() a = cmp[aa];
-    const GPUTPCGMMergedTrack& GPUrestrict() b = cmp[bb];
-    GPUCA_DETERMINISTIC_CODE( // clang-format off
-      if (CAMath::Abs(a.GetParam().GetQPt()) != CAMath::Abs(b.GetParam().GetQPt())) {
-        return CAMath::Abs(a.GetParam().GetQPt()) > CAMath::Abs(b.GetParam().GetQPt());
-      } if (a.GetParam().GetY() != b.GetParam().GetY()) {
-        return a.GetParam().GetY() > b.GetParam().GetY();
-      }
-      return a.GetParam().GetZ() > b.GetParam().GetZ();
-    , // !GPUCA_DETERMINISTIC_CODE
-      return CAMath::Abs(a.GetParam().GetQPt()) > CAMath::Abs(b.GetParam().GetQPt());
-    ) // clang-format on
-  };
-
-  GPUCommonAlgorithm::sortDeviceDynamic(mTrackSort, mTrackSort + mMemory->nMergedTracks, comp);
 #endif
 }
 
@@ -1945,11 +1970,9 @@ GPUd() void GPUTPCGMMerger::MergeLoopersInit(int32_t nBlocks, int32_t nThreads, 
 GPUd() void GPUTPCGMMerger::MergeLoopersSort(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread)
 {
 #ifndef GPUCA_SPECIALIZE_THRUST_SORTS
-  if (iThread || iBlock) {
-    return;
+  if (iThread == 0 && iBlock == 0) {
+    GPUCommonAlgorithm::sortDeviceDynamic(mLooperCandidates, mLooperCandidates + mMemory->nLooperMatchCandidates, GPUTPCGMMergerMergeLoopers_comp());
   }
-  auto comp = [](const MergeLooperParam& a, const MergeLooperParam& b) { return GPUCA_DETERMINISTIC_CODE(CAMath::Abs(a.refz) != CAMath::Abs(b.refz) ? CAMath::Abs(a.refz) < CAMath::Abs(b.refz) : a.id < b.id, CAMath::Abs(a.refz) < CAMath::Abs(b.refz)); };
-  GPUCommonAlgorithm::sortDeviceDynamic(mLooperCandidates, mLooperCandidates + mMemory->nLooperMatchCandidates, comp);
 #endif
 }
 

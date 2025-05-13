@@ -34,6 +34,18 @@ using namespace o2::tpc::constants;
 GPUdi() static constexpr uint8_t getFlagsReject() { return GPUTPCGMMergedTrackHit::flagReject | GPUTPCGMMergedTrackHit::flagNotFit; }
 GPUdi() static uint32_t getFlagsRequired(const GPUSettingsRec& rec) { return rec.tpc.dropSecondaryLegsInOutput ? gputpcgmmergertypes::attachGoodLeg : gputpcgmmergertypes::attachZero; }
 
+namespace o2::gpu::internal
+{
+
+struct GPUTPCGMO2OutputSort_comp {
+  GPUd() bool operator()(const GPUTPCGMMerger::tmpSort& a, const GPUTPCGMMerger::tmpSort& b)
+  {
+    return GPUCA_DETERMINISTIC_CODE(a.y != b.y ? a.y > b.y : a.x > b.x, a.y > b.y);
+  }
+};
+
+} // namespace o2::gpu::internal
+
 template <>
 GPUdii() void GPUTPCGMO2Output::Thread<GPUTPCGMO2Output::prepare>(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& smem, processorType& GPUrestrict() merger)
 {
@@ -84,12 +96,10 @@ template <>
 GPUdii() void GPUTPCGMO2Output::Thread<GPUTPCGMO2Output::sort>(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& smem, processorType& GPUrestrict() merger)
 {
 #ifndef GPUCA_SPECIALIZE_THRUST_SORTS
-  if (iThread || iBlock) {
-    return;
+  if (iThread == 0 && iBlock == 0) {
+    GPUTPCGMMerger::tmpSort* GPUrestrict() trackSort = merger.TrackSortO2();
+    GPUCommonAlgorithm::sortDeviceDynamic(trackSort, trackSort + merger.Memory()->nO2Tracks, internal::GPUTPCGMO2OutputSort_comp());
   }
-  GPUTPCGMMerger::tmpSort* GPUrestrict() trackSort = merger.TrackSortO2();
-  auto comp = [](const auto& a, const auto& b) { return GPUCA_DETERMINISTIC_CODE(a.y != b.y ? a.y > b.y : a.x > b.x, a.y > b.y); };
-  GPUCommonAlgorithm::sortDeviceDynamic(trackSort, trackSort + merger.Memory()->nO2Tracks, comp);
 #endif
 }
 
