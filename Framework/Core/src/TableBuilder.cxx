@@ -131,3 +131,9 @@ std::shared_ptr<arrow::Table> spawnerHelper(std::shared_ptr<arrow::Table> const&
 }
 
 } // namespace o2::framework
+
+template class arrow::NumericBuilder<arrow::UInt8Type>;
+template class arrow::NumericBuilder<arrow::UInt32Type>;
+template class arrow::NumericBuilder<arrow::FloatType>;
+template class arrow::NumericBuilder<arrow::Int32Type>;
+template class arrow::NumericBuilder<arrow::Int8Type>;

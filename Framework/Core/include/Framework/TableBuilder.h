@@ -48,6 +48,12 @@ struct BulkInfo {
   size_t size;
 };
 
+extern template class arrow::NumericBuilder<arrow::UInt8Type>;
+extern template class arrow::NumericBuilder<arrow::UInt32Type>;
+extern template class arrow::NumericBuilder<arrow::FloatType>;
+extern template class arrow::NumericBuilder<arrow::Int32Type>;
+extern template class arrow::NumericBuilder<arrow::Int8Type>;
+
 namespace o2::framework
 {
 namespace detail
