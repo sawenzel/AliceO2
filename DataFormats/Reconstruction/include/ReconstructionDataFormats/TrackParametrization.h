@@ -29,6 +29,7 @@
 #include "GPUCommonDef.h"
 #include "GPUCommonRtypes.h"
 #include "GPUCommonMath.h"
+#include "GPUCommonArray.h"
 #include "GPUROOTCartesianFwd.h"
 
 #ifndef GPUCA_GPUCODE_DEVICE
