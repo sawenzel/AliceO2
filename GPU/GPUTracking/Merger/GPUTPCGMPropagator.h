@@ -53,9 +53,9 @@ class GPUTPCGMPropagator
     updateErrorFitFailed = -1,
     updateErrorClusterRejected = 2,
     updateErrorClusterRejectedDistance = 2,
-    updateErrorEdgeCluster = 3,
-    updateErrorClusterRejectedInInterpolation = 4,
-    updateErrorClusterRejectedInUpdate = 5
+    updateErrorClusterRejectedInInterpolation = 3,
+    updateErrorClusterRejectedInUpdate = 4,
+    updateErrorClusterRejectedEdge = 5
   };
   enum RejectChi2Mode {
     rejectDirect = 1,
@@ -188,7 +188,7 @@ class GPUTPCGMPropagator
   GPUTPCGMPhysicalTrackModel mT0;
   MaterialCorrection mMaterial;
   FieldRegion mFieldRegion = TPC;
-  bool mSeedingErrors = 0;
+  bool mSeedingErrors = 0;    // TODO: Hide variable in Run3 mode
   bool mFitInProjections = 1; // fit (Y,SinPhi,QPt) and (Z,DzDs) paramteres separatelly
   bool mPropagateBzOnly = 0;  // Use Bz only in propagation
   bool mToyMCEvents = 0;      // events are simulated with simple home-made simulation

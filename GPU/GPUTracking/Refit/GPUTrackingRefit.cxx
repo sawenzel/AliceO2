@@ -268,7 +268,7 @@ GPUd() int32_t GPUTrackingRefit::RefitTrack(T& trkX, bool outward, bool resetCov
         if constexpr (std::is_same_v<T, GPUTPCGMMergedTrack>) {
           const auto& hit = mPtrackHits[trkX.FirstClusterRef() + i];
           cl = &mPclusterNative->clustersLinear[hit.num];
-          if (hit.state & (GPUTPCGMMergedTrackHit::flagReject | GPUTPCGMMergedTrackHit::flagNotFit)) {
+          if (hit.state & (GPUTPCGMMergedTrackHit::flagReject | GPUTPCGMMergedTrackHit::flagHighIncl)) {
             cl = nullptr;
             if (i + direction != stop) {
               i += direction;

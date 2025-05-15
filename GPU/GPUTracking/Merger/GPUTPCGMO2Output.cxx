@@ -32,7 +32,7 @@ using namespace o2::gpu;
 using namespace o2::tpc;
 using namespace o2::tpc::constants;
 
-GPUdi() static constexpr uint8_t getFlagsReject() { return GPUTPCGMMergedTrackHit::flagReject | GPUTPCGMMergedTrackHit::flagNotFit; }
+GPUdi() static constexpr uint8_t getFlagsReject() { return GPUTPCGMMergedTrackHit::flagReject | GPUTPCGMMergedTrackHit::flagHighIncl; }
 GPUdi() static uint32_t getFlagsRequired(const GPUSettingsRec& rec) { return rec.tpc.dropSecondaryLegsInOutput ? gputpcgmmergertypes::attachGoodLeg : gputpcgmmergertypes::attachZero; }
 
 namespace o2::gpu::internal

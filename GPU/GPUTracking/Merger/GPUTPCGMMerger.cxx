@@ -1895,7 +1895,7 @@ GPUd() void GPUTPCGMMerger::Finalize1(int32_t nBlocks, int32_t nThreads, int32_t
       uint8_t clusterState = mClusters[trk.FirstClusterRef() + j].state;
       if (!(clusterState & GPUTPCGMMergedTrackHit::flagReject)) {
         weight |= attachGood;
-      } else if (clusterState & GPUTPCGMMergedTrackHit::flagNotFit) {
+      } else if (clusterState & GPUTPCGMMergedTrackHit::flagHighIncl) {
         weight |= attachHighIncl;
       }
       if (mClusters[trk.FirstClusterRef() + j].leg == goodLeg) {
