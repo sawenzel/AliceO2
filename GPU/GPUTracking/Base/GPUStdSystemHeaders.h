@@ -21,5 +21,6 @@
 #include <cfloat>
 #include <cmath>
 #include <type_traits>
+#include <array>
 
 #endif

@@ -29,7 +29,6 @@
 #include "GPUCommonDef.h"
 #include "GPUCommonRtypes.h"
 #include "GPUCommonMath.h"
-#include "GPUCommonArray.h"
 #include "GPUROOTCartesianFwd.h"
 
 #ifndef GPUCA_GPUCODE_DEVICE
@@ -39,6 +38,7 @@
 #include <cstring>
 #include <iosfwd>
 #include <type_traits>
+#include <array>
 #endif
 
 #ifndef GPUCA_ALIGPUCODE // Used only by functions that are hidden on the GPU
@@ -128,9 +128,9 @@ class TrackParametrization
 
  public:
   using value_t = value_T;
-  using dim2_t = gpu::gpustd::array<value_t, 2>;
-  using dim3_t = gpu::gpustd::array<value_t, 3>;
-  using params_t = gpu::gpustd::array<value_t, kNParams>;
+  using dim2_t = std::array<value_t, 2>;
+  using dim3_t = std::array<value_t, 3>;
+  using params_t = std::array<value_t, kNParams>;
 
   struct yzerr_t { // 2 measurement with error
     dim2_t yz;
@@ -209,7 +209,7 @@ class TrackParametrization
   GPUd() math_utils::Point3D<value_t> getXYZGlo() const;
   GPUd() void getXYZGlo(dim3_t& xyz) const;
   GPUd() bool getPxPyPzGlo(dim3_t& pxyz) const;
-  GPUd() bool getPosDirGlo(gpu::gpustd::array<value_t, 9>& posdirp) const;
+  GPUd() bool getPosDirGlo(std::array<value_t, 9>& posdirp) const;
 
   // methods for track params estimate at other point
   GPUd() bool getYZAt(value_t xk, value_t b, value_t& y, value_t& z) const;

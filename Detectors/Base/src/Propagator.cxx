@@ -170,7 +170,7 @@ GPUd() bool PropagatorImpl<value_T>::PropagateToXBxByBz(TrackParCov_t& track, va
     signCorr = -dir; // sign of eloss correction is not imposed
   }
 
-  gpu::gpustd::array<value_type, 3> b{};
+  std::array<value_type, 3> b{};
   while (math_utils::detail::abs<value_type>(dx) > Epsilon) {
     auto step = math_utils::detail::min<value_type>(math_utils::detail::abs<value_type>(dx), maxStep);
     if (dir < 0) {
@@ -239,7 +239,7 @@ GPUd() bool PropagatorImpl<value_T>::PropagateToXBxByBz(TrackPar_t& track, value
     signCorr = -dir; // sign of eloss correction is not imposed
   }
 
-  gpu::gpustd::array<value_type, 3> b{};
+  std::array<value_type, 3> b{};
   while (math_utils::detail::abs<value_type>(dx) > Epsilon) {
     auto step = math_utils::detail::min<value_type>(math_utils::detail::abs<value_type>(dx), maxStep);
     if (dir < 0) {
@@ -553,7 +553,7 @@ GPUd() bool PropagatorImpl<value_T>::propagateToDCABxByBz(const o2::dataformats:
 template <typename value_T>
 GPUd() bool PropagatorImpl<value_T>::propagateToDCA(const math_utils::Point3D<value_type>& vtx, TrackPar_t& track, value_type bZ,
                                                     value_type maxStep, PropagatorImpl<value_T>::MatCorrType matCorr,
-                                                    gpu::gpustd::array<value_type, 2>* dca, track::TrackLTIntegral* tofInfo,
+                                                    std::array<value_type, 2>* dca, track::TrackLTIntegral* tofInfo,
                                                     int signCorr, value_type maxD) const
 {
   // propagate track to DCA to the vertex
@@ -601,7 +601,7 @@ GPUd() bool PropagatorImpl<value_T>::propagateToDCA(const math_utils::Point3D<va
 template <typename value_T>
 GPUd() bool PropagatorImpl<value_T>::propagateToDCABxByBz(const math_utils::Point3D<value_type>& vtx, TrackPar_t& track,
                                                           value_type maxStep, PropagatorImpl<value_T>::MatCorrType matCorr,
-                                                          gpu::gpustd::array<value_type, 2>* dca, track::TrackLTIntegral* tofInfo,
+                                                          std::array<value_type, 2>* dca, track::TrackLTIntegral* tofInfo,
                                                           int signCorr, value_type maxD) const
 {
   // propagate track to DCA to the vertex

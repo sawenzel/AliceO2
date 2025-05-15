@@ -17,12 +17,11 @@
 
 #include "GPUCommonDef.h"
 
-#if !defined(GPUCA_GPUCODE_DEVICE) || defined(__CUDACC__) || defined(__HIPCC__)
+#if !defined(GPUCA_GPUCODE_DEVICE) || defined(__CUDACC__) || defined(__HIPCC__) // TODO: Get rid of GPUCommonTypeTraits once OpenCL supports <type_traits>
 #ifndef GPUCA_GPUCODE_COMPILEKERNELS
 #include <type_traits>
 #endif
 #else
-// We just reimplement some type traits in std for the GPU // TODO: Check if meanwhile we can get rid of GPUCommonTypeTraits and GPUCommonArray, and just use the std headers.
 namespace std
 {
 template <bool B, class T, class F>
