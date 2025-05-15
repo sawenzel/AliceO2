@@ -16,7 +16,9 @@
 #define GPUGETCONSTEXPR_H
 
 #include "GPUCommonDef.h"
-#include "GPUCommonTypeTraits.h"
+#ifndef GPUCA_GPUCODE_DEVICE
+#include <type_traits>
+#endif
 
 // This is a temporary workaround required for clang (with c++20), until we can go to C++23 with P2280R4, which allows getting constexpr static values from references
 

@@ -67,7 +67,9 @@ set(GPU_RTC_BIN ${CMAKE_CURRENT_BINARY_DIR}/GPUReconstructionCUDArtc)
 # cmake-format: off
 add_custom_command(
     OUTPUT ${GPU_RTC_BIN}.src
-    COMMAND cp ${GPUDIR}/Base/cuda/GPUReconstructionCUDAIncludesSystem.h ${GPU_RTC_BIN}.src
+    COMMAND cp ${GPUDIR}/Base/GPUStdSystemHeaders.h ${GPU_RTC_BIN}.src
+    COMMAND cat ${GPUDIR}/Base/cuda/GPUReconstructionCUDAIncludesSystem.h | grep -v GPUStdSystemHeaders.h >> ${GPU_RTC_BIN}.src
+    COMMAND cat ${GPUDIR}/Base/GPUStdSystemHeaders.h >> ${GPU_RTC_BIN}.src
     COMMAND ${CMAKE_CUDA_COMPILER} ${GPU_RTC_DEFINES} ${GPU_RTC_INCLUDES} -std=c++${CMAKE_CUDA_STANDARD} -D__CUDA_ARCH__=${RTC_CUDA_ARCH} -D__CUDACC__ -x c++ -E -Xcompiler "-nostdinc -P" ${GPU_RTC_SRC} >> ${GPU_RTC_BIN}.src
     MAIN_DEPENDENCY ${GPU_RTC_SRC}
     IMPLICIT_DEPENDS CXX ${GPU_RTC_SRC}

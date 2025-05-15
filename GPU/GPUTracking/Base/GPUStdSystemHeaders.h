@@ -9,24 +9,17 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-/// \file GPUReconstructionHIPIncludesSystem.h
+/// \file GPUStdSystemHeaders.h
 /// \author David Rohr
 
-#ifndef O2_GPU_RECONSTRUCTIONHIPINCLUDESSYSTEM_H
-#define O2_GPU_RECONSTRUCTIONHIPINCLUDESSYSTEM_H
+#ifndef GPUSTDSYSTEMHEADERS_H
+#define GPUSTDSYSTEMHEADERS_H
 
-#ifndef GPUCA_GPUCODE_GENRTC
-#include "GPUStdSystemHeaders.h"
+#include <string>
+#include <cstddef>
+#include <cstdint>
+#include <cfloat>
+#include <cmath>
+#include <type_traits>
+
 #endif
-
-#include <hip/hip_runtime.h>
-#include <hip/hip_ext.h>
-#include <hipcub/hipcub.hpp>
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wshadow" // FIXME: Is this still needed?
-#include <thrust/sort.h>
-#include <thrust/execution_policy.h>
-#include <thrust/device_ptr.h>
-#pragma GCC diagnostic pop
-
-#endif // O2_GPU_RECONSTRUCTIONHIPINCLUDESSYSTEM_H

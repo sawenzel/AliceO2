@@ -28,7 +28,10 @@
 #include "GPUCommonArray.h"
 #include "GPUParam.h"
 #include "GPUTrackParamConvert.h"
-#include "GPUCommonTypeTraits.h"
+
+#ifndef GPUCA_GPUCODE_DEVICE
+#include <type_traits>
+#endif
 
 using namespace o2::gpu;
 using namespace o2::track;

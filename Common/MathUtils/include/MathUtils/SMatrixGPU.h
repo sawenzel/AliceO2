@@ -29,7 +29,9 @@
 #include "GPUCommonMath.h"
 #include "GPUCommonAlgorithm.h"
 #include "GPUCommonLogger.h"
-#include "GPUCommonTypeTraits.h"
+#ifndef GPUCA_GPUCODE_DEVICE
+#include <type_traits>
+#endif
 
 namespace o2::math_utils::detail
 {
