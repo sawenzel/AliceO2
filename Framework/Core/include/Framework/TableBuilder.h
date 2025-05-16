@@ -42,12 +42,6 @@ class Table;
 class Array;
 } // namespace arrow
 
-template <typename T>
-struct BulkInfo {
-  const T ptr;
-  size_t size;
-};
-
 extern template class arrow::NumericBuilder<arrow::UInt8Type>;
 extern template class arrow::NumericBuilder<arrow::UInt32Type>;
 extern template class arrow::NumericBuilder<arrow::FloatType>;
@@ -197,34 +191,6 @@ struct BuilderUtils {
       auto status = appendToList<T>(holder.builder, value);
     } else {
       return holder.builder->UnsafeAppend(reinterpret_cast<const uint8_t*>(value));
-    }
-  }
-
-  template <typename HolderType, typename PTR>
-  static arrow::Status bulkAppend(HolderType& holder, size_t bulkSize, const PTR ptr)
-  {
-    return holder.builder->AppendValues(ptr, bulkSize, nullptr);
-  }
-
-  template <typename HolderType, typename PTR>
-  static arrow::Status bulkAppendChunked(HolderType& holder, BulkInfo<PTR> info)
-  {
-    // Appending nullptr is a no-op.
-    if (info.ptr == nullptr) {
-      return arrow::Status::OK();
-    }
-    if constexpr (std::is_same_v<decltype(holder.builder), std::unique_ptr<arrow::FixedSizeListBuilder>>) {
-      if (appendToList<std::remove_pointer_t<decltype(info.ptr)>>(holder.builder, info.ptr, info.size).ok() == false) {
-        throw runtime_error("Unable to append to column");
-      } else {
-        return arrow::Status::OK();
-      }
-    } else {
-      if (holder.builder->AppendValues(info.ptr, info.size, nullptr).ok() == false) {
-        throw runtime_error("Unable to append to column");
-      } else {
-        return arrow::Status::OK();
-      }
     }
   }
 
@@ -518,14 +484,6 @@ struct TableBuilderHelpers {
     return {BuilderTraits<ARGS>::make_datatype()...};
   }
 
-  template <typename... ARGS, size_t NCOLUMNS = sizeof...(ARGS)>
-  static std::vector<std::shared_ptr<arrow::Field>> makeFields(std::array<char const*, NCOLUMNS> const& names)
-  {
-    char const* const* names_ptr = names.data();
-    return {
-      std::make_shared<arrow::Field>(*names_ptr++, BuilderMaker<ARGS>::make_datatype(), true, nullptr)...};
-  }
-
   /// Invokes the append method for each entry in the tuple
   template <typename... Ts, typename VALUES>
   static bool append(std::tuple<Ts...>& holders, VALUES&& values)
@@ -540,19 +498,6 @@ struct TableBuilderHelpers {
   static void unsafeAppend(std::tuple<Ts...>& holders, VALUES&& values)
   {
     (BuilderUtils::unsafeAppend(std::get<Ts::index>(holders), std::get<Ts::index>(values)), ...);
-  }
-
-  template <typename... Ts, typename PTRS>
-  static bool bulkAppend(std::tuple<Ts...>& holders, size_t bulkSize, PTRS ptrs)
-  {
-    return (BuilderUtils::bulkAppend(std::get<Ts::index>(holders), bulkSize, std::get<Ts::index>(ptrs)).ok() && ...);
-  }
-
-  /// Return true if all columns are done.
-  template <typename... Ts, typename INFOS>
-  static bool bulkAppendChunked(std::tuple<Ts...>& holders, INFOS infos)
-  {
-    return (BuilderUtils::bulkAppendChunked(std::get<Ts::index>(holders), std::get<Ts::index>(infos)).ok() && ...);
   }
 
   /// Invokes the append method for each entry in the tuple
@@ -576,14 +521,8 @@ constexpr auto tuple_to_pack(std::tuple<ARGS...>&&)
 }
 
 template <typename T>
-concept BulkInsertable = (std::integral<std::decay<T>> && !std::same_as<bool, std::decay_t<T>>);
-
-template <typename T>
 struct InsertionTrait {
-  static consteval DirectInsertion<T> policy()
-    requires(!BulkInsertable<T>);
-  static consteval CachedInsertion<T> policy()
-    requires(BulkInsertable<T>);
+  static consteval DirectInsertion<T> policy();
   using Policy = decltype(policy());
 };
 
@@ -658,7 +597,9 @@ class TableBuilder
   template <typename... ARGS, size_t I = sizeof...(ARGS)>
   auto makeBuilders(std::array<char const*, I> const& columnNames, size_t nRows)
   {
-    mSchema = std::make_shared<arrow::Schema>(TableBuilderHelpers::makeFields<ARGS...>(columnNames));
+    char const* const* names_ptr = columnNames.data();
+    mSchema = std::make_shared<arrow::Schema>(
+      std::vector<std::shared_ptr<arrow::Field>>({std::make_shared<arrow::Field>(*names_ptr++, BuilderMaker<ARGS>::make_datatype(), true, nullptr)...}));
 
     mHolders = makeHolders<ARGS...>(mMemoryPool, nRows);
     mFinalizer = [](std::vector<std::shared_ptr<arrow::Array>>& arrays, void* holders) -> bool {
@@ -766,45 +707,6 @@ class TableBuilder
     return [this]<typename... Cs>(pack<Cs...>) {
       return this->template persist<E>({Cs::columnLabel()...});
     }(typename T::table_t::persistent_columns_t{});
-  }
-
-  template <typename... ARGS, size_t NCOLUMNS = sizeof...(ARGS)>
-  auto preallocatedPersist(std::array<char const*, NCOLUMNS> const& columnNames, int nRows)
-  {
-    constexpr size_t nColumns = NCOLUMNS;
-    validate();
-    mArrays.resize(nColumns);
-    makeBuilders<ARGS...>(columnNames, nRows);
-
-    // Callback used to fill the builders
-    return [holders = mHolders](unsigned int /*slot*/, typename BuilderMaker<ARGS>::FillType... args) -> void {
-      TableBuilderHelpers::unsafeAppend(*(HoldersTupleIndexed<ARGS...>*)holders, std::forward_as_tuple(args...));
-    };
-  }
-
-  template <typename... ARGS, size_t NCOLUMNS = sizeof...(ARGS)>
-  auto bulkPersist(std::array<char const*, NCOLUMNS> const& columnNames, size_t nRows)
-  {
-    validate();
-    //  Should not be called more than once
-    mArrays.resize(NCOLUMNS);
-    makeBuilders<ARGS...>(columnNames, nRows);
-
-    return [holders = mHolders](unsigned int /*slot*/, size_t batchSize, typename BuilderMaker<ARGS>::FillType const*... args) -> void {
-      TableBuilderHelpers::bulkAppend(*(HoldersTupleIndexed<ARGS...>*)holders, batchSize, std::forward_as_tuple(args...));
-    };
-  }
-
-  template <typename... ARGS, size_t NCOLUMNS = sizeof...(ARGS)>
-  auto bulkPersistChunked(std::array<char const*, NCOLUMNS> const& columnNames, size_t nRows)
-  {
-    validate();
-    mArrays.resize(NCOLUMNS);
-    makeBuilders<ARGS...>(columnNames, nRows);
-
-    return [holders = mHolders](unsigned int /*slot*/, BulkInfo<typename BuilderMaker<ARGS>::STLValueType const*>... args) -> bool {
-      return TableBuilderHelpers::bulkAppendChunked(*(HoldersTupleIndexed<ARGS...>*)holders, std::forward_as_tuple(args...));
-    };
   }
 
   /// Reserve method to expand the columns as needed.
