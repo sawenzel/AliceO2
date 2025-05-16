@@ -94,6 +94,7 @@ TPC_CORR_OPT=
 TPC_CORR_KEY=
 INTERACTION_TAG_CONFIG_KEY=
 EVE_OPT=" --jsons-folder $EDJSONS_DIR"
+: ${SECVTXK0ONLY:=}
 : ${EVE_CONFIG:=}
 : ${STRTRACKING:=}
 : ${ITSEXTRAERR:=}
@@ -591,7 +592,14 @@ has_detector_reco ITS && has_detector_gpu ITS TPC && [[ -z "$DISABLE_ROOT_OUTPUT
 has_detector_matching PRIMVTX && [[ ! -z "$VERTEXING_SOURCES" ]] && [[ $GLOBAL_READER_NEEDS_PV != 1 ]] && add_W o2-primary-vertexing-workflow "$DISABLE_MC $DISABLE_ROOT_INPUT $DISABLE_ROOT_OUTPUT $PVERTEX_CONFIG --pipeline $(get_N primary-vertexing MATCH REST 1 PRIMVTX),$(get_N pvertex-track-matching MATCH REST 1 PRIMVTXMATCH)" "${PVERTEXING_CONFIG_KEY};${INTERACTION_TAG_CONFIG_KEY};"
 
 if [[ $BEAMTYPE != "cosmic" ]] && has_detectors_reco ITS && has_detector_matching SECVTX && [[ ! -z "$SVERTEXING_SOURCES" ]]; then
-  [[ $GLOBAL_READER_NEEDS_SV != 1 ]] && add_W o2-secondary-vertexing-workflow "$DISABLE_MC $STRTRACKING $DISABLE_ROOT_INPUT $DISABLE_ROOT_OUTPUT $TPC_CORR_OPT --vertexing-sources $SVERTEXING_SOURCES --threads $SVERTEX_THREADS --pipeline $(get_N secondary-vertexing MATCH REST $SVERTEX_THREADS SECVTX)" "$TPC_CORR_KEY"
+  : ${REDUCESV_OPT:=}
+  : ${REDUCESV_CONF:=}
+  if [[ $SYNCMODE == 1 ]] && [[ $SECVTXK0ONLY != 0 ]] ; then
+    : ${STRTRACKING:=" --disable-strangeness-tracker "}
+    : ${REDUCESV_OPT:=" --disable-cascade-finder --disable-3body-finder "}
+    : ${REDUCESV_CONF:="svertexer.pidCutsPhoton[0]=-1;svertexer.pidCutsLambda[0]=-1;svertexer.pidCutsHTriton[0]=-1;svertexer.pidCutsHhydrog4[0]=-1;"}
+  fi
+  [[ $GLOBAL_READER_NEEDS_SV != 1 ]] && add_W o2-secondary-vertexing-workflow "$DISABLE_MC $STRTRACKING $REDUCESV_OPT $DISABLE_ROOT_INPUT $DISABLE_ROOT_OUTPUT $TPC_CORR_OPT --vertexing-sources $SVERTEXING_SOURCES --threads $SVERTEX_THREADS --pipeline $(get_N secondary-vertexing MATCH REST $SVERTEX_THREADS SECVTX)" "$TPC_CORR_KEY;$REDUCESV_CONF"
   SECTVTX_ON="1"
 else
   SECTVTX_ON="0"
