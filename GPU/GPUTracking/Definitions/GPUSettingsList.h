@@ -228,6 +228,7 @@ AddOption(runTest, int32_t, 0, "", 0, "Do not run the actual benchmark, but just
 AddOption(cacheMutex, bool, true, "", 0, "Use a file lock to serialize access to the cache folder")
 AddOption(ignoreCacheValid, bool, false, "", 0, "If set, allows to use RTC cached code files even if they are not valid for the current source code / parameters")
 AddOption(printLaunchBounds, bool, false, "", 0, "Print launch bounds used for RTC code as debugging option")
+AddOption(allowOptimizedSlaveReconstruction, bool, false, "", 0, "Allow RTC with slave GPUReconstruction instances with optConstexpr and optSpecialcode")
 AddOption(cacheFolder, std::string, "./rtccache/", "", 0, "Folder in which the cache file is stored")
 AddOption(prependCommand, std::string, "", "", 0, "Prepend RTC compilation commands by this string")
 AddOption(overrideArchitecture, std::string, "", "", 0, "Override arhcitecture part of RTC compilation command line") // Part of cmdLine, so checked against the cache
