@@ -659,7 +659,9 @@ int32_t GPUChainTracking::RunTPCClusterizer(bool synchronizeOutput)
         // But environment must be valid, so we init the model environment first and use it here afterwards.
         // Either this is done in one environment with lane == 0 or by recreating the allocator using recreateMemoryAllocator.
         // TODO: Volatile allocation works for reserving, but not yet for allocations when binding the input tensor
-        // nnApplications[lane].volatileOrtAllocator((nnApplications[lane].mModelClass).getEnv(), (nnApplications[lane].mModelClass).getMemoryInfo(), mRec, recreateMemoryAllocator);
+        // if (lane == 0) {
+        //   nnApplications[lane].directOrtAllocator((nnApplications[lane].mModelClass).getEnv(), (nnApplications[lane].mModelClass).getMemoryInfo(), mRec, recreateMemoryAllocator);
+        // }
         // recreateMemoryAllocator = true;
         (nnApplications[lane].mModelClass).initSession();
       }
@@ -671,7 +673,7 @@ int32_t GPUChainTracking::RunTPCClusterizer(bool synchronizeOutput)
         }
         // (nnApplications[lane].mModelReg1).setEnv((nnApplications[lane].mModelClass).getEnv());
         (nnApplications[lane].mModelReg1).initEnvironment();
-        // nnApplications[lane].volatileOrtAllocator((nnApplications[lane].mModelReg1).getEnv(), (nnApplications[lane].mModelReg1).getMemoryInfo(), mRec, recreateMemoryAllocator);
+        // nnApplications[lane].directOrtAllocator((nnApplications[lane].mModelReg1).getEnv(), (nnApplications[lane].mModelReg1).getMemoryInfo(), mRec, recreateMemoryAllocator);
         (nnApplications[lane].mModelReg1).initSession();
       }
       if (nnApplications[lane].mModelsUsed[2]) {
@@ -680,8 +682,9 @@ int32_t GPUChainTracking::RunTPCClusterizer(bool synchronizeOutput)
         if (nnApplications[lane].mModelReg2.getIntraOpNumThreads() > maxThreads) {
           nnApplications[lane].mModelReg2.setIntraOpNumThreads(maxThreads);
         }
+        // (nnApplications[lane].mModelReg2).setEnv((nnApplications[lane].mModelClass).getEnv());
         (nnApplications[lane].mModelReg2).initEnvironment();
-        // nnApplications[lane].volatileOrtAllocator((nnApplications[lane].mModelClass).getEnv(), (nnApplications[lane].mModelClass).getMemoryInfo(), mRec, recreateMemoryAllocator);
+        // nnApplications[lane].directOrtAllocator((nnApplications[lane].mModelClass).getEnv(), (nnApplications[lane].mModelClass).getMemoryInfo(), mRec, recreateMemoryAllocator);
         (nnApplications[lane].mModelReg2).initSession();
       }
       if (nn_settings.nnClusterizerVerbosity < 3) {
@@ -707,8 +710,6 @@ int32_t GPUChainTracking::RunTPCClusterizer(bool synchronizeOutput)
     if (doGPU) {
       WriteToConstantMemory(RecoStep::TPCClusterFinding, (char*)&processors()->tpcNNClusterer - (char*)processors(), &processorsShadow()->tpcNNClusterer, sizeof(GPUTPCNNClusterizer) * NSECTORS, mRec->NStreams() - 1, &mEvents->init);
     }
-    LOG(info) << "Size of nnApplications[lane]: " << sizeof(nnApplications[0]) << " bytes";
-    LOG(info) << "Size of nnApplications: " << sizeof(GPUTPCNNClusterizerHost) * GetProcessingSettings().nTPCClustererLanes << " bytes";
   }
 #endif
 
@@ -976,6 +977,15 @@ int32_t GPUChainTracking::RunTPCClusterizer(bool synchronizeOutput)
           GPUTPCNNClusterizer& clustererNNShadow = doGPU ? processorsShadow()->tpcNNClusterer[lane] : clustererNN;
           GPUTPCNNClusterizerHost& nnApplication = nnApplications[lane];
 
+          // // bool recreateMemoryAllocator = false;
+          // if (lane == 0) {
+          //   (nnApplications[lane].mModelClass).initEnvironment();
+          //   nnApplications[lane].directOrtAllocator((nnApplications[lane].mModelClass).getEnv(), (nnApplications[lane].mModelClass).getMemoryInfo(), mRec, 0);
+          // }
+          // // recreateMemoryAllocator = true;
+          // (nnApplications[lane].mModelClass).initSession();
+          // (nnApplications[lane].mModelReg1).initSession();
+
           int withMC = (doGPU && propagateMCLabels);
 
           if (clustererNNShadow.mNnClusterizerUseCfRegression || (int)(nn_settings.nnClusterizerApplyCfDeconvolution)) {
@@ -1188,12 +1198,13 @@ int32_t GPUChainTracking::RunTPCClusterizer(bool synchronizeOutput)
     }
   }
   for (int32_t i = 0; i < GetProcessingSettings().nTPCClustererLanes; i++) {
-    // if (GetProcessingSettings().nn.applyNNclusterizer) {
-    //   GPUTPCNNClusterizerHost& nnApplication = nnApplications[i];
-    //   nnApplication.mModelClass.release(GetProcessingSettings().nn.nnInferenceOrtProfiling);
-    //   nnApplication.mModelReg1.release(GetProcessingSettings().nn.nnInferenceOrtProfiling);
-    //   nnApplication.mModelReg2.release(GetProcessingSettings().nn.nnInferenceOrtProfiling);
-    // }
+    if (GetProcessingSettings().nn.applyNNclusterizer) {
+      LOG(info) << "(ORT) Environment releasing...";
+      GPUTPCNNClusterizerHost& nnApplication = nnApplications[i];
+      nnApplication.mModelClass.release(true);
+      nnApplication.mModelReg1.release(true);
+      nnApplication.mModelReg2.release(true);
+    }
     if (transferRunning[i]) {
       ReleaseEvent(mEvents->stream[i], doGPU);
     }
