@@ -771,7 +771,7 @@ template <aod::is_aod_hash D>
 auto spawner(std::vector<std::shared_ptr<arrow::Table>>&& tables, const char* name, o2::framework::expressions::Projector* projectors, std::shared_ptr<gandiva::Projector>& projector)
 {
   using placeholders_pack_t = typename o2::aod::MetadataTrait<D>::metadata::placeholders_pack_t;
-  auto fullTable = soa::ArrowHelpers::joinTables(std::move(tables));
+  auto fullTable = soa::ArrowHelpers::joinTables(std::move(tables), std::span{o2::aod::MetadataTrait<D>::metadata::base_table_t::originalLabels});
   if (fullTable->num_rows() == 0) {
     return makeEmptyTable(name, placeholders_pack_t{});
   }
@@ -798,7 +798,7 @@ template <aod::is_aod_hash D>
 auto spawner(std::vector<std::shared_ptr<arrow::Table>>&& tables, const char* name, std::shared_ptr<gandiva::Projector>& projector)
 {
   using expression_pack_t = typename o2::aod::MetadataTrait<D>::metadata::expression_pack_t;
-  auto fullTable = soa::ArrowHelpers::joinTables(std::move(tables));
+  auto fullTable = soa::ArrowHelpers::joinTables(std::move(tables), std::span{o2::aod::MetadataTrait<D>::metadata::base_table_t::originalLabels});
   if (fullTable->num_rows() == 0) {
     return makeEmptyTable(name, expression_pack_t{});
   }
@@ -834,7 +834,8 @@ auto spawner(std::shared_ptr<arrow::Table> const& fullTable, const char* name, s
 template <typename... C>
 auto spawner(framework::pack<C...> columns, std::vector<std::shared_ptr<arrow::Table>>&& tables, const char* name, std::shared_ptr<gandiva::Projector>& projector)
 {
-  auto fullTable = soa::ArrowHelpers::joinTables(std::move(tables));
+  std::array<const char*, 1> labels{"original"};
+  auto fullTable = soa::ArrowHelpers::joinTables(std::move(tables), std::span<const char* const>{labels});
   if (fullTable->num_rows() == 0) {
     return makeEmptyTable(name, framework::pack<C...>{});
   }
