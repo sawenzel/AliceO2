@@ -12,13 +12,11 @@
 #define O2_FRAMEWORK_EXPRESSIONS_H_
 
 #include "Framework/BasicOps.h"
-#include "Framework/CompilerBuiltins.h"
 #include "Framework/Pack.h"
 #include "Framework/Configurable.h"
 #include "Framework/Variant.h"
 #include "Framework/InitContext.h"
 #include "Framework/ConfigParamRegistry.h"
-#include "Framework/RuntimeError.h"
 #include <arrow/type_fwd.h>
 #include <gandiva/gandiva_aliases.h>
 #include <arrow/type.h>
@@ -143,13 +141,17 @@ struct OpNode {
 /// A placeholder node for simple type configurable
 struct PlaceholderNode : LiteralNode {
   template <typename T>
+    requires(variant_trait_v<typename std::decay<T>::type> != VariantType::Unknown)
   PlaceholderNode(Configurable<T> const& v) : LiteralNode{v.value}, name{v.name}
   {
-    if constexpr (variant_trait_v<typename std::decay<T>::type> != VariantType::Unknown) {
-      retrieve = [](InitContext& context, char const* name) { return LiteralNode::var_t{context.options().get<T>(name)}; };
-    } else {
-      unknownParameterUsed(name.c_str());
-    }
+    retrieve = [](InitContext& context, char const* name) { return LiteralNode::var_t{context.options().get<T>(name)}; };
+  }
+
+  template <typename T, typename AT>
+    requires((std::convertible_to<T, AT>) && (variant_trait_v<typename std::decay<T>::type> != VariantType::Unknown))
+  PlaceholderNode(Configurable<T> const& v, AT*) : LiteralNode{static_cast<AT>(v.value)}, name{v.name}
+  {
+    retrieve = [](InitContext& context, char const* name) { return LiteralNode::var_t{static_cast<AT>(context.options().get<T>(name))}; };
   }
 
   PlaceholderNode(PlaceholderNode const& other) = default;
@@ -162,6 +164,12 @@ struct PlaceholderNode : LiteralNode {
   std::string const& name;
   LiteralNode::var_t (*retrieve)(InitContext&, char const*);
 };
+
+template <typename AT, typename T>
+PlaceholderNode as(Configurable<T> const& v)
+{
+  return PlaceholderNode(v, (AT*)nullptr);
+}
 
 /// A placeholder node for parameters taken from an array
 struct ParameterNode : LiteralNode {
