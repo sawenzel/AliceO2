@@ -60,7 +60,8 @@ class RawDataDecoder
   std::array<uint64_t, o2::ctp::CTP_NCLASSES> getClassErrorsB() { return mClassErrorsB; }
   std::array<uint64_t, o2::ctp::CTP_NCLASSES> getClassCountersA() { return mClassCountersA; }
   std::array<uint64_t, o2::ctp::CTP_NCLASSES> getClassCountersB() { return mClassCountersB; }
-  int getLostDueToShift() { return mLostDueToShift; }
+  int getLostDueToShiftCls() { return mLostDueToShiftCC; }
+  int getLostDueToShiftInp() { return mLostDueToShiftInps; }
 
  private:
   static constexpr uint32_t TF_TRIGGERTYPE_MASK = 0x800;
@@ -80,8 +81,8 @@ class RawDataDecoder
   gbtword80_t mTVXMask = 0x4;  // TVX is 3rd input
   gbtword80_t mVBAMask = 0x20; // VBA is 6 th input
   bool mVerbose = false;
-  uint32_t mIRRejected = 0;
-  uint32_t mTCRRejected = 0;
+  int mIRRejected = 0;
+  int mTCRRejected = 0;
   bool mPadding = true;
   uint32_t mTFOrbit = 0;
   std::vector<uint32_t> mTFOrbits;
@@ -94,7 +95,8 @@ class RawDataDecoder
   std::array<uint64_t, o2::ctp::CTP_NCLASSES> mClassErrorsB{}; // from inputs
   std::array<uint64_t, o2::ctp::CTP_NCLASSES> mClassCountersA{};
   std::array<uint64_t, o2::ctp::CTP_NCLASSES> mClassCountersB{}; // from inputs
-  int mLostDueToShift = 0;
+  int mLostDueToShiftCC = 0;
+  int mLostDueToShiftInps = 0;
   CTPConfiguration mCTPConfig;
 };
 } // namespace ctp

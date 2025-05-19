@@ -780,6 +780,15 @@ int CTPConfiguration::getInputIndex(const std::string& name) const
   LOG(info) << "input:" << name << " index:" << index;
   return index;
 }
+std::string CTPConfiguration::getClassNameFromIndex(int index)
+{
+  if (index < (int)mCTPClasses.size()) {
+    return mCTPClasses[index].name;
+  } else {
+    std::string name = "Cls" + std::to_string(index);
+    return name;
+  }
+};
 std::string CTPConfiguration::getClassNameFromHWIndex(int index)
 {
   for (auto& cls : mCTPClasses) {
@@ -924,8 +933,9 @@ uint64_t CTPConfiguration::getTriggerClassMaskWInputsNoTrgDets() const
     exclude += cls.name.find("EMC") != std::string::npos;
     exclude += cls.name.find("TRD") != std::string::npos;
     exclude += cls.name.find("HMP") != std::string::npos;
-    if (!exclude)
+    if (!exclude) {
       clsmask |= cls.classMask;
+    }
   }
   return clsmask;
 }
