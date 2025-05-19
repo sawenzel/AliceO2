@@ -534,39 +534,43 @@ static void setGroupedCombination(C& comb, TG& grouping, std::tuple<Ts...>& asso
 /// Preslice handling
 template <typename T>
   requires(!is_preslice<T>)
-bool registerCache(T&, std::vector<StringPair>&, std::vector<StringPair>&)
+bool registerCache(T&, Cache&, Cache&)
 {
   return false;
 }
 
 template <is_preslice T>
   requires std::same_as<typename T::policy_t, framework::PreslicePolicySorted>
-bool registerCache(T& preslice, std::vector<StringPair>& bsks, std::vector<StringPair>&)
+bool registerCache(T& preslice, Cache& bsks, Cache&)
 {
   if constexpr (T::optional) {
     if (preslice.binding == "[MISSING]") {
       return true;
     }
   }
-  auto locate = std::find_if(bsks.begin(), bsks.end(), [&](auto const& entry) { return (entry.first == preslice.bindingKey.first) && (entry.second == preslice.bindingKey.second); });
+  auto locate = std::find_if(bsks.begin(), bsks.end(), [&](auto const& entry) { return (entry.binding == preslice.bindingKey.binding) && (entry.key == preslice.bindingKey.key); });
   if (locate == bsks.end()) {
     bsks.emplace_back(preslice.getBindingKey());
+  } else if (locate->enabled == false) {
+    locate->enabled = true;
   }
   return true;
 }
 
 template <is_preslice T>
   requires std::same_as<typename T::policy_t, framework::PreslicePolicyGeneral>
-bool registerCache(T& preslice, std::vector<StringPair>&, std::vector<StringPair>& bsksU)
+bool registerCache(T& preslice, Cache&, Cache& bsksU)
 {
   if constexpr (T::optional) {
     if (preslice.binding == "[MISSING]") {
       return true;
     }
   }
-  auto locate = std::find_if(bsksU.begin(), bsksU.end(), [&](auto const& entry) { return (entry.first == preslice.bindingKey.first) && (entry.second == preslice.bindingKey.second); });
+  auto locate = std::find_if(bsksU.begin(), bsksU.end(), [&](auto const& entry) { return (entry.binding == preslice.bindingKey.binding) && (entry.key == preslice.bindingKey.key); });
   if (locate == bsksU.end()) {
     bsksU.emplace_back(preslice.getBindingKey());
+  } else if (locate->enabled == false) {
+    locate->enabled = true;
   }
   return true;
 }

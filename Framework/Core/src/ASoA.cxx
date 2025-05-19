@@ -194,7 +194,7 @@ bool PreslicePolicyBase::isMissing() const
   return binding == "[MISSING]";
 }
 
-StringPair const& PreslicePolicyBase::getBindingKey() const
+Entry const& PreslicePolicyBase::getBindingKey() const
 {
   return bindingKey;
 }
