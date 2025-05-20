@@ -185,7 +185,7 @@ void GPUChainTracking::PrintMemoryRelations()
   GPUInfo("MEMREL TrackHitss NCl %d NTrkH %d", processors()->tpcMerger.NMaxClusters(), processors()->tpcMerger.NOutputTrackClusters());
 }
 
-void GPUChainTracking::PrepareDebugOutput()
+void GPUChainTracking::PrepareKernelDebugOutput()
 {
 #ifdef GPUCA_KERNEL_DEBUGGER_OUTPUT
   const auto& threadContext = GetThreadContext();
@@ -198,7 +198,7 @@ void GPUChainTracking::PrepareDebugOutput()
 #endif
 }
 
-void GPUChainTracking::PrintDebugOutput()
+void GPUChainTracking::PrintKernelDebugOutput()
 {
 #ifdef GPUCA_KERNEL_DEBUGGER_OUTPUT
   const auto& threadContext = GetThreadContext();
@@ -389,4 +389,24 @@ void GPUChainTracking::DebugSortCompressedClusters(o2::tpc::CompressedClustersFl
   sortMultiple(c.nAttachedClusters, getFullOffset, getN, c.qTotA, c.qMaxA, c.flagsA, c.sigmaPadA, c.sigmaTimeA);
   sortMultiple(c.nAttachedClustersReduced, getReducedOffset, getN1, c.rowDiffA, c.sliceLegDiffA, c.padResA, c.timeResA);
   sortMultiple(c.nTracks, getIndex, get1, c.qPtA, c.rowA, c.sliceA, c.timeA, c.padA, c.nTrackClusters); // NOTE: This must be last, since nTrackClusters is used for handling the arrays above!
+}
+
+void GPUChainTracking::DoDebugRawDump()
+{
+  std::string dirName = mRec->getDebugFolder("tpc_raw");
+  if (dirName == "") {
+    return;
+  }
+  GPUTrackingInOutPointers ioPtrs;
+  if (mIOPtrs.tpcZS) {
+    ioPtrs.tpcZS = mIOPtrs.tpcZS;
+  } else if (mIOPtrs.tpcPackedDigits) {
+    ioPtrs.tpcPackedDigits = mIOPtrs.tpcPackedDigits;
+  } else if (mIOPtrs.clustersNative) {
+    ioPtrs.clustersNative = mIOPtrs.clustersNative;
+  }
+
+  GPUInfo("Doing debug raw dump");
+  mRec->DumpSettings((dirName + "/").c_str());
+  DumpData((dirName + "/event.0.dump").c_str(), &ioPtrs);
 }

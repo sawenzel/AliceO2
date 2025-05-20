@@ -193,6 +193,7 @@ int32_t GPUReconstruction::Init()
     }
     mSlaves[i]->ClearAllocatedMemory();
   }
+  debugInit();
   return 0;
 }
 
@@ -469,6 +470,7 @@ int32_t GPUReconstruction::Exit()
   if (mInitialized) {
     ExitDevice();
   }
+  debugExit();
   mInitialized = false;
   return 0;
 }

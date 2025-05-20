@@ -22,6 +22,7 @@
 #include <memory>
 #include <iosfwd>
 #include <vector>
+#include <functional>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -239,6 +240,9 @@ class GPUReconstruction
   virtual void PrintKernelOccupancies() {}
   double GetStatKernelTime() { return mStatKernelTime; }
   double GetStatWallTime() { return mStatWallTime; }
+  void setDebugDumpCallback(std::function<void()>&& callback = std::function<void()>(nullptr));
+  bool triggerDebugDump();
+  std::string getDebugFolder(const std::string& prefix = ""); // empty string = no debug
 
   // Threading
   std::shared_ptr<GPUReconstructionThreading> mThreading;
@@ -406,6 +410,13 @@ class GPUReconstruction
     void* mGPUEntry;
   };
   static std::shared_ptr<LibraryLoader> sLibCUDA, sLibHIP, sLibOCL;
+
+  // Debugging
+  struct debugInternal;
+  static std::unique_ptr<debugInternal> mDebugData;
+  bool mDebugEnabled = false;
+  void debugInit();
+  void debugExit();
 
   static GPUReconstruction* GPUReconstruction_Create_CPU(const GPUSettingsDeviceBackend& cfg);
 };

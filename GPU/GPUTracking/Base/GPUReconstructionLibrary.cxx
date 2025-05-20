@@ -9,7 +9,7 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-/// \file GPUReconstruction.cxx
+/// \file GPUReconstructionLibrary.cxx
 /// \author David Rohr
 
 #ifdef _WIN32
