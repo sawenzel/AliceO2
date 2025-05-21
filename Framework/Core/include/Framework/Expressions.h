@@ -546,6 +546,14 @@ inline Node updateParameters(Node const& pexp, int bins, std::vector<T> const& p
   return result;
 }
 
+/// clamping functional
+template <typename T>
+inline Node clamp(Node&& expr, T low, T hi)
+{
+  auto copy = expr;
+  return ifnode(Node{copy} < LiteralNode{low}, LiteralNode{low}, ifnode(Node{copy} > LiteralNode{hi}, LiteralNode{hi}, Node{copy}));
+}
+
 /// A struct, containing the root of the expression tree
 struct Filter {
   Filter() = default;
