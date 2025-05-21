@@ -1513,7 +1513,6 @@ GPUd() void GPUTPCGMMerger::CollectMergedTracks(int32_t nBlocks, int32_t nThread
   GPUTPCGMSectorTrack* trackParts[kMaxParts];
 
   for (int32_t itr = iBlock * nThreads + iThread; itr < SectorTrackInfoLocalTotal(); itr += nThreads * nBlocks) {
-
     GPUTPCGMSectorTrack& track = mSectorTrackInfos[itr];
 
     if (track.PrevSegmentNeighbour() >= 0) {
@@ -1712,7 +1711,7 @@ GPUd() void GPUTPCGMMerger::CollectMergedTracks(int32_t nBlocks, int32_t nThread
     }
 
     const uint32_t iMergedTrackFirstCluster = CAMath::AtomicAdd(&mMemory->nMergedTrackClusters, (uint32_t)nHits);
-    if (iMergedTrackFirstCluster >= mNMaxMergedTrackClusters) {
+    if (iMergedTrackFirstCluster + nHits > mNMaxMergedTrackClusters) {
       raiseError(GPUErrors::ERROR_MERGER_HIT_OVERFLOW, iMergedTrackFirstCluster, mNMaxMergedTrackClusters);
       CAMath::AtomicExch(&mMemory->nMergedTrackClusters, mNMaxMergedTrackClusters);
       continue;
