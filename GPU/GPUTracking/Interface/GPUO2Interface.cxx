@@ -110,7 +110,7 @@ int32_t GPUO2Interface::Initialize(const GPUO2InterfaceConfiguration& config)
       return (1);
     }
     if (!mCtx[i].mRec->IsGPU() && mCtx[i].mRec->GetProcessingSettings().memoryAllocationStrategy == GPUMemoryResource::ALLOCATION_INDIVIDUAL) {
-      mCtx[i].mRec->MemoryScalers()->factor *= 2;
+      mCtx[i].mRec->MemoryScalers()->scalingFactor *= 2;
     }
   }
   if (mConfig->configProcessing.doublePipeline) {

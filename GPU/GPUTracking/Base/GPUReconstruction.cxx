@@ -304,7 +304,7 @@ int32_t GPUReconstruction::InitPhaseBeforeDevice()
     mProcessingSettings->rtc.optConstexpr = false;
   }
 
-  mMemoryScalers->factor = GetProcessingSettings().memoryScalingFactor;
+  mMemoryScalers->scalingFactor = GetProcessingSettings().memoryScalingFactor;
   mMemoryScalers->conservative = GetProcessingSettings().conservativeMemoryEstimate;
   mMemoryScalers->returnMaxVal = GetProcessingSettings().forceMaxMemScalers != 0;
   if (GetProcessingSettings().forceMaxMemScalers > 1) {
