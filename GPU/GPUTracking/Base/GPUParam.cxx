@@ -30,7 +30,7 @@ using namespace o2::gpu;
 
 #include "utils/qconfigrtc.h"
 
-void GPUParam::SetDefaults(float solenoidBz)
+void GPUParam::SetDefaults(float solenoidBz, bool assumeConstantBz)
 {
   memset((void*)this, 0, sizeof(*this));
   new (&rec) GPUSettingsRec;
@@ -84,7 +84,7 @@ void GPUParam::SetDefaults(float solenoidBz)
 #endif
 
   par.dAlpha = 0.349066f;
-  UpdateBzOnly(solenoidBz);
+  UpdateBzOnly(solenoidBz, assumeConstantBz);
   par.dodEdx = 0;
 
   constexpr float plusZmin = 0.0529937;
@@ -109,7 +109,6 @@ void GPUParam::SetDefaults(float solenoidBz)
     SectorParam[i].AngleMax = SectorParam[i].Alpha + par.dAlpha / 2.f;
   }
 
-  par.assumeConstantBz = false;
   par.toyMCEventsFlag = false;
   par.continuousTracking = false;
   continuousMaxTimeBin = 0;
@@ -120,8 +119,7 @@ void GPUParam::SetDefaults(float solenoidBz)
 void GPUParam::UpdateSettings(const GPUSettingsGRP* g, const GPUSettingsProcessing* p, const GPURecoStepConfiguration* w, const GPUSettingsRecDynamic* d)
 {
   if (g) {
-    UpdateBzOnly(g->solenoidBzNominalGPU);
-    par.assumeConstantBz = g->constBz;
+    UpdateBzOnly(g->solenoidBzNominalGPU, g->constBz);
     par.toyMCEventsFlag = g->homemadeEvents;
     par.continuousTracking = g->grpContinuousMaxTimeBin != 0;
     continuousMaxTimeBin = g->grpContinuousMaxTimeBin == -1 ? GPUSettings::TPC_MAX_TF_TIME_BIN : g->grpContinuousMaxTimeBin;
@@ -143,12 +141,12 @@ void GPUParam::UpdateSettings(const GPUSettingsGRP* g, const GPUSettingsProcessi
   }
 }
 
-void GPUParam::UpdateBzOnly(float newSolenoidBz)
+void GPUParam::UpdateBzOnly(float newSolenoidBz, bool assumeConstantBz)
 {
   bzkG = newSolenoidBz;
   bzCLight = bzkG * o2::gpu::gpu_common_constants::kCLight;
   polynomialField.Reset();
-  if (par.assumeConstantBz) {
+  if (assumeConstantBz) {
     GPUTPCGMPolynomialFieldManager::GetPolynomialField(GPUTPCGMPolynomialFieldManager::kUniform, bzkG, polynomialField);
   } else {
     GPUTPCGMPolynomialFieldManager::GetPolynomialField(bzkG, polynomialField);
@@ -158,7 +156,7 @@ void GPUParam::UpdateBzOnly(float newSolenoidBz)
 
 void GPUParam::SetDefaults(const GPUSettingsGRP* g, const GPUSettingsRec* r, const GPUSettingsProcessing* p, const GPURecoStepConfiguration* w)
 {
-  SetDefaults(g->solenoidBzNominalGPU);
+  SetDefaults(g->solenoidBzNominalGPU, g->constBz);
   if (r) {
     rec = *r;
     if (rec.fitPropagateBzOnly == -1) {
