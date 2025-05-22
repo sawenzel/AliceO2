@@ -223,29 +223,33 @@ endif()
 if(GPUCA_HIP_COMPILE_MODE STREQUAL "onefile")
   target_compile_definitions(${targetName} PRIVATE GPUCA_KERNEL_COMPILE_MODE=0)
 elseif(GPUCA_HIP_COMPILE_MODE STREQUAL "perkernel")
-  add_library(GPUTrackingHIPKernels OBJECT $<JOIN:$<LIST:TRANSFORM,$<LIST:TRANSFORM,$<LIST:TRANSFORM,$<TARGET_PROPERTY:O2_GPU_KERNELS,O2_GPU_KERNEL_NAMES>,REPLACE,[^A-Za-z0-9]+,_>,PREPEND,${O2_GPU_KERNEL_WRAPPER_FOLDER}/krnl_>,APPEND,.hip>, >)
-  target_compile_options(GPUTrackingHIPKernels PRIVATE "--cuda-device-only")
-  target_compile_options(GPUTrackingHIPKernels PRIVATE $<$<COMPILE_LANGUAGE:HIP>:-fno-gpu-rdc>)
-  target_link_options(GPUTrackingHIPKernels PRIVATE $<$<COMPILE_LANGUAGE:HIP>:-fno-gpu-rdc>)
   target_compile_definitions(${targetName} PRIVATE GPUCA_KERNEL_COMPILE_MODE=1)
-  target_compile_definitions(GPUTrackingHIPKernels PRIVATE $<TARGET_PROPERTY:${targetName},COMPILE_DEFINITIONS>)
-  target_include_directories(GPUTrackingHIPKernels PRIVATE $<TARGET_PROPERTY:${targetName},INCLUDE_DIRECTORIES>)
-  target_link_libraries(GPUTrackingHIPKernels PRIVATE $<TARGET_PROPERTY:${targetName},LINK_LIBRARIES>)
-  if(NOT DEFINED GPUCA_HIP_HIPIFY_FROM_CUDA OR "${GPUCA_HIP_HIPIFY_FROM_CUDA}")
-    add_dependencies(GPUTrackingHIPKernels ${MODULE}_HIPIFIED)
+  if(NOT DEFINED GPUCA_RTC_NO_COMPILED_KERNELS OR NOT GPUCA_RTC_NO_COMPILED_KERNELS)
+    add_library(GPUTrackingHIPKernels OBJECT $<JOIN:$<LIST:TRANSFORM,$<LIST:TRANSFORM,$<LIST:TRANSFORM,$<TARGET_PROPERTY:O2_GPU_KERNELS,O2_GPU_KERNEL_NAMES>,REPLACE,[^A-Za-z0-9]+,_>,PREPEND,${O2_GPU_KERNEL_WRAPPER_FOLDER}/krnl_>,APPEND,.hip>, >)
+    target_compile_options(GPUTrackingHIPKernels PRIVATE "--cuda-device-only")
+    target_compile_options(GPUTrackingHIPKernels PRIVATE $<$<COMPILE_LANGUAGE:HIP>:-fno-gpu-rdc>)
+    target_link_options(GPUTrackingHIPKernels PRIVATE $<$<COMPILE_LANGUAGE:HIP>:-fno-gpu-rdc>)
+    target_compile_definitions(GPUTrackingHIPKernels PRIVATE $<TARGET_PROPERTY:${targetName},COMPILE_DEFINITIONS>)
+    target_include_directories(GPUTrackingHIPKernels PRIVATE $<TARGET_PROPERTY:${targetName},INCLUDE_DIRECTORIES>)
+    target_link_libraries(GPUTrackingHIPKernels PRIVATE $<TARGET_PROPERTY:${targetName},LINK_LIBRARIES>)
+    if(NOT DEFINED GPUCA_HIP_HIPIFY_FROM_CUDA OR "${GPUCA_HIP_HIPIFY_FROM_CUDA}")
+      add_dependencies(GPUTrackingHIPKernels ${MODULE}_HIPIFIED)
+    endif()
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/hip_kernel_module_fatbin)
+    add_custom_command(
+      OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/GPUTrackingHIPKernelModules.o
+      COMMAND cp -u $<TARGET_OBJECTS:GPUTrackingHIPKernels> ${CMAKE_CURRENT_BINARY_DIR}/hip_kernel_module_fatbin/
+      COMMAND ${CMAKE_LINKER} -z noexecstack --relocatable --format binary --output ${CMAKE_CURRENT_BINARY_DIR}/GPUTrackingHIPKernelModules.o $<PATH:RELATIVE_PATH,$<LIST:TRANSFORM,$<PATH:GET_FILENAME,$<TARGET_OBJECTS:GPUTrackingHIPKernels>>,PREPEND,${CMAKE_CURRENT_BINARY_DIR}/hip_kernel_module_fatbin/>,${CMAKE_CURRENT_BINARY_DIR}>
+      DEPENDS GPUTrackingHIPKernels $<TARGET_OBJECTS:GPUTrackingHIPKernels>
+      COMMENT "Compiling fatbin kernels ${CMAKE_CURRENT_BINARY_DIR}/GPUTrackingHIPKernelModules.o"
+      VERBATIM
+      COMMAND_EXPAND_LISTS
+    )
+    target_sources(${targetName} PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/GPUTrackingHIPKernelModules.o)
+    set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/GPUTrackingHIPKernelModules.o PROPERTIES EXTERNAL_OBJECT true GENERATED true)
+  else()
+    set_source_files_properties(${GPUCA_HIP_SOURCE_DIR}/GPUReconstructionHIP.hip PROPERTIES COMPILE_DEFINITIONS GPUCA_RTC_NO_COMPILED_KERNELS)
   endif()
-  file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/hip_kernel_module_fatbin)
-  add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/GPUTrackingHIPKernelModules.o
-    COMMAND cp -u $<TARGET_OBJECTS:GPUTrackingHIPKernels> ${CMAKE_CURRENT_BINARY_DIR}/hip_kernel_module_fatbin/
-    COMMAND ${CMAKE_LINKER} -z noexecstack --relocatable --format binary --output ${CMAKE_CURRENT_BINARY_DIR}/GPUTrackingHIPKernelModules.o $<PATH:RELATIVE_PATH,$<LIST:TRANSFORM,$<PATH:GET_FILENAME,$<TARGET_OBJECTS:GPUTrackingHIPKernels>>,PREPEND,${CMAKE_CURRENT_BINARY_DIR}/hip_kernel_module_fatbin/>,${CMAKE_CURRENT_BINARY_DIR}>
-    DEPENDS GPUTrackingHIPKernels $<TARGET_OBJECTS:GPUTrackingHIPKernels>
-    COMMENT "Compiling fatbin kernels ${CMAKE_CURRENT_BINARY_DIR}/GPUTrackingHIPKernelModules.o"
-    VERBATIM
-    COMMAND_EXPAND_LISTS
-  )
-  target_sources(${targetName} PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/GPUTrackingHIPKernelModules.o)
-  set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/GPUTrackingHIPKernelModules.o PROPERTIES EXTERNAL_OBJECT true GENERATED true)
 
 elseif(GPUCA_HIP_COMPILE_MODE STREQUAL "rdc")
   message(FATAL_ERROR "HIP RDC compilation of GPUReconstruction ios not yet working!")

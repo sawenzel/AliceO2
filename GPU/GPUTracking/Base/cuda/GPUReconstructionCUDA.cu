@@ -34,7 +34,11 @@
 #else // HIP
 #define PER_KERNEL_OBJECT_EXT _hip_o
 #endif
+#ifdef GPUCA_RTC_NO_COMPILED_KERNELS
+#define GPUCA_KRNL(x_class, ...) static void* GPUCA_M_CAT3(_binary_cuda_kernel_module_fatbin_krnl_, GPUCA_M_KRNL_NAME(x_class), GPUCA_M_CAT(PER_KERNEL_OBJECT_EXT, _start)) = nullptr;
+#else
 #define GPUCA_KRNL(x_class, ...) QGET_LD_BINARY_SYMBOLS(GPUCA_M_CAT3(cuda_kernel_module_fatbin_krnl_, GPUCA_M_KRNL_NAME(x_class), PER_KERNEL_OBJECT_EXT))
+#endif
 #include "GPUReconstructionKernelList.h"
 #undef GPUCA_KRNL
 #endif
@@ -335,6 +339,9 @@ int32_t GPUReconstructionCUDA::InitDevice_Runtime()
     }
 #if defined(GPUCA_KERNEL_COMPILE_MODE) && GPUCA_KERNEL_COMPILE_MODE == 1
     else {
+#ifdef GPUCA_RTC_NO_COMPILED_KERNELS
+      GPUFatal("Compiled with GPUCA_RTC_NO_COMPILED_KERNELS, must run RTC mode!");
+#endif
 #define GPUCA_KRNL(x_class, ...)                                        \
   mInternals->kernelModules.emplace_back(std::make_unique<CUmodule>()); \
   GPUChkErr(cuModuleLoadData(mInternals->kernelModules.back().get(), GPUCA_M_CAT3(_binary_cuda_kernel_module_fatbin_krnl_, GPUCA_M_KRNL_NAME(x_class), GPUCA_M_CAT(PER_KERNEL_OBJECT_EXT, _start))));
