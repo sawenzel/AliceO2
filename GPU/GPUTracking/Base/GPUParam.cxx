@@ -83,7 +83,6 @@ void GPUParam::SetDefaults(float solenoidBz, bool assumeConstantBz)
   }
 #endif
 
-  par.dAlpha = 0.349066f;
   UpdateBzOnly(solenoidBz, assumeConstantBz);
   par.dodEdx = 0;
 
@@ -102,11 +101,11 @@ void GPUParam::SetDefaults(float solenoidBz, bool assumeConstantBz)
     if (tmp >= GPUCA_NSECTORS / 4) {
       tmp -= GPUCA_NSECTORS / 2;
     }
-    SectorParam[i].Alpha = 0.174533f + par.dAlpha * tmp;
+    SectorParam[i].Alpha = 0.174533f + dAlpha * tmp;
     SectorParam[i].CosAlpha = CAMath::Cos(SectorParam[i].Alpha);
     SectorParam[i].SinAlpha = CAMath::Sin(SectorParam[i].Alpha);
-    SectorParam[i].AngleMin = SectorParam[i].Alpha - par.dAlpha / 2.f;
-    SectorParam[i].AngleMax = SectorParam[i].Alpha + par.dAlpha / 2.f;
+    SectorParam[i].AngleMin = SectorParam[i].Alpha - dAlpha / 2.f;
+    SectorParam[i].AngleMax = SectorParam[i].Alpha + dAlpha / 2.f;
   }
 
   par.continuousTracking = false;
