@@ -657,7 +657,6 @@ AddVariableRTC(toyMCEventsFlag, int8_t, 0)    // events were build with home-mad
 AddVariableRTC(continuousTracking, int8_t, 0) // Continuous tracking, estimate bz and errors for abs(z) = 125cm during seeding
 AddVariableRTC(dodEdx, int8_t, 0)             // Do dEdx computation
 AddVariableRTC(earlyTpcTransform, int8_t, 0)  // do Early TPC transformation
-AddVariableRTC(debugLevel, int8_t, 0)         // Debug level
 EndConfig()
 
 EndNamespace() // gpu
