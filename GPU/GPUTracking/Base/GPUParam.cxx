@@ -109,7 +109,6 @@ void GPUParam::SetDefaults(float solenoidBz, bool assumeConstantBz)
     SectorParam[i].AngleMax = SectorParam[i].Alpha + par.dAlpha / 2.f;
   }
 
-  par.toyMCEventsFlag = false;
   par.continuousTracking = false;
   continuousMaxTimeBin = 0;
   tpcCutTimeBin = 0;
@@ -120,7 +119,6 @@ void GPUParam::UpdateSettings(const GPUSettingsGRP* g, const GPUSettingsProcessi
 {
   if (g) {
     UpdateBzOnly(g->solenoidBzNominalGPU, g->constBz);
-    par.toyMCEventsFlag = g->homemadeEvents;
     par.continuousTracking = g->grpContinuousMaxTimeBin != 0;
     continuousMaxTimeBin = g->grpContinuousMaxTimeBin == -1 ? GPUSettings::TPC_MAX_TF_TIME_BIN : g->grpContinuousMaxTimeBin;
     tpcCutTimeBin = g->tpcCutTimeBin;

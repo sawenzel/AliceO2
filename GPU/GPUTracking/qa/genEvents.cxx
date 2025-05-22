@@ -168,7 +168,6 @@ int32_t genEvents::GenerateEvent(const GPUParam& param, char* filename)
 
   GPUTPCGMPropagator prop;
   {
-    prop.SetToyMCEventsFlag(kTRUE);
     const GPUTPCGMMerger& merger = mRec->GetProcessors()->tpcMerger;
     prop.SetPolynomialField(&merger.Param().polynomialField);
   }

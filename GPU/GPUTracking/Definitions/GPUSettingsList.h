@@ -652,7 +652,6 @@ EndConfig()
 // Derrived parameters used in GPUParam
 BeginHiddenConfig(GPUSettingsParam, param)
 AddVariableRTC(dAlpha, float, 0.f)            // angular size
-AddVariableRTC(toyMCEventsFlag, int8_t, 0)    // events were build with home-made event generator
 AddVariableRTC(continuousTracking, int8_t, 0) // Continuous tracking, estimate bz and errors for abs(z) = 125cm during seeding
 AddVariableRTC(dodEdx, int8_t, 0)             // Do dEdx computation
 AddVariableRTC(earlyTpcTransform, int8_t, 0)  // do Early TPC transformation
