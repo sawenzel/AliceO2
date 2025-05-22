@@ -125,33 +125,24 @@ int32_t GPUReconstructionCUDA::InitDevice_Runtime()
     }
     std::vector<bool> devicesOK(count, false);
     std::vector<size_t> devMemory(count, 0);
-    bool contextCreated = false;
+    std::vector<bool> contextCreated(count, false);
     for (int32_t i = 0; i < count; i++) {
       if (GetProcessingSettings().debugLevel >= 4) {
         GPUInfo("Examining device %d", i);
       }
       size_t free, total;
-#ifndef __HIPCC__ // CUDA
-      if (GPUChkErrI(cudaInitDevice(i, 0, 0))) {
-#else // HIP
-      if (GPUChkErrI(hipSetDevice(i))) {
-#endif
+      if (GPUChkErrI(cudaSetDevice(i))) {
         if (GetProcessingSettings().debugLevel >= 4) {
           GPUWarning("Couldn't create context for device %d. Skipping it.", i);
         }
         continue;
       }
-      contextCreated = true;
+      contextCreated[i] = true;
       if (GPUChkErrI(cudaMemGetInfo(&free, &total))) {
         if (GetProcessingSettings().debugLevel >= 4) {
           GPUWarning("Error obtaining CUDA memory info about device %d! Skipping it.", i);
         }
-        GPUChkErr(cudaDeviceReset());
         continue;
-      }
-      if (count > 1) {
-        GPUChkErr(cudaDeviceReset());
-        contextCreated = false;
       }
       if (GetProcessingSettings().debugLevel >= 4) {
         GPUInfo("Obtained current memory usage for device %d", i);
@@ -212,13 +203,20 @@ int32_t GPUReconstructionCUDA::InitDevice_Runtime()
         bestDevice = GetProcessingSettings().deviceNum;
       }
     }
-    if (noDevice) {
-      if (contextCreated) {
+    for (int32_t i = 0; i < count; i++) {
+      if (contextCreated[i] && (noDevice || i != bestDevice)) {
+        GPUChkErrI(cudaSetDevice(i));
         GPUChkErrI(cudaDeviceReset());
       }
+    }
+    if (noDevice) {
       return (1);
     }
     mDeviceId = bestDevice;
+    if (GPUChkErrI(cudaSetDevice(mDeviceId))) {
+      GPUError("Could not set CUDA Device!");
+      return (1);
+    }
 
     GPUChkErrI(cudaGetDeviceProperties(&deviceProp, mDeviceId));
 
@@ -261,15 +259,6 @@ int32_t GPUReconstructionCUDA::InitDevice_Runtime()
       return (1);
     }
 #endif
-
-#ifndef __HIPCC__ // CUDA
-    if (contextCreated == 0 && GPUChkErrI(cudaInitDevice(mDeviceId, 0, 0))) {
-#else // HIP
-    if (contextCreated == 0 && GPUChkErrI(hipSetDevice(mDeviceId))) {
-#endif
-      GPUError("Could not set CUDA Device!");
-      return (1);
-    }
 
 #ifndef __HIPCC__ // CUDA
     if (GPUChkErrI(cudaDeviceSetLimit(cudaLimitStackSize, GPUCA_GPU_STACK_SIZE))) {
