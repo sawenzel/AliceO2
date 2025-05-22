@@ -420,8 +420,10 @@ void GPUReconstructionCUDA::genAndLoadRTC()
       mInternals->kernelModules.emplace_back(std::make_unique<CUmodule>());
       GPUChkErr(cuModuleLoad(mInternals->kernelModules.back().get(), (filename + "_" + std::to_string(i) + mRtcBinExtension).c_str()));
     }
-    remove((filename + "_" + std::to_string(i) + mRtcSrcExtension).c_str());
-    remove((filename + "_" + std::to_string(i) + mRtcBinExtension).c_str());
+    if (!GetProcessingSettings().rtctech.keepTempFiles) {
+      remove((filename + "_" + std::to_string(i) + mRtcSrcExtension).c_str());
+      remove((filename + "_" + std::to_string(i) + mRtcBinExtension).c_str());
+    }
   }
   if (GetProcessingSettings().rtctech.runTest == 2) {
     return;

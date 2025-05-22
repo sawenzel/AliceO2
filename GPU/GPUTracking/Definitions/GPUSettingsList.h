@@ -233,6 +233,7 @@ AddOption(cacheFolder, std::string, "./rtccache/", "", 0, "Folder in which the c
 AddOption(prependCommand, std::string, "", "", 0, "Prepend RTC compilation commands by this string")
 AddOption(overrideArchitecture, std::string, "", "", 0, "Override arhcitecture part of RTC compilation command line") // Part of cmdLine, so checked against the cache
 AddOption(loadLaunchBoundsFromFile, std::string, "", "", 0, "Load a parameter object containing the launch bounds from a file")
+AddOption(keepTempFiles, bool, false, "", 0, "Keep temporary source and object files")
 AddHelp("help", 'h')
 EndConfig()
 
