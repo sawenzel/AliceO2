@@ -55,9 +55,20 @@ An example line would .e.g. be
 ```
 
 Some other noteworthy options are `--display` to run the GPU event display, `--qa` to run a QA task on MC data, `--runs` and `--runs2` to run multiple iterations of the benchmark, `--printSettings` to print all the settings that were used, `--memoryStat` to print memory statistics, `--sync` to run with settings for online reco, `--syncAsync` to run online reco first, and then offline reco on the produced TPC CTF data, `--setO2Settings` to use some defaults as they are in O2 not in the standalone version, `--PROCdoublePipeline` to enable the double-threaded pipeline for best performance (works only with multiple iterations, and not in async mode), and `--RTCenable` to enable the run time compilation improvements (check also `--RTCcacheOutput`).
-An example for a benchmark in online mode would be:
+With `--memSize` you can control the amount of GPU memory to use, and with `--inputMemory` and `--outputMemory` GPU-registered input/output buffers can be preallocated (as is the SHM memory when running in O2).
+An example for a benchmark that runs with the same settings as in online data taking would be:
 ```
-./ca -e o2-pbpb-100 -g --sync --setO2Settings --PROCdoublePipeline --RTCenable --runs 10
+./ca -e o2-pbpb-100 -g --gpuType HIP --sync --setO2Settings --PROCdoublePipeline --RTCenable --runs 10 --memSize 15000000000 --inputMemory 6000000000 --outputMemory 10000000000
+```
+
+For setting a GPU device, you can use the `--gpuDevice` option with the GPU index.
+For ROCm with many GPUs, however, like on the EPNs with 8 GPUs, it is better to set the `ROCR_VISIBLE_DEVICES` env variable to the GPU you want to use.
+MAKE SURE TO CHECK IF IT IS ALREADY SET BY SLURM WHEN YOU GET THE NODE!!! IN THAT CASE, USE ONLY THE GPUS ASSIGNED TO YOU BY SLURM!
+
+Finally, also NUMA pinning can play a role. On the EPN, you should use memory and GPUs and CPU cores from the same NUMA domain.
+For a reaslistic benchmark using GPU 0 on the EPNs, please use:
+```
+ROCR_VISIBLE_DEVICES=0 numactl --membind 0 --cpunodebind 0 ./ca -e o2-pbpb-100 --gpuType HIP --memSize 15000000000 --inputMemory 6000000000 --outputMemory 10000000000 --sync --runs 10 --RTCenable --setO2Settings --PROCdoublePipeline
 ```
 
 # Generating a dataset
@@ -84,3 +95,5 @@ To dump standalone data from CTF raw data in `myctf.root`, you can use the same 
 ```
 CTFINPUT=1 INPUT_FILE_LIST=myctf.root CONFIG_EXTRA_PROCESS_o2_gpu_reco_workflow="GPU_global.dump=1;" WORKFLOW_DETECTORS=TPC SHMSIZE=16000000000 $O2_ROOT/prodtests/full-system-test/dpl-workflow.sh
 ```
+
+On the EPNs, you can find some reference data sets at `/home/drohr/standalone/events`.
