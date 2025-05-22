@@ -42,7 +42,7 @@
 #include "GPUGetConstexpr.h"
 
 #ifdef GPUCA_CADEBUG_ENABLED
-#include "../utils/qconfig.h"
+#include "GPUSettings.h"
 #include "AliHLTTPCClusterMCData.h"
 #endif
 

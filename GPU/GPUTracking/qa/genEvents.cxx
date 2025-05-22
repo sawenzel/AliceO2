@@ -38,8 +38,7 @@
 #include "GPUTPCGMMerger.h"
 #include "GPUChainTracking.h"
 #include "GPUConstantMem.h"
-
-#include "../utils/qconfig.h"
+#include "GPUSettings.h"
 
 using namespace o2::gpu;
 using namespace std;
