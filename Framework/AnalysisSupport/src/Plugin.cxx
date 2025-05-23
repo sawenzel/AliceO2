@@ -76,6 +76,24 @@ struct RunSummary : o2::framework::ServicePlugin {
               LOGP(info, "{}", files[fi % files.size()].data);
             }
           }
+          for (size_t li = 0; li < metrics.metricLabels.size(); ++li) {
+            MetricLabel const&label = metrics.metricLabels[li];
+            if (strcmp(label.label, "aod-file-open-info") != 0) {
+              continue;
+            }
+            MetricInfo const&metric = metrics.metrics[li];
+            auto &files = metrics.stringMetrics[metric.storeIdx];
+            if (metric.filledMetrics) {
+              LOGP(info, "### Files opened stats ###");
+            }
+            std::string lastFileRead;
+            for (size_t fi = 0; fi < metric.filledMetrics; ++fi) {
+              lastFileRead = files[fi % files.size()].data;
+            }
+            if (lastFileRead.empty() == false) {
+              LOGP(info, "Last file opened: {}", lastFileRead);
+            }
+          }
         } },
       .kind = ServiceKind::Serial};
   }
