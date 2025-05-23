@@ -131,7 +131,7 @@ int32_t GPUReconstructionCUDA::genRTC(std::string& filename, uint32_t& nCompile)
           }
           return 0;
         };
-        if (checkSHA(shasource, "source") ||
+        if (checkSHA(shasource, "source") || // TODO: CHECK VERSION!
             checkSHA(shaparam, "param") ||
             checkSHA(shacmd, "command line") ||
             checkSHA(shakernels, "kernel definitions") ||

@@ -70,9 +70,10 @@ add_custom_command(
     COMMAND cp ${GPUDIR}/Base/GPUStdSystemHeaders.h ${GPU_RTC_BIN}.src
     COMMAND cat ${GPUDIR}/Base/cuda/GPUReconstructionCUDAIncludesSystem.h | grep -v GPUStdSystemHeaders.h >> ${GPU_RTC_BIN}.src
     COMMAND cat ${GPUDIR}/Base/GPUStdSystemHeaders.h >> ${GPU_RTC_BIN}.src
+    COMMAND ${CMAKE_CUDA_COMPILER} ${GPU_RTC_DEFINES} ${GPU_RTC_INCLUDES} -std=c++${CMAKE_CUDA_STANDARD} -D__CUDA_ARCH__=${RTC_CUDA_ARCH} -D__CUDACC__ -x c++ -M -MD -MT ${GPU_RTC_BIN}.src -MF ${GPU_RTC_BIN}.src.d ${GPU_RTC_SRC}
     COMMAND ${CMAKE_CUDA_COMPILER} ${GPU_RTC_DEFINES} ${GPU_RTC_INCLUDES} -std=c++${CMAKE_CUDA_STANDARD} -D__CUDA_ARCH__=${RTC_CUDA_ARCH} -D__CUDACC__ -x c++ -E -Xcompiler "-nostdinc -P" ${GPU_RTC_SRC} >> ${GPU_RTC_BIN}.src
-    MAIN_DEPENDENCY ${GPU_RTC_SRC}
-    IMPLICIT_DEPENDS CXX ${GPU_RTC_SRC}
+    DEPENDS ${GPU_RTC_SRC} ${GPUDIR}/Base/GPUStdSystemHeaders.h ${GPUDIR}/Base/cuda/GPUReconstructionCUDAIncludesSystem.h ${GPUDIR}/Base/GPUStdSystemHeaders.h
+    DEPFILE ${GPU_RTC_BIN}.src.d
     COMMAND_EXPAND_LISTS
     COMMENT "Preparing CUDA RTC source file ${GPU_RTC_BIN}.src"
 )
