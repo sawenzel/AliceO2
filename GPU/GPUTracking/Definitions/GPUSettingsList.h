@@ -370,6 +370,7 @@ AddOption(debugOnFailureMaxN, uint32_t, 1, "", 0, "Max number of times to run th
 AddOption(debugOnFailureMaxFiles, uint32_t, 0, "", 0, "Max number of files to have in the target folder")
 AddOption(debugOnFailureMaxSize, uint32_t, 0, "", 0, "Max size of existing dumps in the target folder in GB")
 AddOption(debugOnFailureDirectory, std::string, ".", "", 0, "Target folder for debug / dump")
+AddOption(amdMI100SerializationWorkaround, bool, false, "", 0, "Enable workaround that mitigates MI100 serialization bug")
 AddVariable(eventDisplay, o2::gpu::GPUDisplayFrontendInterface*, nullptr)
 AddSubConfig(GPUSettingsProcessingRTC, rtc)
 AddSubConfig(GPUSettingsProcessingRTCtechnical, rtctech)
