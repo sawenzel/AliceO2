@@ -184,3 +184,8 @@ int32_t GPUReconstruction::LibraryLoader::CloseLibrary()
   mGPUEntry = nullptr;
   return 0;
 }
+
+std::string GPUReconstruction::getBackendVersions()
+{
+  return GPUCA_M_STR(GPUCA_COMPILER_VERSIONS);
+}

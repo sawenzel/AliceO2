@@ -275,6 +275,7 @@ class GPUReconstruction
 
   // Private helpers for library loading
   static std::shared_ptr<LibraryLoader>* GetLibraryInstance(DeviceType type, bool verbose);
+  static std::string getBackendVersions();
 
   // Private helper functions for memory management
   size_t AllocateRegisteredMemoryHelper(GPUMemoryResource* res, void*& ptr, void*& memorypool, void* memorybase, size_t memorysize, void* (GPUMemoryResource::*SetPointers)(void*), void*& memorypoolend, const char* device);

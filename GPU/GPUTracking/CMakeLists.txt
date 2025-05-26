@@ -396,6 +396,7 @@ install(DIRECTORY utils
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/GPU
         FILES_MATCHING PATTERN *.h)
 
+set(GPUCA_COMPILER_VERSIONS "CUDA ${CMAKE_CUDA_COMPILER_VERSION} HIP ${hip_VERSION} ${CMAKE_HIP_COMPILER_VERSION} ROCM ${CMAKE_HIP_COMPILER_ROCM_ROOT} LLVM ${LLVM_PACKAGE_VERSION}")
 
 # GPUReconstructionLibrary needs to know which GPU backends are enabled for proper error messages
 configure_file(Base/GPUReconstructionAvailableBackends.template.h ${CMAKE_CURRENT_BINARY_DIR}/GPUReconstructionAvailableBackends.h)
