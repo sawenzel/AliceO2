@@ -38,9 +38,7 @@ void ITSTrackingInterface::initialise()
   std::vector<TrackingParameters> trackParams;
   const auto& trackConf = o2::its::TrackerParamConfig::Instance();
   float bFactor = std::abs(o2::base::Propagator::Instance()->getNominalBz()) / 5.0066791;
-  if (bFactor < 0.01) {
-    bFactor = 1.;
-  }
+  float bFactorTracklets = bFactor < 0.01 ? 1. : bFactor; // for tracklets only
   if (mMode == TrackingMode::Unset) {
     mMode = (TrackingMode)(trackConf.trackingMode);
     LOGP(info, "Tracking mode not set, trying to fetch it from configurable params to: {}", asString(mMode));
@@ -129,7 +127,7 @@ void ITSTrackingInterface::initialise()
   // adjust pT settings to actual mag. field
   for (size_t ip = 0; ip < trackParams.size(); ip++) {
     auto& param = trackParams[ip];
-    param.TrackletMinPt *= bFactor;
+    param.TrackletMinPt *= bFactorTracklets;
     for (int ilg = trackConf.MaxTrackLength; ilg >= trackConf.MinTrackLength; ilg--) {
       int lslot = trackConf.MaxTrackLength - ilg;
       param.MinPt[lslot] *= bFactor;
