@@ -139,7 +139,6 @@ void ITSTrackingInterface::initialise()
   mVertexer->setParameters(vertParams);
 }
 
-template <bool isGPU>
 void ITSTrackingInterface::run(framework::ProcessingContext& pc)
 {
   auto compClusters = pc.inputs().get<gsl::span<o2::itsmft::CompClusterExt>>("compClusters");
@@ -211,9 +210,9 @@ void ITSTrackingInterface::run(framework::ProcessingContext& pc)
   loadROF(trackROFspan, compClusters, pattIt, labels);
   pattIt = patterns.begin();
   std::vector<int> savedROF;
-  auto logger = [&](std::string s) { LOG(info) << s; };
-  auto fatalLogger = [&](std::string s) { LOG(fatal) << s; };
-  auto errorLogger = [&](std::string s) { LOG(error) << s; };
+  auto logger = [&](const std::string& s) { LOG(info) << s; };
+  auto fatalLogger = [&](const std::string& s) { LOG(fatal) << s; };
+  auto errorLogger = [&](const std::string& s) { LOG(error) << s; };
 
   FastMultEst multEst; // mult estimator
   std::vector<uint8_t> processingMask, processUPCMask;
@@ -224,11 +223,7 @@ void ITSTrackingInterface::run(framework::ProcessingContext& pc)
   if (mRunVertexer) {
     vertROFvec.reserve(trackROFvec.size());
     // Run seeding vertexer
-    if constexpr (isGPU) {
-      vertexerElapsedTime = mVertexer->clustersToVerticesHybrid(logger);
-    } else {
-      vertexerElapsedTime = mVertexer->clustersToVertices(logger);
-    }
+    vertexerElapsedTime = mVertexer->clustersToVertices(logger);
   } else { // cosmics
     mTimeFrame->resetRofPV();
   }
@@ -436,8 +431,8 @@ void ITSTrackingInterface::printSummary() const
 }
 
 void ITSTrackingInterface::setTraitsFromProvider(VertexerTraits* vertexerTraits,
-                                                 TrackerTraits* trackerTraits,
-                                                 TimeFrame* frame)
+                                                 TrackerTraits7* trackerTraits,
+                                                 TimeFrame7* frame)
 {
   mVertexer = std::make_unique<Vertexer>(vertexerTraits);
   mTracker = std::make_unique<Tracker>(trackerTraits);
@@ -453,8 +448,5 @@ void ITSTrackingInterface::loadROF(gsl::span<itsmft::ROFRecord>& trackROFspan,
 {
   mTimeFrame->loadROFrameData(trackROFspan, clusters, pattIt, mDict, mcLabels);
 }
-
-template void ITSTrackingInterface::run<true>(framework::ProcessingContext& pc);
-template void ITSTrackingInterface::run<false>(framework::ProcessingContext& pc);
 } // namespace its
 } // namespace o2

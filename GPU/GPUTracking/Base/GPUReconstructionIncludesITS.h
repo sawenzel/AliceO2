@@ -30,9 +30,11 @@ namespace o2::its
 class VertexerTraits
 {
 };
+template <int>
 class TrackerTraits
 {
 };
+template <int>
 class TimeFrame
 {
 };

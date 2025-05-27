@@ -586,7 +586,7 @@ void VertexerTraits::computeVerticesInRof(int rofId,
                                           std::array<float, 2>& beamPosXY,
                                           std::vector<Vertex>& vertices,
                                           std::vector<int>& verticesInRof,
-                                          TimeFrame* tf,
+                                          TimeFrame7* tf,
                                           std::vector<o2::MCCompLabel>* labels,
                                           const int iteration)
 {

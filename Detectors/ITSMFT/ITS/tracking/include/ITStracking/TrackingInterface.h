@@ -31,6 +31,10 @@ namespace o2::its
 {
 class ITSTrackingInterface
 {
+  static constexpr int NLayers{7};
+  using TrackerTraits7 = TrackerTraits<NLayers>;
+  using TimeFrame7 = TimeFrame<NLayers>;
+
  public:
   ITSTrackingInterface(bool isMC,
                        int trgType,
@@ -52,7 +56,6 @@ class ITSTrackingInterface
   }
   // Task callbacks
   void initialise();
-  template <bool isGPU = false>
   void run(framework::ProcessingContext& pc);
   void printSummary() const;
 
@@ -60,7 +63,7 @@ class ITSTrackingInterface
   virtual void finaliseCCDB(framework::ConcreteDataMatcher& matcher, void* obj);
 
   // Custom
-  void setTraitsFromProvider(VertexerTraits*, TrackerTraits*, TimeFrame*);
+  void setTraitsFromProvider(VertexerTraits*, TrackerTraits7*, TimeFrame7*);
   void setTrackingMode(TrackingMode mode = TrackingMode::Unset)
   {
     if (mode == TrackingMode::Unset) {
@@ -72,7 +75,7 @@ class ITSTrackingInterface
   auto getTracker() const { return mTracker.get(); }
   auto getVertexer() const { return mVertexer.get(); }
 
-  TimeFrame* mTimeFrame = nullptr;
+  TimeFrame7* mTimeFrame = nullptr;
 
  protected:
   virtual void loadROF(gsl::span<itsmft::ROFRecord>& trackROFspan,

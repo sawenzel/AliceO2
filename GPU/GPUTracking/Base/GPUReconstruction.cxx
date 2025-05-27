@@ -111,16 +111,16 @@ GPUReconstruction::~GPUReconstruction()
   }
 }
 
-void GPUReconstruction::GetITSTraits(std::unique_ptr<o2::its::TrackerTraits>* trackerTraits, std::unique_ptr<o2::its::VertexerTraits>* vertexerTraits, std::unique_ptr<o2::its::TimeFrame>* timeFrame)
+void GPUReconstruction::GetITSTraits(std::unique_ptr<o2::its::TrackerTraits<7>>* trackerTraits, std::unique_ptr<o2::its::VertexerTraits>* vertexerTraits, std::unique_ptr<o2::its::TimeFrame<7>>* timeFrame)
 {
   if (trackerTraits) {
-    trackerTraits->reset(new o2::its::TrackerTraits);
+    trackerTraits->reset(new o2::its::TrackerTraits<7>);
   }
   if (vertexerTraits) {
     vertexerTraits->reset(new o2::its::VertexerTraits);
   }
   if (timeFrame) {
-    timeFrame->reset(new o2::its::TimeFrame);
+    timeFrame->reset(new o2::its::TimeFrame<7>);
   }
 }
 

@@ -30,7 +30,7 @@ class DefaultGPUAllocator : public ExternalAllocator
 };
 
 template <int nLayers = 7>
-class TimeFrameGPU : public TimeFrame
+class TimeFrameGPU : public TimeFrame<nLayers>
 {
  public:
   TimeFrameGPU();
@@ -205,14 +205,14 @@ class TimeFrameGPU : public TimeFrame
 template <int nLayers>
 inline int TimeFrameGPU<nLayers>::getNClustersInRofSpan(const int rofIdstart, const int rofSpanSize, const int layerId) const
 {
-  return static_cast<int>(mROFramesClusters[layerId][(rofIdstart + rofSpanSize) < mROFramesClusters.size() ? rofIdstart + rofSpanSize : mROFramesClusters.size() - 1] - mROFramesClusters[layerId][rofIdstart]);
+  return static_cast<int>(this->mROFramesClusters[layerId][(rofIdstart + rofSpanSize) < this->mROFramesClusters.size() ? rofIdstart + rofSpanSize : this->mROFramesClusters.size() - 1] - this->mROFramesClusters[layerId][rofIdstart]);
 }
 
 template <int nLayers>
 inline std::vector<unsigned int> TimeFrameGPU<nLayers>::getClusterSizes()
 {
-  std::vector<unsigned int> sizes(mUnsortedClusters.size());
-  std::transform(mUnsortedClusters.begin(), mUnsortedClusters.end(), sizes.begin(),
+  std::vector<unsigned int> sizes(this->mUnsortedClusters.size());
+  std::transform(this->mUnsortedClusters.begin(), this->mUnsortedClusters.end(), sizes.begin(),
                  [](const auto& v) { return static_cast<unsigned int>(v.size()); });
   return sizes;
 }

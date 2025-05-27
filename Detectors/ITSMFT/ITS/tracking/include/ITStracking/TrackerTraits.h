@@ -35,12 +35,13 @@ namespace its
 {
 class TrackITSExt;
 
+template <int nLayers = 7>
 class TrackerTraits
 {
  public:
   virtual ~TrackerTraits() = default;
-  virtual void adoptTimeFrame(TimeFrame* tf);
-  virtual void initialiseTimeFrame(const int iteration);
+  virtual void adoptTimeFrame(TimeFrame<nLayers>* tf) { mTimeFrame = tf; }
+  virtual void initialiseTimeFrame(const int iteration) { mTimeFrame->initialise(iteration, mTrkParams[iteration], mTrkParams[iteration].NLayers); }
 
   virtual void computeLayerTracklets(const int iteration, int iROFslice, int iVertex);
   virtual void computeLayerCells(const int iteration);
@@ -55,11 +56,11 @@ class TrackerTraits
   virtual bool trackFollowing(TrackITSExt* track, int rof, bool outward, const int iteration);
   virtual void processNeighbours(int iLayer, int iLevel, const std::vector<CellSeed>& currentCellSeed, const std::vector<int>& currentCellId, std::vector<CellSeed>& updatedCellSeed, std::vector<int>& updatedCellId);
 
-  void UpdateTrackingParameters(const std::vector<TrackingParameters>& trkPars);
-  TimeFrame* getTimeFrame() { return mTimeFrame; }
+  void updateTrackingParameters(const std::vector<TrackingParameters>& trkPars) { mTrkParams = trkPars; }
+  TimeFrame<nLayers>* getTimeFrame() { return mTimeFrame; }
 
   virtual void setBz(float bz);
-  float getBz() const;
+  float getBz() const { return mBz; }
   void setCorrType(const o2::base::PropagatorImpl<float>::MatCorrType type) { mCorrType = type; }
   bool isMatLUT() const;
   virtual const char* getName() const noexcept { return "CPU"; }
@@ -67,8 +68,8 @@ class TrackerTraits
 
   // Others
   GPUhd() static consteval int4 getEmptyBinsRect() { return int4{0, 0, 0, 0}; }
-  const int4 getBinsRect(const Cluster&, int layer, float z1, float z2, float maxdeltaz, float maxdeltaphi) const noexcept;
-  const int4 getBinsRect(int layer, float phi, float maxdeltaphi, float z, float maxdeltaz) const noexcept;
+  const int4 getBinsRect(int layer, float phi, float maxdeltaphi, float z, float maxdeltaz) const noexcept { return getBinsRect(layer, phi, maxdeltaphi, z, z, maxdeltaz); }
+  const int4 getBinsRect(const Cluster& cls, int layer, float z1, float z2, float maxdeltaz, float maxdeltaphi) const noexcept { return getBinsRect(layer, cls.phi, maxdeltaphi, z1, z2, maxdeltaz); }
   const int4 getBinsRect(int layer, float phi, float maxdeltaphi, float z1, float z2, float maxdeltaz) const noexcept;
   void SetRecoChain(o2::gpu::GPUChainITS* chain) { mChain = chain; }
   void setSmoothing(bool v) { mApplySmoothing = v; }
@@ -79,9 +80,9 @@ class TrackerTraits
   o2::gpu::GPUChainITS* getChain() const { return mChain; }
 
   // TimeFrame information forwarding
-  virtual int getTFNumberOfClusters() const;
-  virtual int getTFNumberOfTracklets() const;
-  virtual int getTFNumberOfCells() const;
+  virtual int getTFNumberOfClusters() const { return mTimeFrame->getNumberOfClusters(); }
+  virtual int getTFNumberOfTracklets() const { return mTimeFrame->getNumberOfTracklets(); }
+  virtual int getTFNumberOfCells() const { return mTimeFrame->getNumberOfCells(); }
 
   float mBz = 5.f;
 
@@ -95,36 +96,12 @@ class TrackerTraits
  protected:
   o2::base::PropagatorImpl<float>::MatCorrType mCorrType = o2::base::PropagatorImpl<float>::MatCorrType::USEMatCorrNONE;
   o2::gpu::GPUChainITS* mChain = nullptr;
-  TimeFrame* mTimeFrame;
+  TimeFrame<nLayers>* mTimeFrame;
   std::vector<TrackingParameters> mTrkParams;
 };
 
-inline void TrackerTraits::initialiseTimeFrame(const int iteration)
-{
-  mTimeFrame->initialise(iteration, mTrkParams[iteration], mTrkParams[iteration].NLayers);
-}
-
-inline float TrackerTraits::getBz() const
-{
-  return mBz;
-}
-
-inline void TrackerTraits::UpdateTrackingParameters(const std::vector<TrackingParameters>& trkPars)
-{
-  mTrkParams = trkPars;
-}
-
-inline const int4 TrackerTraits::getBinsRect(const int layerIndex, float phi, float maxdeltaphi, float z, float maxdeltaz) const noexcept
-{
-  return getBinsRect(layerIndex, phi, maxdeltaphi, z, z, maxdeltaz);
-}
-
-inline const int4 TrackerTraits::getBinsRect(const Cluster& currentCluster, int layerIndex, float z1, float z2, float maxdeltaz, float maxdeltaphi) const noexcept
-{
-  return getBinsRect(layerIndex, currentCluster.phi, maxdeltaphi, z1, z2, maxdeltaz);
-}
-
-inline const int4 TrackerTraits::getBinsRect(const int layerIndex, float phi, float maxdeltaphi, float z1, float z2, float maxdeltaz) const noexcept
+template <int nLayers>
+inline const int4 TrackerTraits<nLayers>::getBinsRect(const int layerIndex, float phi, float maxdeltaphi, float z1, float z2, float maxdeltaz) const noexcept
 {
   const float zRangeMin = o2::gpu::GPUCommonMath::Min(z1, z2) - maxdeltaz;
   const float phiRangeMin = (maxdeltaphi > constants::math::Pi) ? 0.f : phi - maxdeltaphi;
@@ -142,6 +119,7 @@ inline const int4 TrackerTraits::getBinsRect(const int layerIndex, float phi, fl
               o2::gpu::GPUCommonMath::Min(mTrkParams[0].ZBins - 1, utils.getZBinIndex(layerIndex, zRangeMax)), // /!\ trkParams can potentially change across iterations
               utils.getPhiBinIndex(math_utils::getNormalizedPhi(phiRangeMax))};
 }
+
 } // namespace its
 } // namespace o2
 

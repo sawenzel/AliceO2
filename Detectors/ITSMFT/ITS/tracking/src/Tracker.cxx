@@ -30,13 +30,11 @@
 #include <string>
 #include <climits>
 
-namespace o2
-{
-namespace its
+namespace o2::its
 {
 using o2::its::constants::GB;
 
-Tracker::Tracker(o2::its::TrackerTraits* traits) : mTraits(traits)
+Tracker::Tracker(TrackerTraits7* traits) : mTraits(traits)
 {
   /// Initialise standard configuration with 1 iteration
   mTrkParams.resize(1);
@@ -47,7 +45,7 @@ void Tracker::clustersToTracks(LogFunc logger, LogFunc error)
   LogFunc evalLog = [](const std::string&) {};
 
   double total{0};
-  mTraits->UpdateTrackingParameters(mTrkParams);
+  mTraits->updateTrackingParameters(mTrkParams);
   int maxNvertices{-1};
   if (mTrkParams[0].PerPrimaryVertexProcessing) {
     for (int iROF{0}; iROF < mTimeFrame->getNrof(); ++iROF) {
@@ -147,41 +145,6 @@ void Tracker::clustersToTracks(LogFunc logger, LogFunc error)
   rectifyClusterIndices();
   ++mTimeFrameCounter;
   mTotalTime += total;
-}
-
-void Tracker::initialiseTimeFrame(int& iteration)
-{
-  mTraits->initialiseTimeFrame(iteration);
-}
-
-void Tracker::computeTracklets(int& iteration, int& iROFslice, int& iVertex)
-{
-  mTraits->computeLayerTracklets(iteration, iROFslice, iVertex);
-}
-
-void Tracker::computeCells(int& iteration)
-{
-  mTraits->computeLayerCells(iteration);
-}
-
-void Tracker::findCellsNeighbours(int& iteration)
-{
-  mTraits->findCellsNeighbours(iteration);
-}
-
-void Tracker::findRoads(int& iteration)
-{
-  mTraits->findRoads(iteration);
-}
-
-void Tracker::extendTracks(int& iteration)
-{
-  mTraits->extendTracks(iteration);
-}
-
-void Tracker::findShortPrimaries()
-{
-  mTraits->findShortPrimaries();
 }
 
 void Tracker::computeRoadsMClabels()
@@ -427,35 +390,10 @@ void Tracker::getGlobalConfiguration()
   }
 }
 
-void Tracker::adoptTimeFrame(TimeFrame& tf)
+void Tracker::adoptTimeFrame(TimeFrame7& tf)
 {
   mTimeFrame = &tf;
   mTraits->adoptTimeFrame(&tf);
-}
-
-void Tracker::setBz(float bz)
-{
-  mTraits->setBz(bz);
-}
-
-void Tracker::setCorrType(const o2::base::PropagatorImpl<float>::MatCorrType type)
-{
-  mTraits->setCorrType(type);
-}
-
-bool Tracker::isMatLUT() const
-{
-  return mTraits->isMatLUT();
-}
-
-void Tracker::setNThreads(int n)
-{
-  mTraits->setNThreads(n);
-}
-
-int Tracker::getNThreads() const
-{
-  return mTraits->getNThreads();
 }
 
 void Tracker::printSummary() const
@@ -463,5 +401,4 @@ void Tracker::printSummary() const
   LOGP(info, "Tracker summary: Processed {} TFs (dropped {}) in TOT={:.2f} s, AVG/TF={:.2f} s", mTimeFrameCounter, mNumberOfDroppedTFs, mTotalTime * 1.e-3, mTotalTime * 1.e-3 / ((mTimeFrameCounter > 0) ? (double)mTimeFrameCounter : -1.0));
 }
 
-} // namespace its
-} // namespace o2
+} // namespace o2::its

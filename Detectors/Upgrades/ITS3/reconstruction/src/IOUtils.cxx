@@ -56,7 +56,7 @@ void convertCompactClusters(gsl::span<const itsmft::CompClusterExt> clusters,
   }
 }
 
-int loadROFrameDataITS3(its::TimeFrame* tf,
+int loadROFrameDataITS3(its::TimeFrame<7>* tf,
                         gsl::span<o2::itsmft::ROFRecord> rofs,
                         gsl::span<const itsmft::CompClusterExt> clusters,
                         gsl::span<const unsigned char>::iterator& pattIt,
