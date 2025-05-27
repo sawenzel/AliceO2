@@ -121,7 +121,10 @@ std::vector<std::string> getListOfTables(std::unique_ptr<TFile>& f)
       break;
     }
 
-    void* v = f->GetObjectChecked(key->GetName(), TClass::GetClass("ROOT::Experimental::RNTuple"));
+    void* v = f->GetObjectChecked(key->GetName(), TClass::GetClass("ROOT::RNTuple"));
+    if (!v) {
+      v = f->GetObjectChecked(key->GetName(), TClass::GetClass("ROOT::Experimental::RNTuple"));
+    }
     if (v) {
       std::string s = key->GetName();
       size_t pos = s.find('-');
