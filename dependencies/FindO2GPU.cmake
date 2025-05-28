@@ -67,7 +67,7 @@ endfunction()
 # Need to strip c++17 imposed by alidist defaults
 STRING(REGEX REPLACE "\-std=[^ ]*" "" O2_GPU_CMAKE_CXX_FLAGS_NOSTD "${CMAKE_CXX_FLAGS}")
 
-# ---------------------------------- Fast Math / Deterministic Mode ----------------------------------
+# ================================== Fast Math / Deterministic Mode ==================================
 # set(GPUCA_DETERMINISTIC_MODE WHOLEO2)          # Override
 set(GPUCA_DETERMINISTIC_MODE_MAP_OFF 0)
 set(GPUCA_DETERMINISTIC_MODE_MAP_NO_FAST_MATH 1) # No -ffast-math and similar compile flags for GPU folder
@@ -101,7 +101,7 @@ if(GPUCA_DETERMINISTIC_MODE GREATER_EQUAL ${GPUCA_DETERMINISTIC_MODE_MAP_WHOLEO2
 endif()
 
 
-# ---------------------------------- CUDA ----------------------------------
+# ================================== CUDA ==================================
 if(ENABLE_CUDA)
   if(CUDA_COMPUTETARGET)
     set(CMAKE_CUDA_ARCHITECTURES ${CUDA_COMPUTETARGET})
@@ -180,7 +180,7 @@ if(ENABLE_CUDA)
   endif()
 endif()
 
-# ---------------------------------- OpenCL ----------------------------------
+# ================================== OpenCL ==================================
 if(ENABLE_OPENCL)
   find_package(OpenCL)
   if(ENABLE_OPENCL AND NOT ENABLE_OPENCL STREQUAL "AUTO")
@@ -188,9 +188,11 @@ if(ENABLE_OPENCL)
   else()
     set_package_properties(OpenCL PROPERTIES TYPE OPTIONAL)
   endif()
-  find_package(LLVM)
-  if(LLVM_FOUND)
-    find_package(Clang)
+  if(NOT OPENCL_COMPATIBLE_CLANG_FOUND)
+    find_package(LLVM)
+    if(LLVM_FOUND)
+      find_package(Clang)
+    endif()
   endif()
   if (GPUCA_OPENCL_CLANGBIN)
     set(LLVM_CLANG ${GPUCA_OPENCL_CLANGBIN})
@@ -225,7 +227,7 @@ if(ENABLE_OPENCL)
   endif()
 endif()
 
-# ---------------------------------- HIP ----------------------------------
+# ================================== HIP ==================================
 if(ENABLE_HIP)
   if(HIP_AMDGPUTARGET)
     set(CMAKE_HIP_ARCHITECTURES "${HIP_AMDGPUTARGET}")
@@ -329,4 +331,6 @@ endif()
 
 # if we end up here without a FATAL, it means we have found the "O2GPU" package
 set(O2GPU_FOUND TRUE)
-include("${CMAKE_CURRENT_LIST_DIR}/../GPU/GPUTracking/cmake/kernel_helpers.cmake")
+if (NOT GPUCA_FINDO2GPU_CHECK_ONLY)
+  include("${CMAKE_CURRENT_LIST_DIR}/../GPU/GPUTracking/cmake/kernel_helpers.cmake")
+endif()
