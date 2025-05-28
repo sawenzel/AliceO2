@@ -636,6 +636,9 @@ void TrackerTraits<nLayers>::findRoads(const int iteration)
 
   for (int startLevel{mTrkParams[iteration].CellsPerRoad()}; startLevel >= mTrkParams[iteration].CellMinimumLevel(); --startLevel) {
     CA_DEBUGGER(std::cout << "\t > Processing level " << startLevel << std::endl);
+    auto seedFilter = [&](const CellSeed& seed) {
+      return seed.getQ2Pt() <= 1.e3 && seed.getChi2() <= mTrkParams[0].MaxChi2NDF * ((startLevel + 2) * 2 - 5);
+    };
     bounded_vector<CellSeed> trackSeeds(mMemoryPool.get());
     for (int startLayer{mTrkParams[iteration].CellsPerRoad() - 1}; startLayer >= startLevel - 1; --startLayer) {
       if ((mTrkParams[iteration].StartLayerMask & (1 << (startLayer + 2))) == 0) {
@@ -655,9 +658,13 @@ void TrackerTraits<nLayers>::findRoads(const int iteration)
         deepVectorClear(updatedCellId);   /// tame the memory peaks
         processNeighbours(iLayer, --level, lastCellSeed, lastCellId, updatedCellSeed, updatedCellId);
       }
-      std::copy_if(updatedCellSeed.begin(), updatedCellSeed.end(), std::back_inserter(trackSeeds), [&](const CellSeed& seed) {
-        return seed.getQ2Pt() <= 1.e3 && seed.getChi2() <= mTrkParams[0].MaxChi2NDF * ((startLevel + 2) * 2 - 5);
-      });
+      deepVectorClear(lastCellId);   /// tame the memory peaks
+      deepVectorClear(lastCellSeed); /// tame the memory peaks
+
+      if (!updatedCellSeed.empty()) {
+        trackSeeds.reserve(trackSeeds.size() + std::count_if(updatedCellSeed.begin(), updatedCellSeed.end(), seedFilter));
+        std::copy_if(updatedCellSeed.begin(), updatedCellSeed.end(), std::back_inserter(trackSeeds), seedFilter);
+      }
     }
 
     if (trackSeeds.empty()) {
@@ -665,19 +672,12 @@ void TrackerTraits<nLayers>::findRoads(const int iteration)
     }
 
     bounded_vector<TrackITSExt> tracks(mMemoryPool.get());
-    tracks.reserve(trackSeeds.size());
     mTaskArena.execute([&] {
-      tbb::combinable<bounded_vector<TrackITSExt>> locTracksData([&] {
-        return bounded_vector<TrackITSExt>(mMemoryPool.get());
-      });
-
+      bounded_vector<int> perSeedCount(trackSeeds.size() + 1, 0, mMemoryPool.get());
       tbb::parallel_for(
         tbb::blocked_range<size_t>(size_t(0), trackSeeds.size()),
         [&](const tbb::blocked_range<size_t>& Seeds) {
           for (int iSeed = Seeds.begin(); iSeed < Seeds.end(); ++iSeed) {
-            auto& localTracks = locTracksData.local();
-            localTracks.reserve(Seeds.size());
-
             const CellSeed& seed{trackSeeds[iSeed]};
             TrackITSExt temporaryTrack{seed};
             temporaryTrack.resetCovariance();
@@ -697,15 +697,43 @@ void TrackerTraits<nLayers>::findRoads(const int iteration)
             if (!fitSuccess || temporaryTrack.getPt() < mTrkParams[iteration].MinPt[mTrkParams[iteration].NLayers - temporaryTrack.getNClusters()]) {
               continue;
             }
-            localTracks.push_back(temporaryTrack);
+            ++perSeedCount[iSeed];
+          }
+        });
+      std::exclusive_scan(perSeedCount.begin(), perSeedCount.end(), perSeedCount.begin(), 0);
+      auto totalTracks{perSeedCount.back()};
+      if (totalTracks == 0) {
+        return;
+      }
+      tracks.resize(totalTracks);
+
+      tbb::parallel_for(
+        tbb::blocked_range<int>(0, (int)trackSeeds.size()),
+        [&](const tbb::blocked_range<int>& Seeds) {
+          for (int iSeed = Seeds.begin(); iSeed < Seeds.end(); ++iSeed) {
+            if (perSeedCount[iSeed] == perSeedCount[iSeed + 1]) {
+              continue;
+            }
+            const CellSeed& seed{trackSeeds[iSeed]};
+            auto& trk = tracks[perSeedCount[iSeed]] = TrackITSExt(seed);
+            trk.resetCovariance();
+            trk.setChi2(0);
+            for (int iL{0}; iL < 7; ++iL) {
+              trk.setExternalClusterIndex(iL, seed.getCluster(iL), seed.getCluster(iL) != constants::its::UnusedIndex);
+            }
+
+            bool fitSuccess = fitTrack(trk, 0, mTrkParams[0].NLayers, 1, mTrkParams[0].MaxChi2ClusterAttachment, mTrkParams[0].MaxChi2NDF);
+            if (!fitSuccess) {
+              continue;
+            }
+            trk.getParamOut() = trk.getParamIn();
+            trk.resetCovariance();
+            trk.setChi2(0);
+            fitTrack(trk, mTrkParams[0].NLayers - 1, -1, -1, mTrkParams[0].MaxChi2ClusterAttachment, mTrkParams[0].MaxChi2NDF, 50.f);
           }
         });
 
-      locTracksData.combine_each([&](const bounded_vector<TrackITSExt>& localTracks) {
-        tracks.insert(tracks.end(), localTracks.begin(), localTracks.end());
-      });
-      tracks.shrink_to_fit();
-
+      deepVectorClear(trackSeeds);
       tbb::parallel_sort(tracks.begin(), tracks.end(), [](const auto& a, const auto& b) {
         return a.getChi2() < b.getChi2();
       });
