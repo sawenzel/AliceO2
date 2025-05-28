@@ -12,9 +12,11 @@
 /// \file TrackerTraits.cxx
 /// \brief
 ///
+
 #include <algorithm>
-#include <cassert>
 #include <iostream>
+#include <iterator>
+#include <ranges>
 
 #ifdef OPTIMISATION_OUTPUT
 #include <format>
@@ -498,63 +500,125 @@ void TrackerTraits<nLayers>::findCellsNeighbours(const int iteration)
 #endif
   for (int iLayer{0}; iLayer < mTrkParams[iteration].CellsPerRoad() - 1; ++iLayer) {
     const int nextLayerCellsNum{static_cast<int>(mTimeFrame->getCells()[iLayer + 1].size())};
-    mTimeFrame->getCellsNeighboursLUT()[iLayer].clear();
-    mTimeFrame->getCellsNeighboursLUT()[iLayer].resize(nextLayerCellsNum, 0);
+    deepVectorClear(mTimeFrame->getCellsNeighbours()[iLayer]);
+    deepVectorClear(mTimeFrame->getCellsNeighboursLUT()[iLayer]);
     if (mTimeFrame->getCells()[iLayer + 1].empty() ||
         mTimeFrame->getCellsLookupTable()[iLayer].empty()) {
-      mTimeFrame->getCellsNeighbours()[iLayer].clear();
       continue;
     }
 
-    int layerCellsNum{static_cast<int>(mTimeFrame->getCells()[iLayer].size())};
-    bounded_vector<std::pair<int, int>> cellsNeighbours(mMemoryPool.get());
-    cellsNeighbours.reserve(nextLayerCellsNum);
+    mTaskArena.execute([&] {
+      int layerCellsNum{static_cast<int>(mTimeFrame->getCells()[iLayer].size())};
 
-    for (int iCell{0}; iCell < layerCellsNum; ++iCell) {
-      const auto& currentCellSeed{mTimeFrame->getCells()[iLayer][iCell]};
-      const int nextLayerTrackletIndex{currentCellSeed.getSecondTrackletIndex()};
-      const int nextLayerFirstCellIndex{mTimeFrame->getCellsLookupTable()[iLayer][nextLayerTrackletIndex]};
-      const int nextLayerLastCellIndex{mTimeFrame->getCellsLookupTable()[iLayer][nextLayerTrackletIndex + 1]};
-      for (int iNextCell{nextLayerFirstCellIndex}; iNextCell < nextLayerLastCellIndex; ++iNextCell) {
+      bounded_vector<int> perCellCount(layerCellsNum + 1, 0, mMemoryPool.get());
+      tbb::parallel_for(
+        tbb::blocked_range<int>(0, layerCellsNum),
+        [&](const tbb::blocked_range<int>& Cells) {
+          for (int iCell = Cells.begin(); iCell < Cells.end(); ++iCell) {
+            const auto& currentCellSeed{mTimeFrame->getCells()[iLayer][iCell]};
+            const int nextLayerTrackletIndex{currentCellSeed.getSecondTrackletIndex()};
+            const int nextLayerFirstCellIndex{mTimeFrame->getCellsLookupTable()[iLayer][nextLayerTrackletIndex]};
+            const int nextLayerLastCellIndex{mTimeFrame->getCellsLookupTable()[iLayer][nextLayerTrackletIndex + 1]};
 
-        auto nextCellSeed{mTimeFrame->getCells()[iLayer + 1][iNextCell]}; /// copy
-        if (nextCellSeed.getFirstTrackletIndex() != nextLayerTrackletIndex) {
-          break;
-        }
+            int foundNextCells{0};
+            for (int iNextCell{nextLayerFirstCellIndex}; iNextCell < nextLayerLastCellIndex; ++iNextCell) {
+              auto nextCellSeed{mTimeFrame->getCells()[iLayer + 1][iNextCell]}; /// copy
+              if (nextCellSeed.getFirstTrackletIndex() != nextLayerTrackletIndex) {
+                break;
+              }
 
-        if (!nextCellSeed.rotate(currentCellSeed.getAlpha()) ||
-            !nextCellSeed.propagateTo(currentCellSeed.getX(), getBz())) {
-          continue;
-        }
-        float chi2 = currentCellSeed.getPredictedChi2(nextCellSeed); /// TODO: switch to the chi2 wrt cluster to avoid correlation
+              if (!nextCellSeed.rotate(currentCellSeed.getAlpha()) ||
+                  !nextCellSeed.propagateTo(currentCellSeed.getX(), getBz())) {
+                continue;
+              }
+              float chi2 = currentCellSeed.getPredictedChi2(nextCellSeed); /// TODO: switch to the chi2 wrt cluster to avoid correlation
 
 #ifdef OPTIMISATION_OUTPUT
-        bool good{mTimeFrame->getCellsLabel(iLayer)[iCell] == mTimeFrame->getCellsLabel(iLayer + 1)[iNextCell]};
-        off << std::format("{}\t{:d}\t{}", iLayer, good, chi2) << std::endl;
+              bool good{mTimeFrame->getCellsLabel(iLayer)[iCell] == mTimeFrame->getCellsLabel(iLayer + 1)[iNextCell]};
+              off << std::format("{}\t{:d}\t{}", iLayer, good, chi2) << std::endl;
 #endif
 
-        if (chi2 > mTrkParams[0].MaxChi2ClusterAttachment) {
-          continue;
-        }
+              if (chi2 > mTrkParams[0].MaxChi2ClusterAttachment) {
+                continue;
+              }
+              ++foundNextCells;
+            }
+            perCellCount[iCell] = foundNextCells;
+          }
+        });
 
-        mTimeFrame->getCellsNeighboursLUT()[iLayer][iNextCell]++;
-        cellsNeighbours.push_back(std::make_pair(iCell, iNextCell));
-        const int currentCellLevel{currentCellSeed.getLevel()};
-
-        if (currentCellLevel >= nextCellSeed.getLevel()) {
-          mTimeFrame->getCells()[iLayer + 1][iNextCell].setLevel(currentCellLevel + 1);
-        }
+      std::exclusive_scan(perCellCount.begin(), perCellCount.end(), perCellCount.begin(), 0);
+      int totalCellNeighbours = perCellCount.back();
+      if (totalCellNeighbours == 0) {
+        deepVectorClear(mTimeFrame->getCellsNeighbours()[iLayer]);
+        return;
       }
-    }
-    std::sort(cellsNeighbours.begin(), cellsNeighbours.end(), [](const std::pair<int, int>& a, const std::pair<int, int>& b) {
-      return a.second < b.second;
+
+      struct Neighbor {
+        int cell{-1}, nextCell{-1}, level{-1};
+      };
+      bounded_vector<Neighbor> cellsNeighbours(mMemoryPool.get());
+      cellsNeighbours.resize(totalCellNeighbours);
+
+      tbb::parallel_for(
+        tbb::blocked_range<int>(0, layerCellsNum),
+        [&](const tbb::blocked_range<int>& Cells) {
+          for (int iCell = Cells.begin(); iCell < Cells.end(); ++iCell) {
+            if (perCellCount[iCell] == perCellCount[iCell + 1]) {
+              continue;
+            }
+            const auto& currentCellSeed{mTimeFrame->getCells()[iLayer][iCell]};
+            const int nextLayerTrackletIndex{currentCellSeed.getSecondTrackletIndex()};
+            const int nextLayerFirstCellIndex{mTimeFrame->getCellsLookupTable()[iLayer][nextLayerTrackletIndex]};
+            const int nextLayerLastCellIndex{mTimeFrame->getCellsLookupTable()[iLayer][nextLayerTrackletIndex + 1]};
+
+            int position = perCellCount[iCell];
+            for (int iNextCell{nextLayerFirstCellIndex}; iNextCell < nextLayerLastCellIndex; ++iNextCell) {
+              auto nextCellSeed{mTimeFrame->getCells()[iLayer + 1][iNextCell]}; /// copy
+              if (nextCellSeed.getFirstTrackletIndex() != nextLayerTrackletIndex) {
+                break;
+              }
+
+              if (!nextCellSeed.rotate(currentCellSeed.getAlpha()) ||
+                  !nextCellSeed.propagateTo(currentCellSeed.getX(), getBz())) {
+                continue;
+              }
+
+              float chi2 = currentCellSeed.getPredictedChi2(nextCellSeed); /// TODO: switch to the chi2 wrt cluster to avoid correlation
+              if (chi2 > mTrkParams[0].MaxChi2ClusterAttachment) {
+                continue;
+              }
+
+              cellsNeighbours[position++] = {iCell, iNextCell, currentCellSeed.getLevel() + 1};
+            }
+          }
+        });
+
+      tbb::parallel_sort(cellsNeighbours.begin(), cellsNeighbours.end(), [](const auto& a, const auto& b) {
+        return a.nextCell < b.nextCell;
+      });
+
+      auto& cellsNeighbourLUT = mTimeFrame->getCellsNeighboursLUT()[iLayer];
+      cellsNeighbourLUT.assign(nextLayerCellsNum, 0);
+      for (const auto& neigh : cellsNeighbours) {
+        ++cellsNeighbourLUT[neigh.nextCell];
+      }
+      std::inclusive_scan(cellsNeighbourLUT.begin(), cellsNeighbourLUT.end(), cellsNeighbourLUT.begin());
+
+      mTimeFrame->getCellsNeighbours()[iLayer].reserve(totalCellNeighbours);
+      std::ranges::transform(cellsNeighbours, std::back_inserter(mTimeFrame->getCellsNeighbours()[iLayer]), [](const auto& neigh) { return neigh.cell; });
+
+      auto it = cellsNeighbours.begin();
+      while (it != cellsNeighbours.end()) {
+        const int current_nextCell = it->nextCell;
+        auto group_end = std::find_if_not(it, cellsNeighbours.end(),
+                                          [current_nextCell](const auto& nb) { return nb.nextCell == current_nextCell; });
+        const auto max_level_it = std::max_element(it, group_end,
+                                                   [](const auto& a, const auto& b) { return a.level < b.level; });
+        mTimeFrame->getCells()[iLayer + 1][current_nextCell].setLevel(max_level_it->level);
+        it = group_end;
+      }
     });
-    mTimeFrame->getCellsNeighbours()[iLayer].clear();
-    mTimeFrame->getCellsNeighbours()[iLayer].reserve(cellsNeighbours.size());
-    for (auto& cellNeighboursIndex : cellsNeighbours) {
-      mTimeFrame->getCellsNeighbours()[iLayer].push_back(cellNeighboursIndex.first);
-    }
-    std::inclusive_scan(mTimeFrame->getCellsNeighboursLUT()[iLayer].begin(), mTimeFrame->getCellsNeighboursLUT()[iLayer].end(), mTimeFrame->getCellsNeighboursLUT()[iLayer].begin());
   }
 }
 
