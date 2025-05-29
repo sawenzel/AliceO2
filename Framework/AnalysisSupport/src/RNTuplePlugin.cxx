@@ -30,6 +30,8 @@
 #include <arrow/array/array_primitive.h>
 #include <arrow/array/builder_nested.h>
 #include <arrow/array/builder_primitive.h>
+#include <arrow/array/util.h>
+#include <arrow/record_batch.h>
 #include <arrow/dataset/file_base.h>
 
 #if __has_include(<ROOT/RFieldBase.hxx>)
@@ -859,18 +861,19 @@ arrow::Result<arrow::RecordBatchGenerator> RNTupleFileFormat::ScanBatchesAsync(
         }
         switch (listSize) {
           case -1: {
-            auto varray = std::make_shared<arrow::PrimitiveArray>(physicalField->type()->field(0)->type(), totalSize, arrowValuesBuffer);
-            array = std::make_shared<arrow::ListArray>(physicalField->type(), readEntries, arrowOffsetBuffer, varray);
+            auto vdata = std::make_shared<arrow::ArrayData>(physicalField->type()->field(0)->type(), totalSize, std::vector<std::shared_ptr<arrow::Buffer>>{nullptr, arrowValuesBuffer});
+            array = std::make_shared<arrow::ListArray>(physicalField->type(), readEntries, arrowOffsetBuffer, arrow::MakeArray(vdata));
           } break;
           case 1: {
             totalSize = readEntries * listSize;
-            array = std::make_shared<arrow::PrimitiveArray>(physicalField->type(), readEntries, arrowValuesBuffer);
+            auto data = std::make_shared<arrow::ArrayData>(physicalField->type(), readEntries, std::vector<std::shared_ptr<arrow::Buffer>>{nullptr, arrowValuesBuffer});
+            array = arrow::MakeArray(data);
 
           } break;
           default: {
             totalSize = readEntries * listSize;
-            auto varray = std::make_shared<arrow::PrimitiveArray>(physicalField->type()->field(0)->type(), totalSize, arrowValuesBuffer);
-            array = std::make_shared<arrow::FixedSizeListArray>(physicalField->type(), readEntries, varray);
+            auto vdata = std::make_shared<arrow::ArrayData>(physicalField->type()->field(0)->type(), totalSize, std::vector<std::shared_ptr<arrow::Buffer>>{nullptr, arrowValuesBuffer});
+            array = std::make_shared<arrow::FixedSizeListArray>(physicalField->type(), readEntries, arrow::MakeArray(vdata));
           }
         }
       }
