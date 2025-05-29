@@ -47,6 +47,7 @@ struct CTFReaderInp {
   unsigned int decSSpecEMC = 0;
   int tfRateLimit = -999;
   size_t minSHM = 0;
+  bool shuffle{false};
 };
 
 /// create a processor spec
