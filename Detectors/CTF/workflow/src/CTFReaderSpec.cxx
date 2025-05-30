@@ -159,6 +159,9 @@ void CTFReaderSpec::stopReader()
 void CTFReaderSpec::init(InitContext& ic)
 {
   mInput.ctfIDs = o2::RangeTokenizer::tokenize<int>(ic.options().get<std::string>("select-ctf-ids"));
+  if ((mInput.reverseCTFIDs = ic.options().get<bool>("reverse-select-ctf-ids"))) {
+    std::reverse(mInput.ctfIDs.begin(), mInput.ctfIDs.end());
+  }
   mUseLocalTFCounter = ic.options().get<bool>("local-tf-counter");
   mImposeRunStartMS = ic.options().get<int64_t>("impose-run-start-timstamp");
   mInput.checkTFLimitBeforeReading = ic.options().get<bool>("limit-tf-before-reading");
@@ -347,10 +350,10 @@ void CTFReaderSpec::run(ProcessingContext& pc)
   long startWait = 0;
 
   while (mRunning) {
-    if (mCTFTree) {                                                                               // there is a tree open with multiple CTF
-      if (mInput.ctfIDs.empty() || mInput.ctfIDs[mSelIDEntry] == mCTFCounter || mInput.shuffle) { // no selection requested or matching CTF ID is found
+    if (mCTFTree) {                                                                                                       // there is a tree open with multiple CTF
+      if (mInput.ctfIDs.empty() || mInput.ctfIDs[mSelIDEntry] == mCTFCounter || mInput.shuffle || mInput.reverseCTFIDs) { // no selection requested or matching CTF ID is found
         LOG(debug) << "TF " << mCTFCounter << " of " << mInput.maxTFs << " loop " << mFileFetcher->getNLoops();
-        if (mInput.shuffle) {
+        if (mInput.shuffle || mInput.reverseCTFIDs) {
           mCurrTreeEntry = mInput.ctfIDs[mSelIDEntry];
         }
         mSelIDEntry++;
@@ -529,7 +532,7 @@ bool CTFReaderSpec::processTF(ProcessingContext& pc)
 void CTFReaderSpec::checkTreeEntries()
 {
   bool reachedEnd{false};
-  if (mInput.shuffle) { // last entry is last id
+  if (mInput.shuffle || mInput.reverseCTFIDs) { // last entry is last id
     reachedEnd = (mCurrTreeEntry == mInput.ctfIDs.back());
   } else { // check if the tree has entries left, if needed, close current tree/file
     reachedEnd = (++mCurrTreeEntry >= mCTFTree->GetEntries());
@@ -644,6 +647,7 @@ DataProcessorSpec getCTFReaderSpec(const CTFReaderInp& inp)
   }
 
   options.emplace_back(ConfigParamSpec{"select-ctf-ids", VariantType::String, "", {"comma-separated list CTF IDs to inject (from cumulative counter of CTFs seen)"}});
+  options.emplace_back(ConfigParamSpec{"reverse-select-ctf-ids", VariantType::Bool, false, {"reverse order of to inject CTF IDs"}});
   options.emplace_back(ConfigParamSpec{"impose-run-start-timstamp", VariantType::Int64, 0L, {"impose run start time stamp (ms), ignored if 0"}});
   options.emplace_back(ConfigParamSpec{"local-tf-counter", VariantType::Bool, false, {"reassign header.tfCounter from local TF counter"}});
   options.emplace_back(ConfigParamSpec{"fetch-failure-threshold", VariantType::Float, 0.f, {"Fail if too many failures( >0: fraction, <0: abs number, 0: no threshold)"}});

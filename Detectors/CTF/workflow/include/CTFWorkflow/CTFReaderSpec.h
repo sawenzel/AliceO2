@@ -33,6 +33,7 @@ struct CTFReaderInp {
   std::string fileIRFrames{};
   std::string fileRunTimeSpans{};
   std::vector<int> ctfIDs{};
+  bool reverseCTFIDs{false};
   bool skipSkimmedOutTF = false;
   bool invertIRFramesSelection = false;
   bool allowMissingDetectors = false;
