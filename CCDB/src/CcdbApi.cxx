@@ -232,7 +232,7 @@ void CcdbApi::init(std::string const& host)
                deploymentMode == o2::framework::DeploymentMode::FST) {
       mCurlTimeoutDownload = 15;
     } else if (deploymentMode == o2::framework::DeploymentMode::Local) {
-      mCurlTimeoutDownload = 1;
+      mCurlTimeoutDownload = 5;
     }
   }
 
