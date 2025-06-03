@@ -1675,6 +1675,7 @@ void AODProducerWorkflowDPL::init(InitContext& ic)
   mLPMProdTag = ic.options().get<string>("lpmp-prod-tag");
   mAnchorPass = ic.options().get<string>("anchor-pass");
   mAnchorProd = ic.options().get<string>("anchor-prod");
+  mUser = ic.options().get<string>("created-by");
   mRecoPass = ic.options().get<string>("reco-pass");
   mTFNumber = ic.options().get<int64_t>("aod-timeframe-id");
   mRecoOnly = ic.options().get<int>("reco-mctracks-only");
@@ -2398,8 +2399,8 @@ void AODProducerWorkflowDPL::run(ProcessingContext& pc)
   TString dataType = mUseMC ? "MC" : "RAW";
   TString O2Version = o2::fullVersion();
   TString ROOTVersion = ROOT_RELEASE;
-  mMetaDataKeys = {"DataType", "Run", "O2Version", "ROOTVersion", "RecoPassName", "AnchorProduction", "AnchorPassName", "LPMProductionTag"};
-  mMetaDataVals = {dataType, "3", O2Version, ROOTVersion, mRecoPass, mAnchorProd, mAnchorPass, mLPMProdTag};
+  mMetaDataKeys = {"DataType", "Run", "O2Version", "ROOTVersion", "RecoPassName", "AnchorProduction", "AnchorPassName", "LPMProductionTag", "CreatedBy"};
+  mMetaDataVals = {dataType, "3", O2Version, ROOTVersion, mRecoPass, mAnchorProd, mAnchorPass, mLPMProdTag, mUser};
   pc.outputs().snapshot(Output{"AMD", "AODMetadataKeys", 0}, mMetaDataKeys);
   pc.outputs().snapshot(Output{"AMD", "AODMetadataVals", 0}, mMetaDataVals);
 
@@ -3256,6 +3257,7 @@ DataProcessorSpec getAODProducerWorkflowSpec(GID::mask_t src, bool enableSV, boo
       ConfigParamSpec{"anchor-pass", VariantType::String, "", {"AnchorPassName"}},
       ConfigParamSpec{"anchor-prod", VariantType::String, "", {"AnchorProduction"}},
       ConfigParamSpec{"reco-pass", VariantType::String, "", {"RecoPassName"}},
+      ConfigParamSpec{"created-by", VariantType::String, "", {"Who created this AO2D"}},
       ConfigParamSpec{"nthreads", VariantType::Int, std::max(1, int(std::thread::hardware_concurrency() / 2)), {"Number of threads"}},
       ConfigParamSpec{"reco-mctracks-only", VariantType::Int, 0, {"Store only reconstructed MC tracks and their mothers/daughters. 0 -- off, != 0 -- on"}},
       ConfigParamSpec{"ctpreadout-create", VariantType::Int, 0, {"Create CTP digits from detector readout and CTP inputs. !=1 -- off, 1 -- on"}},
