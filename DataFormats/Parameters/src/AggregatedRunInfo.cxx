@@ -83,3 +83,49 @@ o2::parameters::AggregatedRunInfo AggregatedRunInfo::buildAggregatedRunInfo(int 
   }
   return AggregatedRunInfo{runnumber, sorMS, eorMS, nOrbitsPerTF, orbitResetMUS, orbitSOR, orbitEOR, grpecs};
 }
+
+namespace
+{
+
+// get path where to find MC production info
+std::string getFullPath_MC(std::string const& username, std::string const& lpm_prod_tag)
+{
+  // construct the path where to lookup
+  std::string path = "/Users/" + std::string(1, username[0]) + "/" + username;
+  std::string fullpath = path + "/" + "MCProdInfo/" + lpm_prod_tag;
+  return fullpath;
+}
+
+} // namespace
+
+AggregatedRunInfo AggregatedRunInfo::buildAggregatedRunInfo_MC(o2::ccdb::CCDBManagerInstance& ccdb, int run_number, std::string const& lpm_prod_tag, std::string const& username)
+{
+  // (a) lookup the AggregatedRunInfo for the run
+  // (b) modify/overwrite the info object with MC specific settings (if available)
+  
+  // For now just the timeframe length is overwritten. We can consider
+  // to return the full MCProdInfo meta-data to the caller as well.
+  
+  auto original_info = buildAggregatedRunInfo(ccdb, run_number);
+
+  std::map<std::string, std::string> metaDataFilter;
+  metaDataFilter["lpm_prod_tag"] = lpm_prod_tag;
+
+  // fetch the meta information for MC productions
+  auto header_data = ccdb.getCCDBAccessor().retrieveHeaders(getFullPath_MC(username, lpm_prod_tag), metaDataFilter, run_number);
+
+  // adjust timeframe length if we find entry for MC production
+  auto iter = header_data.find("OrbitsPerTF");
+  if (iter != header_data.end()) {
+    auto mc_orbitsPerTF = std::stoi(iter->second);
+    if (mc_orbitsPerTF != original_info.orbitsPerTF) {
+      LOG(info) << "Adjusting OrbitsPerTF from " << original_info.orbitsPerTF << " to " << mc_orbitsPerTF << " based on differing MC info";
+      original_info.orbitsPerTF = mc_orbitsPerTF;
+    }
+  }
+  else {
+    LOG(warn) << "No OrbitsPerTF information found for MC production " << lpm_prod_tag << " and run number " << run_number;
+  }
+
+  return original_info;
+}
