@@ -177,7 +177,7 @@ if [[ $BEAMTYPE == "cosmic" ]]; then
 elif [[ $SYNCMODE == 1 ]]; then
   [[ -z ${ITS_CONFIG+x} ]] && ITS_CONFIG=" --tracking-mode sync"
 else
-  [[ -z ${ITS_CONFIG+x} ]] && ITS_CONFIG=" --tracking-mode async"
+  [[ -z ${ITS_CONFIG+x} ]] && ITS_CONFIG=" --tracking-mode async --ccdb-meanvertex-seed"
 fi
 
 if [[ $SYNCMODE == 1 ]] && [[ ${PRESCALE_ITS_WO_TRIGGER:-} != 1 ]]; then
