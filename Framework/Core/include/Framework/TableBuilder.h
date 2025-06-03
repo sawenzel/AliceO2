@@ -456,10 +456,16 @@ struct CachedInsertion {
   int pos = 0;
 };
 
-template <size_t I, typename T, typename P>
-struct BuilderHolder : P {
+template <typename T>
+struct InsertionTrait {
+  static consteval DirectInsertion<T> policy();
+  using Policy = decltype(policy());
+};
+
+template <size_t I, typename T>
+struct BuilderHolder : InsertionTrait<T>::Policy {
   static constexpr size_t index = I;
-  using Policy = P;
+  using Policy = typename InsertionTrait<T>::Policy;
   using ArrowType = typename detail::ConversionTraits<T>::ArrowType;
   using BuilderType = typename arrow::TypeTraits<ArrowType>::BuilderType;
 
@@ -520,12 +526,6 @@ constexpr auto tuple_to_pack(std::tuple<ARGS...>&&)
   return framework::pack<ARGS...>{};
 }
 
-template <typename T>
-struct InsertionTrait {
-  static consteval DirectInsertion<T> policy();
-  using Policy = decltype(policy());
-};
-
 /// Helper function to convert a brace-initialisable struct to
 /// a tuple.
 template <class T>
@@ -553,7 +553,7 @@ template <typename... ARGS>
 constexpr auto makeHolderTypes()
 {
   return []<std::size_t... Is>(std::index_sequence<Is...>) {
-    return std::tuple(BuilderHolder<Is, ARGS, typename InsertionTrait<ARGS>::Policy>(arrow::default_memory_pool())...);
+    return std::tuple(BuilderHolder<Is, ARGS>(arrow::default_memory_pool())...);
   }(std::make_index_sequence<sizeof...(ARGS)>{});
 }
 
@@ -561,7 +561,7 @@ template <typename... ARGS>
 auto makeHolders(arrow::MemoryPool* pool, size_t nRows)
 {
   return [pool, nRows]<std::size_t... Is>(std::index_sequence<Is...>) {
-    return new std::tuple(BuilderHolder<Is, ARGS, typename InsertionTrait<ARGS>::Policy>(pool, nRows)...);
+    return new std::tuple(BuilderHolder<Is, ARGS>(pool, nRows)...);
   }(std::make_index_sequence<sizeof...(ARGS)>{});
 }
 
@@ -579,7 +579,7 @@ class TableBuilder
   static void throwError(RuntimeErrorRef const& ref);
 
   template <typename... ARGS>
-  using HoldersTuple = typename std::tuple<BuilderHolder<0, ARGS, typename InsertionTrait<ARGS>::Policy>...>;
+  using HoldersTuple = typename std::tuple<BuilderHolder<0, ARGS>...>;
 
   template <typename... ARGS>
   using HoldersTupleIndexed = decltype(makeHolderTypes<ARGS...>());
