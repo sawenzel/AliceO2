@@ -374,6 +374,9 @@ void ITSTrackingInterface::updateTimeDependentParams(framework::ProcessingContex
 {
   o2::base::GRPGeomHelper::instance().checkUpdates(pc);
   static bool initOnceDone = false;
+  if (mOverrideBeamEstimation) {
+    pc.inputs().get<o2::dataformats::MeanVertexObject*>("meanvtx");
+  }
   if (!initOnceDone) { // this params need to be queried only once
     initOnceDone = true;
     pc.inputs().get<o2::itsmft::TopologyDictionary*>("itscldict"); // just to trigger the finaliseCCDB
@@ -402,9 +405,6 @@ void ITSTrackingInterface::getConfiguration(framework::ProcessingContext& pc)
 {
   mVertexer->getGlobalConfiguration();
   mTracker->getGlobalConfiguration();
-  if (mOverrideBeamEstimation) {
-    pc.inputs().get<o2::dataformats::MeanVertexObject*>("meanvtx");
-  }
 }
 
 void ITSTrackingInterface::finaliseCCDB(ConcreteDataMatcher& matcher, void* obj)
