@@ -20,6 +20,7 @@
 #include <string>
 #include <vector>
 
+#include "ITStracking/BoundedAllocator.h"
 #include "ITStracking/Cluster.h"
 #include "ITStracking/ClusterLines.h"
 #include "ITStracking/Configuration.h"
@@ -30,6 +31,8 @@
 
 #include "GPUCommonDef.h"
 #include "GPUCommonMath.h"
+
+#include <oneapi/tbb/task_arena.h>
 
 namespace o2
 {
@@ -68,23 +71,23 @@ class VertexerTraits
   virtual void computeTracklets(const int iteration = 0);
   virtual void computeTrackletMatching(const int iteration = 0);
   virtual void computeVertices(const int iteration = 0);
-  virtual void adoptTimeFrame(TimeFrame7* tf) { mTimeFrame = tf; }
+  virtual void adoptTimeFrame(TimeFrame7* tf) noexcept { mTimeFrame = tf; }
   virtual void updateVertexingParameters(const std::vector<VertexingParameters>& vrtPar, const TimeFrameGPUParameters& gpuTfPar);
 
   void computeVerticesInRof(int,
                             gsl::span<const o2::its::Line>&,
-                            std::vector<bool>&,
-                            std::vector<o2::its::ClusterLines>&,
+                            bounded_vector<bool>&,
+                            bounded_vector<o2::its::ClusterLines>&,
                             std::array<float, 2>&,
-                            std::vector<Vertex>&,
-                            std::vector<int>&,
+                            bounded_vector<Vertex>&,
+                            bounded_vector<int>&,
                             TimeFrame7*,
-                            std::vector<o2::MCCompLabel>*,
+                            bounded_vector<o2::MCCompLabel>*,
                             const int iteration = 0);
 
-  static const std::vector<std::pair<int, int>> selectClusters(const int* indexTable,
-                                                               const std::array<int, 4>& selectedBinsRect,
-                                                               const IndexTableUtils& utils);
+  const bounded_vector<std::pair<int, int>> selectClusters(const int* indexTable,
+                                                           const std::array<int, 4>& selectedBinsRect,
+                                                           const IndexTableUtils& utils);
 
   // utils
   auto& getVertexingParameters() { return mVrtParams; }
@@ -95,9 +98,11 @@ class VertexerTraits
   int getNThreads() const { return mNThreads; }
   virtual bool isGPU() const noexcept { return false; }
   virtual const char* getName() const noexcept { return "CPU"; }
+  virtual bool usesMemoryPool() const noexcept { return true; }
+  void setMemoryPool(std::shared_ptr<BoundedMemoryResource>& pool) { mMemoryPool = pool; }
 
   template <typename T = o2::MCCompLabel>
-  static std::pair<T, float> computeMain(const std::vector<T>& elements)
+  static std::pair<T, float> computeMain(const bounded_vector<T>& elements)
   {
     T elem;
     size_t maxCount = 0;
@@ -119,6 +124,9 @@ class VertexerTraits
 
   // Frame related quantities
   TimeFrame7* mTimeFrame = nullptr; // observer ptr
+ private:
+  std::shared_ptr<BoundedMemoryResource> mMemoryPool;
+  tbb::task_arena mTaskArena;
 };
 
 inline void VertexerTraits::initialise(const TrackingParameters& trackingParams, const int iteration)

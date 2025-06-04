@@ -9,6 +9,7 @@
 # granted to it by virtue of its status as an Intergovernmental Organization
 # or submit itself to any jurisdiction.
 
+#add_compile_options(-O0 -g -fPIC -fno-omit-frame-pointer)
 o2_add_library(ITStracking
                TARGETVARNAME targetName
                SOURCES src/ClusterLines.cxx
@@ -35,12 +36,8 @@ o2_add_library(ITStracking
                        O2::ITSBase
                        O2::ITSReconstruction
                        O2::ITSMFTReconstruction
-                       O2::DataFormatsITS)
-
-if (OpenMP_CXX_FOUND)
-        target_compile_definitions(${targetName} PRIVATE WITH_OPENMP)
-        target_link_libraries(${targetName} PRIVATE OpenMP::OpenMP_CXX)
-endif()
+                       O2::DataFormatsITS
+               PRIVATE_LINK_LIBRARIES TBB::tbb)
 
 o2_add_library(ITSTrackingInterface
                TARGETVARNAME targetName
@@ -49,11 +46,6 @@ o2_add_library(ITSTrackingInterface
                        O2::ITStracking
                        O2::Framework
                        O2::GPUTracking)
-
-if (OpenMP_CXX_FOUND)
-        target_compile_definitions(${targetName} PRIVATE WITH_OPENMP)
-        target_link_libraries(${targetName} PRIVATE OpenMP::OpenMP_CXX)
-endif()
 
 o2_target_root_dictionary(ITStracking
                           HEADERS include/ITStracking/ClusterLines.h

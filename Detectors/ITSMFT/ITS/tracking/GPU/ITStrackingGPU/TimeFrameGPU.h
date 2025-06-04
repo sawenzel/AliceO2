@@ -13,6 +13,7 @@
 #ifndef TRACKINGITSGPU_INCLUDE_TIMEFRAMEGPU_H
 #define TRACKINGITSGPU_INCLUDE_TIMEFRAMEGPU_H
 
+#include "ITStracking/BoundedAllocator.h"
 #include "ITStracking/TimeFrame.h"
 #include "ITStracking/Configuration.h"
 #include "ITStrackingGPU/Utils.h"
@@ -62,7 +63,7 @@ class TimeFrameGPU : public TimeFrame<nLayers>
   void loadTrackSeedsDevice();
   void loadTrackSeedsChi2Device();
   void loadRoadsDevice();
-  void loadTrackSeedsDevice(std::vector<CellSeed>&);
+  void loadTrackSeedsDevice(bounded_vector<CellSeed>&);
   void createTrackletsBuffers();
   void createCellsBuffers(const int);
   void createCellsDevice();
@@ -72,10 +73,10 @@ class TimeFrameGPU : public TimeFrame<nLayers>
   void createNeighboursDevice(const unsigned int layer, std::vector<std::pair<int, int>>& neighbours);
   void createNeighboursLUTDevice(const int, const unsigned int);
   void createNeighboursDeviceArray();
-  void createTrackITSExtDevice(std::vector<CellSeed>&);
-  void downloadTrackITSExtDevice(std::vector<CellSeed>&);
-  void downloadCellsNeighboursDevice(std::vector<std::vector<std::pair<int, int>>>&, const int);
-  void downloadNeighboursLUTDevice(std::vector<int>&, const int);
+  void createTrackITSExtDevice(bounded_vector<CellSeed>&);
+  void downloadTrackITSExtDevice(bounded_vector<CellSeed>&);
+  void downloadCellsNeighboursDevice(std::vector<bounded_vector<std::pair<int, int>>>&, const int);
+  void downloadNeighboursLUTDevice(bounded_vector<int>&, const int);
   void downloadCellsDevice();
   void downloadCellsLUTDevice();
   void unregisterRest();
@@ -90,7 +91,7 @@ class TimeFrameGPU : public TimeFrame<nLayers>
   int getNClustersInRofSpan(const int, const int, const int) const;
   IndexTableUtils* getDeviceIndexTableUtils() { return mIndexTableUtilsDevice; }
   int* getDeviceROFramesClusters(const int layer) { return mROFramesClustersDevice[layer]; }
-  std::vector<o2::its::TrackITSExt>& getTrackITSExt() { return mTrackITSExt; }
+  auto& getTrackITSExt() { return mTrackITSExt; }
   Vertex* getDeviceVertices() { return mPrimaryVerticesDevice; }
   int* getDeviceROFramesPV() { return mROFramesPVDevice; }
   unsigned char* getDeviceUsedClusters(const int);
@@ -199,7 +200,7 @@ class TimeFrameGPU : public TimeFrame<nLayers>
   bool mFirstInit = true;
 
   // Temporary buffer for storing output tracks from GPU tracking
-  std::vector<TrackITSExt> mTrackITSExt;
+  bounded_vector<TrackITSExt> mTrackITSExt;
 };
 
 template <int nLayers>

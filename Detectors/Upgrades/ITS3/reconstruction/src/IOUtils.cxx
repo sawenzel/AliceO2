@@ -12,6 +12,7 @@
 #include "ITS3Reconstruction/IOUtils.h"
 #include "ITStracking/IOUtils.h"
 #include "ITStracking/TimeFrame.h"
+#include "ITStracking/BoundedAllocator.h"
 #include "DataFormatsITSMFT/CompCluster.h"
 #include "DataFormatsITSMFT/ROFRecord.h"
 #include "ITS3Reconstruction/TopologyDictionary.h"
@@ -68,8 +69,7 @@ int loadROFrameDataITS3(its::TimeFrame<7>* tf,
 
   tf->mNrof = 0;
 
-  std::vector<uint8_t> clusterSizeVec;
-  clusterSizeVec.reserve(clusters.size());
+  its::bounded_vector<uint8_t> clusterSizeVec(clusters.size(), tf->getMemoryPool().get());
 
   for (auto& rof : rofs) {
     for (int clusterId{rof.getFirstEntry()}; clusterId < rof.getFirstEntry() + rof.getNEntries(); ++clusterId) {

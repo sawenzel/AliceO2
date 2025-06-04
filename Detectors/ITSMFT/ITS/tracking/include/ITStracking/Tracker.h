@@ -23,6 +23,7 @@
 #include <iomanip>
 #include <iosfwd>
 #include <memory>
+#include <string_view>
 #include <utility>
 #include <sstream>
 
@@ -34,6 +35,7 @@
 #include "ITStracking/TimeFrame.h"
 #include "ITStracking/TrackerTraits.h"
 #include "ITStracking/Road.h"
+#include "ITStracking/BoundedAllocator.h"
 
 #include "DataFormatsITS/TrackITS.h"
 #include "SimulationDataFormat/MCCompLabel.h"
@@ -65,6 +67,7 @@ class Tracker
     LogFunc = [](const std::string& s) { std::cerr << s << '\n'; });
 
   void setParameters(const std::vector<TrackingParameters>& p) { mTrkParams = p; }
+  void setMemoryPool(std::shared_ptr<BoundedMemoryResource>& pool) { mMemoryPool = pool; }
   std::vector<TrackingParameters>& getParameters() { return mTrkParams; }
   void getGlobalConfiguration();
   void setBz(float bz) { mTraits->setBz(bz); }
@@ -89,7 +92,7 @@ class Tracker
   void rectifyClusterIndices();
 
   template <typename... T, typename... F>
-  float evaluateTask(void (Tracker::*task)(T...), const char* taskName, LogFunc logger, F&&... args);
+  float evaluateTask(void (Tracker::*task)(T...), std::string_view taskName, int iteration, LogFunc logger, F&&... args);
 
   TrackerTraits7* mTraits = nullptr; /// Observer pointer, not owned by this class
   TimeFrame7* mTimeFrame = nullptr;  /// Observer pointer, not owned by this class
@@ -100,23 +103,35 @@ class Tracker
   unsigned int mNumberOfDroppedTFs{0};
   unsigned int mTimeFrameCounter{0};
   double mTotalTime{0};
+  std::shared_ptr<BoundedMemoryResource> mMemoryPool;
+
+  enum State {
+    TFInit = 0,
+    Trackleting,
+    Celling,
+    Neighbouring,
+    Roading,
+    NStates,
+  };
+  State mCurState;
+  static constexpr std::array<const char*, NStates> StateNames{"TimeFrame initialisation", "Tracklet finding", "Cell finding", "Neighbour finding", "Road finding"};
 };
 
 template <typename... T, typename... F>
-float Tracker::evaluateTask(void (Tracker::*task)(T...), const char* taskName, LogFunc logger, F&&... args)
+float Tracker::evaluateTask(void (Tracker::*task)(T...), std::string_view taskName, int iteration, LogFunc logger, F&&... args)
 {
   float diff{0.f};
 
   if constexpr (constants::DoTimeBenchmarks) {
     auto start = std::chrono::high_resolution_clock::now();
-    (this->*task)(std::forward<T>(args)...);
+    (this->*task)(std::forward<F>(args)...);
     auto end = std::chrono::high_resolution_clock::now();
 
     std::chrono::duration<double, std::milli> diff_t{end - start};
     diff = diff_t.count();
 
     std::stringstream sstream;
-    if (taskName == nullptr) {
+    if (taskName.empty()) {
       sstream << diff << "\t";
     } else {
       sstream << std::setw(2) << " - " << taskName << " completed in: " << diff << " ms";
@@ -124,20 +139,17 @@ float Tracker::evaluateTask(void (Tracker::*task)(T...), const char* taskName, L
     logger(sstream.str());
 
     if (mTrkParams[0].SaveTimeBenchmarks) {
-      std::stringstream str2file;
       std::string taskNameStr(taskName);
       std::transform(taskNameStr.begin(), taskNameStr.end(), taskNameStr.begin(),
                      [](unsigned char c) { return std::tolower(c); });
       std::replace(taskNameStr.begin(), taskNameStr.end(), ' ', '_');
-      str2file << taskNameStr << "\t" << diff;
-      std::ofstream file;
-      file.open("its_time_benchmarks.txt", std::ios::app);
-      file << str2file.str() << std::endl;
-      file.close();
+      if (std::ofstream file{"its_time_benchmarks.txt", std::ios::app}) {
+        file << "trk:" << iteration << '\t' << taskNameStr << '\t' << diff << '\n';
+      }
     }
 
   } else {
-    (this->*task)(std::forward<T>(args)...);
+    (this->*task)(std::forward<F>(args)...);
   }
 
   return diff;

@@ -221,7 +221,7 @@ void TrackerTraitsGPU<nLayers>::findRoads(const int iteration)
   auto& conf = o2::its::ITSGpuTrackingParamConfig::Instance();
   for (int startLevel{this->mTrkParams[iteration].CellsPerRoad()}; startLevel >= this->mTrkParams[iteration].CellMinimumLevel(); --startLevel) {
     const int minimumLayer{startLevel - 1};
-    std::vector<CellSeed> trackSeeds;
+    bounded_vector<CellSeed> trackSeeds(this->getMemoryPool().get());
     for (int startLayer{this->mTrkParams[iteration].CellsPerRoad() - 1}; startLayer >= minimumLayer; --startLayer) {
       if ((this->mTrkParams[iteration].StartLayerMask & (1 << (startLayer + 2))) == 0) {
         continue;

@@ -14,6 +14,7 @@
 ///
 
 #include "ITStracking/Vertexer.h"
+#include "ITStracking/BoundedAllocator.h"
 #include "ITStracking/Cluster.h"
 #include "ITStracking/ROframe.h"
 #include "ITStracking/ClusterLines.h"
@@ -38,27 +39,46 @@ float Vertexer::clustersToVertices(LogFunc logger)
   TrackingParameters trkPars;
   TimeFrameGPUParameters tfGPUpar;
   mTraits->updateVertexingParameters(mVertParams, tfGPUpar);
+
+  auto handleException = [&](const auto& err) {
+    LOGP(error, "Encountered critical error in step {}, stopping further processing of this TF: {}", StateNames[mCurState], err.what());
+    if (!mVertParams[0].DropTFUponFailure) {
+      throw err;
+    } else {
+      LOGP(error, "Dropping this TF!");
+      mTimeFrame->resetTracklets();
+    }
+  };
+
   float timeTracklet{0.f}, timeSelection{0.f}, timeVertexing{0.f}, timeInit{0.f};
-  for (int iteration = 0; iteration < std::min(mVertParams[0].nIterations, (int)mVertParams.size()); ++iteration) {
-    unsigned int nTracklets01{0}, nTracklets12{0};
-    logger(fmt::format("=== ITS {} Seeding vertexer iteration {} summary:", mTraits->getName(), iteration));
-    trkPars.PhiBins = mTraits->getVertexingParameters()[0].PhiBins;
-    trkPars.ZBins = mTraits->getVertexingParameters()[0].ZBins;
-    auto timeInitIteration = evaluateTask(
-      &Vertexer::initialiseVertexer, " - Vertexer initialisation", evalLog, trkPars, iteration);
-    auto timeTrackletIteration = evaluateTask(
-      &Vertexer::findTracklets, " - Vertexer tracklet finding", evalLog, iteration);
-    nTracklets01 = mTimeFrame->getTotalTrackletsTF(0);
-    nTracklets12 = mTimeFrame->getTotalTrackletsTF(1);
-    auto timeSelectionIteration = evaluateTask(
-      &Vertexer::validateTracklets, " - Vertexer tracklets validation", evalLog, iteration);
-    auto timeVertexingIteration = evaluateTask(
-      &Vertexer::findVertices, " - Vertexer vertex finding", evalLog, iteration);
-    printEpilog(logger, nTracklets01, nTracklets12, mTimeFrame->getNLinesTotal(), mTimeFrame->getTotVertIteration()[iteration], timeInitIteration, timeTrackletIteration, timeSelectionIteration, timeVertexingIteration);
-    timeInit += timeInitIteration;
-    timeTracklet += timeTrackletIteration;
-    timeSelection += timeSelectionIteration;
-    timeVertexing += timeVertexingIteration;
+  try {
+    for (int iteration = 0; iteration < std::min(mVertParams[0].nIterations, (int)mVertParams.size()); ++iteration) {
+      mMemoryPool->setMaxMemory(mVertParams[iteration].MaxMemory);
+      unsigned int nTracklets01{0}, nTracklets12{0};
+      logger(fmt::format("=== ITS {} Seeding vertexer iteration {} summary:", mTraits->getName(), iteration));
+      trkPars.PhiBins = mTraits->getVertexingParameters()[0].PhiBins;
+      trkPars.ZBins = mTraits->getVertexingParameters()[0].ZBins;
+      auto timeInitIteration = evaluateTask(
+        &Vertexer::initialiseVertexer, StateNames[mCurState = Init], iteration, evalLog, trkPars, iteration);
+      auto timeTrackletIteration = evaluateTask(
+        &Vertexer::findTracklets, StateNames[mCurState = Trackleting], iteration, evalLog, iteration);
+      nTracklets01 = mTimeFrame->getTotalTrackletsTF(0);
+      nTracklets12 = mTimeFrame->getTotalTrackletsTF(1);
+      auto timeSelectionIteration = evaluateTask(
+        &Vertexer::validateTracklets, StateNames[mCurState = Validating], iteration, evalLog, iteration);
+      auto timeVertexingIteration = evaluateTask(&Vertexer::findVertices, StateNames[mCurState = Finding], iteration, evalLog, iteration);
+      printEpilog(logger, nTracklets01, nTracklets12, mTimeFrame->getNLinesTotal(), mTimeFrame->getTotVertIteration()[iteration], timeInitIteration, timeTrackletIteration, timeSelectionIteration, timeVertexingIteration);
+      timeInit += timeInitIteration;
+      timeTracklet += timeTrackletIteration;
+      timeSelection += timeSelectionIteration;
+      timeVertexing += timeVertexingIteration;
+    }
+  } catch (const BoundedMemoryResource::MemoryLimitExceeded& err) {
+    handleException(err);
+  } catch (const std::bad_alloc& err) {
+    handleException(err);
+  } catch (...) {
+    LOGP(fatal, "Uncaught exception!");
   }
 
   return timeInit + timeTracklet + timeSelection + timeVertexing;
@@ -91,6 +111,7 @@ void Vertexer::getGlobalConfiguration()
   mVertParams[0].nThreads = vc.nThreads;
   mVertParams[0].ZBins = vc.ZBins;
   mVertParams[0].PhiBins = vc.PhiBins;
+  mVertParams[0].SaveTimeBenchmarks = vc.saveTimeBenchmarks;
 }
 
 void Vertexer::adoptTimeFrame(TimeFrame7& tf)
@@ -108,7 +129,10 @@ void Vertexer::printEpilog(LogFunc& logger,
   logger(fmt::format(" - {} Vertexer: found {} | {} tracklets in: {} ms", mTraits->getName(), trackletN01, trackletN12, trackletT));
   logger(fmt::format(" - {} Vertexer: selected {} tracklets in: {} ms", mTraits->getName(), selectedN, selecT));
   logger(fmt::format(" - {} Vertexer: found {} vertices in: {} ms", mTraits->getName(), vertexN, vertexT));
-  // logger(fmt::format(" - Timeframe {} vertexing completed in: {} ms, using {} thread(s).", mTimeFrameCounter++, total, mTraits->getNThreads()));
+  if (mVertParams[0].PrintMemory) {
+    mTimeFrame->printArtefactsMemory();
+    mMemoryPool->print();
+  }
 }
 
 } // namespace o2::its

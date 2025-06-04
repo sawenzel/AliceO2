@@ -22,6 +22,10 @@
 #include "ITStracking/Configuration.h"
 #include "ITStracking/MathUtils.h"
 #include "ITStracking/TimeFrame.h"
+#include "ITStracking/BoundedAllocator.h"
+
+#include <oneapi/tbb.h>
+#include <oneapi/tbb/partitioner.h>
 
 // #define OPTIMISATION_OUTPUT
 
@@ -54,7 +58,7 @@ class TrackerTraits
   virtual void findShortPrimaries();
 
   virtual bool trackFollowing(TrackITSExt* track, int rof, bool outward, const int iteration);
-  virtual void processNeighbours(int iLayer, int iLevel, const std::vector<CellSeed>& currentCellSeed, const std::vector<int>& currentCellId, std::vector<CellSeed>& updatedCellSeed, std::vector<int>& updatedCellId);
+  virtual void processNeighbours(int iLayer, int iLevel, const bounded_vector<CellSeed>& currentCellSeed, const bounded_vector<int>& currentCellId, bounded_vector<CellSeed>& updatedCellSeed, bounded_vector<int>& updatedCellId);
 
   void updateTrackingParameters(const std::vector<TrackingParameters>& trkPars) { mTrkParams = trkPars; }
   TimeFrame<nLayers>* getTimeFrame() { return mTimeFrame; }
@@ -65,6 +69,8 @@ class TrackerTraits
   bool isMatLUT() const;
   virtual const char* getName() const noexcept { return "CPU"; }
   virtual bool isGPU() const noexcept { return false; }
+  void setMemoryPool(std::shared_ptr<BoundedMemoryResource>& pool) noexcept { mMemoryPool = pool; }
+  auto getMemoryPool() const noexcept { return mMemoryPool; }
 
   // Others
   GPUhd() static consteval int4 getEmptyBinsRect() { return int4{0, 0, 0, 0}; }
@@ -92,6 +98,8 @@ class TrackerTraits
 
   int mNThreads = 1;
   bool mApplySmoothing = false;
+  std::shared_ptr<BoundedMemoryResource> mMemoryPool;
+  tbb::task_arena mTaskArena;
 
  protected:
   o2::base::PropagatorImpl<float>::MatCorrType mCorrType = o2::base::PropagatorImpl<float>::MatCorrType::USEMatCorrNONE;

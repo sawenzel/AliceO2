@@ -420,7 +420,7 @@ void TimeFrameGPU<nLayers>::loadRoadsDevice()
 }
 
 template <int nLayers>
-void TimeFrameGPU<nLayers>::loadTrackSeedsDevice(std::vector<CellSeed>& seeds)
+void TimeFrameGPU<nLayers>::loadTrackSeedsDevice(bounded_vector<CellSeed>& seeds)
 {
   START_GPU_STREAM_TIMER(mGpuStreams[0]->get(), "loading track seeds");
   LOGP(debug, "gpu-transfer: loading {} track seeds, for {} MB.", seeds.size(), seeds.size() * sizeof(CellSeed) / MB);
@@ -466,11 +466,10 @@ void TimeFrameGPU<nLayers>::createNeighboursDeviceArray()
 }
 
 template <int nLayers>
-void TimeFrameGPU<nLayers>::createTrackITSExtDevice(std::vector<CellSeed>& seeds)
+void TimeFrameGPU<nLayers>::createTrackITSExtDevice(bounded_vector<CellSeed>& seeds)
 {
   START_GPU_STREAM_TIMER(mGpuStreams[0]->get(), "reserving tracks");
-  mTrackITSExt.clear();
-  mTrackITSExt.resize(seeds.size());
+  mTrackITSExt = bounded_vector<TrackITSExt>(seeds.size(), {}, this->getMemoryPool().get());
   LOGP(debug, "gpu-allocation: reserving {} tracks, for {} MB.", seeds.size(), seeds.size() * sizeof(o2::its::TrackITSExt) / MB);
   allocMemAsync(reinterpret_cast<void**>(&mTrackITSExtDevice), seeds.size() * sizeof(o2::its::TrackITSExt), mGpuStreams[0], this->getExtAllocator());
   GPUChkErrS(cudaMemsetAsync(mTrackITSExtDevice, 0, seeds.size() * sizeof(o2::its::TrackITSExt), mGpuStreams[0]->get()));
@@ -503,7 +502,7 @@ void TimeFrameGPU<nLayers>::downloadCellsLUTDevice()
 }
 
 template <int nLayers>
-void TimeFrameGPU<nLayers>::downloadCellsNeighboursDevice(std::vector<std::vector<std::pair<int, int>>>& neighbours, const int layer)
+void TimeFrameGPU<nLayers>::downloadCellsNeighboursDevice(std::vector<bounded_vector<std::pair<int, int>>>& neighbours, const int layer)
 {
   START_GPU_STREAM_TIMER(mGpuStreams[0]->get(), fmt::format("downloading neighbours from layer {}", layer));
   LOGP(debug, "gpu-transfer: downloading {} neighbours, for {} MB.", neighbours[layer].size(), neighbours[layer].size() * sizeof(std::pair<int, int>) / MB);
@@ -512,7 +511,7 @@ void TimeFrameGPU<nLayers>::downloadCellsNeighboursDevice(std::vector<std::vecto
 }
 
 template <int nLayers>
-void TimeFrameGPU<nLayers>::downloadNeighboursLUTDevice(std::vector<int>& lut, const int layer)
+void TimeFrameGPU<nLayers>::downloadNeighboursLUTDevice(bounded_vector<int>& lut, const int layer)
 {
   START_GPU_STREAM_TIMER(mGpuStreams[0]->get(), fmt::format("downloading neighbours LUT from layer {}", layer));
   LOGP(debug, "gpu-transfer: downloading neighbours LUT for {} elements on layer {}, for {} MB.", lut.size(), layer, lut.size() * sizeof(int) / MB);
@@ -521,7 +520,7 @@ void TimeFrameGPU<nLayers>::downloadNeighboursLUTDevice(std::vector<int>& lut, c
 }
 
 template <int nLayers>
-void TimeFrameGPU<nLayers>::downloadTrackITSExtDevice(std::vector<CellSeed>& seeds)
+void TimeFrameGPU<nLayers>::downloadTrackITSExtDevice(bounded_vector<CellSeed>& seeds)
 {
   START_GPU_STREAM_TIMER(mGpuStreams[0]->get(), "downloading tracks");
   LOGP(debug, "gpu-transfer: downloading {} tracks, for {} MB.", mTrackITSExt.size(), mTrackITSExt.size() * sizeof(o2::its::TrackITSExt) / MB);

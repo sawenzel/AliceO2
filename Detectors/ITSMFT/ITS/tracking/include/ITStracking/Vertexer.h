@@ -27,6 +27,7 @@
 #include "ITStracking/Configuration.h"
 #include "ITStracking/TimeFrame.h"
 #include "ITStracking/VertexerTraits.h"
+#include "ITStracking/BoundedAllocator.h"
 #include "ReconstructionDataFormats/Vertex.h"
 
 #include "ITStracking/ClusterLines.h"
@@ -56,6 +57,7 @@ class Vertexer
   auto& getVertParameters() const { return mTraits->getVertexingParameters(); }
   void setParameters(const std::vector<VertexingParameters>& vertParams) { mVertParams = vertParams; }
   void getGlobalConfiguration();
+  void setMemoryPool(std::shared_ptr<BoundedMemoryResource>& pool) { mMemoryPool = pool; }
 
   std::vector<Vertex> exportVertices();
   VertexerTraits* getTraits() const { return mTraits; };
@@ -80,7 +82,8 @@ class Vertexer
   // Utils
   void dumpTraits() { mTraits->dumpVertexerTraits(); }
   template <typename... T>
-  float evaluateTask(void (Vertexer::*)(T...), const char*, LogFunc logger, T&&... args);
+  float evaluateTask(void (Vertexer::*task)(T...), std::string_view taskName, int iteration, LogFunc& logger, T&&... args);
+
   void printEpilog(LogFunc& logger,
                    const unsigned int trackletN01, const unsigned int trackletN12,
                    const unsigned selectedN, const unsigned int vertexN, const float initT,
@@ -93,6 +96,17 @@ class Vertexer
   TimeFrame7* mTimeFrame = nullptr;  /// Observer pointer, not owned by this class
 
   std::vector<VertexingParameters> mVertParams;
+  std::shared_ptr<BoundedMemoryResource> mMemoryPool;
+
+  enum State {
+    Init = 0,
+    Trackleting,
+    Validating,
+    Finding,
+    NStates,
+  };
+  State mCurState;
+  static constexpr std::array<const char*, NStates> StateNames{"Initialisation", "Tracklet finding", "Tracklet validation", "Vertex finding"};
 };
 
 template <typename... T>
@@ -120,8 +134,7 @@ inline void Vertexer::findVertices(T&&... args)
 }
 
 template <typename... T>
-float Vertexer::evaluateTask(void (Vertexer::*task)(T...), const char* taskName, LogFunc logger,
-                             T&&... args)
+float Vertexer::evaluateTask(void (Vertexer::*task)(T...), std::string_view taskName, int iteration, LogFunc& logger, T&&... args)
 {
   float diff{0.f};
 
@@ -134,12 +147,22 @@ float Vertexer::evaluateTask(void (Vertexer::*task)(T...), const char* taskName,
     diff = diff_t.count();
 
     std::stringstream sstream;
-    if (taskName == nullptr) {
+    if (taskName.empty()) {
       sstream << diff << "\t";
     } else {
       sstream << std::setw(2) << " - " << taskName << " completed in: " << diff << " ms";
     }
     logger(sstream.str());
+
+    if (mVertParams[0].SaveTimeBenchmarks) {
+      std::string taskNameStr(taskName);
+      std::transform(taskNameStr.begin(), taskNameStr.end(), taskNameStr.begin(),
+                     [](unsigned char c) { return std::tolower(c); });
+      std::replace(taskNameStr.begin(), taskNameStr.end(), ' ', '_');
+      if (std::ofstream file{"its_time_benchmarks.txt", std::ios::app}) {
+        file << "vtx:" << iteration << '\t' << taskNameStr << '\t' << diff << '\n';
+      }
+    }
   } else {
     (this->*task)(std::forward<T>(args)...);
   }
