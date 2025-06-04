@@ -35,6 +35,8 @@ And there are plenty of additional settings to enable/disable event display, qa,
 
 This will create the `ca` binary in `~/standalone`, which is basically the same as the `o2-gpu-standalone-benchmark`, but built outside of O2.
 
+As an exacmple you can also have a look at [build.sh](https://github.com/AliceO2Group/AliceO2/blob/dev/GPU/GPUTracking/Standalone/cmake/build.sh), which is used by the CI.
+
 # Running
 
 The following command lines will use `./ca`, in case you use the executable from the O2 build, please replace by `o2-gpu-standalone-benchmark`.
