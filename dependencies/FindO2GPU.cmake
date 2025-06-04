@@ -9,6 +9,9 @@
 # granted to it by virtue of its status as an Intergovernmental Organization
 # or submit itself to any jurisdiction.
 
+# NOTE!!!! - Whenever this file is changed, move it over to alidist/resources
+# FindO2GPU.cmake Version 1
+
 if(NOT DEFINED ENABLE_CUDA)
   set(ENABLE_CUDA "AUTO")
 endif()
