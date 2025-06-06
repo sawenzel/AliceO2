@@ -90,8 +90,6 @@ class TrackerTraits
   virtual int getTFNumberOfTracklets() const { return mTimeFrame->getNumberOfTracklets(); }
   virtual int getTFNumberOfCells() const { return mTimeFrame->getNumberOfCells(); }
 
-  float mBz = 5.f;
-
  private:
   track::TrackParCov buildTrackSeed(const Cluster& cluster1, const Cluster& cluster2, const TrackingFrameInfo& tf3);
   bool fitTrack(TrackITSExt& track, int start, int end, int step, float chi2clcut = o2::constants::math::VeryBig, float chi2ndfcut = o2::constants::math::VeryBig, float maxQoverPt = o2::constants::math::VeryBig, int nCl = 0);
@@ -106,6 +104,9 @@ class TrackerTraits
   o2::gpu::GPUChainITS* mChain = nullptr;
   TimeFrame<nLayers>* mTimeFrame;
   std::vector<TrackingParameters> mTrkParams;
+
+  float mBz{-999.f};
+  bool mIsZeroField{false};
 };
 
 template <int nLayers>

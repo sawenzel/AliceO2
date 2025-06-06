@@ -19,7 +19,6 @@ o2_add_library(ITStracking
                        src/TimeFrame.cxx
                        src/IOUtils.cxx
                        src/Label.cxx
-                       src/Road.cxx
                        src/Tracker.cxx
                        src/TrackerTraits.cxx
                        src/TrackingConfigParam.cxx

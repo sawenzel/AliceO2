@@ -28,6 +28,7 @@
 #include "ITStracking/IndexTableUtils.h"
 #include "ITStracking/TimeFrame.h"
 #include "ITStracking/Tracklet.h"
+#include "ITStracking/MathUtils.h"
 
 #include "GPUCommonDef.h"
 #include "GPUCommonMath.h"
