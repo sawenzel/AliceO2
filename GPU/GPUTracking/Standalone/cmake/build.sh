@@ -3,6 +3,7 @@ if [[ -z $1 ]]; then
   echo "Please provide Sourcedir as command line argument"
   exit 1
 fi
+set -e
 mkdir -p standalone/build
 pushd standalone/build
 cp $1/GPU/GPUTracking/Standalone/cmake/config.cmake .
