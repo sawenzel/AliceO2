@@ -102,6 +102,8 @@
 #ifdef WITH_OPENMP
 #include <omp.h>
 #endif
+#include <filesystem>
+#include <nlohmann/json.hpp>
 
 using namespace o2::framework;
 using namespace o2::math_utils::detail;
@@ -1793,6 +1795,38 @@ void AODProducerWorkflowDPL::init(InitContext& ic)
   }
 }
 
+namespace
+{
+void add_additional_meta_info(std::vector<TString>& keys, std::vector<TString>& values)
+{
+  // see if we should put additional meta info (e.g. from MC)
+  auto aod_external_meta_info_file = getenv("AOD_ADDITIONAL_METADATA_FILE");
+  if (aod_external_meta_info_file != nullptr) {
+    LOG(info) << "Trying to inject additional AOD meta-data from " << aod_external_meta_info_file;
+    if (std::filesystem::exists(aod_external_meta_info_file)) {
+      std::ifstream input_file(aod_external_meta_info_file);
+      if (input_file) {
+        nlohmann::json json_data;
+        try {
+          input_file >> json_data;
+        } catch (nlohmann::json::parse_error& e) {
+          std::cerr << "JSON Parse Error: " << e.what() << "\n";
+          std::cerr << "Exception ID: " << e.id << "\n";
+          std::cerr << "Byte position: " << e.byte << "\n";
+          return;
+        }
+        // If parsing succeeds, iterate over key-value pairs
+        for (const auto& [key, value] : json_data.items()) {
+          LOG(info) << "Adding AOD MetaData" << key << " : " << value;
+          keys.push_back(key.c_str());
+          values.push_back(value.get<std::string>());
+        }
+      }
+    }
+  }
+}
+} // namespace
+
 void AODProducerWorkflowDPL::run(ProcessingContext& pc)
 {
   mTimer.Start(false);
@@ -2401,6 +2435,8 @@ void AODProducerWorkflowDPL::run(ProcessingContext& pc)
   TString ROOTVersion = ROOT_RELEASE;
   mMetaDataKeys = {"DataType", "Run", "O2Version", "ROOTVersion", "RecoPassName", "AnchorProduction", "AnchorPassName", "LPMProductionTag", "CreatedBy"};
   mMetaDataVals = {dataType, "3", O2Version, ROOTVersion, mRecoPass, mAnchorProd, mAnchorPass, mLPMProdTag, mUser};
+  add_additional_meta_info(mMetaDataKeys, mMetaDataVals);
+
   pc.outputs().snapshot(Output{"AMD", "AODMetadataKeys", 0}, mMetaDataKeys);
   pc.outputs().snapshot(Output{"AMD", "AODMetadataVals", 0}, mMetaDataVals);
 
