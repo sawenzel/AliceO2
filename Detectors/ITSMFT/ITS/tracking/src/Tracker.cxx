@@ -118,6 +118,9 @@ void Tracker::clustersToTracks(LogFunc logger, LogFunc error)
         total += timeExtending;
         logger(std::format(" - Extending Tracks: {} extended tracks using {} clusters found in {:.2f} ms", nExtendedTracks + mTimeFrame->mNExtendedTracks, nExtendedClusters + mTimeFrame->mNExtendedUsedClusters, timeExtending));
       }
+      if (mTrkParams[iteration].PrintMemory) {
+        mMemoryPool->print();
+      }
     }
     if (mTraits->supportsFindShortPrimaries() && mTrkParams[0].FindShortTracks) {
       auto nTracksB = mTimeFrame->getNumberOfTracks();

@@ -302,7 +302,7 @@ void ITSTrackingInterface::run(framework::ProcessingContext& pc)
                              o2::its::VertexerParamConfig::Instance().nIterations > 1 ? mTimeFrame->getTotVertIteration()[1] : 0,
                              trackROFspan.size() - mTimeFrame->getNoVertexROF(),
                              trackROFspan.size());
-    LOG(info) << fmt::format("FastMultEst: rejected {}/{} ROFs: random/mult.sel:{} (seed {}), vtx.sel:{}", cutRandomMult + cutVertexMult, trackROFspan.size(), cutRandomMult, multEst.lastRandomSeed, cutVertexMult);
+    LOG(info) << fmt::format(" - FastMultEst: rejected {}/{} ROFs: random/mult.sel:{} (seed {}), vtx.sel:{}", cutRandomMult + cutVertexMult, trackROFspan.size(), cutRandomMult, multEst.lastRandomSeed, cutVertexMult);
   }
   if (mOverrideBeamEstimation) {
     LOG(info) << fmt::format(" - Beam position set to: {}, {} from meanvertex object", mTimeFrame->getBeamX(), mTimeFrame->getBeamY());
@@ -392,6 +392,11 @@ void ITSTrackingInterface::updateTimeDependentParams(framework::ProcessingContex
     if (pc.services().get<const o2::framework::DeviceSpec>().inputTimesliceId == 0) { // print settings only for the 1st pipeling
       o2::its::VertexerParamConfig::Instance().printKeyValues();
       o2::its::TrackerParamConfig::Instance().printKeyValues();
+      const auto& vtxParams = mVertexer->getParameters();
+      for (size_t it = 0; it < vtxParams.size(); it++) {
+        const auto& par = vtxParams[it];
+        LOGP(info, "vtxIter#{} : {}", it, par.asString());
+      }
       const auto& trParams = mTracker->getParameters();
       for (size_t it = 0; it < trParams.size(); it++) {
         const auto& par = trParams[it];

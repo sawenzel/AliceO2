@@ -113,6 +113,8 @@ struct TrackingParameters {
 };
 
 struct VertexingParameters {
+  std::string asString() const;
+
   int nIterations = 1;         // Number of vertexing passes to perform
   int vertPerRofThreshold = 0; // Maximum number of vertices per ROF to trigger second a round
   bool allowSingleContribClusters = false;
@@ -145,6 +147,8 @@ struct VertexingParameters {
 };
 
 struct TimeFrameGPUParameters {
+  std::string asString() const;
+
   size_t tmpCUBBufferSize = 1e5; // In average in pp events there are required 4096 bytes
   size_t maxTrackletsPerCluster = 1e2;
   size_t clustersPerLayerCapacity = 2.5e5;
