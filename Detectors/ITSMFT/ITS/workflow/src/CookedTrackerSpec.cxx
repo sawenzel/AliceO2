@@ -52,7 +52,7 @@ namespace its
 
 using Vertex = o2::dataformats::Vertex<o2::dataformats::TimeStamp<int>>;
 
-CookedTrackerDPL::CookedTrackerDPL(std::shared_ptr<o2::base::GRPGeomRequest> gr, bool useMC, int trgType, const TrackingMode& trMode) : mGGCCDBRequest(gr), mUseMC(useMC), mUseTriggers{trgType}, mMode(trMode)
+CookedTrackerDPL::CookedTrackerDPL(std::shared_ptr<o2::base::GRPGeomRequest> gr, bool useMC, int trgType, TrackingMode::Type trMode) : mGGCCDBRequest(gr), mUseMC(useMC), mUseTriggers{trgType}, mMode(trMode)
 {
   mVertexerTraitsPtr = std::make_unique<VertexerTraits>();
   mVertexerPtr = std::make_unique<Vertexer>(mVertexerTraitsPtr.get());
@@ -225,13 +225,13 @@ void CookedTrackerDPL::updateTimeDependentParams(ProcessingContext& pc)
     if (pc.inputs().getPos("itsTGeo") >= 0) {
       pc.inputs().get<o2::its::GeometryTGeo*>("itsTGeo");
     }
-    mVertexerPtr->getGlobalConfiguration();
+    mVertexerPtr->setParameters(TrackingMode::getVertexingParameters(mMode));
     o2::its::GeometryTGeo* geom = o2::its::GeometryTGeo::Instance();
     geom->fillMatrixCache(o2::math_utils::bit2Mask(o2::math_utils::TransformType::T2L, o2::math_utils::TransformType::T2GRot,
                                                    o2::math_utils::TransformType::T2G));
     mTracker.setGeometry(geom);
     mTracker.setConfigParams();
-    LOG(info) << "Tracking mode " << mMode;
+    LOG(info) << "Tracking mode " << TrackingMode::toString(mMode);
     if (mMode == TrackingMode::Cosmics) {
       LOG(info) << "Setting cosmics parameters...";
       mTracker.setParametersCosmics();
@@ -269,7 +269,7 @@ void CookedTrackerDPL::finaliseCCDB(ConcreteDataMatcher& matcher, void* obj)
   }
 }
 
-DataProcessorSpec getCookedTrackerSpec(bool useMC, bool useGeom, int trgType, const std::string& trModeS)
+DataProcessorSpec getCookedTrackerSpec(bool useMC, bool useGeom, int trgType, TrackingMode::Type trmode)
 {
   std::vector<InputSpec> inputs;
   inputs.emplace_back("compClusters", "ITS", "COMPCLUSTERS", 0, Lifetime::Timeframe);
@@ -315,8 +315,7 @@ DataProcessorSpec getCookedTrackerSpec(bool useMC, bool useGeom, int trgType, co
     AlgorithmSpec{adaptFromTask<CookedTrackerDPL>(ggRequest,
                                                   useMC,
                                                   trgType,
-                                                  trModeS == "sync" ? o2::its::TrackingMode::Sync : trModeS == "async" ? o2::its::TrackingMode::Async
-                                                                                                                       : o2::its::TrackingMode::Cosmics)},
+                                                  trmode)},
     Options{{"nthreads", VariantType::Int, 1, {"Number of threads"}}}};
 }
 

@@ -36,7 +36,7 @@ namespace reco_workflow
 
 framework::WorkflowSpec getWorkflow(bool useMC,
                                     bool useCAtracker,
-                                    const std::string& trmode,
+                                    TrackingMode::Type trmode,
                                     const bool overrideBeamPosition,
                                     bool upstreamDigits,
                                     bool upstreamClusters,
@@ -56,7 +56,7 @@ framework::WorkflowSpec getWorkflow(bool useMC,
   if (!disableRootOutput) {
     specs.emplace_back(o2::its::getClusterWriterSpec(useMC));
   }
-  if (!trmode.empty()) {
+  if (trmode != TrackingMode::Off) {
     if (useCAtracker) {
       if (useGPUWF) {
         o2::gpu::GPURecoWorkflowSpec::Config cfg;

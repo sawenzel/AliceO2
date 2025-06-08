@@ -84,36 +84,6 @@ float Vertexer::clustersToVertices(LogFunc logger)
   return timeInit + timeTracklet + timeSelection + timeVertexing;
 }
 
-void Vertexer::getGlobalConfiguration()
-{
-  auto& vc = o2::its::VertexerParamConfig::Instance();
-  auto& grc = o2::its::ITSGpuTrackingParamConfig::Instance();
-
-  // This is odd: we override only the parameters for the first iteration.
-  // Variations for the next iterations are set in the trackingInterfrace.
-  mVertParams[0].nIterations = vc.nIterations;
-  mVertParams[0].deltaRof = vc.deltaRof;
-  mVertParams[0].allowSingleContribClusters = vc.allowSingleContribClusters;
-  mVertParams[0].zCut = vc.zCut;
-  mVertParams[0].phiCut = vc.phiCut;
-  mVertParams[0].pairCut = vc.pairCut;
-  mVertParams[0].clusterCut = vc.clusterCut;
-  mVertParams[0].histPairCut = vc.histPairCut;
-  mVertParams[0].tanLambdaCut = vc.tanLambdaCut;
-  mVertParams[0].lowMultBeamDistCut = vc.lowMultBeamDistCut;
-  mVertParams[0].vertNsigmaCut = vc.vertNsigmaCut;
-  mVertParams[0].vertRadiusSigma = vc.vertRadiusSigma;
-  mVertParams[0].trackletSigma = vc.trackletSigma;
-  mVertParams[0].maxZPositionAllowed = vc.maxZPositionAllowed;
-  mVertParams[0].clusterContributorsCut = vc.clusterContributorsCut;
-  mVertParams[0].maxTrackletsPerCluster = vc.maxTrackletsPerCluster;
-  mVertParams[0].phiSpan = vc.phiSpan;
-  mVertParams[0].nThreads = vc.nThreads;
-  mVertParams[0].ZBins = vc.ZBins;
-  mVertParams[0].PhiBins = vc.PhiBins;
-  mVertParams[0].SaveTimeBenchmarks = vc.saveTimeBenchmarks;
-}
-
 void Vertexer::adoptTimeFrame(TimeFrame7& tf)
 {
   mTimeFrame = &tf;

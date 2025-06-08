@@ -26,36 +26,8 @@
 #include "DetectorsBase/Propagator.h"
 #include "ITStracking/Constants.h"
 
-namespace o2
+namespace o2::its
 {
-namespace its
-{
-
-enum class TrackingMode {
-  Sync,
-  Async,
-  Cosmics,
-  Unset, // Special value to leave a default in case we want to override via Configurable Params
-};
-
-std::string asString(TrackingMode mode);
-std::ostream& operator<<(std::ostream& os, TrackingMode v);
-
-template <typename Param>
-class Configuration : public Param
-{
- public:
-  static Configuration<Param>& getInstance()
-  {
-    static Configuration<Param> instance;
-    return instance;
-  }
-  Configuration(const Configuration<Param>&) = delete;
-  const Configuration<Param>& operator=(const Configuration<Param>&) = delete;
-
- private:
-  Configuration() = default;
-};
 
 struct TrackingParameters {
   int CellMinimumLevel() const noexcept { return MinTrackLength - constants::ClustersPerCell + 1; }
@@ -166,7 +138,24 @@ struct TimeFrameGPUParameters {
   int maxGPUMemoryGB = -1;
 };
 
-} // namespace its
-} // namespace o2
+namespace TrackingMode
+{
+enum Type : int8_t {
+  Unset = -1, // Special value to leave a default in case we want to override via Configurable Params
+  Sync = 0,
+  Async = 1,
+  Cosmics = 2,
+  Off = 3,
+};
+
+Type fromString(std::string_view str);
+std::string toString(Type mode);
+
+std::vector<TrackingParameters> getTrackingParameters(Type mode);
+std::vector<VertexingParameters> getVertexingParameters(Type mode);
+
+}; // namespace TrackingMode
+
+} // namespace o2::its
 
 #endif /* TRACKINGITSU_INCLUDE_CONFIGURATION_H_ */

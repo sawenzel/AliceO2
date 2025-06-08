@@ -33,122 +33,26 @@ using namespace o2::its;
 
 void ITSTrackingInterface::initialise()
 {
-  mRunVertexer = true;
-  mCosmicsProcessing = false;
-  std::vector<VertexingParameters> vertParams;
-  std::vector<TrackingParameters> trackParams;
-  const auto& vertConf = o2::its::VertexerParamConfig::Instance();
+  // get parameters
   const auto& trackConf = o2::its::TrackerParamConfig::Instance();
-  float bFactor = std::abs(o2::base::Propagator::Instance()->getNominalBz()) / 5.0066791;
-  float bFactorTracklets = bFactor < 0.01 ? 1. : bFactor; // for tracklets only
+  const auto& vertConf = o2::its::VertexerParamConfig::Instance();
   if (mMode == TrackingMode::Unset) {
-    mMode = (TrackingMode)(trackConf.trackingMode);
-    LOGP(info, "Tracking mode not set, trying to fetch it from configurable params to: {}", asString(mMode));
+    mMode = (TrackingMode::Type)trackConf.trackingMode;
+    LOGP(info, "Tracking mode not set, trying to fetch it from configurable params to: {}", TrackingMode::toString(mMode));
   }
-  if (mMode == TrackingMode::Async) {
-    trackParams.resize(trackConf.doUPCIteration ? 4 : 3);
-    vertParams.resize(2); // The number of actual iterations will be set as a configKeyVal to allow for pp/PbPb choice
-    trackParams[1].TrackletMinPt = 0.2f;
-    trackParams[1].CellDeltaTanLambdaSigma *= 2.;
-    trackParams[2].TrackletMinPt = 0.1f;
-    trackParams[2].CellDeltaTanLambdaSigma *= 4.;
-
-    trackParams[0].MinPt[0] = 1.f / 12; // 7cl
-
-    trackParams[1].MinPt[0] = 1.f / 12; // 7cl
-
-    trackParams[2].MinTrackLength = 4;
-    trackParams[2].MinPt[0] = 1.f / 12; // 7cl
-    trackParams[2].MinPt[1] = 1.f / 5;  // 6cl
-    trackParams[2].MinPt[2] = 1.f / 1;  // 5cl
-    trackParams[2].MinPt[3] = 1.f / 6;  // 4cl
-
-    trackParams[2].StartLayerMask = (1 << 6) + (1 << 3);
-    if (o2::its::TrackerParamConfig::Instance().doUPCIteration) {
-      trackParams[3].MinTrackLength = 4;
-      trackParams[3].TrackletMinPt = 0.1f;
-      trackParams[3].CellDeltaTanLambdaSigma *= 4.;
-      trackParams[3].DeltaROF = 0; // UPC specific setting
-    }
-    for (size_t ip = 0; ip < trackParams.size(); ip++) {
-      auto& param = trackParams[ip];
-      param.ZBins = 64;
-      param.PhiBins = 32;
-      param.CellsPerClusterLimit = 1.e3f;
-      param.TrackletsPerClusterLimit = 1.e3f;
-      // check if something was overridden via configurable params
-      if (ip < trackConf.MaxIter) {
-        if (trackConf.startLayerMask[ip] > 0) {
-          trackParams[2].StartLayerMask = trackConf.startLayerMask[ip];
-        }
-        if (trackConf.minTrackLgtIter[ip] > 0) {
-          param.MinTrackLength = trackConf.minTrackLgtIter[ip];
-        }
-        for (int ilg = trackConf.MaxTrackLength; ilg >= trackConf.MinTrackLength; ilg--) {
-          int lslot0 = (trackConf.MaxTrackLength - ilg), lslot = lslot0 + ip * (trackConf.MaxTrackLength - trackConf.MinTrackLength + 1);
-          if (trackConf.minPtIterLgt[lslot] > 0.) {
-            param.MinPt[lslot0] = trackConf.minPtIterLgt[lslot];
-          }
-        }
-      }
-    }
-    LOGP(info, "Initializing tracker in async. phase reconstruction with {} passes for tracking and {}/{} for vertexing", trackParams.size(), o2::its::VertexerParamConfig::Instance().nIterations, vertParams.size());
-    vertParams[1].phiCut = 0.015f;
-    vertParams[1].tanLambdaCut = 0.015f;
-    vertParams[1].vertPerRofThreshold = 0;
-    vertParams[1].deltaRof = 0;
-  } else if (mMode == TrackingMode::Sync) {
-    trackParams.resize(1);
-    trackParams[0].ZBins = 64;
-    trackParams[0].PhiBins = 32;
-    trackParams[0].MinTrackLength = 4;
-    LOGP(info, "Initializing tracker in sync. phase reconstruction with {} passes", trackParams.size());
-    vertParams.resize(1);
-  } else if (mMode == TrackingMode::Cosmics) {
-    mCosmicsProcessing = true;
-    mRunVertexer = false;
-    trackParams.resize(1);
-    trackParams[0].MinTrackLength = 4;
-    trackParams[0].CellDeltaTanLambdaSigma *= 10;
-    trackParams[0].PhiBins = 4;
-    trackParams[0].ZBins = 16;
-    trackParams[0].PVres = 1.e5f;
-    trackParams[0].MaxChi2ClusterAttachment = 60.;
-    trackParams[0].MaxChi2NDF = 40.;
-    trackParams[0].TrackletsPerClusterLimit = 100.;
-    trackParams[0].CellsPerClusterLimit = 100.;
-    LOGP(info, "Initializing tracker in reconstruction for cosmics with {} passes", trackParams.size());
-
-  } else {
-    throw std::runtime_error(fmt::format("Unsupported ITS tracking mode {:s} ", asString(mMode)));
-  }
-
-  // TODO this imposes the same memory limits on each iteration
-  for (auto& p : vertParams) {
-    p.PrintMemory = vertConf.printMemory;
-    p.MaxMemory = vertConf.maxMemory;
-    p.DropTFUponFailure = vertConf.dropTFUponFailure;
-  }
-  for (auto& p : trackParams) {
-    p.PrintMemory = trackConf.printMemory;
-    p.MaxMemory = trackConf.maxMemory;
-    p.DropTFUponFailure = trackConf.dropTFUponFailure;
-  }
-
-  for (auto& params : trackParams) {
-    params.CorrType = o2::base::PropagatorImpl<float>::MatCorrType::USEMatCorrLUT;
-  }
-  // adjust pT settings to actual mag. field
-  for (size_t ip = 0; ip < trackParams.size(); ip++) {
-    auto& param = trackParams[ip];
-    param.TrackletMinPt *= bFactorTracklets;
-    for (int ilg = trackConf.MaxTrackLength; ilg >= trackConf.MinTrackLength; ilg--) {
-      int lslot = trackConf.MaxTrackLength - ilg;
-      param.MinPt[lslot] *= bFactor;
-    }
-  }
+  auto trackParams = TrackingMode::getTrackingParameters(mMode);
+  auto vertParams = TrackingMode::getVertexingParameters(mMode);
+  LOGP(info, "Initializing tracker in {} phase reconstruction with {} passes for tracking and {}/{} for vertexing", TrackingMode::toString(mMode), trackParams.size(), o2::its::VertexerParamConfig::Instance().nIterations, vertParams.size());
   mTracker->setParameters(trackParams);
   mVertexer->setParameters(vertParams);
+
+  if (mMode == TrackingMode::Cosmics) {
+    mRunVertexer = false;
+    mCosmicsProcessing = true;
+    LOGP(info, "Cosmic mode enabled, will skip vertexing");
+  }
+
+  // threading
   if (trackConf.nThreads == vertConf.nThreads) {
     bool clamped{false};
     int nThreads = trackConf.nThreads;
@@ -409,7 +313,6 @@ void ITSTrackingInterface::updateTimeDependentParams(framework::ProcessingContex
     GeometryTGeo* geom = GeometryTGeo::Instance();
     geom->fillMatrixCache(o2::math_utils::bit2Mask(o2::math_utils::TransformType::T2L, o2::math_utils::TransformType::T2GRot, o2::math_utils::TransformType::T2G));
     initialise();
-    getConfiguration(pc);
 
     if (pc.services().get<const o2::framework::DeviceSpec>().inputTimesliceId == 0) { // print settings only for the 1st pipeling
       o2::its::VertexerParamConfig::Instance().printKeyValues();
@@ -426,12 +329,6 @@ void ITSTrackingInterface::updateTimeDependentParams(framework::ProcessingContex
       }
     }
   }
-}
-
-void ITSTrackingInterface::getConfiguration(framework::ProcessingContext& pc)
-{
-  mVertexer->getGlobalConfiguration();
-  mTracker->getGlobalConfiguration();
 }
 
 void ITSTrackingInterface::finaliseCCDB(ConcreteDataMatcher& matcher, void* obj)
