@@ -36,9 +36,9 @@ void ITSTrackingInterface::initialise()
   // get parameters
   const auto& trackConf = o2::its::TrackerParamConfig::Instance();
   const auto& vertConf = o2::its::VertexerParamConfig::Instance();
-  if (mMode == TrackingMode::Unset) {
-    mMode = (TrackingMode::Type)trackConf.trackingMode;
-    LOGP(info, "Tracking mode not set, trying to fetch it from configurable params to: {}", TrackingMode::toString(mMode));
+  if (auto parmode = (TrackingMode::Type)trackConf.trackingMode; mMode == TrackingMode::Unset || (parmode != TrackingMode::Unset && mMode != parmode)) {
+    LOGP(info, "Tracking mode overwritten by configurable params from {} to {}", TrackingMode::toString(mMode), TrackingMode::toString(parmode));
+    mMode = parmode;
   }
   auto trackParams = TrackingMode::getTrackingParameters(mMode);
   auto vertParams = TrackingMode::getVertexingParameters(mMode);
