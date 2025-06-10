@@ -449,6 +449,11 @@ void ITSTrackingInterface::printSummary() const
   mTracker->printSummary();
 }
 
+void ITSTrackingInterface::end()
+{
+  mTimeFrame->wipe();
+}
+
 void ITSTrackingInterface::setTraitsFromProvider(VertexerTraits* vertexerTraits,
                                                  TrackerTraits7* trackerTraits,
                                                  TimeFrame7* frame)
