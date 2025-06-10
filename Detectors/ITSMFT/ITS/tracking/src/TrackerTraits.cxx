@@ -101,7 +101,7 @@ void TrackerTraits<nLayers>::computeLayerTracklets(const int iteration, int iROF
               const float inverseR0{1.f / currentCluster.radius};
 
               for (int iV{startVtx}; iV < endVtx; ++iV) {
-                auto& primaryVertex{primaryVertices[iV]};
+                const auto& primaryVertex{primaryVertices[iV]};
                 if (primaryVertex.isFlagSet(2) && iteration != 3) {
                   continue;
                 }
@@ -830,8 +830,8 @@ void TrackerTraits<nLayers>::findRoads(const int iteration)
     mTaskArena.execute([&] {
       bounded_vector<int> perSeedCount(trackSeeds.size() + 1, 0, mMemoryPool.get());
       tbb::parallel_for(
-        tbb::blocked_range<size_t>(size_t(0), trackSeeds.size()),
-        [&](const tbb::blocked_range<size_t>& Seeds) {
+        tbb::blocked_range<int>(0, (int)trackSeeds.size()),
+        [&](const tbb::blocked_range<int>& Seeds) {
           for (int iSeed = Seeds.begin(); iSeed < Seeds.end(); ++iSeed) {
             const CellSeed& seed{trackSeeds[iSeed]};
             TrackITSExt temporaryTrack{seed};

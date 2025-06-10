@@ -333,8 +333,8 @@ struct TimeFrame {
   bounded_vector<int> mBogusClusters; /// keep track of clusters with wild coordinates
 
   bounded_vector<std::pair<unsigned long long, bool>> mRoadLabels;
-  int mCutClusterMult;
-  int mCutVertexMult;
+  int mCutClusterMult{-999};
+  int mCutVertexMult{-999};
 
   // Vertexer
   std::vector<bounded_vector<int>> mNTrackletsPerROF;

@@ -74,7 +74,7 @@ void TimeFrame<nLayers>::addPrimaryVertices(const bounded_vector<Vertex>& vertic
   for (const auto& vertex : vertices) {
     mPrimaryVertices.emplace_back(vertex);
     if (!isBeamPositionOverridden) {
-      const int w{vertex.getNContributors()};
+      const float w = vertex.getNContributors();
       mBeamPos[0] = (mBeamPos[0] * mBeamPosWeight + vertex.getX() * w) / (mBeamPosWeight + w);
       mBeamPos[1] = (mBeamPos[1] * mBeamPosWeight + vertex.getY() * w) / (mBeamPosWeight + w);
       mBeamPosWeight += w;
@@ -126,7 +126,7 @@ void TimeFrame<nLayers>::addPrimaryVertices(const gsl::span<const Vertex>& verti
     mPrimaryVertices.emplace_back(vertex); // put a copy in the present
     mTotVertPerIteration[iteration]++;
     if (!isBeamPositionOverridden) { // beam position is updated only at first occurrence of the vertex. A bit sketchy if we have past/future vertices, it should not impact too much.
-      const int w{vertex.getNContributors()};
+      const float w = vertex.getNContributors();
       mBeamPos[0] = (mBeamPos[0] * mBeamPosWeight + vertex.getX() * w) / (mBeamPosWeight + w);
       mBeamPos[1] = (mBeamPos[1] * mBeamPosWeight + vertex.getY() * w) / (mBeamPosWeight + w);
       mBeamPosWeight += w;
@@ -166,7 +166,7 @@ int TimeFrame<nLayers>::loadROFrameData(gsl::span<o2::itsmft::ROFRecord> rofs,
   clearResizeBoundedVector(mClusterSize, clusters.size(), mMemoryPool.get());
   for (auto& rof : rofs) {
     for (int clusterId{rof.getFirstEntry()}; clusterId < rof.getFirstEntry() + rof.getNEntries(); ++clusterId) {
-      auto& c = clusters[clusterId];
+      const auto& c = clusters[clusterId];
 
       int layer = geom->getLayer(c.getSensorID());
 
@@ -280,7 +280,7 @@ void TimeFrame<nLayers>::prepareClusters(const TrackingParameters& trkParam, con
         c.radius = h.r;
         c.indexTableBinIndex = h.bin;
       }
-      for (unsigned int iB{0}; iB < clsPerBin.size(); ++iB) {
+      for (int iB{0}; iB < (int)clsPerBin.size(); ++iB) {
         mIndexTables[iLayer][rof * (trkParam.ZBins * trkParam.PhiBins + 1) + iB] = lutPerBin[iB];
       }
       for (auto iB{clsPerBin.size()}; iB < (trkParam.ZBins * trkParam.PhiBins + 1); iB++) {
@@ -374,7 +374,7 @@ void TimeFrame<nLayers>::initialise(const int iteration, const TrackingParameter
       const float cosTheta1half = o2::gpu::CAMath::Sqrt(1.f - Sq(0.5f * r1 * oneOverR));
       const float cosTheta2half = o2::gpu::CAMath::Sqrt(1.f - Sq(0.5f * r2 * oneOverR));
       float x = r2 * cosTheta1half - r1 * cosTheta2half;
-      float delta = o2::gpu::CAMath::Sqrt(1. / (1.f - 0.25f * Sq(x * oneOverR)) * (Sq(0.25f * r1 * r2 * Sq(oneOverR) / cosTheta2half + cosTheta1half) * Sq(res1) + Sq(0.25f * r1 * r2 * Sq(oneOverR) / cosTheta1half + cosTheta2half) * Sq(res2)));
+      float delta = o2::gpu::CAMath::Sqrt(1.f / (1.f - 0.25f * Sq(x * oneOverR)) * (Sq(0.25f * r1 * r2 * Sq(oneOverR) / cosTheta2half + cosTheta1half) * Sq(res1) + Sq(0.25f * r1 * r2 * Sq(oneOverR) / cosTheta1half + cosTheta2half) * Sq(res2)));
       mPhiCuts[iLayer] = std::min(o2::gpu::CAMath::ASin(0.5f * x * oneOverR) + 2.f * mMSangles[iLayer] + delta, constants::math::Pi * 0.5f);
     }
   }
@@ -401,13 +401,13 @@ template <int nLayers>
 unsigned long TimeFrame<nLayers>::getArtefactsMemory() const
 {
   unsigned long size{0};
-  for (auto& trkl : mTracklets) {
+  for (const auto& trkl : mTracklets) {
     size += sizeof(Tracklet) * trkl.size();
   }
-  for (auto& cells : mCells) {
+  for (const auto& cells : mCells) {
     size += sizeof(CellSeed) * cells.size();
   }
-  for (auto& cellsN : mCellsNeighbours) {
+  for (const auto& cellsN : mCellsNeighbours) {
     size += sizeof(int) * cellsN.size();
   }
   return size + sizeof(Road<nLayers - 2>) * mRoads.size();
@@ -422,9 +422,7 @@ void TimeFrame<nLayers>::printArtefactsMemory() const
 template <int nLayers>
 void TimeFrame<nLayers>::fillPrimaryVerticesXandAlpha()
 {
-  if (mPValphaX.size()) {
-    mPValphaX.clear();
-  }
+  deepVectorClear(mPValphaX);
   mPValphaX.reserve(mPrimaryVertices.size());
   for (auto& pv : mPrimaryVertices) {
     mPValphaX.emplace_back(std::array<float, 2>{o2::gpu::CAMath::Hypot(pv.getX(), pv.getY()), math_utils::computePhi(pv.getX(), pv.getY())});

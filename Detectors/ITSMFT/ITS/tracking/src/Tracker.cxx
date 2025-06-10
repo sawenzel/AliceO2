@@ -41,7 +41,7 @@ Tracker::Tracker(TrackerTraits7* traits) : mTraits(traits)
   mTrkParams.resize(1);
 }
 
-void Tracker::clustersToTracks(LogFunc logger, LogFunc error)
+void Tracker::clustersToTracks(const LogFunc& logger, const LogFunc& error)
 {
   LogFunc evalLog = [](const std::string&) {};
 
@@ -195,7 +195,7 @@ void Tracker::computeRoadsMClabels()
         bool found{false};
         for (size_t iOcc{0}; iOcc < occurrences.size(); ++iOcc) {
           std::pair<o2::MCCompLabel, size_t>& occurrence = occurrences[iOcc];
-          for (auto& label : cl0labs) {
+          for (const auto& label : cl0labs) {
             if (label == occurrence.first) {
               ++occurrence.second;
               found = true;
@@ -204,7 +204,7 @@ void Tracker::computeRoadsMClabels()
           }
         }
         if (!found) {
-          for (auto& label : cl0labs) {
+          for (const auto& label : cl0labs) {
             occurrences.emplace_back(label, 1);
           }
         }
@@ -277,7 +277,7 @@ void Tracker::computeTracksMClabels()
         bool found{false};
         for (size_t iOcc{0}; iOcc < occurrences.size(); ++iOcc) {
           std::pair<o2::MCCompLabel, size_t>& occurrence = occurrences[iOcc];
-          for (auto& label : labels) {
+          for (const auto& label : labels) {
             if (label == occurrence.first) {
               ++occurrence.second;
               found = true;
@@ -286,7 +286,7 @@ void Tracker::computeTracksMClabels()
           }
         }
         if (!found) {
-          for (auto& label : labels) {
+          for (const auto& label : labels) {
             occurrences.emplace_back(label, 1);
           }
         }
@@ -302,7 +302,7 @@ void Tracker::computeTracksMClabels()
         auto clid = track.getClusterIndex(ic);
         if (clid != constants::its::UnusedIndex) {
           auto labelsSpan = mTimeFrame->getClusterLabels(ic, clid);
-          for (auto& currentLabel : labelsSpan) {
+          for (const auto& currentLabel : labelsSpan) {
             if (currentLabel == maxOccurrencesValue) {
               pattern |= 0x1 << (16 + ic); // set bit if correct
               break;
@@ -335,7 +335,7 @@ void Tracker::rectifyClusterIndices()
 
 void Tracker::getGlobalConfiguration()
 {
-  auto& tc = o2::its::TrackerParamConfig::Instance();
+  const auto& tc = o2::its::TrackerParamConfig::Instance();
   if (tc.useMatCorrTGeo) {
     mTraits->setCorrType(o2::base::PropagatorImpl<float>::MatCorrType::USEMatCorrTGeo);
   } else if (tc.useFastMaterial) {

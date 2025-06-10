@@ -146,9 +146,9 @@ void trackletSelectionKernelHost(
   }
 }
 
-const bounded_vector<std::pair<int, int>> VertexerTraits::selectClusters(const int* indexTable,
-                                                                         const std::array<int, 4>& selectedBinsRect,
-                                                                         const IndexTableUtils& utils)
+bounded_vector<std::pair<int, int>> VertexerTraits::selectClusters(const int* indexTable,
+                                                                   const std::array<int, 4>& selectedBinsRect,
+                                                                   const IndexTableUtils& utils)
 {
   bounded_vector<std::pair<int, int>> filteredBins{mMemoryPool.get()};
   int phiBinsNum{selectedBinsRect[3] - selectedBinsRect[1] + 1};
@@ -270,12 +270,12 @@ void VertexerTraits::computeTracklets(const int iteration)
 
   /// Create tracklets labels for L0-L1, information is as flat as in tracklets vector (no rofId)
   if (mTimeFrame->hasMCinformation()) {
-    for (auto& trk : mTimeFrame->getTracklets()[0]) {
+    for (const auto& trk : mTimeFrame->getTracklets()[0]) {
       o2::MCCompLabel label;
       int sortedId0{mTimeFrame->getSortedIndex(trk.rof[0], 0, trk.firstClusterIndex)};
       int sortedId1{mTimeFrame->getSortedIndex(trk.rof[1], 1, trk.secondClusterIndex)};
-      for (auto& lab0 : mTimeFrame->getClusterLabels(0, mTimeFrame->getClusters()[0][sortedId0].clusterId)) {
-        for (auto& lab1 : mTimeFrame->getClusterLabels(1, mTimeFrame->getClusters()[1][sortedId1].clusterId)) {
+      for (const auto& lab0 : mTimeFrame->getClusterLabels(0, mTimeFrame->getClusters()[0][sortedId0].clusterId)) {
+        for (const auto& lab1 : mTimeFrame->getClusterLabels(1, mTimeFrame->getClusters()[1][sortedId1].clusterId)) {
           if (lab0 == lab1 && lab0.isValid()) {
             label = lab0;
             break;
@@ -544,7 +544,7 @@ void VertexerTraits::computeVertices(const int iteration)
         mTimeFrame->addPrimaryVerticesLabelsInROF(polls, rofId);
       }
     }
-    if (!vertices.size() && !(iteration && (int)mTimeFrame->getPrimaryVertices(rofId).size() > mVrtParams[iteration].vertPerRofThreshold)) {
+    if (vertices.empty() && !(iteration && (int)mTimeFrame->getPrimaryVertices(rofId).size() > mVrtParams[iteration].vertPerRofThreshold)) {
       mTimeFrame->getNoVertexROF()++;
     }
   }
