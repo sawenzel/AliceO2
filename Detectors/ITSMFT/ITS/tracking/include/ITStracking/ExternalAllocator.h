@@ -23,8 +23,8 @@ class ExternalAllocator
 {
  public:
   virtual void* allocate(size_t) = 0;
+  virtual void deallocate(char*, size_t) = 0;
 };
-
 } // namespace o2::its
 
 #endif

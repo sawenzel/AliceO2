@@ -19,6 +19,7 @@
 namespace o2::its
 {
 class CellSeed;
+class ExternalAllocator;
 namespace gpu
 {
 #ifdef GPUCA_GPUCODE // GPUg() global kernels must only when compiled by GPU compiler
@@ -178,7 +179,8 @@ void computeCellNeighboursHandler(CellSeed** cellsLayersDevice,
 
 int filterCellNeighboursHandler(gpuPair<int, int>*,
                                 int*,
-                                unsigned int);
+                                unsigned int,
+                                o2::its::ExternalAllocator* = nullptr);
 
 template <int nLayers = 7>
 void processNeighboursHandler(const int startLayer,
@@ -191,6 +193,7 @@ void processNeighboursHandler(const int startLayer,
                               gsl::span<int*> neighboursDeviceLUTs,
                               const TrackingFrameInfo** foundTrackingFrameInfo,
                               bounded_vector<CellSeed>& seedsHost,
+                              o2::its::ExternalAllocator*,
                               const float bz,
                               const float MaxChi2ClusterAttachment,
                               const float maxChi2NDF,

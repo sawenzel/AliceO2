@@ -28,14 +28,13 @@
 #include "ITStracking/Constants.h"
 #include "ITStracking/IndexTableUtils.h"
 #include "ITStracking/MathUtils.h"
+#include "ITStracking/ExternalAllocator.h"
 #include "DataFormatsITS/TrackITS.h"
 #include "ReconstructionDataFormats/Vertex.h"
 
 #include "ITStrackingGPU/TrackerTraitsGPU.h"
 #include "ITStrackingGPU/TrackingKernels.h"
 #include "ITStrackingGPU/Utils.h"
-
-#include "GPUCommonHelpers.h"
 
 #ifndef __HIPCC__
 #define THRUST_NAMESPACE thrust::cuda
@@ -63,6 +62,37 @@ GPUdii() float Sq(float v)
 
 namespace gpu
 {
+
+template <typename T>
+class TypedAllocator : public thrust::device_allocator<T>
+{
+ public:
+  using value_type = T;
+  using pointer = T*;
+
+  template <typename U>
+  struct rebind {
+    using other = TypedAllocator<U>;
+  };
+
+  explicit TypedAllocator(ExternalAllocator* allocPtr)
+    : mInternalAllocator(allocPtr) {}
+
+  T* allocate(size_t n)
+  {
+    return reinterpret_cast<T*>(mInternalAllocator->allocate(n * sizeof(T)));
+  }
+
+  void deallocate(T* p, size_t n)
+  {
+    char* raw_ptr = reinterpret_cast<char*>(p);
+    size_t bytes = n * sizeof(T);
+    mInternalAllocator->deallocate(raw_ptr, bytes); // redundant as internal dealloc is no-op.
+  }
+
+ private:
+  ExternalAllocator* mInternalAllocator;
+};
 
 GPUd() const int4 getBinsRect(const Cluster& currentCluster, const int layerIndex,
                               const o2::its::IndexTableUtils& utils,
@@ -1117,7 +1147,8 @@ void computeCellNeighboursHandler(CellSeed** cellsLayersDevice,
 
 int filterCellNeighboursHandler(gpuPair<int, int>* cellNeighbourPairs,
                                 int* cellNeighbours,
-                                unsigned int nNeigh)
+                                unsigned int nNeigh,
+                                o2::its::ExternalAllocator* allocator)
 {
   thrust::device_ptr<gpuPair<int, int>> neighVectorPairs(cellNeighbourPairs);
   thrust::device_ptr<int> validNeighs(cellNeighbours);
@@ -1140,6 +1171,7 @@ void processNeighboursHandler(const int startLayer,
                               gsl::span<int*> neighboursDeviceLUTs,
                               const TrackingFrameInfo** foundTrackingFrameInfo,
                               bounded_vector<CellSeed>& seedsHost,
+                              o2::its::ExternalAllocator* allocator,
                               const float bz,
                               const float maxChi2ClusterAttachment,
                               const float maxChi2NDF,
@@ -1148,8 +1180,10 @@ void processNeighboursHandler(const int startLayer,
                               const int nBlocks,
                               const int nThreads)
 {
-  thrust::device_vector<int> foundSeedsTable(nCells[startLayer] + 1); // Shortcut: device_vector skips central memory management, we are relying on the contingency.
-                                                                      // TODO: fix this.
+  auto allocInt = gpu::TypedAllocator<int>(allocator);
+  auto allocCellSeed = gpu::TypedAllocator<CellSeed>(allocator);
+  thrust::device_vector<int, gpu::TypedAllocator<int>> foundSeedsTable(nCells[startLayer] + 1, 0, allocInt); // Shortcut: device_vector skips central memory management, we are relying on the contingency.
+                                                                                                             // TODO: fix this.
 
   gpu::processNeighboursKernel<true><<<o2::gpu::CAMath::Min(nBlocks, GPU_BLOCKS),
                                        o2::gpu::CAMath::Min(nThreads, GPU_THREADS)>>>(
@@ -1172,8 +1206,8 @@ void processNeighboursHandler(const int startLayer,
     matCorrType);
   gpu::cubExclusiveScanInPlace(foundSeedsTable, nCells[startLayer] + 1);
 
-  thrust::device_vector<int> updatedCellId(foundSeedsTable.back());
-  thrust::device_vector<CellSeed> updatedCellSeed(foundSeedsTable.back());
+  thrust::device_vector<int, gpu::TypedAllocator<int>> updatedCellId(foundSeedsTable.back(), 0, allocInt);
+  thrust::device_vector<CellSeed, gpu::TypedAllocator<CellSeed>> updatedCellSeed(foundSeedsTable.back(), allocCellSeed);
   gpu::processNeighboursKernel<false><<<o2::gpu::CAMath::Min(nBlocks, GPU_BLOCKS),
                                         o2::gpu::CAMath::Min(nThreads, GPU_THREADS)>>>(
     startLayer,
@@ -1195,13 +1229,13 @@ void processNeighboursHandler(const int startLayer,
     matCorrType);
 
   int level = startLevel;
-  thrust::device_vector<int> lastCellId;
-  thrust::device_vector<CellSeed> lastCellSeed;
+  thrust::device_vector<int, gpu::TypedAllocator<int>> lastCellId(allocInt);
+  thrust::device_vector<CellSeed, gpu::TypedAllocator<CellSeed>> lastCellSeed(allocCellSeed);
   for (int iLayer{startLayer - 1}; iLayer > 0 && level > 2; --iLayer) {
     lastCellSeed.swap(updatedCellSeed);
     lastCellId.swap(updatedCellId);
-    thrust::device_vector<CellSeed>().swap(updatedCellSeed);
-    thrust::device_vector<int>().swap(updatedCellId);
+    thrust::device_vector<CellSeed, gpu::TypedAllocator<CellSeed>>(allocCellSeed).swap(updatedCellSeed);
+    thrust::device_vector<int, gpu::TypedAllocator<int>>(allocInt).swap(updatedCellId);
     auto lastCellSeedSize{lastCellSeed.size()};
     foundSeedsTable.resize(lastCellSeedSize + 1);
     thrust::fill(foundSeedsTable.begin(), foundSeedsTable.end(), 0);
@@ -1253,8 +1287,7 @@ void processNeighboursHandler(const int startLayer,
       propagator,
       matCorrType);
   }
-
-  thrust::device_vector<CellSeed> outSeeds(updatedCellSeed.size());
+  thrust::device_vector<CellSeed, gpu::TypedAllocator<CellSeed>> outSeeds(updatedCellSeed.size(), allocCellSeed);
   auto end = thrust::copy_if(updatedCellSeed.begin(), updatedCellSeed.end(), outSeeds.begin(), gpu::seed_selector(1.e3, maxChi2NDF * ((startLevel + 2) * 2 - 5)));
   auto s{end - outSeeds.begin()};
   seedsHost.reserve(seedsHost.size() + s);
@@ -1367,6 +1400,7 @@ template void processNeighboursHandler<7>(const int startLayer,
                                           gsl::span<int*> neighboursDeviceLUTs,
                                           const TrackingFrameInfo** foundTrackingFrameInfo,
                                           bounded_vector<CellSeed>& seedsHost,
+                                          o2::its::ExternalAllocator*,
                                           const float bz,
                                           const float maxChi2ClusterAttachment,
                                           const float maxChi2NDF,
