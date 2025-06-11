@@ -31,12 +31,6 @@
 
 using namespace o2::its;
 
-float smallestAngleDifference(float a, float b)
-{
-  float diff = fmod(b - a + constants::math::Pi, constants::math::TwoPi) - constants::math::Pi;
-  return (diff < -constants::math::Pi) ? diff + constants::math::TwoPi : ((diff > constants::math::Pi) ? diff - constants::math::TwoPi : diff);
-}
-
 template <TrackletMode Mode, bool EvalRun>
 void trackleterKernelHost(
   const gsl::span<const Cluster>& clustersNextLayer,    // 0 2
@@ -75,7 +69,7 @@ void trackleterKernelHost(
             continue;
           }
           const Cluster& nextCluster{clustersNextLayer[iNextLayerClusterIndex]};
-          if (o2::gpu::GPUCommonMath::Abs(smallestAngleDifference(currentCluster.phi, nextCluster.phi)) < phiCut) {
+          if (o2::gpu::GPUCommonMath::Abs(math_utils::smallestAngleDifference(currentCluster.phi, nextCluster.phi)) < phiCut) {
             if (storedTracklets < maxTrackletsPerCluster) {
               if constexpr (!EvalRun) {
                 if constexpr (Mode == TrackletMode::Layer0Layer1) {
@@ -128,7 +122,7 @@ void trackletSelectionKernelHost(
           continue;
         }
         const float deltaTanLambda{o2::gpu::GPUCommonMath::Abs(tracklet01.tanLambda - tracklet12.tanLambda)};
-        const float deltaPhi{o2::gpu::GPUCommonMath::Abs(smallestAngleDifference(tracklet01.phi, tracklet12.phi))};
+        const float deltaPhi{o2::gpu::GPUCommonMath::Abs(math_utils::smallestAngleDifference(tracklet01.phi, tracklet12.phi))};
         if (!usedTracklets[iTracklet01] && deltaTanLambda < tanLambdaCut && deltaPhi < phiCut && validTracklets != maxTracklets) {
           usedClusters0[tracklet01.firstClusterIndex] = true;
           usedClusters2[tracklet12.secondClusterIndex] = true;
@@ -171,7 +165,7 @@ void VertexerTraits::updateVertexingParameters(const std::vector<VertexingParame
   mVrtParams = vrtPar;
   mIndexTableUtils.setTrackingParameters(vrtPar[0]);
   for (auto& par : mVrtParams) {
-    par.phiSpan = static_cast<int>(std::ceil(mIndexTableUtils.getNphiBins() * par.phiCut / constants::math::TwoPi));
+    par.phiSpan = static_cast<int>(std::ceil(mIndexTableUtils.getNphiBins() * par.phiCut / o2::constants::math::TwoPI));
     par.zSpan = static_cast<int>(std::ceil(par.zCut * mIndexTableUtils.getInverseZCoordinate(0)));
   }
   setNThreads(vrtPar[0].nThreads);

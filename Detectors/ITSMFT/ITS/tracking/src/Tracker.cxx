@@ -178,7 +178,7 @@ void Tracker::computeRoadsMClabels()
     for (int iCell{0}; iCell < mTrkParams[0].CellsPerRoad(); ++iCell) {
       const int currentCellIndex{currentRoad[iCell]};
 
-      if (currentCellIndex == constants::its::UnusedIndex) {
+      if (currentCellIndex == constants::UnusedIndex) {
         if (isFirstRoadCell) {
           continue;
         } else {
@@ -270,7 +270,7 @@ void Tracker::computeTracksMClabels()
 
       for (int iCluster = 0; iCluster < TrackITSExt::MaxClusters; ++iCluster) {
         const int index = track.getClusterIndex(iCluster);
-        if (index == constants::its::UnusedIndex) {
+        if (index == constants::UnusedIndex) {
           continue;
         }
         auto labels = mTimeFrame->getClusterLabels(iCluster, index);
@@ -300,7 +300,7 @@ void Tracker::computeTracksMClabels()
       // set fake clusters pattern
       for (int ic{TrackITSExt::MaxClusters}; ic--;) {
         auto clid = track.getClusterIndex(ic);
-        if (clid != constants::its::UnusedIndex) {
+        if (clid != constants::UnusedIndex) {
           auto labelsSpan = mTimeFrame->getClusterLabels(ic, clid);
           for (const auto& currentLabel : labelsSpan) {
             if (currentLabel == maxOccurrencesValue) {
@@ -325,7 +325,7 @@ void Tracker::rectifyClusterIndices()
     for (auto& track : mTimeFrame->getTracks(iROF)) {
       for (int iCluster = 0; iCluster < TrackITSExt::MaxClusters; ++iCluster) {
         const int index = track.getClusterIndex(iCluster);
-        if (index != constants::its::UnusedIndex) {
+        if (index != constants::UnusedIndex) {
           track.setExternalClusterIndex(iCluster, mTimeFrame->getClusterExternalIndex(iCluster, index));
         }
       }

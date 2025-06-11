@@ -34,18 +34,6 @@ struct ClusterHelper {
   int bin;
   int ind;
 };
-
-inline float MSangle(float mass, float p, float xX0)
-{
-  float beta = p / o2::gpu::CAMath::Hypot(mass, p);
-  return 0.0136f * o2::gpu::CAMath::Sqrt(xX0) * (1.f + 0.038f * o2::gpu::CAMath::Log(xX0)) / (beta * p);
-}
-
-inline float Sq(float v)
-{
-  return v * v;
-}
-
 } // namespace
 
 namespace o2::its
@@ -323,7 +311,7 @@ void TimeFrame<nLayers>::initialise(const int iteration, const TrackingParameter
     for (unsigned int iLayer{0}; iLayer < std::min((int)mClusters.size(), maxLayers); ++iLayer) {
       clearResizeBoundedVector(mClusters[iLayer], mUnsortedClusters[iLayer].size(), mMemoryPool.get());
       clearResizeBoundedVector(mUsedClusters[iLayer], mUnsortedClusters[iLayer].size(), mMemoryPool.get());
-      mPositionResolution[iLayer] = o2::gpu::CAMath::Sqrt(0.5 * (trkParam.SystErrorZ2[iLayer] + trkParam.SystErrorY2[iLayer]) + trkParam.LayerResolution[iLayer] * trkParam.LayerResolution[iLayer]);
+      mPositionResolution[iLayer] = o2::gpu::CAMath::Sqrt(0.5f * (trkParam.SystErrorZ2[iLayer] + trkParam.SystErrorY2[iLayer]) + trkParam.LayerResolution[iLayer] * trkParam.LayerResolution[iLayer]);
     }
     clearResizeBoundedArray(mIndexTables, mNrof * (trkParam.ZBins * trkParam.PhiBins + 1), mMemoryPool.get());
     clearResizeBoundedVector(mLines, mNrof, mMemoryPool.get());
@@ -364,18 +352,18 @@ void TimeFrame<nLayers>::initialise(const int iteration, const TrackingParameter
 
   float oneOverR{0.001f * 0.3f * std::abs(mBz) / trkParam.TrackletMinPt};
   for (unsigned int iLayer{0}; iLayer < mClusters.size(); ++iLayer) {
-    mMSangles[iLayer] = MSangle(0.14f, trkParam.TrackletMinPt, trkParam.LayerxX0[iLayer]);
+    mMSangles[iLayer] = math_utils::MSangle(0.14f, trkParam.TrackletMinPt, trkParam.LayerxX0[iLayer]);
     mPositionResolution[iLayer] = o2::gpu::CAMath::Sqrt(0.5f * (trkParam.SystErrorZ2[iLayer] + trkParam.SystErrorY2[iLayer]) + trkParam.LayerResolution[iLayer] * trkParam.LayerResolution[iLayer]);
     if (iLayer < mClusters.size() - 1) {
       const float& r1 = trkParam.LayerRadii[iLayer];
       const float& r2 = trkParam.LayerRadii[iLayer + 1];
       const float res1 = o2::gpu::CAMath::Hypot(trkParam.PVres, mPositionResolution[iLayer]);
       const float res2 = o2::gpu::CAMath::Hypot(trkParam.PVres, mPositionResolution[iLayer + 1]);
-      const float cosTheta1half = o2::gpu::CAMath::Sqrt(1.f - Sq(0.5f * r1 * oneOverR));
-      const float cosTheta2half = o2::gpu::CAMath::Sqrt(1.f - Sq(0.5f * r2 * oneOverR));
+      const float cosTheta1half = o2::gpu::CAMath::Sqrt(1.f - math_utils::Sq(0.5f * r1 * oneOverR));
+      const float cosTheta2half = o2::gpu::CAMath::Sqrt(1.f - math_utils::Sq(0.5f * r2 * oneOverR));
       float x = r2 * cosTheta1half - r1 * cosTheta2half;
-      float delta = o2::gpu::CAMath::Sqrt(1.f / (1.f - 0.25f * Sq(x * oneOverR)) * (Sq(0.25f * r1 * r2 * Sq(oneOverR) / cosTheta2half + cosTheta1half) * Sq(res1) + Sq(0.25f * r1 * r2 * Sq(oneOverR) / cosTheta1half + cosTheta2half) * Sq(res2)));
-      mPhiCuts[iLayer] = std::min(o2::gpu::CAMath::ASin(0.5f * x * oneOverR) + 2.f * mMSangles[iLayer] + delta, constants::math::Pi * 0.5f);
+      float delta = o2::gpu::CAMath::Sqrt(1.f / (1.f - 0.25f * math_utils::Sq(x * oneOverR)) * (math_utils::Sq(0.25f * r1 * r2 * math_utils::Sq(oneOverR) / cosTheta2half + cosTheta1half) * math_utils::Sq(res1) + math_utils::Sq(0.25f * r1 * r2 * math_utils::Sq(oneOverR) / cosTheta1half + cosTheta2half) * math_utils::Sq(res2)));
+      mPhiCuts[iLayer] = std::min(o2::gpu::CAMath::ASin(0.5f * x * oneOverR) + 2.f * mMSangles[iLayer] + delta, o2::constants::math::PI * 0.5f);
     }
   }
 

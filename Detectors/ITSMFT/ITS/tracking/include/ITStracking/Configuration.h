@@ -58,9 +58,9 @@ class Configuration : public Param
 };
 
 struct TrackingParameters {
-  int CellMinimumLevel() { return MinTrackLength - constants::its::ClustersPerCell + 1; }
-  int CellsPerRoad() const { return NLayers - 2; }
-  int TrackletsPerRoad() const { return NLayers - 1; }
+  int CellMinimumLevel() const noexcept { return MinTrackLength - constants::ClustersPerCell + 1; }
+  int CellsPerRoad() const noexcept { return NLayers - 2; }
+  int TrackletsPerRoad() const noexcept { return NLayers - 1; }
   std::string asString() const;
 
   int NLayers = 7;

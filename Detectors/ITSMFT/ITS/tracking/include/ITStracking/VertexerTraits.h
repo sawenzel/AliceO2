@@ -41,8 +41,6 @@ class MCCompLabel;
 
 namespace its
 {
-class ROframe;
-using constants::its::LayersNumberVertexer;
 
 enum class TrackletMode {
   Layer0Layer1 = 0,

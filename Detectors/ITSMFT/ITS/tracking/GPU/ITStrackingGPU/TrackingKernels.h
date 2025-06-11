@@ -22,7 +22,11 @@ class CellSeed;
 class ExternalAllocator;
 namespace gpu
 {
+
 #ifdef GPUCA_GPUCODE // GPUg() global kernels must only when compiled by GPU compiler
+
+GPUdi() int4 getEmptyBinsRect() { return int4{0, 0, 0, 0}; }
+
 GPUd() bool fitTrack(TrackITSExt& track,
                      int start,
                      int end,

@@ -52,13 +52,7 @@ using namespace o2::track;
 
 namespace o2::its
 {
-using namespace constants::its2;
 using Vertex = o2::dataformats::Vertex<o2::dataformats::TimeStamp<int>>;
-
-GPUdii() float Sq(float v)
-{
-  return v * v;
-}
 
 namespace gpu
 {
@@ -99,9 +93,9 @@ GPUd() const int4 getBinsRect(const Cluster& currentCluster, const int layerInde
                               const float z1, const float z2, float maxdeltaz, float maxdeltaphi)
 {
   const float zRangeMin = o2::gpu::CAMath::Min(z1, z2) - maxdeltaz;
-  const float phiRangeMin = (maxdeltaphi > constants::math::Pi) ? 0.f : currentCluster.phi - maxdeltaphi;
+  const float phiRangeMin = (maxdeltaphi > o2::constants::math::PI) ? 0.f : currentCluster.phi - maxdeltaphi;
   const float zRangeMax = o2::gpu::CAMath::Max(z1, z2) + maxdeltaz;
-  const float phiRangeMax = (maxdeltaphi > constants::math::Pi) ? constants::math::TwoPi : currentCluster.phi + maxdeltaphi;
+  const float phiRangeMax = (maxdeltaphi > o2::constants::math::PI) ? o2::constants::math::TwoPI : currentCluster.phi + maxdeltaphi;
 
   if (zRangeMax < -utils.getLayerZ(layerIndex) ||
       zRangeMin > utils.getLayerZ(layerIndex) || zRangeMin > zRangeMax) {
@@ -129,7 +123,7 @@ GPUd() bool fitTrack(TrackITSExt& track,
                      o2::base::PropagatorF::MatCorrType matCorrType)
 {
   for (int iLayer{start}; iLayer != end; iLayer += step) {
-    if (track.getClusterIndex(iLayer) == constants::its::UnusedIndex) {
+    if (track.getClusterIndex(iLayer) == constants::UnusedIndex) {
       continue;
     }
     const TrackingFrameInfo& trackingHit = tfInfos[iLayer][track.getClusterIndex(iLayer)];
@@ -316,7 +310,7 @@ GPUg() void fitTrackSeedsKernel(
     temporaryTrack.setChi2(0);
     int* clusters = seed.getClusters();
     for (int iL{0}; iL < 7; ++iL) {
-      temporaryTrack.setExternalClusterIndex(iL, clusters[iL], clusters[iL] != constants::its::UnusedIndex);
+      temporaryTrack.setExternalClusterIndex(iL, clusters[iL], clusters[iL] != constants::UnusedIndex);
     }
     bool fitSuccess = fitTrack(temporaryTrack,               // TrackITSExt& track,
                                0,                            // int lastLayer,
@@ -422,8 +416,6 @@ GPUg() void computeLayerCellsKernel(
   const float cellDeltaTanLambdaSigma,
   const float nSigmaCut)
 {
-  constexpr float radl = 9.36f;                                                           // Radiation length of Si [cm].
-  constexpr float rho = 2.33f;                                                            // Density of Si [g/cm^3].
   constexpr float layerxX0[7] = {5.e-3f, 5.e-3f, 5.e-3f, 1.e-2f, 1.e-2f, 1.e-2f, 1.e-2f}; // Hardcoded here for the moment.
   for (int iCurrentTrackletIndex = blockIdx.x * blockDim.x + threadIdx.x; iCurrentTrackletIndex < nTrackletsCurrent; iCurrentTrackletIndex += blockDim.x * gridDim.x) {
     const Tracklet& currentTracklet = tracklets[layer][iCurrentTrackletIndex];
@@ -462,7 +454,7 @@ GPUg() void computeLayerCellsKernel(
             break;
           }
 
-          if (!track.correctForMaterial(layerxX0[layer + iC], layerxX0[layer] * radl * rho, true)) {
+          if (!track.correctForMaterial(layerxX0[layer + iC], layerxX0[layer] * constants::Radl * constants::Rho, true)) {
             break;
           }
 
@@ -548,12 +540,12 @@ GPUg() void computeLayerTrackletsMultiROFKernel(
         if (primaryVertex.isFlagSet(2) && iteration != 3) {
           continue;
         }
-        const float resolution = o2::gpu::CAMath::Sqrt(Sq(resolutionPV) / primaryVertex.getNContributors() + Sq(positionResolution));
+        const float resolution = o2::gpu::CAMath::Sqrt(math_utils::Sq(resolutionPV) / primaryVertex.getNContributors() + math_utils::Sq(positionResolution));
         const float tanLambda{(currentCluster.zCoordinate - primaryVertex.getZ()) * inverseR0};
         const float zAtRmin{tanLambda * (minR - currentCluster.radius) + currentCluster.zCoordinate};
         const float zAtRmax{tanLambda * (maxR - currentCluster.radius) + currentCluster.zCoordinate};
-        const float sqInverseDeltaZ0{1.f / (Sq(currentCluster.zCoordinate - primaryVertex.getZ()) + 2.e-8f)}; /// protecting from overflows adding the detector resolution
-        const float sigmaZ{o2::gpu::CAMath::Sqrt(Sq(resolution) * Sq(tanLambda) * ((Sq(inverseR0) + sqInverseDeltaZ0) * Sq(meanDeltaR) + 1.f) + Sq(meanDeltaR * MSAngle))};
+        const float sqInverseDeltaZ0{1.f / (math_utils::Sq(currentCluster.zCoordinate - primaryVertex.getZ()) + 2.e-8f)}; /// protecting from overflows adding the detector resolution
+        const float sigmaZ{o2::gpu::CAMath::Sqrt(math_utils::Sq(resolution) * math_utils::Sq(tanLambda) * ((math_utils::Sq(inverseR0) + sqInverseDeltaZ0) * math_utils::Sq(meanDeltaR) + 1.f) + math_utils::Sq(meanDeltaR * MSAngle))};
         const int4 selectedBinsRect{getBinsRect(currentCluster, layerIndex + 1, *utils, zAtRmin, zAtRmax, sigmaZ * NSigmaCut, phiCut)};
         if (selectedBinsRect.x == 0 && selectedBinsRect.y == 0 && selectedBinsRect.z == 0 && selectedBinsRect.w == 0) {
           continue;
@@ -587,7 +579,7 @@ GPUg() void computeLayerTrackletsMultiROFKernel(
               const float deltaPhi{o2::gpu::CAMath::Abs(currentCluster.phi - nextCluster.phi)};
               const float deltaZ{o2::gpu::CAMath::Abs(tanLambda * (nextCluster.radius - currentCluster.radius) + currentCluster.zCoordinate - nextCluster.zCoordinate)};
               const int nextSortedIndex{ROFClusters[layerIndex + 1][rof1] + nextClusterIndex};
-              if (deltaZ / sigmaZ < NSigmaCut && (deltaPhi < phiCut || o2::gpu::CAMath::Abs(deltaPhi - constants::math::TwoPi) < phiCut)) {
+              if (deltaZ / sigmaZ < NSigmaCut && (deltaPhi < phiCut || o2::gpu::CAMath::Abs(deltaPhi - o2::constants::math::TwoPI) < phiCut)) {
                 if constexpr (initRun) {
                   trackletsLUT[layerIndex][currentSortedIndex]++; // we need l0 as well for usual exclusive sums.
                 } else {
@@ -634,8 +626,6 @@ GPUg() void processNeighboursKernel(const int layer,
                                     const o2::base::Propagator* propagator,
                                     const o2::base::PropagatorF::MatCorrType matCorrType)
 {
-  constexpr float radl = 9.36f;                                                           // Radiation length of Si [cm].
-  constexpr float rho = 2.33f;                                                            // Density of Si [g/cm^3].
   constexpr float layerxX0[7] = {5.e-3f, 5.e-3f, 5.e-3f, 1.e-2f, 1.e-2f, 1.e-2f, 1.e-2f}; // Hardcoded here for the moment.
   for (unsigned int iCurrentCell = blockIdx.x * blockDim.x + threadIdx.x; iCurrentCell < nCurrentCells; iCurrentCell += blockDim.x * gridDim.x) {
     int foundSeeds{0};
@@ -678,7 +668,7 @@ GPUg() void processNeighboursKernel(const int layer,
       }
 
       if (matCorrType == o2::base::PropagatorF::MatCorrType::USEMatCorrNONE) {
-        if (!seed.correctForMaterial(layerxX0[layer - 1], layerxX0[layer - 1] * radl * rho, true)) {
+        if (!seed.correctForMaterial(layerxX0[layer - 1], layerxX0[layer - 1] * constants::Radl * constants::Rho, true)) {
           continue;
         }
       }
