@@ -67,7 +67,6 @@
 #endif
 
 //#define GPUCA_MERGER_BY_MC_LABEL                    // Use MC labels for TPC track merging - for performance studies // TODO: Cleanup unneeded options
-//#define GPUCA_GM_USE_FULL_FIELD                     // Use offline magnetic field during GMPropagator prolongation
 
 // clang-format on
 
