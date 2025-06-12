@@ -33,9 +33,6 @@ typedef uint32_t cahit;
 struct cahit2 { cahit x, y; };
 } // namespace o2::GPU
 
-#ifdef GPUCA_TPC_RAW_PROPAGATE_PAD_ROW_TIME // Needs full clusterdata
-  #define GPUCA_FULL_CLUSTERDATA
-#endif
 
 #if defined(GPUCA_STANDALONE) || defined(GPUCA_GPUCODE) // No support for Full Field Propagator or Statistical errors
   #ifdef GPUCA_GM_USE_FULL_FIELD
