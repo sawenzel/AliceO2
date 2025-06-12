@@ -298,8 +298,6 @@ struct TimeFrame {
   std::array<bounded_vector<Cluster>, nLayers> mUnsortedClusters;
   std::vector<bounded_vector<Tracklet>> mTracklets;
   std::vector<bounded_vector<CellSeed>> mCells;
-  std::vector<bounded_vector<o2::track::TrackParCovF>> mCellSeeds;
-  std::vector<bounded_vector<float>> mCellSeedsChi2;
   bounded_vector<Road<nLayers - 2>> mRoads;
   std::vector<bounded_vector<TrackITSExt>> mTracks;
   std::vector<bounded_vector<int>> mCellsNeighbours;
@@ -311,7 +309,7 @@ struct TimeFrame {
   void wipe();
 
  private:
-  void prepareClusters(const TrackingParameters& trkParam, const int maxLayers);
+  void prepareClusters(const TrackingParameters& trkParam, const int maxLayers = nLayers);
   float mBz = 5.;
   unsigned int mNTotalLowPtVertices = 0;
   int mBeamPosWeight = 0;

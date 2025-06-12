@@ -79,7 +79,7 @@ void Tracker::clustersToTracks(const LogFunc& logger, const LogFunc& error)
       double timeTracklets{0.}, timeCells{0.}, timeNeighbours{0.}, timeRoads{0.};
       int nTracklets{0}, nCells{0}, nNeighbours{0}, nTracks{-static_cast<int>(mTimeFrame->getNumberOfTracks())};
       int nROFsIterations = mTrkParams[iteration].nROFsPerIterations > 0 ? mTimeFrame->getNrof() / mTrkParams[iteration].nROFsPerIterations + bool(mTimeFrame->getNrof() % mTrkParams[iteration].nROFsPerIterations) : 1;
-      int iVertex{std::min(maxNvertices, 0)};
+      iVertex = std::min(maxNvertices, 0);
       logger(std::format("==== ITS {} Tracking iteration {} summary ====", mTraits->getName(), iteration));
 
       total += evaluateTask(&Tracker::initialiseTimeFrame, StateNames[mCurState = TFInit], iteration, logger, iteration);
@@ -105,8 +105,7 @@ void Tracker::clustersToTracks(const LogFunc& logger, const LogFunc& error)
           nNeighbours += mTimeFrame->getNumberOfNeighbours();
           timeRoads += evaluateTask(&Tracker::findRoads, StateNames[mCurState = Roading], iteration, evalLog, iteration);
         }
-        iVertex++;
-      } while (iVertex < maxNvertices);
+      } while (++iVertex < maxNvertices);
       logger(std::format(" - Tracklet finding: {} tracklets found in {:.2f} ms", nTracklets, timeTracklets));
       logger(std::format(" - Cell finding: {} cells found in {:.2f} ms", nCells, timeCells));
       logger(std::format(" - Neighbours finding: {} neighbours found in {:.2f} ms", nNeighbours, timeNeighbours));

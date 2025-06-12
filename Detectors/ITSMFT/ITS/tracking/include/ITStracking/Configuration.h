@@ -18,7 +18,7 @@
 
 #ifndef GPUCA_GPUCODE_DEVICE
 #include <array>
-#include <climits>
+#include <limits>
 #include <vector>
 #include <cmath>
 #endif
@@ -108,7 +108,7 @@ struct TrackingParameters {
   float TrackFollowerNSigmaCutPhi = 1.f;
 
   bool PrintMemory = false; // print allocator usage in epilog report
-  size_t MaxMemory = 12000000000UL;
+  size_t MaxMemory = std::numeric_limits<size_t>::max();
   bool DropTFUponFailure = false;
 };
 
@@ -142,7 +142,7 @@ struct VertexingParameters {
 
   int nThreads = 1;
   bool PrintMemory = false; // print allocator usage in epilog report
-  size_t MaxMemory = 12000000000UL;
+  size_t MaxMemory = std::numeric_limits<size_t>::max();
   bool DropTFUponFailure = false;
 };
 
