@@ -16,9 +16,17 @@
 #define GPUERRORS_H
 
 #include "GPUCommonDef.h"
+#include "GPUDefMacros.h"
+#include <unordered_map>
 
 namespace o2::gpu
 {
+
+static std::unordered_map<uint32_t, const char*> errorNames = {
+#define GPUCA_ERROR_CODE(num, name, ...) {num, GPUCA_M_STR(name)},
+#include "GPUErrorCodes.h"
+#undef GPUCA_ERROR_CODE
+};
 
 class GPUErrors
 {

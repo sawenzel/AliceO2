@@ -36,7 +36,6 @@ GPUd() void GPUErrors::raiseError(uint32_t code, uint32_t param1, uint32_t param
 #ifndef GPUCA_GPUCODE
 
 #include <cstring>
-#include <unordered_map>
 
 uint32_t GPUErrors::getMaxErrors()
 {
@@ -47,12 +46,6 @@ void GPUErrors::clear()
 {
   memset(mErrors, 0, GPUCA_MAX_ERRORS * sizeof(*mErrors));
 }
-
-static std::unordered_map<uint32_t, const char*> errorNames = {
-#define GPUCA_ERROR_CODE(num, name, ...) {num, GPUCA_M_STR(name)},
-#include "GPUErrorCodes.h"
-#undef GPUCA_ERROR_CODE
-};
 
 bool GPUErrors::printErrors(bool silent, uint64_t mask)
 {

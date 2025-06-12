@@ -54,7 +54,7 @@ class GPUErrorQA
   void resetHistograms();
 
   /// return histograms
-  const std::unordered_map<std::string, std::unique_ptr<TH1>>& getMapHist() const { return mMapHist; };
+  const std::unordered_map<std::string, std::unique_ptr<TH1>>& getMapHist() const { return mMapHist; }
 
   /// Dump results to a file
   void dumpToFile(std::string filename);
@@ -62,7 +62,7 @@ class GPUErrorQA
  private:
   std::unordered_map<std::string, std::unique_ptr<TH1>> mMapHist;
 
-  ClassDefNV(GPUErrorQA, 1);
+  ClassDefNV(GPUErrorQA, 2);
 };
 } // namespace o2::tpc::qc
 
