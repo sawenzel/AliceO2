@@ -155,7 +155,6 @@ set(HDRS_INSTALL
     SectorTracker/GPUTPCHit.h
     SectorTracker/GPUTPCHitId.h
     SectorTracker/GPUTPCMCInfo.h
-    SectorTracker/GPUTPCSectorOutCluster.h
     SectorTracker/GPUTPCTracklet.h
     SectorTracker/GPUTPCTrackLinearisation.h
     TPCConvert/GPUTPCConvertImpl.h
