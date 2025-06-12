@@ -753,7 +753,7 @@ int main(int argc, char* argv[])
           }
         }
         LOG(error) << "SHUTTING DOWN DUE TO SIGNALED EXIT IN COMPONENT " << cpid;
-        o2::simpubsub::publishMessage(externalpublishchannel,o2::simpubsub::simStatusString("O2SIM", "STATE", "FAILURE"));
+        o2::simpubsub::publishMessage(externalpublishchannel, o2::simpubsub::simStatusString("O2SIM", "STATE", "FAILURE"));
         errored = true;
       }
     }
