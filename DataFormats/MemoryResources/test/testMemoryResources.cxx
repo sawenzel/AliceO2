@@ -60,7 +60,7 @@ BOOST_AUTO_TEST_CASE(transportallocatormap_test)
   BOOST_CHECK(_tmp == allocZMQ);
 }
 
-using namespace boost::container::pmr;
+using namespace fair::mq::pmr;
 
 BOOST_AUTO_TEST_CASE(allocator_test)
 {

@@ -115,7 +115,7 @@ class MessageResource : public FairMQMemoryResource
 // A spectator pmr memory resource which only watches the memory of the underlying buffer, does not
 // carry out real allocation. It owns the underlying buffer which is destroyed on deallocation.
 template <typename BufferType>
-class SpectatorMemoryResource : public boost::container::pmr::memory_resource
+class SpectatorMemoryResource : public fair::mq::pmr::memory_resource
 {
  public:
   using buffer_type = BufferType;
@@ -183,10 +183,10 @@ class SpectatorMemoryResource : public boost::container::pmr::memory_resource
 // This in general (as in STL) is a bad idea, but here it is safe to inherit from an allocator since we
 // have no additional data and only override some methods so we don't get into slicing and other problems.
 template <typename T>
-class SpectatorAllocator : public boost::container::pmr::polymorphic_allocator<T>
+class SpectatorAllocator : public fair::mq::pmr::polymorphic_allocator<T>
 {
  public:
-  using boost::container::pmr::polymorphic_allocator<T>::polymorphic_allocator;
+  using fair::mq::pmr::polymorphic_allocator<T>::polymorphic_allocator;
   using propagate_on_container_move_assignment = std::true_type;
 
   // skip default construction of empty elements
@@ -243,7 +243,7 @@ class OwningMessageSpectatorAllocator
     return OwningMessageSpectatorAllocator();
   }
 
-  boost::container::pmr::memory_resource* resource() { return &mResource; }
+  fair::mq::pmr::memory_resource* resource() { return &mResource; }
 
   // skip default construction of empty elements
   // this is important for two reasons: one: it allows us to adopt an existing buffer (e.g. incoming message) and
@@ -269,14 +269,14 @@ class OwningMessageSpectatorAllocator
 
 // The NoConstructAllocator behaves like the normal pmr vector but does not call constructors / destructors
 template <typename T>
-class NoConstructAllocator : public boost::container::pmr::polymorphic_allocator<T>
+class NoConstructAllocator : public fair::mq::pmr::polymorphic_allocator<T>
 {
  public:
-  using boost::container::pmr::polymorphic_allocator<T>::polymorphic_allocator;
+  using fair::mq::pmr::polymorphic_allocator<T>::polymorphic_allocator;
   using propagate_on_container_move_assignment = std::true_type;
 
   template <typename... Args>
-  NoConstructAllocator(Args&&... args) : boost::container::pmr::polymorphic_allocator<T>(std::forward<Args>(args)...)
+  NoConstructAllocator(Args&&... args) : fair::mq::pmr::polymorphic_allocator<T>(std::forward<Args>(args)...)
   {
   }
 
@@ -302,9 +302,9 @@ class NoConstructAllocator : public boost::container::pmr::polymorphic_allocator
 //__________________________________________________________________________________________________
 
 using ByteSpectatorAllocator = SpectatorAllocator<std::byte>;
-using BytePmrAllocator = boost::container::pmr::polymorphic_allocator<std::byte>;
+using BytePmrAllocator = fair::mq::pmr::polymorphic_allocator<std::byte>;
 template <class T>
-using vector = std::vector<T, o2::pmr::polymorphic_allocator<T>>;
+using vector = std::vector<T, fair::mq::pmr::polymorphic_allocator<T>>;
 
 //__________________________________________________________________________________________________
 /// Return a std::vector spanned over the contents of the message, takes ownership of the message
