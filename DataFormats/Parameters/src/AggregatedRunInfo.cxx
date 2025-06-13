@@ -102,10 +102,10 @@ AggregatedRunInfo AggregatedRunInfo::buildAggregatedRunInfo_MC(o2::ccdb::CCDBMan
 {
   // (a) lookup the AggregatedRunInfo for the run
   // (b) modify/overwrite the info object with MC specific settings (if available)
-  
+
   // For now just the timeframe length is overwritten. We can consider
   // to return the full MCProdInfo meta-data to the caller as well.
-  
+
   auto original_info = buildAggregatedRunInfo(ccdb, run_number);
 
   std::map<std::string, std::string> metaDataFilter;
@@ -122,8 +122,7 @@ AggregatedRunInfo AggregatedRunInfo::buildAggregatedRunInfo_MC(o2::ccdb::CCDBMan
       LOG(info) << "Adjusting OrbitsPerTF from " << original_info.orbitsPerTF << " to " << mc_orbitsPerTF << " based on differing MC info";
       original_info.orbitsPerTF = mc_orbitsPerTF;
     }
-  }
-  else {
+  } else {
     LOG(warn) << "No OrbitsPerTF information found for MC production " << lpm_prod_tag << " and run number " << run_number;
   }
 
