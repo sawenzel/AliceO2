@@ -80,7 +80,7 @@ void Dispatcher::init(InitContext& ctx)
 
 header::Stack extractAdditionalHeaders(const char* inputHeaderStack)
 {
-  std::array<header::BaseHeader const*, 5> headers;
+  std::array<header::BaseHeader const*, 8> headers;
   int count = 0;
   const auto* first = header::BaseHeader::get(reinterpret_cast<const std::byte*>(inputHeaderStack));
   for (const auto* current = first; current != nullptr; current = current->next()) {
