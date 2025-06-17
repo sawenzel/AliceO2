@@ -166,8 +166,8 @@ WorkflowSpec defineDataProcessing(ConfigContext const& cfgc)
   cfg.lumiScaleMode = sclOpt.lumiMode;
   cfg.enableMShape = sclOpt.enableMShapeCorrection;
   cfg.enableCTPLumi = sclOpt.requestCTPLumi;
-  cfg.decompressTPC = isEnabled(inputTypes, ioType::CompClustCTF);
   cfg.decompressTPCFromROOT = isEnabled(inputTypes, ioType::CompClustROOT);
+  cfg.decompressTPC = isEnabled(inputTypes, ioType::CompClustCTF) || cfg.decompressTPCFromROOT;
   cfg.zsDecoder = isEnabled(inputTypes, ioType::ZSRaw);
   cfg.zsOnTheFly = isEnabled(inputTypes, ioType::ZSRawOTF);
   cfg.caClusterer = cfg.zsDecoder || cfg.zsOnTheFly || isEnabled(inputTypes, ioType::Digits);
