@@ -220,12 +220,6 @@ WorkflowSpec defineDataProcessing(ConfigContext const& cfgc)
       taskPrepare->options()});
   }
 
-  if (!cfgc.options().get<bool>("ignore-dist-stf")) {
-    GlobalTrackID::mask_t srcTrk = GlobalTrackID::getSourcesMask("none");
-    GlobalTrackID::mask_t srcCl = GlobalTrackID::getSourcesMask("TPC");
-    o2::globaltracking::InputHelper::addInputSpecs(cfgc, specs, srcCl, srcTrk, srcTrk, doMC);
-  }
-
   // configure dpl timer to inject correct firstTForbit: start from the 1st orbit of TF containing 1st sampled orbit
   o2::raw::HBFUtilsInitializer hbfIni(cfgc, specs);
 
