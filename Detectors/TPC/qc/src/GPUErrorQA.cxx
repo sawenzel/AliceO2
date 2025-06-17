@@ -28,14 +28,27 @@ void GPUErrorQA::initializeHistograms()
 {
   TH1::AddDirectory(false);
 
+  auto const& errorNames = o2::gpu::GPUErrors::getErrorNames();
+
+  int maxErrorCode = 1;
+  for (const auto& [key, _] : errorNames) {
+    if (static_cast<int>(key) > maxErrorCode) {
+      maxErrorCode = key;
+    }
+  }
+
   // 1D histogram counting all reported errors
-  mMapHist["ErrorCounter"] = std::make_unique<TH1I>("ErrorCounter", "ErrorCounter", o2::gpu::errorNames.size(), -0.5, o2::gpu::errorNames.size() - 0.5);
+  mMapHist["ErrorCounter"] = std::make_unique<TH1I>("ErrorCounter", "ErrorCounter", maxErrorCode, -0.5, maxErrorCode - 0.5);
   mMapHist["ErrorCounter"]->GetXaxis()->SetTitle("Error Codes");
   mMapHist["ErrorCounter"]->GetYaxis()->SetTitle("Entries");
   // for convienence, label each bin with the error name
-  for (size_t bin = 1; bin < mMapHist["ErrorCounter"]->GetNbinsX(); bin++) {
-    auto const& it = o2::gpu::errorNames.find(bin);
-    mMapHist["ErrorCounter"]->GetXaxis()->SetBinLabel(bin, it->second);
+  for (size_t bin = 1; bin <= maxErrorCode; bin++) {
+    auto const& it = errorNames.find(bin);
+    if (it != errorNames.end()) {
+      mMapHist["ErrorCounter"]->GetXaxis()->SetBinLabel(bin, it->second);
+    } else {
+      mMapHist["ErrorCounter"]->GetXaxis()->SetBinLabel(bin, "NO_DEF");
+    }
   }
 }
 //______________________________________________________________________________
