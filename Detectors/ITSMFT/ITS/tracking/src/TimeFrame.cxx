@@ -180,7 +180,7 @@ int TimeFrame<nLayers>::loadROFrameData(gsl::span<o2::itsmft::ROFRecord> rofs,
         locXYZ = dict->getClusterCoordinates(c, patt, false);
         clusterSize = patt.getNPixels();
       }
-      mClusterSize.push_back(std::clamp(clusterSize, 0u, 255u));
+      mClusterSize[clusterId] = std::clamp(clusterSize, 0u, 255u);
       auto sensorID = c.getSensorID();
       // Inverse transformation to the local --> tracking
       auto trkXYZ = geom->getMatrixT2L(sensorID) ^ locXYZ;
