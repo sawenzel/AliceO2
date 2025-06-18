@@ -214,13 +214,16 @@ void VertexerTraits::computeTracklets(const int iteration)
           mTimeFrame->getNTrackletsROF(pivotRofId, 1) = std::accumulate(mTimeFrame->getNTrackletsCluster(pivotRofId, 1).begin(), mTimeFrame->getNTrackletsCluster(pivotRofId, 1).end(), 0);
         }
       });
-  });
 
-  mTimeFrame->computeTrackletsPerROFScans();
-  mTimeFrame->getTracklets()[0].resize(mTimeFrame->getTotalTrackletsTF(0));
-  mTimeFrame->getTracklets()[1].resize(mTimeFrame->getTotalTrackletsTF(1));
+    mTimeFrame->computeTrackletsPerROFScans();
+    if (auto tot0 = mTimeFrame->getTotalTrackletsTF(0), tot1 = mTimeFrame->getTotalTrackletsTF(1);
+        tot0 == 0 || tot1 == 0) {
+      return;
+    } else {
+      mTimeFrame->getTracklets()[0].resize(tot0);
+      mTimeFrame->getTracklets()[1].resize(tot1);
+    }
 
-  mTaskArena->execute([&] {
     tbb::parallel_for(
       tbb::blocked_range<short>(0, (short)mTimeFrame->getNrof()),
       [&](const tbb::blocked_range<short>& Rofs) {
@@ -266,17 +269,19 @@ void VertexerTraits::computeTracklets(const int iteration)
   if (mTimeFrame->hasMCinformation()) {
     for (const auto& trk : mTimeFrame->getTracklets()[0]) {
       o2::MCCompLabel label;
-      int sortedId0{mTimeFrame->getSortedIndex(trk.rof[0], 0, trk.firstClusterIndex)};
-      int sortedId1{mTimeFrame->getSortedIndex(trk.rof[1], 1, trk.secondClusterIndex)};
-      for (const auto& lab0 : mTimeFrame->getClusterLabels(0, mTimeFrame->getClusters()[0][sortedId0].clusterId)) {
-        for (const auto& lab1 : mTimeFrame->getClusterLabels(1, mTimeFrame->getClusters()[1][sortedId1].clusterId)) {
-          if (lab0 == lab1 && lab0.isValid()) {
-            label = lab0;
+      if (!trk.isEmpty()) {
+        int sortedId0{mTimeFrame->getSortedIndex(trk.rof[0], 0, trk.firstClusterIndex)};
+        int sortedId1{mTimeFrame->getSortedIndex(trk.rof[1], 1, trk.secondClusterIndex)};
+        for (const auto& lab0 : mTimeFrame->getClusterLabels(0, mTimeFrame->getClusters()[0][sortedId0].clusterId)) {
+          for (const auto& lab1 : mTimeFrame->getClusterLabels(1, mTimeFrame->getClusters()[1][sortedId1].clusterId)) {
+            if (lab0 == lab1 && lab0.isValid()) {
+              label = lab0;
+              break;
+            }
+          }
+          if (label.isValid()) {
             break;
           }
-        }
-        if (label.isValid()) {
-          break;
         }
       }
       mTimeFrame->getTrackletsLabel(0).emplace_back(label);
