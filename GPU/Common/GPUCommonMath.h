@@ -99,12 +99,9 @@ class GPUCommonMath
   GPUhdi() static float Remainderf(float x, float y);
   GPUd() constexpr static bool Finite(float x);
   GPUd() constexpr static bool IsNaN(float x);
-#pragma GCC diagnostic push
-#if defined(__FAST_MATH__) && defined(__clang__)
-#pragma GCC diagnostic ignored "-Wnan-infinity-disabled"
-#endif
+#ifndef __FAST_MATH__
   GPUd() constexpr static float QuietNaN() { return GPUCA_CHOICE(std::numeric_limits<float>::quiet_NaN(), __builtin_nanf(""), nan(0u)); }
-#pragma GCC diagnostic pop
+#endif
   GPUd() constexpr static uint32_t Clz(uint32_t val);
   GPUd() constexpr static uint32_t Popcount(uint32_t val);
 
