@@ -28,6 +28,8 @@ struct TrackMCStudyConfig : o2::conf::ConfigurableParamHelper<TrackMCStudyConfig
   bool requireITSorTPCTrackRefs = true;
   bool requireTopBottomRefs = false;
   int minTPCRefsToExtractClRes = 2;
+  int nOccBinsDrift = 10; // number of bins for TPC max drift time, where we integrate the occupancies
+  int nTBPerOccBin = 48;  // number of TB per occ bin
   float rejectClustersResStat = 0.1;
   float maxTPCRefExtrap = 2;                   // max dX to extrapolate the track ref when extrapolating track true posions
   int decayPDG[5] = {310, 3122, 411, 421, -1}; // decays to study, must end by -1
