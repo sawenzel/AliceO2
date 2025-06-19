@@ -52,7 +52,8 @@ struct MCTrackInfo {
   uint8_t maxTPCRowSect = -1;
   int8_t nITSCl = 0;
   int8_t pattITSCl = 0;
-  ClassDefNV(MCTrackInfo, 4);
+  bool addedAtRecStage = false;
+  ClassDefNV(MCTrackInfo, 5);
 };
 
 struct RecTrack {
@@ -75,6 +76,7 @@ struct RecTrack {
   uint8_t nClTPC = 0;
   uint8_t pattITS = 0;
   int8_t lowestPadRow = -1;
+  int8_t padFromEdge = -1;
 
   bool isFakeGLO() const { return flags & FakeGLO; }
   bool isFakeITS() const { return flags & FakeITS; }
@@ -83,7 +85,7 @@ struct RecTrack {
   bool isFakeTOF() const { return flags & FakeTOF; }
   bool isFakeITSTPC() const { return flags & FakeITSTPC; }
 
-  ClassDefNV(RecTrack, 1);
+  ClassDefNV(RecTrack, 2);
 };
 
 struct TrackPairInfo {

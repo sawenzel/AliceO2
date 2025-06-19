@@ -122,6 +122,7 @@ class TrackMCStudy : public Task
   std::vector<float> mTPCOcc;    ///< TPC occupancy for this interaction time
   std::vector<int> mITSOcc;      //< N ITS clusters in the ROF containing collision
   bool mCheckSV = false;         //< check SV binding (apart from prongs availability)
+  bool mRecProcStage = false;    //< flag that the MC particle was added only at the stage of reco tracks processing
   int mNTPCOccBinLength = 0;     ///< TPC occ. histo bin length in TBs
   float mNTPCOccBinLengthInv;
   int mVerbose = 0;
@@ -185,6 +186,7 @@ void TrackMCStudy::run(ProcessingContext& pc)
 
   recoData.collectData(pc, *mDataRequest.get()); // select tracks of needed type, with minimal cuts, the real selected will be done in the vertexer
   updateTimeDependentParams(pc);                 // Make sure this is called after recoData.collectData, which may load some conditions
+  mRecProcStage = false;
   process(recoData);
 }
 
@@ -278,15 +280,21 @@ void TrackMCStudy::process(const o2::globaltracking::RecoContainer& recoData)
     return patt;
   };
 
-  auto getLowestPadrow = [&recoData](const o2::tpc::TrackTPC& trc) {
+  auto getLowestPadrow = [&recoData](const o2::tpc::TrackTPC& trc, RecTrack& tref) {
     if (recoData.inputsTPCclusters) {
       uint8_t clSect = 0, clRow = 0;
       uint32_t clIdx = 0;
       const auto clRefs = recoData.getTPCTracksClusterRefs();
+      const auto tpcClusAcc = recoData.getTPCClusters();
       trc.getClusterReference(clRefs, trc.getNClusterReferences() - 1, clSect, clRow, clIdx);
-      return int(clRow);
+      const auto& clus = tpcClusAcc.clusters[clSect][clRow][clIdx];
+      int padFromEdge = int(clus.getPad()), npads = o2::gpu::GPUTPCGeometry::NPads(clRow);
+      if (padFromEdge > npads / 2) {
+        padFromEdge = npads - 1 - padFromEdge;
+      }
+      tref.padFromEdge = uint8_t(padFromEdge);
+      tref.lowestPadRow = clRow;
     }
-    return -1;
   };
 
   auto flagTPCClusters = [&recoData](const o2::tpc::TrackTPC& trc, o2::MCCompLabel lbTrc) {
@@ -352,7 +360,7 @@ void TrackMCStudy::process(const o2::globaltracking::RecoContainer& recoData)
     int nev = mcReader.getNEvents(curSrcMC);
     bool okAccVtx = true;
     if (nev != (int)mMCVtVec.size()) {
-      LOGP(error, "source {} has {} events while {} MC vertices were booked", curSrcMC, nev, mMCVtVec.size());
+      LOGP(debug, "source {} has {} events while {} MC vertices were booked", curSrcMC, nev, mMCVtVec.size());
       okAccVtx = false;
     }
     for (curEvMC = 0; curEvMC < nev; curEvMC++) {
@@ -382,6 +390,7 @@ void TrackMCStudy::process(const o2::globaltracking::RecoContainer& recoData)
   }
 
   // add reconstruction info to MC particles. If MC particle was not selected before but was reconstrected, account MC info
+  mRecProcStage = true; // MC particles accepted only at this stage will be flagged
   for (int iv = 0; iv < nv; iv++) {
     if (mVerbose > 1) {
       LOGP(info, "processing PV {} of {}", iv, nv);
@@ -532,7 +541,7 @@ void TrackMCStudy::process(const o2::globaltracking::RecoContainer& recoData)
         if (msk[DetID::TPC]) {
           const auto& trtpc = recoData.getTPCTrack(gidSet[GTrackID::TPC]);
           tref.nClTPC = trtpc.getNClusters();
-          tref.lowestPadRow = getLowestPadrow(trtpc);
+          getLowestPadrow(trtpc, tref);
           flagTPCClusters(trtpc, entry.first);
           if (trackFam.entTPC < 0) {
             trackFam.entTPC = tcnt;
@@ -1088,6 +1097,7 @@ bool TrackMCStudy::addMCParticle(const MCTrack& mcPart, const o2::MCCompLabel& l
   mcEntry.mcTrackInfo.bcInTF = mIntBC[lb.getEventID()];
   mcEntry.mcTrackInfo.occTPC = mTPCOcc[lb.getEventID()];
   mcEntry.mcTrackInfo.occITS = mITSOcc[lb.getEventID()];
+  mcEntry.mcTrackInfo.addedAtRecStage = mRecProcStage;
   int moth = -1;
   o2::MCCompLabel mclbPar;
   if ((moth = mcPart.getMotherTrackId()) >= 0) {
