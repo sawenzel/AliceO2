@@ -48,6 +48,8 @@ struct VertexerParamConfig : public o2::conf::ConfigurableParamHelper<VertexerPa
   int ZBins = 1;     // z-phi index table configutation: number of z bins
   int PhiBins = 128; // z-phi index table configutation: number of phi bins
 
+  bool useTruthSeeding{false}; // overwrite seeding vertices with MC truth
+
   int nThreads = 1;
   bool printMemory = false;
   size_t maxMemory = std::numeric_limits<size_t>::max();

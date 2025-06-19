@@ -10,10 +10,10 @@
 // or submit itself to any jurisdiction.
 ///
 
-#include <iostream>
 #include <memory>
-#include <string>
-#include <chrono>
+#include <ranges>
+#include <map>
+#include <algorithm>
 
 #include <oneapi/tbb/blocked_range.h>
 #include <oneapi/tbb/parallel_for.h>
@@ -22,6 +22,9 @@
 #include "ITStracking/BoundedAllocator.h"
 #include "ITStracking/ClusterLines.h"
 #include "ITStracking/Tracklet.h"
+#include "SimulationDataFormat/DigitizationContext.h"
+#include "Steer/MCKinematicsReader.h"
+#include "ITSMFTBase/DPLAlpideParam.h"
 
 #ifdef VTX_DEBUG
 #include "TTree.h"
@@ -691,6 +694,59 @@ void VertexerTraits::computeVerticesInRof(int rofId,
     }
   }
   verticesInRof.push_back(foundVertices);
+}
+
+void VertexerTraits::addTruthSeedingVertices()
+{
+  LOGP(info, "Using truth seeds as vertices; will skip computations");
+  mTimeFrame->resetRofPV();
+  const auto dc = o2::steer::DigitizationContext::loadFromFile("collisioncontext.root");
+  const auto irs = dc->getEventRecords();
+  int64_t roFrameBiasInBC = o2::itsmft::DPLAlpideParam<o2::detectors::DetID::ITS>::Instance().roFrameBiasInBC;
+  int64_t roFrameLengthInBC = o2::itsmft::DPLAlpideParam<o2::detectors::DetID::ITS>::Instance().roFrameLengthInBC;
+  o2::steer::MCKinematicsReader mcReader(dc);
+  std::map<int, bounded_vector<Vertex>> vertices;
+  for (int iSrc{0}; iSrc < mcReader.getNSources(); ++iSrc) {
+    auto eveId2colId = dc->getCollisionIndicesForSource(iSrc);
+    for (int iEve{0}; iEve < mcReader.getNEvents(iSrc); ++iEve) {
+      const auto& ir = irs[eveId2colId[iEve]];
+      if (!ir.isDummy()) { // do we need this, is this for diffractive events?
+        const auto& eve = mcReader.getMCEventHeader(iSrc, iEve);
+        int rofId = (ir.toLong() - roFrameBiasInBC) / roFrameLengthInBC;
+        if (!vertices.contains(rofId)) {
+          vertices[rofId] = bounded_vector<Vertex>(mMemoryPool.get());
+        }
+        Vertex vert;
+        vert.setTimeStamp(rofId);
+        vert.setNContributors(std::ranges::count_if(mcReader.getTracks(iSrc, iEve), [](const auto& trk) {
+          return trk.isPrimary() && trk.GetPt() > 0.2 && std::abs(trk.GetEta()) < 1.3;
+        }));
+        vert.setXYZ((float)eve.GetX(), (float)eve.GetY(), (float)eve.GetZ());
+        vert.setChi2(1);
+        constexpr float cov = 50e-9;
+        vert.setCov(cov, cov, cov, cov, cov, cov);
+        vertices[rofId].push_back(vert);
+      }
+    }
+  }
+  size_t nVerts{0};
+  for (int iROF{0}; iROF < mTimeFrame->getNrof(); ++iROF) {
+    bounded_vector<Vertex> verts(mMemoryPool.get());
+    bounded_vector<std::pair<o2::MCCompLabel, float>> polls(mMemoryPool.get());
+    if (vertices.contains(iROF)) {
+      verts = vertices[iROF];
+      nVerts += verts.size();
+      for (size_t i{0}; i < verts.size(); ++i) {
+        o2::MCCompLabel lbl; // unset label for now
+        polls.emplace_back(lbl, 1.f);
+      }
+    } else {
+      mTimeFrame->getNoVertexROF()++;
+    }
+    mTimeFrame->addPrimaryVertices(verts, iROF, 0);
+    mTimeFrame->addPrimaryVerticesLabels(polls);
+  }
+  LOGP(info, "Found {}/{} ROFs with {} vertices -> <NV>={:.2f}", vertices.size(), mTimeFrame->getNrof(), nVerts, (float)nVerts / (float)vertices.size());
 }
 
 void VertexerTraits::setNThreads(int n, std::shared_ptr<tbb::task_arena>& arena)

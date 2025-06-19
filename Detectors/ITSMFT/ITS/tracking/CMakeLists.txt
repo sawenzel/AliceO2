@@ -36,7 +36,9 @@ o2_add_library(ITStracking
                        O2::ITSReconstruction
                        O2::ITSMFTReconstruction
                        O2::DataFormatsITS
-               PRIVATE_LINK_LIBRARIES TBB::tbb)
+               PRIVATE_LINK_LIBRARIES
+                       O2::Steer
+                       TBB::tbb)
 
 o2_add_library(ITSTrackingInterface
                TARGETVARNAME targetName

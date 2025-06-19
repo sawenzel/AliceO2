@@ -187,13 +187,13 @@ void ITSTrackingInterface::run(framework::ProcessingContext& pc)
       vtxROF.setNEntries(vtxSpan.size());
       bool selROF = vtxSpan.empty();
       for (auto iV{0}; iV < vtxSpan.size(); ++iV) {
-        auto& v = vtxSpan[iV];
+        const auto& v = vtxSpan[iV];
         if (multEstConf.isVtxMultCutRequested() && !multEstConf.isPassingVtxMultCut(v.getNContributors())) {
           continue; // skip vertex of unwanted multiplicity
         }
         selROF = true;
         vertices.push_back(v);
-        if (mIsMC) {
+        if (mIsMC && !VertexerParamConfig::Instance().useTruthSeeding) {
           allVerticesLabels.push_back(vMCRecInfo[iV].first);
           allVerticesPurities.push_back(vMCRecInfo[iV].second);
         }

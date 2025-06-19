@@ -36,6 +36,11 @@ Vertexer::Vertexer(VertexerTraits* traits) : mTraits(traits)
 float Vertexer::clustersToVertices(LogFunc logger)
 {
   LogFunc evalLog = [](const std::string&) {};
+
+  if (mTimeFrame->hasMCinformation() && mVertParams[0].useTruthSeeding) {
+    return evaluateTask(&Vertexer::addTruthSeeds, StateNames[mCurState = TruthSeeding], 0, evalLog);
+  }
+
   TrackingParameters trkPars;
   TimeFrameGPUParameters tfGPUpar;
   mTraits->updateVertexingParameters(mVertParams, tfGPUpar);
@@ -58,14 +63,11 @@ float Vertexer::clustersToVertices(LogFunc logger)
       logger(fmt::format("=== ITS {} Seeding vertexer iteration {} summary:", mTraits->getName(), iteration));
       trkPars.PhiBins = mTraits->getVertexingParameters()[0].PhiBins;
       trkPars.ZBins = mTraits->getVertexingParameters()[0].ZBins;
-      auto timeInitIteration = evaluateTask(
-        &Vertexer::initialiseVertexer, StateNames[mCurState = Init], iteration, evalLog, trkPars, iteration);
-      auto timeTrackletIteration = evaluateTask(
-        &Vertexer::findTracklets, StateNames[mCurState = Trackleting], iteration, evalLog, iteration);
+      auto timeInitIteration = evaluateTask(&Vertexer::initialiseVertexer, StateNames[mCurState = Init], iteration, evalLog, trkPars, iteration);
+      auto timeTrackletIteration = evaluateTask(&Vertexer::findTracklets, StateNames[mCurState = Trackleting], iteration, evalLog, iteration);
       nTracklets01 = mTimeFrame->getTotalTrackletsTF(0);
       nTracklets12 = mTimeFrame->getTotalTrackletsTF(1);
-      auto timeSelectionIteration = evaluateTask(
-        &Vertexer::validateTracklets, StateNames[mCurState = Validating], iteration, evalLog, iteration);
+      auto timeSelectionIteration = evaluateTask(&Vertexer::validateTracklets, StateNames[mCurState = Validating], iteration, evalLog, iteration);
       auto timeVertexingIteration = evaluateTask(&Vertexer::findVertices, StateNames[mCurState = Finding], iteration, evalLog, iteration);
       printEpilog(logger, nTracklets01, nTracklets12, mTimeFrame->getNLinesTotal(), mTimeFrame->getTotVertIteration()[iteration], timeInitIteration, timeTrackletIteration, timeSelectionIteration, timeVertexingIteration);
       timeInit += timeInitIteration;

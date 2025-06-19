@@ -112,6 +112,8 @@ struct VertexingParameters {
   int zSpan = -1;
   bool SaveTimeBenchmarks = false;
 
+  bool useTruthSeeding = false; // overwrite found vertices with MC events
+
   int nThreads = 1;
   bool PrintMemory = false; // print allocator usage in epilog report
   size_t MaxMemory = std::numeric_limits<size_t>::max();

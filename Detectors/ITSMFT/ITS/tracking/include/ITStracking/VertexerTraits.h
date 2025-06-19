@@ -73,6 +73,8 @@ class VertexerTraits
   virtual void computeVertices(const int iteration = 0);
   virtual void adoptTimeFrame(TimeFrame7* tf) noexcept { mTimeFrame = tf; }
   virtual void updateVertexingParameters(const std::vector<VertexingParameters>& vrtPar, const TimeFrameGPUParameters& gpuTfPar);
+  // truth tracking
+  void addTruthSeedingVertices();
 
   void computeVerticesInRof(int,
                             gsl::span<const o2::its::Line>&,

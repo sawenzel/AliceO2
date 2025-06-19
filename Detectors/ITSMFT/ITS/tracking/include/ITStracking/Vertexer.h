@@ -75,7 +75,8 @@ class Vertexer
   void validateTracklets(T&&... args);
   template <typename... T>
   void findVertices(T&&... args);
-  void findHistVertices();
+
+  void addTruthSeeds() { mTraits->addTruthSeedingVertices(); }
 
   template <typename... T>
   void initialiseVertexer(T&&... args);
@@ -108,10 +109,11 @@ class Vertexer
     Trackleting,
     Validating,
     Finding,
+    TruthSeeding,
     NStates,
   };
   State mCurState{Init};
-  static constexpr std::array<const char*, NStates> StateNames{"Initialisation", "Tracklet finding", "Tracklet validation", "Vertex finding"};
+  static constexpr std::array<const char*, NStates> StateNames{"Initialisation", "Tracklet finding", "Tracklet validation", "Vertex finding", "Truth seeding"};
 };
 
 template <typename... T>
