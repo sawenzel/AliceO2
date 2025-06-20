@@ -11,6 +11,7 @@
 ///
 
 #include <iostream>
+#include <memory>
 #include <string>
 #include <chrono>
 
@@ -168,13 +169,12 @@ void VertexerTraits::updateVertexingParameters(const std::vector<VertexingParame
     par.phiSpan = static_cast<int>(std::ceil(mIndexTableUtils.getNphiBins() * par.phiCut / o2::constants::math::TwoPI));
     par.zSpan = static_cast<int>(std::ceil(par.zCut * mIndexTableUtils.getInverseZCoordinate(0)));
   }
-  setNThreads(vrtPar[0].nThreads);
 }
 
 // Main functions
 void VertexerTraits::computeTracklets(const int iteration)
 {
-  mTaskArena.execute([&] {
+  mTaskArena->execute([&] {
     tbb::parallel_for(
       tbb::blocked_range<short>(0, (short)mTimeFrame->getNrof()),
       [&](const tbb::blocked_range<short>& Rofs) {
@@ -220,7 +220,7 @@ void VertexerTraits::computeTracklets(const int iteration)
   mTimeFrame->getTracklets()[0].resize(mTimeFrame->getTotalTrackletsTF(0));
   mTimeFrame->getTracklets()[1].resize(mTimeFrame->getTotalTrackletsTF(1));
 
-  mTaskArena.execute([&] {
+  mTaskArena->execute([&] {
     tbb::parallel_for(
       tbb::blocked_range<short>(0, (short)mTimeFrame->getNrof()),
       [&](const tbb::blocked_range<short>& Rofs) {
@@ -329,7 +329,7 @@ void VertexerTraits::computeTracklets(const int iteration)
 
 void VertexerTraits::computeTrackletMatching(const int iteration)
 {
-  mTaskArena.execute([&] {
+  mTaskArena->execute([&] {
     tbb::parallel_for(
       tbb::blocked_range<short>(0, (short)mTimeFrame->getNrof()),
       [&](const tbb::blocked_range<short>& Rofs) {
@@ -687,15 +687,17 @@ void VertexerTraits::computeVerticesInRof(int rofId,
   verticesInRof.push_back(foundVertices);
 }
 
-void VertexerTraits::setNThreads(int n)
+void VertexerTraits::setNThreads(int n, std::shared_ptr<tbb::task_arena>& arena)
 {
-  if (mNThreads == n && mTaskArena.is_active()) {
-    return;
-  }
-  mNThreads = n > 0 ? n : 1;
 #if defined(VTX_DEBUG)
-  mNThreads = 1;
+  mTaskArena = std::make_shared<tbb::task_arena>(1);
+#else
+  if (arena == nullptr) {
+    mTaskArena = std::make_shared<tbb::task_arena>(std::abs(n));
+    LOGP(info, "Setting seeding vertexer with {} threads.", n);
+  } else {
+    mTaskArena = arena;
+    LOGP(info, "Attaching vertexer to calling thread's arena");
+  }
 #endif
-  mTaskArena.initialize(mNThreads);
-  LOGP(info, "Setting seeding vertexer with {} threads.", mNThreads);
 }

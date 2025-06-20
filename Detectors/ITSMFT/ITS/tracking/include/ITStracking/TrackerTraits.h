@@ -80,8 +80,8 @@ class TrackerTraits
   void SetRecoChain(o2::gpu::GPUChainITS* chain) { mChain = chain; }
   void setSmoothing(bool v) { mApplySmoothing = v; }
   bool getSmoothing() const { return mApplySmoothing; }
-  void setNThreads(int n);
-  int getNThreads() const { return mNThreads; }
+  void setNThreads(int n, std::shared_ptr<tbb::task_arena>& arena);
+  int getNThreads() { return mTaskArena->max_concurrency(); }
 
   o2::gpu::GPUChainITS* getChain() const { return mChain; }
 
@@ -94,10 +94,9 @@ class TrackerTraits
   track::TrackParCov buildTrackSeed(const Cluster& cluster1, const Cluster& cluster2, const TrackingFrameInfo& tf3);
   bool fitTrack(TrackITSExt& track, int start, int end, int step, float chi2clcut = o2::constants::math::VeryBig, float chi2ndfcut = o2::constants::math::VeryBig, float maxQoverPt = o2::constants::math::VeryBig, int nCl = 0);
 
-  int mNThreads = 1;
   bool mApplySmoothing = false;
   std::shared_ptr<BoundedMemoryResource> mMemoryPool;
-  tbb::task_arena mTaskArena;
+  std::shared_ptr<tbb::task_arena> mTaskArena;
 
  protected:
   o2::base::PropagatorImpl<float>::MatCorrType mCorrType = o2::base::PropagatorImpl<float>::MatCorrType::USEMatCorrNONE;

@@ -21,6 +21,9 @@
 #include <iomanip>
 #include <array>
 #include <iosfwd>
+#include <memory>
+
+#include <oneapi/tbb/task_arena.h>
 
 #include "ITStracking/ROframe.h"
 #include "ITStracking/Constants.h"
@@ -89,6 +92,8 @@ class Vertexer
                    const unsigned int trackletN01, const unsigned int trackletN12,
                    const unsigned selectedN, const unsigned int vertexN, const float initT,
                    const float trackletT, const float selecT, const float vertexT);
+
+  void setNThreads(int n, std::shared_ptr<tbb::task_arena>& arena) { mTraits->setNThreads(n, arena); }
 
  private:
   std::uint32_t mTimeFrameCounter = 0;

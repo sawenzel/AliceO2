@@ -342,7 +342,6 @@ void Tracker::getGlobalConfiguration()
   } else {
     mTraits->setCorrType(o2::base::PropagatorImpl<float>::MatCorrType::USEMatCorrLUT);
   }
-  setNThreads(tc.nThreads);
   int nROFsPerIterations = tc.nROFsPerIterations > 0 ? tc.nROFsPerIterations : -1;
   if (tc.nOrbitsPerIterations > 0) {
     /// code to be used when the number of ROFs per orbit is known, this gets priority over the number of ROFs per iteration

@@ -27,6 +27,8 @@
 #include <utility>
 #include <sstream>
 
+#include <oneapi/tbb/task_arena.h>
+
 #include "ITStracking/Configuration.h"
 #include "CommonConstants/MathConstants.h"
 #include "ITStracking/Definitions.h"
@@ -73,8 +75,7 @@ class Tracker
   void setBz(float bz) { mTraits->setBz(bz); }
   void setCorrType(const o2::base::PropagatorImpl<float>::MatCorrType type) { mTraits->setCorrType(type); }
   bool isMatLUT() const { return mTraits->isMatLUT(); }
-  void setNThreads(int n) { mTraits->setNThreads(n); }
-  int getNThreads() const { return mTraits->getNThreads(); }
+  void setNThreads(int n, std::shared_ptr<tbb::task_arena>& arena) { mTraits->setNThreads(n, arena); }
   void printSummary() const;
 
  private:

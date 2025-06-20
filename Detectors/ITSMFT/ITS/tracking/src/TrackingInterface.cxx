@@ -16,6 +16,7 @@
 #include "ITSReconstruction/FastMultEst.h"
 
 #include "ITStracking/TrackingInterface.h"
+#include <oneapi/tbb/task_arena.h>
 #include <memory>
 
 #include "DataFormatsITSMFT/ROFRecord.h"
@@ -148,6 +149,20 @@ void ITSTrackingInterface::initialise()
   }
   mTracker->setParameters(trackParams);
   mVertexer->setParameters(vertParams);
+  if (trackConf.nThreads == vertConf.nThreads) {
+    bool clamped{false};
+    int nThreads = trackConf.nThreads;
+    if (nThreads > 0) {
+      const int hw = std::thread::hardware_concurrency();
+      const int maxThreads = (hw == 0 ? 1 : hw);
+      nThreads = std::clamp(nThreads, 1, maxThreads);
+      clamped = trackConf.nThreads > maxThreads;
+    }
+    LOGP(info, "Tracker and Vertexer will share the task arena with {} thread(s){}", nThreads, (clamped) ? " (clamped)" : "");
+    mTaskArena = std::make_shared<tbb::task_arena>(std::abs(nThreads));
+  }
+  mVertexer->setNThreads(vertConf.nThreads, mTaskArena);
+  mTracker->setNThreads(trackConf.nThreads, mTaskArena);
 }
 
 void ITSTrackingInterface::run(framework::ProcessingContext& pc)
