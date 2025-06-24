@@ -130,9 +130,6 @@ void Tracker::clustersToTracks(const LogFunc& logger, const LogFunc& error)
       auto nTracksA = mTimeFrame->getNumberOfTracks();
       logger(std::format("  `-> found {} additional tracks", nTracksA - nTracksB));
     }
-    if (mTrkParams[iteration].PrintMemory) {
-      mMemoryPool->print();
-    }
     if constexpr (constants::DoTimeBenchmarks) {
       logger(std::format("=== TimeFrame {} processing completed in: {:.2f} ms using {} thread(s) ===", mTimeFrameCounter, total, mTraits->getNThreads()));
     }
