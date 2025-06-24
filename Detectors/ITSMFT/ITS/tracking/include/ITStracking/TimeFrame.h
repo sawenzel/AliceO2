@@ -175,9 +175,9 @@ struct TimeFrame {
   auto& getVerticesMCRecInfo() { return mVerticesMCRecInfo; }
 
   int getNumberOfClusters() const;
-  int getNumberOfCells() const;
-  int getNumberOfTracklets() const;
-  int getNumberOfNeighbours() const;
+  virtual int getNumberOfCells() const;
+  virtual int getNumberOfTracklets() const;
+  virtual int getNumberOfNeighbours() const;
   size_t getNumberOfTracks() const;
   size_t getNumberOfUsedClusters() const;
   auto getNumberOfExtendedTracks() const { return mNExtendedTracks; }
