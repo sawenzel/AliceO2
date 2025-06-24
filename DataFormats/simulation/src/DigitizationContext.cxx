@@ -457,7 +457,7 @@ std::vector<std::tuple<int, int, int>> getTimeFrameBoundaries(std::vector<o2::In
       // this is the orbit of the ti-th timeframe start
       auto orbit_timeframe_start = startOrbit + ti * orbitsPerTF;
 
-      auto orbit_timeframe_early_fractional = 1.*orbit_timeframe_start - orbitsEarly;
+      auto orbit_timeframe_early_fractional = 1. * orbit_timeframe_start - orbitsEarly;
       auto orbit_timeframe_early_integral = static_cast<long>(std::floor(orbit_timeframe_early_fractional));
 
       auto bc_early = (uint32_t)((orbit_timeframe_early_fractional - orbit_timeframe_early_integral) * o2::constants::lhc::LHCMaxBunches);
