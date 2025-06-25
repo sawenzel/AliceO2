@@ -127,6 +127,8 @@ GPUdii() void GPUTPCNNClusterizerKernels::Thread<GPUTPCNNClusterizerKernels::fil
   if (clustererNN.mNnClusterizerAddIndexData && (int32_t)transient_index == (clustererNN.mNnClusterizerElementSize - 1)) {
     uint32_t top_idx = (base_idx + 1) * clustererNN.mNnClusterizerElementSize;
     if (!clustererNN.mNnClusterizerSetDeconvolutionFlags) { // Only if deconvolution flags are not set
+      clustererNN.mClusterFlags[2 * base_idx] = 0;
+      clustererNN.mClusterFlags[2 * base_idx + 1] = 0;
       for (uint16_t i = 0; i < 8; i++) {                    // This solution needs testing. It is not the same as the deconvolution flags
         Delta2 d = cfconsts::InnerNeighbors[i];
         CfChargePos tmp_pos = peak.delta(d);
@@ -470,6 +472,8 @@ GPUdii() void GPUTPCNNClusterizerKernels::Thread<GPUTPCNNClusterizerKernels::pub
   CfArray2D<PackedCharge> chargeMap(reinterpret_cast<PackedCharge*>(clusterer.mPchargeMap));
   CfChargePos peak = clusterer.mPfilteredPeakPositions[idx + batchStart];
 
+  clustererNN.mClusterFlags[2 * idx] = 0;
+  clustererNN.mClusterFlags[2 * idx + 1] = 0;
   for (int i = 0; i < 8; i++) {
     Delta2 d = cfconsts::InnerNeighbors[i];
     CfChargePos tmp_pos = peak.delta(d);
