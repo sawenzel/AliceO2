@@ -692,7 +692,7 @@ DataRelayer::RelayChoice
       }
       index.publishSlot(slot);
       index.markAsDirty(slot, true);
-      return RelayChoice{.type = RelayChoice::Type::WillRelay};
+      return RelayChoice{.type = RelayChoice::Type::WillRelay, .timeslice = timeslice};
   }
   O2_BUILTIN_UNREACHABLE();
 }
