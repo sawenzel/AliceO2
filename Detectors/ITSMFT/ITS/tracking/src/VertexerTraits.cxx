@@ -482,7 +482,6 @@ void VertexerTraits::computeVertices(const int iteration)
     }
   }
   for (int rofId{0}; rofId < mTimeFrame->getNrof(); ++rofId) {
-    vertices.clear();
     std::sort(mTimeFrame->getTrackletClusters(rofId).begin(), mTimeFrame->getTrackletClusters(rofId).end(),
               [](ClusterLines& cluster1, ClusterLines& cluster2) { return cluster1.getSize() > cluster2.getSize(); }); // ensure clusters are ordered by contributors, so that we can cat after the first.
 #ifdef VTX_DEBUG
@@ -541,6 +540,8 @@ void VertexerTraits::computeVertices(const int iteration)
     if (vertices.empty() && !(iteration && (int)mTimeFrame->getPrimaryVertices(rofId).size() > mVrtParams[iteration].vertPerRofThreshold)) {
       mTimeFrame->getNoVertexROF()++;
     }
+    vertices.clear();
+    polls.clear();
   }
 #ifdef VTX_DEBUG
   TFile* dbg_file = TFile::Open("artefacts_tf.root", "update");
