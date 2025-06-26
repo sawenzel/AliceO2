@@ -307,12 +307,49 @@ bool prepareOutput(ProcessingContext& context, T& builds)
 
 template <is_defines T>
 bool prepareOutput(ProcessingContext& context, T& defines)
+  requires(T::delayed == false)
 {
   using metadata = o2::aod::MetadataTrait<o2::aod::Hash<T::spawnable_t::ref.desc_hash>>::metadata;
   auto originalTable = soa::ArrowHelpers::joinTables(extractOriginals<metadata::sources.size(), metadata::sources>(context), std::span{metadata::base_table_t::originalLabels});
   if (originalTable->schema()->fields().empty() == true) {
     using base_table_t = typename T::base_table_t::table_t;
     originalTable = makeEmptyTable<base_table_t>(o2::aod::label<metadata::extension_table_t::ref>());
+  }
+  if (defines.inputSchema == nullptr) {
+    defines.inputSchema = originalTable->schema();
+  }
+  using D = o2::aod::Hash<metadata::extension_table_t::ref.desc_hash>;
+
+  defines.extension = std::make_shared<typename T::extension_t>(o2::framework::spawner<D>(originalTable,
+                                                                                          o2::aod::label<metadata::extension_table_t::ref>(),
+                                                                                          defines.projectors.data(),
+                                                                                          defines.projector,
+                                                                                          defines.schema));
+  defines.table = std::make_shared<typename T::spawnable_t::table_t>(soa::ArrowHelpers::joinTables({defines.extension->asArrowTable(), originalTable}, std::span{T::spawnable_t::table_t::originalLabels}));
+  return true;
+}
+
+template <typename T>
+bool prepareDelayedOutput(ProcessingContext&, T&)
+{
+  return false;
+}
+
+template <is_defines T>
+  requires(T::delayed == true)
+bool prepareDelayedOutput(ProcessingContext& context, T& defines)
+{
+  if (defines.needRecompilation) {
+    defines.recompile();
+  }
+  using metadata = o2::aod::MetadataTrait<o2::aod::Hash<T::spawnable_t::ref.desc_hash>>::metadata;
+  auto originalTable = soa::ArrowHelpers::joinTables(extractOriginals<metadata::sources.size(), metadata::sources>(context), std::span{metadata::base_table_t::originalLabels});
+  if (originalTable->schema()->fields().empty() == true) {
+    using base_table_t = typename T::base_table_t::table_t;
+    originalTable = makeEmptyTable<base_table_t>(o2::aod::label<metadata::extension_table_t::ref>());
+  }
+  if (defines.inputSchema == nullptr) {
+    defines.inputSchema = originalTable->schema();
   }
   using D = o2::aod::Hash<metadata::extension_table_t::ref.desc_hash>;
 

@@ -32,6 +32,15 @@ struct P {
   PROCESS_SWITCH(P, process1, "", true);
 };
 
+namespace o2::aod
+{
+namespace ct
+{
+DECLARE_SOA_CONFIGURABLE_EXPRESSION_COLUMN(Test, test, float, "test");
+}
+DECLARE_SOA_CONFIGURABLE_EXTENDED_TABLE(TracksMore, TracksIU, "TRKMORE", ct::Test);
+} // namespace o2::aod
+
 TEST_CASE("IdentificationConcepts")
 {
   // ASoA
@@ -121,6 +130,11 @@ TEST_CASE("IdentificationConcepts")
 
   Builds<o2::aod::Run3MatchedSparse> bld;
   REQUIRE(is_builds<decltype(bld)>);
+
+  Defines<o2::aod::TracksMore> def;
+  DefinesDelayed<o2::aod::TracksMore> ddef;
+  REQUIRE(is_defines<decltype(def)>);
+  REQUIRE(is_defines<decltype(ddef)>);
 
   OutputObj<TH1F> oo{"test"};
   REQUIRE(is_outputobj<decltype(oo)>);
