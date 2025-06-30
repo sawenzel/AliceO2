@@ -10,9 +10,6 @@
 // or submit itself to any jurisdiction.
 #ifndef O2_FRAMEWORK_BASICOPS_H_
 #define O2_FRAMEWORK_BASICOPS_H_
-#include <array>
-#include <string_view>
-#include "CommonConstants/MathConstants.h"
 
 namespace o2::framework
 {
@@ -49,61 +46,6 @@ enum BasicOp : unsigned int {
   BitwiseNot,
   Conditional // 3-ar functions
 };
-
-static constexpr std::array<std::string_view, BasicOp::Conditional + 1> mapping{
-  "&&",
-  "||",
-  "+",
-  "-",
-  "/",
-  "*",
-  "&",
-  "|",
-  "^",
-  "<",
-  "<=",
-  ">",
-  ">=",
-  "==",
-  "!=",
-  "natan2",
-  "npow",
-  "nsqrt",
-  "nexp",
-  "nlog",
-  "nlog10",
-  "nsin",
-  "ncos",
-  "ntan",
-  "nasin",
-  "nacos",
-  "natan",
-  "nabs",
-  "nround",
-  "nbitwise_not",
-  "ifnode"};
-
-static constexpr std::array<std::string_view, 9> mathConstants{
-  "Almost0",
-  "Epsilon",
-  "Almost1",
-  "VeryBig",
-  "PI",
-  "TwoPI",
-  "PIHalf",
-  "PIThird",
-  "PIQuarter"};
-
-static constexpr std::array<float, 9> mathConstantsValues{
-  o2::constants::math::Almost0,
-  o2::constants::math::Epsilon,
-  o2::constants::math::Almost1,
-  o2::constants::math::VeryBig,
-  o2::constants::math::PI,
-  o2::constants::math::TwoPI,
-  o2::constants::math::PIHalf,
-  o2::constants::math::PIThird,
-  o2::constants::math::PIQuarter};
 } // namespace o2::framework
 
 #endif // O2_FRAMEWORK_BASICOPS_H_

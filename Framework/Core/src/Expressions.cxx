@@ -19,6 +19,7 @@
 #include <set>
 #include <stack>
 #include <unordered_map>
+#include "CommonConstants/MathConstants.h"
 
 using namespace o2::framework;
 
@@ -29,9 +30,67 @@ void unknownParameterUsed(const char* name)
   runtime_error_f("Unknown parameter used in expression: %s", name);
 }
 
+/// a map between BasicOp and tokens in string expressions
+constexpr std::array<std::string_view, BasicOp::Conditional + 1> mapping{
+  "&&",
+  "||",
+  "+",
+  "-",
+  "/",
+  "*",
+  "&",
+  "|",
+  "^",
+  "<",
+  "<=",
+  ">",
+  ">=",
+  "==",
+  "!=",
+  "natan2",
+  "npow",
+  "nsqrt",
+  "nexp",
+  "nlog",
+  "nlog10",
+  "nsin",
+  "ncos",
+  "ntan",
+  "nasin",
+  "nacos",
+  "natan",
+  "nabs",
+  "nround",
+  "nbitwise_not",
+  "ifnode"};
+
+/// math constants to recognize in string expressions
+constexpr std::array<std::string_view, 9> mathConstants{
+  "Almost0",
+  "Epsilon",
+  "Almost1",
+  "VeryBig",
+  "PI",
+  "TwoPI",
+  "PIHalf",
+  "PIThird",
+  "PIQuarter"};
+
+/// values of math constants to substiture
+constexpr std::array<float, 9> mathConstantsValues{
+  o2::constants::math::Almost0,
+  o2::constants::math::Epsilon,
+  o2::constants::math::Almost1,
+  o2::constants::math::VeryBig,
+  o2::constants::math::PI,
+  o2::constants::math::TwoPI,
+  o2::constants::math::PIHalf,
+  o2::constants::math::PIThird,
+  o2::constants::math::PIQuarter};
+
 /// a map between BasicOp and gandiva node definitions
 /// note that logical 'and' and 'or' are created separately
-static constexpr std::array<const char*, BasicOp::Conditional + 1> basicOperationsMap = {
+constexpr std::array<const char*, BasicOp::Conditional + 1> basicOperationsMap = {
   "and",
   "or",
   "add",
