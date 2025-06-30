@@ -580,7 +580,7 @@ static void setGroupedCombination(C& comb, TG& grouping, std::tuple<Ts...>& asso
 
 /// Preslice handling
 template <typename T>
-  requires(!is_preslice<T>)
+  requires(!is_preslice<T> && !is_preslice_group<T>)
 bool registerCache(T&, Cache&, Cache&)
 {
   return false;
@@ -622,8 +622,15 @@ bool registerCache(T& preslice, Cache&, Cache& bsksU)
   return true;
 }
 
+template <is_preslice_group T>
+bool registerCache(T& presliceGroup, Cache& bsks, Cache& bsksU)
+{
+  homogeneous_apply_refs<true>([&bsks, &bsksU](auto& preslice) { return registerCache(preslice, bsks, bsksU); }, presliceGroup);
+  return true;
+}
+
 template <typename T>
-  requires(!is_preslice<T>)
+  requires(!is_preslice<T> && !is_preslice_group<T>)
 bool updateSliceInfo(T&, ArrowTableSlicingCache&)
 {
   return false;
@@ -652,6 +659,13 @@ static bool updateSliceInfo(T& preslice, ArrowTableSlicingCache& cache)
     }
   }
   preslice.updateSliceInfo(cache.getCacheUnsortedFor(preslice.getBindingKey()));
+  return true;
+}
+
+template <is_preslice_group T>
+static bool updateSliceInfo(T& presliceGroup, ArrowTableSlicingCache& cache)
+{
+  homogeneous_apply_refs<true>([&cache](auto& preslice) { return updateSliceInfo(preslice, cache); }, presliceGroup);
   return true;
 }
 

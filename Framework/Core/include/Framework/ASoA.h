@@ -1468,6 +1468,24 @@ using PresliceOptional = PresliceBase<T, PreslicePolicySorted, true>;
 template <typename T>
 concept is_preslice = std::derived_from<T, PreslicePolicyBase>;
 
+/// Can be user to group together a number of Preslice declaration
+/// to avoid the limit of 100 data members per task
+///
+/// struct MyTask
+///   struct : public PresliceGroup {
+///     Preslice<aod::Tracks> perCol = aod::track::collisonId;
+///     Preslice<aod::McParticles> perMcCol = aod::mcparticle::mcCollisionId;
+///   } preslices;
+///
+/// individual components can be access with
+///
+/// preslices.perCol;
+struct PresliceGroup {
+};
+
+template <typename T>
+concept is_preslice_group = std::derived_from<T, PresliceGroup>;
+
 } // namespace o2::framework
 
 namespace o2::soa
