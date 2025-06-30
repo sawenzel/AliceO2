@@ -152,6 +152,12 @@ size_t Filter::designateSubtrees(Node* node, size_t index)
   return index;
 }
 
+void Filter::parse()
+{
+  node = std::make_unique<Node>(Parser::parse(input));
+  (void)designateSubtrees(node.get());
+}
+
 template <typename T>
 constexpr inline auto makeDatum(T const&)
 {
@@ -252,6 +258,9 @@ std::ostream& operator<<(std::ostream& os, DatumSpec const& spec)
 
 void updatePlaceholders(Filter& filter, InitContext& context)
 {
+  if (filter.node == nullptr && !filter.input.empty()) {
+    filter.parse();
+  }
   expressions::walk(filter.node.get(), [&](Node* node) {
     if (node->self.index() == 3) {
       std::get_if<3>(&node->self)->reset(context);

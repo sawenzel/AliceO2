@@ -610,15 +610,29 @@ struct Filter {
     (void)designateSubtrees(node.get());
   }
 
+  Filter(std::string const& input_) : input{input_} {}
+
   Filter& operator=(Filter&& other) noexcept
   {
     node = std::move(other.node);
+    input = std::move(other.input);
+    return *this;
+  }
+
+  Filter& operator=(std::string const& input_)
+  {
+    input = input_;
+    if (node != nullptr) {
+      node = nullptr;
+    }
     return *this;
   }
 
   std::unique_ptr<Node> node = nullptr;
+  std::string input;
 
   size_t designateSubtrees(Node* node, size_t index = 0);
+  void parse();
 };
 
 template <typename T>
