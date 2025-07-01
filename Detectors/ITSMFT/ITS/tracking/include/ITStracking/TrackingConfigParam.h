@@ -95,6 +95,7 @@ struct TrackerParamConfig : public o2::conf::ConfigurableParamHelper<TrackerPara
   bool overrideBeamEstimation = false;     // use beam position from meanVertex CCDB object
   int trackingMode = -1;                   // -1: unset, 0=sync, 1=async, 2=cosmics used by gpuwf only
   bool doUPCIteration = false;             // Perform an additional iteration for UPC events on tagged vertices. You want to combine this config with VertexerParamConfig.nIterations=2
+  int nIterations = MaxIter;               // overwrite the number of iterations
 
   int nThreads = 1;
   bool printMemory = false;

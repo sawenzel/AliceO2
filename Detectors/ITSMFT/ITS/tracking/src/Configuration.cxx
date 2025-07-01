@@ -245,6 +245,10 @@ std::vector<TrackingParameters> TrackingMode::getTrackingParameters(TrackingMode
     }
   }
 
+  if (trackParams.size() > tc.nIterations) {
+    trackParams.resize(tc.nIterations);
+  }
+
   return trackParams;
 }
 
