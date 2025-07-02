@@ -25,19 +25,12 @@
 
 #include <oneapi/tbb/task_arena.h>
 
-#include "ITStracking/ROframe.h"
 #include "ITStracking/Constants.h"
 #include "ITStracking/Configuration.h"
 #include "ITStracking/TimeFrame.h"
 #include "ITStracking/VertexerTraits.h"
 #include "ITStracking/BoundedAllocator.h"
 #include "ReconstructionDataFormats/Vertex.h"
-
-#include "ITStracking/ClusterLines.h"
-#include "ITStracking/Tracklet.h"
-#include "ITStracking/Cluster.h"
-
-#include "GPUCommonLogger.h"
 
 namespace o2::its
 {

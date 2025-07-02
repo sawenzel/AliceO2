@@ -19,7 +19,6 @@
 #include "ITStracking/Cell.h"
 #include "ITStracking/Constants.h"
 #include "ITStracking/IndexTableUtils.h"
-#include "ITStracking/Smoother.h"
 #include "ITStracking/Tracklet.h"
 #include "ITStracking/TrackerTraits.h"
 #include "ITStracking/TrackingConfigParam.h"

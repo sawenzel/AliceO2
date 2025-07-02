@@ -34,7 +34,6 @@
 #include "DetectorsBase/Propagator.h"
 #include "ITSBase/GeometryTGeo.h"
 #include "CommonDataFormat/IRFrame.h"
-#include "ITStracking/ROframe.h"
 #include "ITStracking/IOUtils.h"
 #include "DetectorsCommonDataFormats/DetectorNameConf.h"
 #include "CommonUtils/StringUtils.h"
@@ -113,7 +112,6 @@ void CookedTrackerDPL::run(ProcessingContext& pc)
     mTracker.setMCTruthContainers(labels.get(), &trackLabels);
   }
 
-  o2::its::ROframe event(0, 7);
   mVertexerPtr->adoptTimeFrame(mTimeFrame);
 
   auto& vertROFvec = pc.outputs().make<std::vector<o2::itsmft::ROFRecord>>(Output{"ITS", "VERTICESROF", 0});

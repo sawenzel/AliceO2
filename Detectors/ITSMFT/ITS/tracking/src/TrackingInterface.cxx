@@ -9,15 +9,18 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
+#include <memory>
+
+#include <oneapi/tbb/task_arena.h>
+
 #include "ITSMFTBase/DPLAlpideParam.h"
 #include "ITSBase/GeometryTGeo.h"
 
 #include "ITSReconstruction/FastMultEstConfig.h"
 #include "ITSReconstruction/FastMultEst.h"
 
+#include "ITStracking/TrackingConfigParam.h"
 #include "ITStracking/TrackingInterface.h"
-#include <oneapi/tbb/task_arena.h>
-#include <memory>
 
 #include "DataFormatsITSMFT/ROFRecord.h"
 #include "DataFormatsITSMFT/PhysTrigger.h"
@@ -25,7 +28,6 @@
 #include "CommonDataFormat/IRFrame.h"
 #include "DetectorsBase/GRPGeomHelper.h"
 #include "ITStracking/BoundedAllocator.h"
-#include "ITStracking/TrackingConfigParam.h"
 #include "Framework/DeviceSpec.h"
 
 using namespace o2::framework;

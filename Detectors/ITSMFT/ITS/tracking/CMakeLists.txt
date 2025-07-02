@@ -15,10 +15,8 @@ o2_add_library(ITStracking
                SOURCES src/ClusterLines.cxx
                        src/Cluster.cxx
                        src/Configuration.cxx
-                       src/ROframe.cxx
                        src/TimeFrame.cxx
                        src/IOUtils.cxx
-                       src/Label.cxx
                        src/Tracker.cxx
                        src/TrackerTraits.cxx
                        src/TrackingConfigParam.cxx

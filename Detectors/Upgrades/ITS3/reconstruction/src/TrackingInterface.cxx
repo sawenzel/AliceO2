@@ -12,6 +12,7 @@
 #include "ITS3Reconstruction/TrackingInterface.h"
 #include "ITS3Reconstruction/IOUtils.h"
 #include "ITSBase/GeometryTGeo.h"
+#include "ITStracking/TrackingConfigParam.h"
 #include "ITSMFTBase/DPLAlpideParam.h"
 #include "DetectorsBase/GRPGeomHelper.h"
 #include "Framework/DeviceSpec.h"

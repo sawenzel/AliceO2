@@ -32,7 +32,6 @@
 #include "ITStracking/Configuration.h"
 #include "CommonConstants/MathConstants.h"
 #include "ITStracking/Definitions.h"
-#include "ITStracking/ROframe.h"
 #include "ITStracking/MathUtils.h"
 #include "ITStracking/TimeFrame.h"
 #include "ITStracking/TrackerTraits.h"
