@@ -1660,6 +1660,10 @@ void GPUQA::RunQA(bool matchOnly, const std::vector<o2::tpc::TrackTPC>* tracksEx
 
   if (mQATasks & taskTrackStatistics) {
     // Fill track statistic histograms
+    std::vector<std::array<float, 2>> clusterAttachCounts;
+    if (mcAvail) {
+      clusterAttachCounts.resize(GetNMCLabels(), {0.f, 0.f});
+    }
     for (uint32_t i = 0; i < nReconstructedTracks; i++) {
       const GPUTPCGMMergedTrack& track = mTracking->mIOPtrs.mergedTracks[i];
       if (!track.OK()) {
@@ -1668,21 +1672,38 @@ void GPUQA::RunQA(bool matchOnly, const std::vector<o2::tpc::TrackTPC>* tracksEx
       mTracks->Fill(1.f / fabsf(track.GetParam().GetQPt()));
       mNCl[0]->Fill(track.NClustersFitted());
       uint32_t nClCorrected = 0;
-      int32_t lastSector = -1, lastRow = -1;
       const auto& trackClusters = mTracking->mIOPtrs.mergedTrackHits;
-      for (uint32_t j = 0; j < track.NClusters(); j++) {
-        if (trackClusters[track.FirstClusterRef() + j].state & GPUTPCGMMergedTrackHit::flagReject) {
-          continue;
+      uint32_t jNext = 0;
+      for (uint32_t j = 0; j < track.NClusters(); j = jNext) {
+        uint32_t rowClCount = !(trackClusters[track.FirstClusterRef() + j].state & GPUTPCGMMergedTrackHit::flagReject);
+        for (jNext = j + 1; j < track.NClusters(); jNext++) {
+          if (trackClusters[track.FirstClusterRef() + j].sector != trackClusters[track.FirstClusterRef() + jNext].sector || trackClusters[track.FirstClusterRef() + j].row != trackClusters[track.FirstClusterRef() + jNext].row) {
+            break;
+          }
+          rowClCount += !(trackClusters[track.FirstClusterRef() + jNext].state & GPUTPCGMMergedTrackHit::flagReject);
         }
-        if (trackClusters[track.FirstClusterRef() + j].sector == lastSector && trackClusters[track.FirstClusterRef() + j].row == lastRow) {
-          continue;
+        if (trackClusters[track.FirstClusterRef() + j].leg == trackClusters[track.FirstClusterRef() + track.NClusters() - 1].leg && rowClCount) {
+          nClCorrected++;
         }
-        if (trackClusters[track.FirstClusterRef() + j].leg != trackClusters[track.FirstClusterRef() + track.NClusters() - 1].leg) {
-          continue;
+        if (mcAvail && rowClCount) {
+          for (uint32_t k = j; k < jNext; k++) {
+            const auto& cl = trackClusters[track.FirstClusterRef() + k];
+            if (cl.state & GPUTPCGMMergedTrackHit::flagReject) {
+              continue;
+            }
+            bool labelOk = false;
+            if (mTrackMCLabels[i].isValid() && !mTrackMCLabels[i].isFake()) {
+              for (int32_t l = 0; l < GetMCLabelNID(cl.num); l++) {
+                if (GetMCLabel(cl.num, l) == mTrackMCLabels[i]) {
+                  labelOk = true;
+                  break;
+                }
+              }
+            }
+            clusterAttachCounts[cl.num][0] += (float)labelOk / rowClCount;
+            clusterAttachCounts[cl.num][1] += 1.0f;
+          }
         }
-        nClCorrected++;
-        lastSector = trackClusters[track.FirstClusterRef() + j].sector;
-        lastRow = trackClusters[track.FirstClusterRef() + j].sector;
       }
       mNCl[1]->Fill(nClCorrected);
     }
@@ -1698,6 +1719,16 @@ void GPUQA::RunQA(bool matchOnly, const std::vector<o2::tpc::TrackTPC>* tracksEx
           }
         }
       }
+    }
+    if (mcAvail) {
+      double clusterAttachNormalizedCount = 0;
+      for (uint32_t i = 0; i < clusterAttachCounts.size(); i++) {
+        if (clusterAttachCounts[i][1]) {
+          clusterAttachNormalizedCount += clusterAttachCounts[i][0] / clusterAttachCounts[i][1];
+        }
+      }
+      mClusterCounts.nCorrectlyAttachedNormalized = clusterAttachNormalizedCount;
+      clusterAttachCounts.clear();
     }
 
     if (QA_TIMING || (mTracking && mTracking->GetProcessingSettings().debugLevel >= 3)) {
@@ -2824,7 +2855,7 @@ void GPUQA::PrintClusterCount(int32_t mode, int32_t& num, const char* name, uint
     createHist(mHistClusterCount[num], name2, name, 1000, 0, mConfig.histMaxNClusters, 1000, 0, 100);
   } else if (mode == 0) {
     if (normalization && mConfig.enableLocalOutput) {
-      printf("\t%35s: %'12" PRIu64 " (%6.2f%%)\n", name, n, 100.f * n / normalization);
+      printf("\t%40s: %'12" PRIu64 " (%6.2f%%)\n", name, n, 100.f * n / normalization);
     }
     if (mConfig.clusterRejectionHistograms) {
       float ratio = 100.f * n / std::max<uint64_t>(normalization, 1);
@@ -2868,6 +2899,9 @@ int32_t GPUQA::DoClusterCounts(uint64_t* attachClusterCounts, int32_t mode)
     PrintClusterCount(mode, num, "Full Fake Removed (> 400 MeV)", mClusterCounts.nFullFakeRemove400, mClusterCounts.nAbove400);
     PrintClusterCount(mode, num, "Tracks < 40 MeV", mClusterCounts.nBelow40, mClusterCounts.nTotal);
     PrintClusterCount(mode, num, "Fake Protect (< 40 MeV)", mClusterCounts.nFakeProtect40, mClusterCounts.nBelow40);
+  }
+  if (mcPresent() && (mQATasks & taskTrackStatistics)) {
+    PrintClusterCount(mode, num, "Correctly Attached non-fake normalized", mClusterCounts.nCorrectlyAttachedNormalized, mClusterCounts.nTotal);
   }
   return num;
 }
