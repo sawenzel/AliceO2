@@ -105,7 +105,7 @@ float EMCALTempCalibExtractor::getGainCalibFactor(const unsigned short cellID) c
 std::vector<unsigned short> EMCALTempCalibExtractor::getSensorsForSM(const unsigned short iSM) const
 {
   unsigned short nSensors = 8;
-  if (iSM == 10 || iSM == 11 || iSM == 19 || iSM == 20) {
+  if (iSM == 10 || iSM == 11 || iSM == 18 || iSM == 19) { // 1/3 SM of EMCal only have 4 sensors
     nSensors = 4;
   }
 
