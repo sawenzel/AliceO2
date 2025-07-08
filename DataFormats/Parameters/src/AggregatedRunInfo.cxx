@@ -104,7 +104,7 @@ std::map<std::string, std::string> AggregatedRunInfo::getMCProdInfo(o2::ccdb::CC
                                                                     std::string const& username)
 {
   std::map<std::string, std::string> metaDataFilter;
-  metaDataFilter["lpm_prod_tag"] = lpm_prod_tag;
+  metaDataFilter["LPMProductionTag"] = lpm_prod_tag;
 
   // fetch the meta information for MC productions
   auto header_data = ccdb.getCCDBAccessor().retrieveHeaders(getFullPath_MC(username, lpm_prod_tag), metaDataFilter, run_number);
