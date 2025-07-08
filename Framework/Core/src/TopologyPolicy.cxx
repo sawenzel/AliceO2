@@ -87,10 +87,6 @@ bool sporadicDataDeps(DataProcessorSpec const& a, DataProcessorSpec const& b)
   if (isAWithSporadicInput && isBWithSporadicInput) {
     return false;
   }
-  // If a has sporadic inputs
-  if (isAWithSporadicInput && isBWithSporadicInput) {
-    return false;
-  }
 
   // We have a with sporadic inputs. We sort it later, unless there was already some actual
   // dependency between A and B.
