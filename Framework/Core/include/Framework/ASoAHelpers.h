@@ -78,12 +78,12 @@ std::vector<BinningIndex> groupTable(const T& table, const BP<Cs...>& binningPol
 {
   std::vector<BinningIndex> groupedIndices;
 
-  for(auto rowIterator : table) {
-      auto values = binningPolicy.getBinningValues(rowIterator);
-      auto val = binningPolicy.getBin(values);
-      if (val != outsider) {
-        groupedIndices.emplace_back(val, *std::get<1>(rowIterator.getIndices()));
-      }
+  for (auto rowIterator : table) {
+    auto values = binningPolicy.getBinningValues(rowIterator);
+    auto val = binningPolicy.getBin(values);
+    if (val != outsider) {
+      groupedIndices.emplace_back(val, *std::get<1>(rowIterator.getIndices()));
+    }
   }
 
   // Do a stable sort so that same categories entries are
