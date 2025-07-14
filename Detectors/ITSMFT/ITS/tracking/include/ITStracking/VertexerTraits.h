@@ -73,23 +73,9 @@ class VertexerTraits
   virtual void computeVertices(const int iteration = 0);
   virtual void adoptTimeFrame(TimeFrame7* tf) noexcept { mTimeFrame = tf; }
   virtual void updateVertexingParameters(const std::vector<VertexingParameters>& vrtPar, const TimeFrameGPUParameters& gpuTfPar);
+
   // truth tracking
   void addTruthSeedingVertices();
-
-  void computeVerticesInRof(int,
-                            gsl::span<const o2::its::Line>&,
-                            bounded_vector<bool>&,
-                            bounded_vector<o2::its::ClusterLines>&,
-                            std::array<float, 2>&,
-                            bounded_vector<Vertex>&,
-                            bounded_vector<int>&,
-                            TimeFrame7*,
-                            bounded_vector<o2::MCCompLabel>*,
-                            const int iteration = 0);
-
-  bounded_vector<std::pair<int, int>> selectClusters(const int* indexTable,
-                                                     const std::array<int, 4>& selectedBinsRect,
-                                                     const IndexTableUtils& utils);
 
   // utils
   auto& getVertexingParameters() { return mVrtParams; }
