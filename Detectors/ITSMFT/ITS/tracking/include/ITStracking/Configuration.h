@@ -113,6 +113,7 @@ struct VertexingParameters {
   bool SaveTimeBenchmarks = false;
 
   bool useTruthSeeding = false; // overwrite found vertices with MC events
+  bool outputContLabels = false;
 
   int nThreads = 1;
   bool PrintMemory = false; // print allocator usage in epilog report

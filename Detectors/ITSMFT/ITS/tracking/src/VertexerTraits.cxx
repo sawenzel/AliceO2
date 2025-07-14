@@ -388,6 +388,7 @@ void VertexerTraits::computeVertices(const int iteration)
   auto nsigmaCut{std::min(mVrtParams[iteration].vertNsigmaCut * mVrtParams[iteration].vertNsigmaCut * (mVrtParams[iteration].vertRadiusSigma * mVrtParams[iteration].vertRadiusSigma + mVrtParams[iteration].trackletSigma * mVrtParams[iteration].trackletSigma), 1.98f)};
   bounded_vector<Vertex> vertices(mMemoryPool.get());
   bounded_vector<std::pair<o2::MCCompLabel, float>> polls(mMemoryPool.get());
+  bounded_vector<o2::MCCompLabel> contLabels(mMemoryPool.get());
 #ifdef VTX_DEBUG
   std::vector<std::vector<ClusterLines>> dbg_clusLines(mTimeFrame->getNrof());
 #endif
@@ -511,6 +512,9 @@ void VertexerTraits::computeVertices(const int iteration)
             labels.push_back(mTimeFrame->getLinesLabel(rofId)[index]); // then we can use nContributors from vertices to get the labels
           }
           polls.push_back(computeMain(labels));
+          if (mVrtParams[iteration].outputContLabels) {
+            contLabels.insert(contLabels.end(), labels.begin(), labels.end());
+          }
         }
       }
     }
@@ -518,11 +522,17 @@ void VertexerTraits::computeVertices(const int iteration)
       mTimeFrame->addPrimaryVertices(vertices, rofId, iteration);
       if (mTimeFrame->hasMCinformation()) {
         mTimeFrame->addPrimaryVerticesLabels(polls);
+        if (mVrtParams[iteration].outputContLabels) {
+          mTimeFrame->addPrimaryVerticesContributorLabels(contLabels);
+        }
       }
     } else {
       mTimeFrame->addPrimaryVerticesInROF(vertices, rofId, iteration);
       if (mTimeFrame->hasMCinformation()) {
         mTimeFrame->addPrimaryVerticesLabelsInROF(polls, rofId);
+        if (mVrtParams[iteration].outputContLabels) {
+          mTimeFrame->addPrimaryVerticesContributorLabelsInROF(contLabels, rofId);
+        }
       }
     }
     if (vertices.empty() && !(iteration && (int)mTimeFrame->getPrimaryVertices(rofId).size() > mVrtParams[iteration].vertPerRofThreshold)) {

@@ -117,6 +117,8 @@ void ITSTrackingInterface::run(framework::ProcessingContext& pc)
   static pmr::vector<float> dummyMCPurVerts;
   auto& allTrackLabels = mIsMC ? pc.outputs().make<std::vector<o2::MCCompLabel>>(Output{"ITS", "TRACKSMCTR", 0}) : dummyMCLabTracks;
   auto& allVerticesLabels = mIsMC ? pc.outputs().make<std::vector<o2::MCCompLabel>>(Output{"ITS", "VERTICESMCTR", 0}) : dummyMCLabVerts;
+  bool writeContLabels = mIsMC && o2::its::VertexerParamConfig::Instance().outputContLabels;
+  auto& allVerticesContLabels = writeContLabels ? pc.outputs().make<std::vector<o2::MCCompLabel>>(Output{"ITS", "VERTICESMCTRCONT", 0}) : dummyMCLabVerts;
   auto& allVerticesPurities = mIsMC ? pc.outputs().make<std::vector<float>>(Output{"ITS", "VERTICESMCPUR", 0}) : dummyMCPurVerts;
 
   std::uint32_t roFrame = 0;
@@ -159,6 +161,7 @@ void ITSTrackingInterface::run(framework::ProcessingContext& pc)
   }
   const auto& multEstConf = FastMultEstConfig::Instance(); // parameters for mult estimation and cuts
   gsl::span<const std::pair<MCCompLabel, float>> vMCRecInfo;
+  gsl::span<const MCCompLabel> vMCContLabels;
   for (auto iRof{0}; iRof < trackROFspan.size(); ++iRof) {
     std::vector<Vertex> vtxVecLoc;
     auto& vtxROF = vertROFvec.emplace_back(trackROFspan[iRof]);
@@ -167,6 +170,9 @@ void ITSTrackingInterface::run(framework::ProcessingContext& pc)
       auto vtxSpan = mTimeFrame->getPrimaryVertices(iRof);
       if (mIsMC) {
         vMCRecInfo = mTimeFrame->getPrimaryVerticesMCRecInfo(iRof);
+        if (o2::its::VertexerParamConfig::Instance().outputContLabels) {
+          vMCContLabels = mTimeFrame->getPrimaryVerticesContributors(iRof);
+        }
       }
       if (o2::its::TrackerParamConfig::Instance().doUPCIteration) {
         if (!vtxSpan.empty()) {
@@ -186,9 +192,10 @@ void ITSTrackingInterface::run(framework::ProcessingContext& pc)
       }
       vtxROF.setNEntries(vtxSpan.size());
       bool selROF = vtxSpan.empty();
-      for (auto iV{0}; iV < vtxSpan.size(); ++iV) {
+      for (int iV{0}, iVC{0}; iV < vtxSpan.size(); ++iV) {
         const auto& v = vtxSpan[iV];
         if (multEstConf.isVtxMultCutRequested() && !multEstConf.isPassingVtxMultCut(v.getNContributors())) {
+          iVC += v.getNContributors();
           continue; // skip vertex of unwanted multiplicity
         }
         selROF = true;
@@ -196,7 +203,11 @@ void ITSTrackingInterface::run(framework::ProcessingContext& pc)
         if (mIsMC && !VertexerParamConfig::Instance().useTruthSeeding) {
           allVerticesLabels.push_back(vMCRecInfo[iV].first);
           allVerticesPurities.push_back(vMCRecInfo[iV].second);
+          if (o2::its::VertexerParamConfig::Instance().outputContLabels) {
+            allVerticesContLabels.insert(allVerticesContLabels.end(), vMCContLabels.begin() + iVC, vMCContLabels.begin() + iVC + v.getNContributors());
+          }
         }
+        iVC += v.getNContributors();
       }
       if (processingMask[iRof] && !selROF) { // passed selection in clusters and not in vertex multiplicity
         LOGP(info, "ROF {} rejected by the vertex multiplicity selection [{},{}]", iRof, multEstConf.cutMultVtxLow, multEstConf.cutMultVtxHigh);
@@ -291,6 +302,9 @@ void ITSTrackingInterface::run(framework::ProcessingContext& pc)
     if (mIsMC) {
       LOGP(info, "ITSTracker pushed {} track labels", allTrackLabels.size());
       LOGP(info, "ITSTracker pushed {} vertex labels", allVerticesLabels.size());
+      if (!allVerticesContLabels.empty()) {
+        LOGP(info, "ITSTracker pushed {} vertex contributor labels", allVerticesContLabels.size());
+      }
       LOGP(info, "ITSTracker pushed {} vertex purities", allVerticesPurities.size());
     }
   }

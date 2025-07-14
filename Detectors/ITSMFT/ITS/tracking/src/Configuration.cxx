@@ -284,6 +284,7 @@ std::vector<VertexingParameters> TrackingMode::getVertexingParameters(TrackingMo
     p.PhiBins = vc.PhiBins;
 
     p.useTruthSeeding = vc.useTruthSeeding;
+    p.outputContLabels = vc.outputContLabels;
   }
   // set for now outside to not disturb status quo
   vertParams[0].vertNsigmaCut = vc.vertNsigmaCut;
