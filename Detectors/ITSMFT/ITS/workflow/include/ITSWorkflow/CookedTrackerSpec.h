@@ -19,11 +19,14 @@
 #include "ITStracking/TimeFrame.h"
 #include "ITStracking/Vertexer.h"
 #include "ITStracking/VertexerTraits.h"
+#include "ITStracking/BoundedAllocator.h"
 #include "DataFormatsParameters/GRPObject.h"
 #include "DataFormatsITSMFT/TopologyDictionary.h"
 #include "Framework/Task.h"
 #include "TStopwatch.h"
 #include "DetectorsBase/GRPGeomHelper.h"
+
+#include <oneapi/tbb/task_arena.h>
 
 using namespace o2::framework;
 
@@ -57,6 +60,8 @@ class CookedTrackerDPL : public Task
   o2::its::CookedTracker mTracker;
   std::unique_ptr<VertexerTraits> mVertexerTraitsPtr = nullptr;
   std::unique_ptr<Vertexer> mVertexerPtr = nullptr;
+  std::shared_ptr<BoundedMemoryResource> mMemoryPool;
+  std::shared_ptr<tbb::task_arena> mTaskArena;
   TStopwatch mTimer;
 };
 
