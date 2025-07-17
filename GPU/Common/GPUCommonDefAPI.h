@@ -79,7 +79,7 @@
   #define GPUdDefault()
   #define GPUhdDefault()
   #define GPUdi() inline
-  #define GPUdii() inline
+  #define GPUdii() __attribute__((always_inline)) inline
   #define GPUdni()
   #define GPUdnii()
   #define GPUh() INVALID_TRIGGER_ERROR_NO_HOST_CODE
