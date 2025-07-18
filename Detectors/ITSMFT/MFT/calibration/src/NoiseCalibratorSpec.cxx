@@ -299,8 +299,8 @@ void NoiseCalibratorSpec::sendOutputCcdbMerge(DataAllocator& output)
 
   auto payload = mCalibrator->getNoiseMap();
   //  const auto& payload = mCalibrator->getNoiseMap(starTF, endTF); //For TimeSlot calibration
-  map<string, string> headers;
-  map<std::string, std::string> filter;
+  std::map<std::string, std::string> headers;
+  std::map<std::string, std::string> filter;
   auto* payloadPrev1 = api.retrieveFromTFileAny<o2::itsmft::NoiseMap>(mPathSingle, filter, -1, &headers);
   long validtime = std::stol(headers["Valid-From"]);
   auto mergedPL = payload;
@@ -424,8 +424,8 @@ void NoiseCalibratorSpec::sendOutputDcsMerge(DataAllocator& output)
   auto payload = mCalibrator->getNoiseMap();
   //  const auto& payload = mCalibrator->getNoiseMap(starTF, endTF); //For TimeSlot calibration
 
-  map<string, string> headers;
-  map<std::string, std::string> filter;
+  std::map<std::string, std::string> headers;
+  std::map<std::string, std::string> filter;
   auto* payloadPrev1 = api.retrieveFromTFileAny<o2::itsmft::NoiseMap>(mPathSingle, filter, -1, &headers);
   long validtime = std::stol(headers["Valid-From"]);
   auto mergedPL = payload;
