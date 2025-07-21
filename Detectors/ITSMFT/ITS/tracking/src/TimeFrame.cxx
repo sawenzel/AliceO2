@@ -711,6 +711,8 @@ void TimeFrame<nLayers>::wipe()
   deepVectorClear(mPrimaryVertices);
   deepVectorClear(mTrackletClusters);
   deepVectorClear(mVerticesContributorLabels);
+  deepVectorClear(mLines);
+  deepVectorClear(mLinesLabels);
 }
 
 template class TimeFrame<7>;
