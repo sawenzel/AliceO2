@@ -25,6 +25,7 @@
 #include "SimulationDataFormat/DigitizationContext.h"
 #include "Steer/MCKinematicsReader.h"
 #include "ITSMFTBase/DPLAlpideParam.h"
+#include "DetectorsRaw/HBFUtils.h"
 
 #ifdef VTX_DEBUG
 #include "TTree.h"
@@ -574,16 +575,25 @@ void VertexerTraits::addTruthSeedingVertices()
   int64_t roFrameBiasInBC = o2::itsmft::DPLAlpideParam<o2::detectors::DetID::ITS>::Instance().roFrameBiasInBC;
   int64_t roFrameLengthInBC = o2::itsmft::DPLAlpideParam<o2::detectors::DetID::ITS>::Instance().roFrameLengthInBC;
   o2::steer::MCKinematicsReader mcReader(dc);
-  std::map<int, bounded_vector<Vertex>> vertices;
+  struct VertInfo {
+    bounded_vector<Vertex> vertices;
+    bounded_vector<int> srcs;
+    bounded_vector<int> events;
+  };
+  std::map<int, VertInfo> vertices;
   for (int iSrc{0}; iSrc < mcReader.getNSources(); ++iSrc) {
     auto eveId2colId = dc->getCollisionIndicesForSource(iSrc);
     for (int iEve{0}; iEve < mcReader.getNEvents(iSrc); ++iEve) {
       const auto& ir = irs[eveId2colId[iEve]];
       if (!ir.isDummy()) { // do we need this, is this for diffractive events?
         const auto& eve = mcReader.getMCEventHeader(iSrc, iEve);
-        int rofId = (ir.toLong() - roFrameBiasInBC) / roFrameLengthInBC;
+        int rofId = ((ir - raw::HBFUtils::Instance().getFirstSampledTFIR()).toLong() - roFrameBiasInBC) / roFrameLengthInBC;
         if (!vertices.contains(rofId)) {
-          vertices[rofId] = bounded_vector<Vertex>(mMemoryPool.get());
+          vertices[rofId] = {
+            .vertices = bounded_vector<Vertex>(mMemoryPool.get()),
+            .srcs = bounded_vector<int>(mMemoryPool.get()),
+            .events = bounded_vector<int>(mMemoryPool.get()),
+          };
         }
         Vertex vert;
         vert.setTimeStamp(rofId);
@@ -594,7 +604,9 @@ void VertexerTraits::addTruthSeedingVertices()
         vert.setChi2(1);
         constexpr float cov = 50e-9;
         vert.setCov(cov, cov, cov, cov, cov, cov);
-        vertices[rofId].push_back(vert);
+        vertices[rofId].vertices.push_back(vert);
+        vertices[rofId].srcs.push_back(iSrc);
+        vertices[rofId].events.push_back(iEve);
       }
     }
   }
@@ -603,10 +615,11 @@ void VertexerTraits::addTruthSeedingVertices()
     bounded_vector<Vertex> verts(mMemoryPool.get());
     bounded_vector<std::pair<o2::MCCompLabel, float>> polls(mMemoryPool.get());
     if (vertices.contains(iROF)) {
-      verts = vertices[iROF];
+      const auto& vertInfo = vertices[iROF];
+      verts = vertInfo.vertices;
       nVerts += verts.size();
       for (size_t i{0}; i < verts.size(); ++i) {
-        o2::MCCompLabel lbl; // unset label for now
+        o2::MCCompLabel lbl(o2::MCCompLabel::maxTrackID(), vertInfo.events[i], vertInfo.srcs[i], false);
         polls.emplace_back(lbl, 1.f);
       }
     } else {
