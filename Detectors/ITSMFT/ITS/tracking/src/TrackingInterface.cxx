@@ -165,7 +165,7 @@ void ITSTrackingInterface::run(framework::ProcessingContext& pc)
   gsl::span<const std::pair<MCCompLabel, float>> vMCRecInfo;
   gsl::span<const MCCompLabel> vMCContLabels;
   for (auto iRof{0}; iRof < trackROFspan.size(); ++iRof) {
-    std::vector<Vertex> vtxVecLoc;
+    bounded_vector<Vertex> vtxVecLoc;
     auto& vtxROF = vertROFvec.emplace_back(trackROFspan[iRof]);
     vtxROF.setFirstEntry(vertices.size());
     if (mRunVertexer) {
@@ -223,7 +223,7 @@ void ITSTrackingInterface::run(framework::ProcessingContext& pc)
       for (auto& v : vtxVecLoc) {
         vertices.push_back(v);
       }
-      mTimeFrame->addPrimaryVertices(vtxVecLoc, iRof, 0);
+      mTimeFrame->addPrimaryVertices(vtxVecLoc, 0);
     }
   }
   if (mRunVertexer) {

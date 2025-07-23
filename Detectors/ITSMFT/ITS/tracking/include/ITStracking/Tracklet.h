@@ -16,6 +16,7 @@
 #ifndef TRACKINGITS_INCLUDE_TRACKLET_H_
 #define TRACKINGITS_INCLUDE_TRACKLET_H_
 
+#include "ITStracking/Constants.h"
 #include "ITStracking/Cluster.h"
 #include "GPUCommonRtypes.h"
 #include "GPUCommonMath.h"
@@ -41,9 +42,10 @@ struct Tracklet final {
   {
     return firstClusterIndex < 0 || secondClusterIndex < 0;
   }
+  GPUhdi() auto getMinRof() const noexcept { return o2::gpu::CAMath::Min(rof[0], rof[1]); }
+  GPUhdi() auto getMaxRof() const noexcept { return o2::gpu::CAMath::Max(rof[0], rof[1]); }
   GPUhdi() auto getDeltaRof() const { return rof[1] - rof[0]; }
-  GPUhdi() void dump() const;
-  GPUhdi() void dump(const int, const int) const;
+  GPUhdi() auto getSpanRof(const Tracklet& o) const noexcept { return o2::gpu::CAMath::Max(getMaxRof(), o.getMaxRof()) - o2::gpu::CAMath::Min(getMinRof(), o.getMinRof()); }
   GPUhdi() unsigned char operator<(const Tracklet&) const;
 #if !defined(GPUCA_NO_FMT) && !defined(GPUCA_GPUCODE_DEVICE)
   std::string asString() const
@@ -53,11 +55,11 @@ struct Tracklet final {
   void print() const { LOG(info) << asString(); }
 #endif
 
-  int firstClusterIndex{-1};
-  int secondClusterIndex{-1};
+  int firstClusterIndex{constants::UnusedIndex};
+  int secondClusterIndex{constants::UnusedIndex};
   float tanLambda{-999};
   float phi{-999};
-  short rof[2] = {-1, -1};
+  short rof[2] = {constants::UnusedIndex, constants::UnusedIndex};
 
   ClassDefNV(Tracklet, 1);
 };
@@ -91,16 +93,6 @@ GPUhdi() unsigned char Tracklet::operator<(const Tracklet& t) const
     return false;
   }
   return true;
-}
-
-GPUhdi() void Tracklet::dump(const int offsetFirst, const int offsetSecond) const
-{
-  printf("fClIdx: %d sClIdx: %d  rof1: %hu rof2: %hu\n", firstClusterIndex + offsetFirst, secondClusterIndex + offsetSecond, rof[0], rof[1]);
-}
-
-GPUhdi() void Tracklet::dump() const
-{
-  printf("fClIdx: %d sClIdx: %d  rof1: %hu rof2: %hu\n", firstClusterIndex, secondClusterIndex, rof[0], rof[1]);
 }
 
 } // namespace o2::its

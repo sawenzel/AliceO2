@@ -52,7 +52,9 @@ void Tracker::clustersToTracks(const LogFunc& logger, const LogFunc& error)
   int maxNvertices{-1};
   if (mTrkParams[0].PerPrimaryVertexProcessing) {
     for (int iROF{0}; iROF < mTimeFrame->getNrof(); ++iROF) {
-      maxNvertices = std::max(maxNvertices, (int)mTimeFrame->getPrimaryVertices(iROF).size());
+      int minRof = o2::gpu::CAMath::Max(0, iROF - mTrkParams[0].DeltaROF);
+      int maxRof = o2::gpu::CAMath::Min(mTimeFrame->getNrof(), iROF + mTrkParams[0].DeltaROF);
+      maxNvertices = std::max(maxNvertices, (int)mTimeFrame->getPrimaryVertices(minRof, maxRof).size());
     }
   }
 

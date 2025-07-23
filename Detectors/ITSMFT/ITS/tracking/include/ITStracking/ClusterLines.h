@@ -42,8 +42,8 @@ struct Line final {
   bool operator!=(const Line&) const;
   short getMinROF() const { return rof[0] < rof[1] ? rof[0] : rof[1]; }
 
-  float originPoint[3] = {0};
-  float cosinesDirector[3] = {0};
+  float originPoint[3] = {0, 0, 0};
+  float cosinesDirector[3] = {0, 0, 0};
   // float weightMatrix[6] = {1., 0., 0., 1., 0., 1.};
   // weightMatrix is a symmetric matrix internally stored as
   //    0 --> row = 0, col = 0
@@ -52,7 +52,7 @@ struct Line final {
   //    3 --> 1,1
   //    4 --> 1,2
   //    5 --> 2,2
-  short rof[2] = {-1, -1};
+  short rof[2] = {constants::UnusedIndex, constants::UnusedIndex};
 
   ClassDefNV(Line, 1);
 };
@@ -207,7 +207,7 @@ class ClusterLines final
   std::array<float, 6> mRMS2 = {0.f};         // symmetric matrix: diagonal is RMS2
   float mAvgDistance2 = 0.f;                  // substitute for chi2
   int mROFWeight = 0;                         // rof weight for voting
-  short mROF = -1;                            // rof
+  short mROF = constants::UnusedIndex;        // rof
 };
 
 } // namespace o2::its

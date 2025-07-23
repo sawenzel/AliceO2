@@ -77,11 +77,9 @@ struct TimeFrame {
   gsl::span<const std::array<float, 2>> getPrimaryVerticesXAlpha(int rofId) const;
   void fillPrimaryVerticesXandAlpha();
   int getPrimaryVerticesNum(int rofId = -1) const;
-  void addPrimaryVertices(const bounded_vector<Vertex>& vertices);
   void addPrimaryVerticesLabels(bounded_vector<std::pair<MCCompLabel, float>>& labels);
   void addPrimaryVerticesContributorLabels(bounded_vector<MCCompLabel>& labels);
-  void addPrimaryVertices(const bounded_vector<Vertex>& vertices, const int rofId, const int iteration);
-  void addPrimaryVertices(const gsl::span<const Vertex>& vertices, const int rofId, const int iteration);
+  void addPrimaryVertices(const bounded_vector<Vertex>& vertices, const int iteration);
   void addPrimaryVerticesInROF(const bounded_vector<Vertex>& vertices, const int rofId, const int iteration);
   void addPrimaryVerticesLabelsInROF(const bounded_vector<std::pair<MCCompLabel, float>>& labels, const int rofId);
   void addPrimaryVerticesContributorLabelsInROF(const bounded_vector<MCCompLabel>& labels, const int rofId);
@@ -397,7 +395,8 @@ inline gsl::span<const Vertex> TimeFrame<nLayers>::getPrimaryVertices(int romin,
   if (mPrimaryVertices.empty()) {
     return {};
   }
-  return {&mPrimaryVertices[mROFramesPV[romin]], static_cast<gsl::span<const Vertex>::size_type>(mROFramesPV[romax + 1] - mROFramesPV[romin])};
+  const int stop_idx = romax >= mNrof - 1 ? mNrof : romax + 1;
+  return {&mPrimaryVertices[mROFramesPV[romin]], static_cast<gsl::span<const Vertex>::size_type>(mROFramesPV[stop_idx] - mROFramesPV[romin])};
 }
 
 template <int nLayers>
@@ -594,7 +593,7 @@ inline gsl::span<int> TimeFrame<nLayers>::getExclusiveNTrackletsCluster(int rofI
 template <int nLayers>
 inline gsl::span<Tracklet> TimeFrame<nLayers>::getFoundTracklets(int rofId, int combId)
 {
-  if (rofId < 0 || rofId >= mNrof) {
+  if (rofId < 0 || rofId >= mNrof || mTracklets[combId].empty()) {
     return {};
   }
   auto startIdx{mNTrackletsPerROF[combId][rofId]};
