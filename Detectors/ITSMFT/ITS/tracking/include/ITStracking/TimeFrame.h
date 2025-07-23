@@ -308,7 +308,7 @@ struct TimeFrame {
 
   const o2::base::PropagatorImpl<float>* mPropagatorDevice = nullptr; // Needed only for GPU
 
-  void wipe();
+  virtual void wipe();
 
  private:
   void prepareClusters(const TrackingParameters& trkParam, const int maxLayers = nLayers);
@@ -531,8 +531,8 @@ inline gsl::span<int> TimeFrame<nLayers>::getIndexTable(int rofId, int layer)
   if (rofId < 0 || rofId >= mNrof) {
     return {};
   }
-  return {&mIndexTables[layer][rofId * (mIndexTableUtils.getNphiBins() * mIndexTableUtils.getNzBins() + 1)],
-          static_cast<gsl::span<int>::size_type>(mIndexTableUtils.getNphiBins() * mIndexTableUtils.getNzBins() + 1)};
+  const int tableSize = mIndexTableUtils.getNphiBins() * mIndexTableUtils.getNzBins() + 1;
+  return {&mIndexTables[layer][rofId * tableSize], static_cast<gsl::span<int>::size_type>(tableSize)};
 }
 
 template <int nLayers>

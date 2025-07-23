@@ -310,6 +310,7 @@ void ITSTrackingInterface::run(framework::ProcessingContext& pc)
       LOGP(info, "ITSTracker pushed {} vertex purities", allVerticesPurities.size());
     }
   }
+  mTimeFrame->wipe();
 }
 
 void ITSTrackingInterface::updateTimeDependentParams(framework::ProcessingContext& pc)
@@ -379,11 +380,6 @@ void ITSTrackingInterface::finaliseCCDB(ConcreteDataMatcher& matcher, void* obj)
 void ITSTrackingInterface::printSummary() const
 {
   mTracker->printSummary();
-}
-
-void ITSTrackingInterface::end()
-{
-  mTimeFrame->wipe();
 }
 
 void ITSTrackingInterface::setTraitsFromProvider(VertexerTraits* vertexerTraits,

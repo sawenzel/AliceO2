@@ -107,9 +107,10 @@ void TrackerTraits<nLayers>::computeLayerTracklets(const int iteration, int iROF
 
           for (int iV = startVtx; iV < endVtx; ++iV) {
             const auto& pv = primaryVertices[iV];
-            if (pv.isFlagSet(Vertex::Flags::UPCMode) && iteration != 3) {
+            if ((pv.isFlagSet(Vertex::Flags::UPCMode) && iteration != 3) || (iteration == 3 && !pv.isFlagSet(Vertex::Flags::UPCMode))) {
               continue;
             }
+
             const float resolution = o2::gpu::CAMath::Sqrt(math_utils::Sq(mTimeFrame->getPositionResolution(iLayer)) + math_utils::Sq(mTrkParams[iteration].PVres) / float(pv.getNContributors()));
             const float tanLambda = (currentCluster.zCoordinate - pv.getZ()) * inverseR0;
             const float zAtRmin = tanLambda * (mTimeFrame->getMinR(iLayer + 1) - currentCluster.radius) + currentCluster.zCoordinate;

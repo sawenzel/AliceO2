@@ -583,7 +583,6 @@ void TimeFrame<nLayers>::printSliceInfo(const int startROF, const int sliceSize)
 template <int nLayers>
 void TimeFrame<nLayers>::setMemoryPool(std::shared_ptr<BoundedMemoryResource>& pool)
 {
-  wipe();
   mMemoryPool = pool;
 
   auto initVector = [&]<typename T>(bounded_vector<T>& vec) {

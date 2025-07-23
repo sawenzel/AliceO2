@@ -65,7 +65,6 @@ void Tracker::clustersToTracks(const LogFunc& logger, const LogFunc& error)
          (double)mTimeFrame->getArtefactsMemory() / GB, (double)mTrkParams[iteration].MaxMemory / GB);
     LOGP(error, "Exception: {}", err.what());
     if (mTrkParams[iteration].DropTFUponFailure) {
-      mTimeFrame->wipe();
       mMemoryPool->print();
       ++mNumberOfDroppedTFs;
       error("...Dropping Timeframe...");
@@ -144,17 +143,17 @@ void Tracker::clustersToTracks(const LogFunc& logger, const LogFunc& error)
     error("Uncaught exception, all bets are off...");
   }
 
-  if (mTrkParams[0].PrintMemory) {
-    mTimeFrame->printArtefactsMemory();
-    mMemoryPool->print();
-  }
-
   if (mTimeFrame->hasMCinformation()) {
     computeTracksMClabels();
   }
   rectifyClusterIndices();
   ++mTimeFrameCounter;
   mTotalTime += total;
+
+  if (mTrkParams[0].PrintMemory) {
+    mTimeFrame->printArtefactsMemory();
+    mMemoryPool->print();
+  }
 }
 
 void Tracker::computeRoadsMClabels()
