@@ -272,7 +272,7 @@ void TrackerTraits<nLayers>::computeLayerTracklets(const int iteration, int iROF
       });
 
     /// Create tracklets labels
-    if (mTimeFrame->hasMCinformation()) {
+    if (mTimeFrame->hasMCinformation() && mTrkParams[iteration].createArtefactLabels) {
       tbb::parallel_for(
         tbb::blocked_range<int>(0, mTrkParams[iteration].TrackletsPerRoad()),
         [&](const tbb::blocked_range<int>& Layers) {
@@ -313,7 +313,7 @@ void TrackerTraits<nLayers>::computeLayerCells(const int iteration)
     if (iLayer > 0) {
       deepVectorClear(mTimeFrame->getCellsLookupTable()[iLayer - 1]);
     }
-    if (mTimeFrame->hasMCinformation()) {
+    if (mTimeFrame->hasMCinformation() && mTrkParams[iteration].createArtefactLabels) {
       deepVectorClear(mTimeFrame->getCellsLabel(iLayer));
     }
   }
@@ -458,14 +458,19 @@ void TrackerTraits<nLayers>::computeLayerCells(const int iteration)
   });
 
   /// Create cells labels
-  if (mTimeFrame->hasMCinformation()) {
-    for (int iLayer{0}; iLayer < mTrkParams[iteration].CellsPerRoad(); ++iLayer) {
-      for (const auto& cell : mTimeFrame->getCells()[iLayer]) {
-        MCCompLabel currentLab{mTimeFrame->getTrackletsLabel(iLayer)[cell.getFirstTrackletIndex()]};
-        MCCompLabel nextLab{mTimeFrame->getTrackletsLabel(iLayer + 1)[cell.getSecondTrackletIndex()]};
-        mTimeFrame->getCellsLabel(iLayer).emplace_back(currentLab == nextLab ? currentLab : MCCompLabel());
-      }
-    }
+  if (mTimeFrame->hasMCinformation() && mTrkParams[iteration].createArtefactLabels) {
+    tbb::parallel_for(
+      tbb::blocked_range<int>(0, mTrkParams[iteration].CellsPerRoad()),
+      [&](const tbb::blocked_range<int>& Layers) {
+        for (int iLayer = Layers.begin(); iLayer < Layers.end(); ++iLayer) {
+          mTimeFrame->getCellsLabel(iLayer).reserve(mTimeFrame->getCells()[iLayer].size());
+          for (const auto& cell : mTimeFrame->getCells()[iLayer]) {
+            MCCompLabel currentLab{mTimeFrame->getTrackletsLabel(iLayer)[cell.getFirstTrackletIndex()]};
+            MCCompLabel nextLab{mTimeFrame->getTrackletsLabel(iLayer + 1)[cell.getSecondTrackletIndex()]};
+            mTimeFrame->getCellsLabel(iLayer).emplace_back(currentLab == nextLab ? currentLab : MCCompLabel());
+          }
+        }
+      });
   }
 }
 
