@@ -9,14 +9,15 @@
 # granted to it by virtue of its status as an Intergovernmental Organization
 # or submit itself to any jurisdiction.
 
-add_subdirectory(Passive)
-add_subdirectory(TRK)
-add_subdirectory(ECal)
-add_subdirectory(FD3)
-add_subdirectory(FT3)
-add_subdirectory(FCT)
-add_subdirectory(AOD)
-add_subdirectory(IOTOF)
-add_subdirectory(RICH)
-add_subdirectory(MID)
-add_subdirectory(macros)
+o2_add_library(DataFormatsFD3
+  SOURCES src/Hit.cxx
+  PUBLIC_LINK_LIBRARIES O2::FD3Base
+                        O2::SimulationDataFormat
+                        O2::CommonDataFormat
+                        Microsoft.GSL::GSL
+                        O2::DetectorsCommonDataFormats
+)
+
+o2_target_root_dictionary(DataFormatsFD3
+  HEADERS include/DataFormatsFD3/Hit.h
+)
