@@ -273,7 +273,7 @@ class O2PrimaryServerDevice final : public fair::mq::Device
             LOG(error) << "Obtained request with unexpected payload size";
             sendErrorReply(channel); // ALWAYS reply
           }
-          
+
           memcpy(&request_payload, request->GetData(), sizeof(request_payload));
 
           if (request_payload == (int)O2PrimaryServerInfoRequest::Status) {
