@@ -353,6 +353,4 @@ BOOST_AUTO_TEST_CASE(CalDetStreamerTest)
   creator.loadIDCPadFlags(1731274461770);
 }
 
-
-
 } // namespace o2::tpc
