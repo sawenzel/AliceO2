@@ -10,8 +10,7 @@
 # or submit itself to any jurisdiction.
 
 o2_add_library(Framework
-               SOURCES src/AODReaderHelpers.cxx
-                       src/AnalysisHelpers.cxx
+               SOURCES src/AnalysisHelpers.cxx
                        src/AlgorithmSpec.cxx
                        src/ArrowSupport.cxx
                        src/ArrowTableSlicingCache.cxx
@@ -143,6 +142,7 @@ o2_add_library(Framework
                        src/Variant.cxx
                        src/VariantJSONHelpers.cxx
                        src/ExpressionJSONHelpers.cxx
+		       src/IndexJSONHelpers.cxx
                        src/VariantPropertyTreeHelpers.cxx
                        src/WorkflowCustomizationHelpers.cxx
                        src/WorkflowHelpers.cxx
