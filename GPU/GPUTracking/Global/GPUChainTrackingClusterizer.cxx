@@ -47,6 +47,7 @@
 #ifdef GPUCA_HAS_ONNX
 #include "GPUTPCNNClusterizerKernels.h"
 #include "GPUTPCNNClusterizerHost.h"
+#include "ORTRootSerializer.h"
 #endif
 
 #ifdef GPUCA_O2_LIB
@@ -639,7 +640,7 @@ int32_t GPUChainTracking::RunTPCClusterizer(bool synchronizeOutput)
   // Maximum of 4 lanes supported
   HighResTimer* nnTimers[12];
 
-  if (GetProcessingSettings().nn.applyNNclusterizer) {
+  if (nn_settings.applyNNclusterizer) {
     int32_t deviceId = -1;
     int32_t numLanes = GetProcessingSettings().nTPCClustererLanes;
     int32_t maxThreads = mRec->getNKernelHostThreads(true);
@@ -677,7 +678,11 @@ int32_t GPUChainTracking::RunTPCClusterizer(bool synchronizeOutput)
         //   nnApplications[lane].directOrtAllocator((nnApplications[lane].mModelClass).getEnv(), (nnApplications[lane].mModelClass).getMemoryInfo(), mRec, recreateMemoryAllocator);
         // }
         // recreateMemoryAllocator = true;
-        (nnApplications[lane].mModelClass).initSession();
+        if (!nn_settings.nnLoadFromCCDB) {
+          (nnApplications[lane].mModelClass).initSession(); // loads from file
+        } else {
+          (nnApplications[lane].mModelClass).initSessionFromBuffer((processors()->calibObjects.nnClusterizerNetworks[0])->getONNXModel(), (processors()->calibObjects.nnClusterizerNetworks[0])->getONNXModelSize()); // loads from CCDB
+        }
       }
       if (nnApplications[lane].mModelsUsed[1]) {
         SetONNXGPUStream(*(nnApplications[lane].mModelReg1).getSessionOptions(), lane, &deviceId);
@@ -688,7 +693,11 @@ int32_t GPUChainTracking::RunTPCClusterizer(bool synchronizeOutput)
         // (nnApplications[lane].mModelReg1).setEnv((nnApplications[lane].mModelClass).getEnv());
         (nnApplications[lane].mModelReg1).initEnvironment();
         // nnApplications[lane].directOrtAllocator((nnApplications[lane].mModelReg1).getEnv(), (nnApplications[lane].mModelReg1).getMemoryInfo(), mRec, recreateMemoryAllocator);
-        (nnApplications[lane].mModelReg1).initSession();
+        if (!nn_settings.nnLoadFromCCDB) {
+          (nnApplications[lane].mModelReg1).initSession(); // loads from file
+        } else {
+          (nnApplications[lane].mModelReg1).initSessionFromBuffer((processors()->calibObjects.nnClusterizerNetworks[1])->getONNXModel(), (processors()->calibObjects.nnClusterizerNetworks[1])->getONNXModelSize()); // loads from CCDB
+        }
       }
       if (nnApplications[lane].mModelsUsed[2]) {
         SetONNXGPUStream(*(nnApplications[lane].mModelReg2).getSessionOptions(), lane, &deviceId);
@@ -699,7 +708,11 @@ int32_t GPUChainTracking::RunTPCClusterizer(bool synchronizeOutput)
         // (nnApplications[lane].mModelReg2).setEnv((nnApplications[lane].mModelClass).getEnv());
         (nnApplications[lane].mModelReg2).initEnvironment();
         // nnApplications[lane].directOrtAllocator((nnApplications[lane].mModelClass).getEnv(), (nnApplications[lane].mModelClass).getMemoryInfo(), mRec, recreateMemoryAllocator);
-        (nnApplications[lane].mModelReg2).initSession();
+        if (!nn_settings.nnLoadFromCCDB) {
+          (nnApplications[lane].mModelReg2).initSession(); // loads from file
+        } else {
+          (nnApplications[lane].mModelReg2).initSessionFromBuffer((processors()->calibObjects.nnClusterizerNetworks[2])->getONNXModel(), (processors()->calibObjects.nnClusterizerNetworks[2])->getONNXModelSize()); // loads from CCDB
+        }
       }
       if (nn_settings.nnClusterizerVerbosity > 0) {
         LOG(info) << "(ORT) Allocated ONNX stream for lane " << lane << " and device " << deviceId;
