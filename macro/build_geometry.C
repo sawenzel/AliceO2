@@ -63,6 +63,12 @@
 #include <Alice3DetectorsPassive/Magnet.h>
 #endif
 
+#include <DetectorsBase/GenericGDMLDetector.h>
+
+struct TSTHit {
+  float x;
+};
+
 using Return = o2::base::Detector*;
 
 void finalize_geometry(FairRunSim* run);
@@ -340,6 +346,17 @@ void build_geometry(FairRunSim* run = nullptr)
   if (isActivated("FOC")) {
     // FOCAL
     addReadoutDetector(new o2::focal::Detector(isReadout("FOC"), gSystem->ExpandPathName("$O2_ROOT/share/Detectors/Geometry/FOC/geometryFiles/geometry_Sheets.txt")));
+  }
+
+  if (isActivated("TST")) {
+    // a TST detector for the generic GDML import
+    o2::base::GDMLDetectorOptions opts;
+    opts.gdml_file = "/home/swenzel/alisw/O2DPG/MC/utils/only_ITS.gdml";
+    opts.top_volume = "ITSV";
+    opts.anchor_volume = "barrel";
+    auto det = new o2::base::GenericGDMLDetector("TST", true);
+    det->setOptions(opts);
+    addReadoutDetector(det);
   }
 
   if (geomonly) {

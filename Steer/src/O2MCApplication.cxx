@@ -37,6 +37,9 @@
 #include "SimConfig/GlobalProcessCutSimParam.h"
 #include "DetectorsBase/GeometryManagerParam.h"
 #include <TGeoParallelWorld.h>
+#include <TGeoVolume.h>
+#include <TBuffer3D.h>
+#include <TGeoTessellated.h>
 
 namespace o2
 {
@@ -144,8 +147,136 @@ void O2MCApplicationBase::ConstructGeometry()
   }
 }
 
+namespace {
+  std::vector<int>
+BuildVertexLoop(const TBuffer3D& buf,
+                const std::vector<int>& segs)
+{
+  // adjacency list
+  std::unordered_map<int, std::vector<int>> adj;
+
+  for (int s : segs) {
+    int a = buf.fSegs[3*s + 1];
+    int b = buf.fSegs[3*s + 2];
+    adj[a].push_back(b);
+    adj[b].push_back(a);
+  }
+
+  // start from any vertex
+  int start = adj.begin()->first;
+  int prev  = -1;
+  int curr  = start;
+
+  std::vector<int> loop;
+
+  while (true) {
+    loop.push_back(curr);
+
+    const auto& nbrs = adj[curr];
+    int next = -1;
+
+    for (int n : nbrs) {
+      if (n != prev) {
+        next = n;
+        break;
+      }
+    }
+
+    if (next == -1 || next == start) 
+      break;
+
+    prev = curr;
+    curr = next;
+  }
+
+  return loop;
+}
+ 
+  // some helpers to replace certain volumes by there meshed approximation
+  // for quick testing
+  std::vector<std::vector<int>>
+  ExtractPolygons(const TBuffer3D& buf)
+  {
+    std::vector<std::vector<int>> polys;
+    Int_t idx = 0;
+
+    for (Int_t ip = 0; ip < buf.NbPols(); ++ip) {
+
+      idx++;                  // color
+      Int_t nseg = buf.fPols[idx++];
+
+      std::vector<int> segs(nseg);
+      for (Int_t i = 0; i < nseg; ++i) {
+        segs[i] = buf.fPols[idx++];
+      }
+
+      auto verts = BuildVertexLoop(buf, segs);
+      if (verts.size() >= 3) {
+        polys.push_back(std::move(verts));
+      }
+    }
+
+    return polys;
+  }
+
+
+  std::vector<std::array<int,3>>
+  Triangulate(const std::vector<std::vector<int>>& polys)
+  {
+    std::vector<std::array<int,3>> tris;
+
+    for (const auto& poly : polys) {
+      int nv = poly.size();
+      if (nv < 3) continue;
+
+      int v0 = poly[0];
+      for (int i = 1; i < nv - 1; ++i) {
+        tris.push_back({{v0, poly[i], poly[i+1]}});
+      }
+  }
+
+  return tris;
+}
+
+  TGeoTessellated* MakeTessellated(const TBuffer3D& buf)
+  {
+    auto polys = ExtractPolygons(buf);
+    auto tris  = Triangulate(polys);
+    int i =0;
+    auto* tess = new TGeoTessellated("tess");
+    const Double_t* p = buf.fPnts;
+    for (auto& t : tris) {
+      tess->AddFacet(
+                     TGeoTessellated::Vertex_t{p[3*t[0]], p[3*t[0]+1], p[3*t[0]+2]},
+                     TGeoTessellated::Vertex_t{p[3*t[1]], p[3*t[1]+1], p[3*t[1]+2]},
+                     TGeoTessellated::Vertex_t{p[3*t[2]], p[3*t[2]+1], p[3*t[2]+2]}
+      );
+    }
+    tess->CloseShape();
+    return tess;
+  }
+
+  // this replace logical volume identified by volume_name by it's tessellated variant
+  void replaceShape(const char* volume_name) {
+    auto vol = gGeoManager->FindVolumeFast(volume_name);
+    if (!vol) {
+      LOG(warn) << "Volume not found ... cannot tessellate";
+      return;
+    }
+    auto shape = vol->GetShape();
+    auto& buf = shape->GetBuffer3D(TBuffer3D::kRawSizes | TBuffer3D::kRaw | TBuffer3D::kCore, false);
+  
+    auto tes = MakeTessellated(buf);
+    // redefine volume to use tessellated
+    vol->SetShape(tes);
+    LOG(info) << "Replaced " << volume_name << " with tessellated instance";
+  }
+}
+
+
 void O2MCApplicationBase::InitGeometry()
 {
+  std::cout << "Init geometry O2MC\n";
   // load special cuts which might be given from the outside first.
   auto& matMgr = o2::base::MaterialManager::Instance();
   matMgr.loadCutsAndProcessesFromJSON(o2::base::MaterialManager::ESpecial::kTRUE);
@@ -163,10 +294,15 @@ void O2MCApplicationBase::InitGeometry()
   for (auto e : mSensitiveVolumes) {
     sensvolfile << e.first << ":" << e.second << "\n";
   }
+
+  replaceShape("TPC_Drift");
 }
 
 bool O2MCApplicationBase::MisalignGeometry()
 {
+  std::cout << "Misalign geometry\n";
+  // replaceShape("TPC_Drift");
+
   for (auto det : listDetectors) {
     if (dynamic_cast<o2::base::Detector*>(det)) {
       ((o2::base::Detector*)det)->addAlignableVolumes();

@@ -298,7 +298,7 @@ class O2HitMerger : public fair::mq::Device
     if (detIDmessage->GetSize() == 4) {
       auto ptr = (int*)detIDmessage->GetData();
       o2::detectors::DetID id(ptr[0]);
-      LOG(debug2) << "I1 " << ptr[0] << " NAME " << id.getName() << " MB "
+      LOG(info)   << "I1 " << ptr[0] << " NAME " << id.getName() << " MB "
                   << data.At(index)->GetSize() / 1024. / 1024.;
 
       // get the detector that can interpret it
@@ -1004,6 +1004,11 @@ void O2HitMerger::initDetInstances()
     }
     if (i == DetID::FOC) {
       mDetectorInstances[i] = std::move(std::make_unique<o2::focal::Detector>(true, gSystem->ExpandPathName("$O2_ROOT/share/Detectors/Geometry/FOC/geometryFiles/geometry_Sheets.txt")));
+      counter++;
+    }
+    if (i == DetID::TST) {
+      LOG(info) << "INITING TST";
+      mDetectorInstances[i] = std::move(std::make_unique<o2::base::GenericGDMLDetector>("TST", true));
       counter++;
     }
 #ifdef ENABLE_UPGRADES

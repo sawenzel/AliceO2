@@ -42,4 +42,7 @@
 
 #pragma link C++ class o2::data::Stack + ;
 
+#pragma link C++ class o2::base::GenericGDMLDetector + ;
+#pragma link C++ class o2::base::DetImpl<o2::base::GenericGDMLDetector> + ;
+
 #endif
