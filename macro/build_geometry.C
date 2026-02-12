@@ -188,7 +188,7 @@ void build_geometry(FairRunSim* run = nullptr)
     // EXAMPLE!! how to pick geometry generated from external (CAD) module via `O2_CADtoTGeo.py`
     o2::passive::ExternalModuleOptions options;
     options.root_macro_file = "PATH_TO_EXTERNAL_GEOM_MODULE/geom.C";
-    options.anchor_volume = "barrel";   // hook this into barrel
+    options.anchor_volume = "barrel"; // hook this into barrel
     auto rot = new TGeoCombiTrans();
     rot->RotateX(90);
     rot->SetDy(30); // we need to compensate for a shift of barrel with respect to zero
