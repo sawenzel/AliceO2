@@ -31,12 +31,6 @@ using o2::its::constants::GB;
 template <int NLayers>
 Tracker<NLayers>::Tracker(TrackerTraits<NLayers>* traits) : mTraits(traits)
 {
-  /// Initialise standard configuration with 1 iteration
-  mTrkParams.resize(1);
-  if (traits->isGPU()) {
-    ITSGpuTrackingParamConfig::Instance().maybeOverride();
-    ITSGpuTrackingParamConfig::Instance().printKeyValues(true, true);
-  }
 }
 
 template <int NLayers>
@@ -46,7 +40,6 @@ void Tracker<NLayers>::clustersToTracks(const LogFunc& logger, const LogFunc& er
 
   double total{0};
   mTraits->updateTrackingParameters(mTrkParams);
-  mTimeFrame->updateROFVertexLookupTable();
 
   int maxNvertices{-1};
   if (mTrkParams[0].PerPrimaryVertexProcessing) {

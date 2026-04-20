@@ -168,15 +168,15 @@ void VertexerTraits<NLayers>::computeTracklets(const int iteration)
 {
   mTaskArena->execute([&] {
     tbb::parallel_for(0, mTimeFrame->getNrof(1), [&](const short pivotRofId) {
-      bool skipROF = !mTimeFrame->getROFMaskView().isROFEnabled(1, pivotRofId);
+      bool skip = skipROF(iteration, pivotRofId);
       const auto& rofRange01 = mTimeFrame->getROFOverlapTableView().getOverlap(1, 0, pivotRofId);
       for (auto targetRofId = rofRange01.getFirstEntry(); targetRofId < rofRange01.getEntriesBound(); ++targetRofId) {
         const auto timeErr = mTimeFrame->getROFOverlapTableView().getTimeStamp(0, targetRofId, 1, pivotRofId);
         trackleterKernelHost<TrackletMode::Layer0Layer1, true>(
-          !skipROF ? mTimeFrame->getClustersOnLayer(targetRofId, 0) : gsl::span<Cluster>(), // Clusters to be matched with the next layer in target rof
-          !skipROF ? mTimeFrame->getClustersOnLayer(pivotRofId, 1) : gsl::span<Cluster>(),  // Clusters to be matched with the current layer in pivot rof
-          mTimeFrame->getUsedClustersROF(targetRofId, 0),                                   // Span of the used clusters in the target rof
-          mTimeFrame->getIndexTable(targetRofId, 0).data(),                                 // Index table to access the data on the next layer in target rof
+          !skip ? mTimeFrame->getClustersOnLayer(targetRofId, 0) : gsl::span<Cluster>(), // Clusters to be matched with the next layer in target rof
+          !skip ? mTimeFrame->getClustersOnLayer(pivotRofId, 1) : gsl::span<Cluster>(),  // Clusters to be matched with the current layer in pivot rof
+          mTimeFrame->getUsedClustersROF(targetRofId, 0),                                // Span of the used clusters in the target rof
+          mTimeFrame->getIndexTable(targetRofId, 0).data(),                              // Index table to access the data on the next layer in target rof
           mVrtParams[iteration].phiCut,
           mTimeFrame->getTracklets()[0],                   // Flat tracklet buffer
           mTimeFrame->getNTrackletsCluster(pivotRofId, 0), // Span of the number of tracklets per each cluster in pivot rof
@@ -191,8 +191,8 @@ void VertexerTraits<NLayers>::computeTracklets(const int iteration)
       for (auto targetRofId = rofRange12.getFirstEntry(); targetRofId < rofRange12.getEntriesBound(); ++targetRofId) {
         const auto timeErr = mTimeFrame->getROFOverlapTableView().getTimeStamp(2, targetRofId, 1, pivotRofId);
         trackleterKernelHost<TrackletMode::Layer1Layer2, true>(
-          !skipROF ? mTimeFrame->getClustersOnLayer(targetRofId, 2) : gsl::span<Cluster>(),
-          !skipROF ? mTimeFrame->getClustersOnLayer(pivotRofId, 1) : gsl::span<Cluster>(),
+          !skip ? mTimeFrame->getClustersOnLayer(targetRofId, 2) : gsl::span<Cluster>(),
+          !skip ? mTimeFrame->getClustersOnLayer(pivotRofId, 1) : gsl::span<Cluster>(),
           mTimeFrame->getUsedClustersROF(targetRofId, 2),
           mTimeFrame->getIndexTable(targetRofId, 2).data(),
           mVrtParams[iteration].phiCut,
@@ -219,14 +219,14 @@ void VertexerTraits<NLayers>::computeTracklets(const int iteration)
     }
 
     tbb::parallel_for(0, mTimeFrame->getNrof(1), [&](const short pivotRofId) {
-      bool skipROF = !mTimeFrame->getROFMaskView().isROFEnabled(1, pivotRofId);
+      bool skip = skipROF(iteration, pivotRofId);
       const int globalOffsetPivot = mTimeFrame->getSortedStartIndex(pivotRofId, 1);
       const auto& rofRange01 = mTimeFrame->getROFOverlapTableView().getOverlap(1, 0, pivotRofId);
       for (auto targetRofId = rofRange01.getFirstEntry(); targetRofId < rofRange01.getEntriesBound(); ++targetRofId) {
         const auto timeErr = mTimeFrame->getROFOverlapTableView().getTimeStamp(0, targetRofId, 1, pivotRofId);
         trackleterKernelHost<TrackletMode::Layer0Layer1, false>(
-          !skipROF ? mTimeFrame->getClustersOnLayer(targetRofId, 0) : gsl::span<Cluster>(),
-          !skipROF ? mTimeFrame->getClustersOnLayer(pivotRofId, 1) : gsl::span<Cluster>(),
+          !skip ? mTimeFrame->getClustersOnLayer(targetRofId, 0) : gsl::span<Cluster>(),
+          !skip ? mTimeFrame->getClustersOnLayer(pivotRofId, 1) : gsl::span<Cluster>(),
           mTimeFrame->getUsedClustersROF(targetRofId, 0),
           mTimeFrame->getIndexTable(targetRofId, 0).data(),
           mVrtParams[iteration].phiCut,
@@ -243,8 +243,8 @@ void VertexerTraits<NLayers>::computeTracklets(const int iteration)
       for (auto targetRofId = rofRange12.getFirstEntry(); targetRofId < rofRange12.getEntriesBound(); ++targetRofId) {
         const auto timeErr = mTimeFrame->getROFOverlapTableView().getTimeStamp(2, targetRofId, 1, pivotRofId);
         trackleterKernelHost<TrackletMode::Layer1Layer2, false>(
-          !skipROF ? mTimeFrame->getClustersOnLayer(targetRofId, 2) : gsl::span<Cluster>(),
-          !skipROF ? mTimeFrame->getClustersOnLayer(pivotRofId, 1) : gsl::span<Cluster>(),
+          !skip ? mTimeFrame->getClustersOnLayer(targetRofId, 2) : gsl::span<Cluster>(),
+          !skip ? mTimeFrame->getClustersOnLayer(pivotRofId, 1) : gsl::span<Cluster>(),
           mTimeFrame->getUsedClustersROF(targetRofId, 2),
           mTimeFrame->getIndexTable(targetRofId, 2).data(),
           mVrtParams[iteration].phiCut,
@@ -293,7 +293,7 @@ void VertexerTraits<NLayers>::computeTrackletMatching(const int iteration)
       tbb::blocked_range<short>(0, (short)mTimeFrame->getNrof(1)),
       [&](const tbb::blocked_range<short>& Rofs) {
         for (short pivotRofId = Rofs.begin(); pivotRofId < Rofs.end(); ++pivotRofId) {
-          if (mTimeFrame->getFoundTracklets(pivotRofId, 0).empty()) {
+          if (mTimeFrame->getFoundTracklets(pivotRofId, 0).empty() || skipROF(iteration, pivotRofId)) {
             continue;
           }
           mTimeFrame->getLines(pivotRofId).reserve(mTimeFrame->getNTrackletsCluster(pivotRofId, 0).size());
@@ -330,7 +330,6 @@ void VertexerTraits<NLayers>::computeVertices(const int iteration)
   const int nRofs = mTimeFrame->getNrof(1);
   std::vector<std::vector<Vertex>> rofVertices(nRofs);
   std::vector<std::vector<VertexLabel>> rofLabels(nRofs);
-  const float nsigmaCut = std::min(mVrtParams[iteration].vertNsigmaCut * mVrtParams[iteration].vertNsigmaCut * (mVrtParams[iteration].vertRadiusSigma * mVrtParams[iteration].vertRadiusSigma + mVrtParams[iteration].trackletSigma * mVrtParams[iteration].trackletSigma), 1.98f);
   const float pairCut2 = mVrtParams[iteration].pairCut * mVrtParams[iteration].pairCut;
   const float duplicateZCut = mVrtParams[iteration].duplicateZCut > 0.f ? mVrtParams[iteration].duplicateZCut : std::max(4.f * mVrtParams[iteration].pairCut, 0.5f * mVrtParams[iteration].clusterCut);
   const float duplicateDistance2Cut = mVrtParams[iteration].duplicateDistance2Cut > 0.f ? mVrtParams[iteration].duplicateDistance2Cut : std::max(16.f * pairCut2, 0.0625f * mVrtParams[iteration].clusterCut * mVrtParams[iteration].clusterCut);
@@ -352,6 +351,9 @@ void VertexerTraits<NLayers>::computeVertices(const int iteration)
   settings.memoryPool = mMemoryPool;
 
   const auto processROF = [&](const int rofId) {
+    if (skipROF(iteration, rofId)) {
+      return;
+    }
     auto& lines = mTimeFrame->getLines(rofId);
     auto clusters = line_vertexer::buildClusters(std::span<const Line>{lines.data(), lines.size()}, settings);
     deepVectorClear(lines); // not needed after
@@ -508,7 +510,7 @@ void VertexerTraits<NLayers>::computeVertices(const int iteration)
     for (const auto sortedId : sortedIndices) {
       const auto& cluster = clusters[selectedIndices[sortedId]];
       const auto beamDistance2 = clusterBeamDistance2(cluster);
-      if (!(beamDistance2 < nsigmaCut)) {
+      if (!(beamDistance2 < mVrtParams[iteration].NSigmaCut)) {
         continue;
       }
       if (cluster.getSize() < mVrtParams[iteration].clusterContributorsCut) {
@@ -618,6 +620,12 @@ void VertexerTraits<NLayers>::setNThreads(int n, std::shared_ptr<tbb::task_arena
   } else {
     mTaskArena = arena;
   }
+}
+
+template <int NLayers>
+bool VertexerTraits<NLayers>::skipROF(int iteration, int rof) const
+{
+  return iteration && (int)mTimeFrame->getROFVertexLookupTableView().getVertices(1, rof).getEntries() > mVrtParams[iteration].vertPerRofThreshold;
 }
 
 template class VertexerTraits<7>;
