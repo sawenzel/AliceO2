@@ -456,15 +456,20 @@ void WorkflowHelpers::injectServiceDevices(WorkflowSpec& workflow, ConfigContext
     }
   }
 
+  auto tfnsource = std::ranges::find_if(workflow, [](DataProcessorSpec const& spec) {
+    return std::ranges::any_of(spec.outputs, [](OutputSpec const& output) {
+      return DataSpecUtils::match(output, "TFN", "TFNumber", 0);
+    });
+  });
+
   // add the reader
   if (aodReader.outputs.empty() == false) {
-    auto mctracks2aod = std::ranges::find_if(workflow, [](auto const& x) { return x.name == "mctracks-to-aod"; });
-    if (mctracks2aod == workflow.end()) {
+    if (tfnsource == workflow.end()) {
       // add normal reader
       aodReader.outputs.emplace_back(OutputSpec{"TFN", "TFNumber"});
       aodReader.outputs.emplace_back(OutputSpec{"TFF", "TFFilename"});
     } else {
-      // AODs are being injected on-the-fly, add error-handler reader
+      // AODs are being injected the tfnsource is the entry point, add error-handler reader
       aodReader.algorithm = AlgorithmSpec{
         adaptStateful(
           [](DeviceSpec const& spec) {
@@ -595,6 +600,12 @@ void WorkflowHelpers::injectServiceDevices(WorkflowSpec& workflow, ConfigContext
 
   std::vector<InputSpec> unmatched;
   auto forwardingDestination = ctx.options().get<std::string>("forwarding-destination");
+  // update tfnsource iterator (could be aod-reader)
+  tfnsource = std::ranges::find_if(workflow, [](DataProcessorSpec const& spec) {
+    return std::ranges::any_of(spec.outputs, [](OutputSpec const& output) {
+      return DataSpecUtils::match(output, "TFN", "TFNumber", 0);
+    });
+  });
   if (redirectedOutputsInputs.size() > 0 && forwardingDestination == "file") {
     auto fileSink = CommonDataProcessors::getGlobalFileSink(redirectedOutputsInputs, unmatched);
     if (unmatched.size() != redirectedOutputsInputs.size()) {
@@ -606,7 +617,7 @@ void WorkflowHelpers::injectServiceDevices(WorkflowSpec& workflow, ConfigContext
   } else if (forwardingDestination != "drop") {
     throw runtime_error_f("Unknown forwarding destination %s", forwardingDestination.c_str());
   }
-  if (unmatched.size() > 0 || redirectedOutputsInputs.size() > 0) {
+  if ((unmatched.size() > 0) || (redirectedOutputsInputs.size() > 0) || (tfnsource != workflow.end())) {
     std::vector<InputSpec> ignored = unmatched;
     ignored.insert(ignored.end(), redirectedOutputsInputs.begin(), redirectedOutputsInputs.end());
     for (auto& ignoredInput : ignored) {
@@ -615,8 +626,11 @@ void WorkflowHelpers::injectServiceDevices(WorkflowSpec& workflow, ConfigContext
 
     // Use the new dummy sink when the AOD reader is there
     O2_SIGNPOST_ID_GENERATE(sid, workflow_helpers);
-    if (aodReader.outputs.empty() == false) {
+    if (tfnsource != workflow.end()) {
       O2_SIGNPOST_EVENT_EMIT(workflow_helpers, sid, "injectServiceDevices", "Injecting scheduled dummy sink");
+      // if there is a tfnsource, make sure the sink gets TFN/TFF
+      DataSpecUtils::updateInputList(ignored, InputSpec{"tfn", "TFN", "TFNumber", 0, Lifetime::Sporadic});
+      DataSpecUtils::updateInputList(ignored, InputSpec{"tff", "TFF", "TFFilename", 0, Lifetime::Sporadic});
       extraSpecs.push_back(CommonDataProcessors::getScheduledDummySink(ignored));
     } else {
       O2_SIGNPOST_EVENT_EMIT(workflow_helpers, sid, "injectServiceDevices", "Injecting rate limited dummy sink");
@@ -740,6 +754,11 @@ void WorkflowHelpers::injectAODWriter(WorkflowSpec& workflow, ConfigContext cons
 
     auto it = std::find_if(dec.outputsInputs.begin(), dec.outputsInputs.end(), [](InputSpec const& spec) -> bool {
       return DataSpecUtils::partialMatch(spec, o2::header::DataOrigin("TFN"));
+    });
+    dec.isDangling[std::distance(dec.outputsInputs.begin(), it)] = false;
+
+    it = std::find_if(dec.outputsInputs.begin(), dec.outputsInputs.end(), [](InputSpec const& spec) -> bool {
+      return DataSpecUtils::partialMatch(spec, o2::header::DataOrigin("TFF"));
     });
     dec.isDangling[std::distance(dec.outputsInputs.begin(), it)] = false;
   }
