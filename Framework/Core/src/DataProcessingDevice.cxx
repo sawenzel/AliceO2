@@ -1644,6 +1644,7 @@ void DataProcessingDevice::doPrepare(ServiceRegistryRef ref)
 void DataProcessingDevice::doRun(ServiceRegistryRef ref)
 {
   auto& context = ref.get<DataProcessorContext>();
+  auto& streamContext = ref.get<StreamContext>();
   O2_SIGNPOST_ID_FROM_POINTER(dpid, device, &context);
   auto& state = ref.get<DeviceState>();
   auto& spec = ref.get<DeviceSpec const>();
@@ -1652,9 +1653,9 @@ void DataProcessingDevice::doRun(ServiceRegistryRef ref)
     return;
   }
 
-  context.completed.clear();
-  context.completed.reserve(16);
-  if (DataProcessingDevice::tryDispatchComputation(ref, context.completed)) {
+  streamContext.completed.clear();
+  streamContext.completed.reserve(16);
+  if (DataProcessingDevice::tryDispatchComputation(ref, streamContext.completed)) {
     state.lastActiveDataProcessor.store(&context);
   }
   DanglingContext danglingContext{*context.registry};
@@ -1668,8 +1669,8 @@ void DataProcessingDevice::doRun(ServiceRegistryRef ref)
     state.lastActiveDataProcessor = &context;
   }
 
-  context.completed.clear();
-  if (DataProcessingDevice::tryDispatchComputation(ref, context.completed)) {
+  streamContext.completed.clear();
+  if (DataProcessingDevice::tryDispatchComputation(ref, streamContext.completed)) {
     state.lastActiveDataProcessor = &context;
   }
 
@@ -1695,7 +1696,7 @@ void DataProcessingDevice::doRun(ServiceRegistryRef ref)
 
     bool shouldProcess = DataProcessingHelpers::hasOnlyGenerated(spec) == false;
 
-    while (DataProcessingDevice::tryDispatchComputation(ref, context.completed) && shouldProcess) {
+    while (DataProcessingDevice::tryDispatchComputation(ref, streamContext.completed) && shouldProcess) {
       relayer.processDanglingInputs(context.expirationHandlers, *context.registry, false);
     }
 
