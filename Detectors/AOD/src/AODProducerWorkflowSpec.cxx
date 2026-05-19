@@ -2436,8 +2436,8 @@ void AODProducerWorkflowDPL::run(ProcessingContext& pc)
   countTPCClusters(recoData);
 
   int collisionID = 0;
-  mIndexTableMFT.resize(recoData.getMFTTracks().size());
-  mIndexTableFwd.resize(recoData.getMCHTracks().size());
+  mIndexTableMFT.assign(recoData.getMFTTracks().size(), -1);
+  mIndexTableFwd.assign(recoData.getMCHTracks().size(), -1);
 
   auto& trackReffwd = primVer2TRefs.back();
   fillIndexTablesPerCollision(trackReffwd, primVerGIs, recoData);
