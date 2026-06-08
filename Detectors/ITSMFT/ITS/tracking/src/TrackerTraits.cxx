@@ -14,9 +14,14 @@
 ///
 
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <iterator>
+#include <mutex>
+#include <ranges>
 #include <cmath>
 #include <type_traits>
+#include <vector>
 
 #include <oneapi/tbb/blocked_range.h>
 #include <oneapi/tbb/enumerable_thread_specific.h>
@@ -30,6 +35,7 @@
 #include "ITStracking/LayerMask.h"
 #include "ITStracking/ROFLookupTables.h"
 #include "ITStracking/TrackerTraits.h"
+#include "ITStracking/TrackFollower.h"
 #include "ITStracking/TrackHelpers.h"
 #include "ITStracking/Tracklet.h"
 
@@ -658,6 +664,89 @@ void TrackerTraits<NLayers>::processNeighbours(int iteration, int defaultCellTop
 }
 
 template <int NLayers>
+bool TrackerTraits<NLayers>::finaliseTrackSeed(const TrackSeedN& seed,
+                                               TrackITSExt& track,
+                                               const int iteration,
+                                               const TrackingFrameInfo* const* tfInfos,
+                                               const Cluster* const* unsortedClusters,
+                                               const o2::base::Propagator* propagator)
+{
+  const auto& trkParams = mTrkParams[iteration];
+  const track::TrackFitContext<NLayers> fitCtx{
+    tfInfos, trkParams.LayerxX0.data(), trkParams.NLayers, mBz,
+    trkParams.MaxChi2ClusterAttachment, trkParams.MaxChi2NDF,
+    propagator, trkParams.CorrType, trkParams.ShiftRefToCluster, trkParams.RepeatRefitOut};
+  TrackITSInternal<NLayers> internalTrack;
+  if (!track::refitTrackSeed<NLayers>(seed,
+                                      internalTrack,
+                                      fitCtx,
+                                      unsortedClusters,
+                                      trkParams.LayerRadii.data(),
+                                      trkParams.MinPt.data(),
+                                      trkParams.ReseedIfShorter)) {
+    return false;
+  }
+
+  const bool extendTop = trkParams.PassFlags[IterationStep::TrackFollowerTop];
+  const bool extendBot = trkParams.PassFlags[IterationStep::TrackFollowerBot];
+  if (!extendTop && !extendBot) {
+    track = makeTrackITSExt(internalTrack);
+    return true;
+  }
+
+  const int maxHypotheses = std::max(1, trkParams.TrackFollowerMaxHypotheses);
+  TrackFollowerScratch scratch{mMemoryPool.get()};
+  if (static_cast<int>(scratch.activeHypotheses.size()) < maxHypotheses) {
+    scratch.activeHypotheses.resize(maxHypotheses);
+  }
+  if (static_cast<int>(scratch.nextHypotheses.size()) < maxHypotheses) {
+    scratch.nextHypotheses.resize(maxHypotheses);
+  }
+
+  const Cluster* clustersPtrs[NLayers]{};
+  const unsigned char* usedClustersPtrs[NLayers]{};
+  const int* clustersIndexTablesPtrs[NLayers]{};
+  const int* rofClustersPtrs[NLayers]{};
+  for (int iLayer{0}; iLayer < NLayers; ++iLayer) {
+    clustersPtrs[iLayer] = mTimeFrame->getClusters()[iLayer].data();
+    usedClustersPtrs[iLayer] = mTimeFrame->getUsedClusters(iLayer).data();
+    clustersIndexTablesPtrs[iLayer] = mTimeFrame->getIndexTable(0, iLayer).data();
+    rofClustersPtrs[iLayer] = mTimeFrame->getROFrameClusters(iLayer).data();
+  }
+  const TrackFollowContext<NLayers> followCtx{
+    &mTimeFrame->getIndexTableUtils(),
+    mTimeFrame->getROFMaskView(),
+    mTimeFrame->getROFOverlapTableView(),
+    clustersPtrs, usedClustersPtrs, clustersIndexTablesPtrs, rofClustersPtrs,
+    trkParams.LayerRadii.data(), trkParams.PhiBins, maxHypotheses,
+    trkParams.TrackFollowerNSigmaCutPhi, trkParams.TrackFollowerNSigmaCutZ};
+
+  const auto backup = internalTrack;
+  auto best = internalTrack;
+  uint32_t bestDiff{0};
+  auto followDirection = [&](TrackITSInternal<NLayers>& candidate, bool outward) {
+    const TrackExtensionHypothesis<NLayers> startHypothesis{candidate, outward};
+    TrackExtensionHypothesis<NLayers> bestHypothesis;
+    if (!followTrackExtensionDirection<NLayers>(startHypothesis, fitCtx, followCtx, outward,
+                                                scratch.activeHypotheses.data(),
+                                                scratch.nextHypotheses.data(),
+                                                bestHypothesis)) {
+      return false;
+    }
+    updateTrackFromExtensionHypothesis(bestHypothesis, outward, trkParams.NLayers, candidate);
+    return true;
+  };
+  TrackExtensionBestTrial<NLayers> bestTrial{backup.getPattern(), fitCtx};
+  followTrackExtensionBranches(backup, extendTop, extendBot, trkParams.NLayers, followDirection, bestTrial, best, bestDiff);
+
+  track = makeTrackITSExt(best);
+  if (bestDiff) {
+    track.setExtendedLayerPattern<NLayers>(bestDiff);
+  }
+  return true;
+}
+
+template <int NLayers>
 void TrackerTraits<NLayers>::findRoads(const int iteration)
 {
   bounded_vector<bounded_vector<int>> firstClusters(mTrkParams[iteration].NLayers, bounded_vector<int>(mMemoryPool.get()), mMemoryPool.get());
@@ -717,65 +806,34 @@ void TrackerTraits<NLayers>::findRoads(const int iteration)
 
     bounded_vector<TrackITSExt> tracks(mMemoryPool.get());
     mTaskArena->execute([&] {
-      auto forSeed = [&](auto Tag, int iSeed, int offset = 0) {
-        TrackITSExt temporaryTrack;
-        bool refitSuccess = track::refitTrack<NLayers>(trackSeeds[iSeed],
-                                                       temporaryTrack,
-                                                       mTrkParams[iteration].MaxChi2ClusterAttachment,
-                                                       mTrkParams[iteration].MaxChi2NDF,
-                                                       mBz,
-                                                       tfInfos,
-                                                       unsortedClusters,
-                                                       mTrkParams[iteration].LayerxX0.data(),
-                                                       mTrkParams[iteration].LayerRadii.data(),
-                                                       mTrkParams[iteration].MinPt.data(),
-                                                       propagator,
-                                                       mTrkParams[iteration].CorrType,
-                                                       mTrkParams[iteration].ReseedIfShorter,
-                                                       mTrkParams[iteration].ShiftRefToCluster,
-                                                       mTrkParams[iteration].RepeatRefitOut);
-
-        if (refitSuccess) {
-          if constexpr (decltype(Tag)::value == PassMode::OnePass::value) {
-            tracks.push_back(temporaryTrack);
-          } else if constexpr (decltype(Tag)::value == PassMode::TwoPassCount::value) {
-            // nothing to do
-          } else if constexpr (decltype(Tag)::value == PassMode::TwoPassInsert::value) {
-            tracks[offset] = temporaryTrack;
-          } else {
-            static_assert(false, "Unknown mode!");
-          }
-          return 1;
-        }
-        return 0;
-      };
-
       const int nSeeds = static_cast<int>(trackSeeds.size());
-      if (mTaskArena->max_concurrency() <= 1) {
-        for (int iSeed{0}; iSeed < nSeeds; ++iSeed) {
-          forSeed(PassMode::OnePass{}, iSeed);
-        }
-      } else {
-        // The double-pass allows us to avoid sizeable memory spikes
-        bounded_vector<int> perSeedCount(nSeeds + 1, 0, mMemoryPool.get());
-        tbb::parallel_for(0, nSeeds, [&](const int iSeed) {
-          perSeedCount[iSeed] = forSeed(PassMode::TwoPassCount{}, iSeed);
-        });
-
-        std::exclusive_scan(perSeedCount.begin(), perSeedCount.end(), perSeedCount.begin(), 0);
-        auto totalTracks{perSeedCount.back()};
-        if (totalTracks == 0) {
-          return;
-        }
-        tracks.resize(totalTracks);
-
-        tbb::parallel_for(0, nSeeds, [&](const int iSeed) {
-          if (perSeedCount[iSeed] == perSeedCount[iSeed + 1]) {
-            return;
+      const int nWorkers = std::min(static_cast<int>(mTaskArena->max_concurrency()), nSeeds);
+      const int chunkSize = std::min(nSeeds, std::clamp(nSeeds / (16 * nWorkers), 256, 4096));
+      std::atomic<int> nextSeed{0};
+      std::mutex tracksMutex;
+      tbb::parallel_for(0, nWorkers, [&](const int) {
+        bounded_vector<TrackITSExt> localTracks(mMemoryPool.get());
+        localTracks.reserve(chunkSize);
+        while (true) {
+          const int firstSeed = nextSeed.fetch_add(chunkSize, std::memory_order_relaxed);
+          if (firstSeed >= nSeeds) {
+            break;
           }
-          forSeed(PassMode::TwoPassInsert{}, iSeed, perSeedCount[iSeed]);
-        });
-      }
+          const int lastSeed = std::min(firstSeed + chunkSize, nSeeds);
+          for (int iSeed{firstSeed}; iSeed < lastSeed; ++iSeed) {
+            TrackITSExt temporaryTrack;
+            if (finaliseTrackSeed(trackSeeds[iSeed], temporaryTrack, iteration, tfInfos, unsortedClusters, propagator)) {
+              localTracks.push_back(temporaryTrack);
+            }
+          }
+          if (!localTracks.empty()) {
+            std::lock_guard lock{tracksMutex};
+            tracks.insert(tracks.end(), std::make_move_iterator(localTracks.begin()), std::make_move_iterator(localTracks.end()));
+            localTracks.clear();
+          }
+        }
+        deepVectorClear(localTracks);
+      });
 
       deepVectorClear(trackSeeds);
     });
@@ -790,7 +848,9 @@ void TrackerTraits<NLayers>::findRoads(const int iteration)
 }
 
 template <int NLayers>
-void TrackerTraits<NLayers>::acceptTracks(int iteration, bounded_vector<TrackITSExt>& tracks, bounded_vector<bounded_vector<int>>& firstClusters)
+void TrackerTraits<NLayers>::acceptTracks(int iteration,
+                                          bounded_vector<TrackITSExt>& tracks,
+                                          bounded_vector<bounded_vector<int>>& firstClusters)
 {
   auto& trks = mTimeFrame->getTracks();
   trks.reserve(trks.size() + tracks.size());
@@ -851,8 +911,15 @@ void TrackerTraits<NLayers>::acceptTracks(int iteration, bounded_vector<TrackITS
     if (track.getTimeStamp().getTimeStampError() > smallestROFHalf) {
       track.getTimeStamp().setTimeStampError(smallestROFHalf);
     }
-    track.setUserField(0);
-    track.getParamOut().setUserField(0);
+    const auto diff = track.getExtendedLayerPattern<NLayers>();
+    if (diff) {
+      size_t nExtendedClusters = 0;
+      for (int iLayer{0}; iLayer < mTrkParams[iteration].NLayers; ++iLayer) {
+        nExtendedClusters += static_cast<bool>(diff & (0x1u << iLayer));
+      }
+      mTimeFrame->addTrackExtensionCounters(1, nExtendedClusters);
+    }
+    track.clearExtendedLayerPattern();
     trks.emplace_back(track);
 
     if (mTrkParams[iteration].AllowSharingFirstCluster) {

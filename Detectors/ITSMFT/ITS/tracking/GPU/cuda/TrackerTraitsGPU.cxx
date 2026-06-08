@@ -12,13 +12,15 @@
 
 #include <unistd.h>
 
+#include <algorithm>
+#include <array>
+
 #include "ITStrackingGPU/TrackerTraitsGPU.h"
 #include "ITStrackingGPU/TrackingKernels.h"
 #include "ITStracking/Configuration.h"
 
 namespace o2::its
 {
-
 template <int NLayers>
 void TrackerTraitsGPU<NLayers>::initialiseTimeFrame(const int iteration)
 {
@@ -301,10 +303,11 @@ template <int NLayers>
 void TrackerTraitsGPU<NLayers>::findRoads(const int iteration)
 {
   bounded_vector<bounded_vector<int>> firstClusters(this->mTrkParams[iteration].NLayers, bounded_vector<int>(this->getMemoryPool().get()), this->getMemoryPool().get());
-  bounded_vector<bounded_vector<int>> sharedFirstClusters(this->mTrkParams[iteration].NLayers, bounded_vector<int>(this->getMemoryPool().get()), this->getMemoryPool().get());
   firstClusters.resize(this->mTrkParams[iteration].NLayers);
-  sharedFirstClusters.resize(this->mTrkParams[iteration].NLayers);
   const auto hostTopology = mTimeFrameGPU->getTrackingTopologyView();
+  const bool extendTop = this->mTrkParams[iteration].PassFlags[IterationStep::TrackFollowerTop];
+  const bool extendBot = this->mTrkParams[iteration].PassFlags[IterationStep::TrackFollowerBot];
+  const bool extendTracks = extendTop || extendBot;
   for (int startLevel{this->mTrkParams[iteration].CellsPerRoad()}; startLevel >= this->mTrkParams[iteration].CellMinimumLevel(); --startLevel) {
     bounded_vector<TrackSeed<NLayers>> trackSeeds(this->getMemoryPool().get());
     for (int startCellTopologyId{0}; startCellTopologyId < hostTopology.nCells; ++startCellTopologyId) {
@@ -353,7 +356,6 @@ void TrackerTraitsGPU<NLayers>::findRoads(const int iteration)
                           this->mTrkParams[iteration].LayerxX0,
                           trackSeeds.size(),
                           this->mBz,
-                          startLevel,
                           this->mTrkParams[iteration].MaxChi2ClusterAttachment,
                           this->mTrkParams[iteration].MaxChi2NDF,
                           this->mTrkParams[iteration].ReseedIfShorter,
@@ -363,23 +365,41 @@ void TrackerTraitsGPU<NLayers>::findRoads(const int iteration)
                           this->mTrkParams[iteration].CorrType,
                           mTimeFrameGPU->getFrameworkAllocator());
     mTimeFrameGPU->createTrackITSExtDevice(trackSeeds.size());
+    if (extendTracks) {
+      mTimeFrameGPU->createTrackExtensionScratchDevice(constants::GPUThreadsTotal, this->mTrkParams[iteration].TrackFollowerMaxHypotheses);
+    }
     computeTrackSeedHandler(mTimeFrameGPU->getDeviceTrackSeeds(),
                             mTimeFrameGPU->getDeviceArrayTrackingFrameInfo(),
                             mTimeFrameGPU->getDeviceArrayUnsortedClusters(),
+                            mTimeFrameGPU->getDeviceIndexTableUtils(),
+                            mTimeFrameGPU->getDeviceROFMaskTableView(),
+                            mTimeFrameGPU->getDeviceROFOverlapTableView(),
+                            mTimeFrameGPU->getDeviceArrayClusters(),
+                            (const unsigned char**)mTimeFrameGPU->getDeviceArrayUsedClusters(),
+                            mTimeFrameGPU->getDeviceArrayClustersIndexTables(),
+                            mTimeFrameGPU->getDeviceROFrameClusters(),
                             mTimeFrameGPU->getDeviceTrackITSExt(),
                             mTimeFrameGPU->getDeviceTrackSeedsLUT(),
+                            extendTracks ? mTimeFrameGPU->getDeviceActiveTrackExtensionHypotheses() : nullptr,
+                            extendTracks ? mTimeFrameGPU->getDeviceNextTrackExtensionHypotheses() : nullptr,
                             this->mTrkParams[iteration].LayerRadii,
                             this->mTrkParams[iteration].MinPt,
                             this->mTrkParams[iteration].LayerxX0,
                             trackSeeds.size(),
                             mTimeFrameGPU->getNTrackSeeds(),
                             this->mBz,
-                            startLevel,
                             this->mTrkParams[iteration].MaxChi2ClusterAttachment,
                             this->mTrkParams[iteration].MaxChi2NDF,
                             this->mTrkParams[iteration].ReseedIfShorter,
                             this->mTrkParams[iteration].RepeatRefitOut,
                             this->mTrkParams[iteration].ShiftRefToCluster,
+                            this->mTrkParams[iteration].NLayers,
+                            this->mTrkParams[iteration].PhiBins,
+                            this->mTrkParams[iteration].TrackFollowerMaxHypotheses,
+                            extendTop,
+                            extendBot,
+                            this->mTrkParams[iteration].TrackFollowerNSigmaCutPhi,
+                            this->mTrkParams[iteration].TrackFollowerNSigmaCutZ,
                             mTimeFrameGPU->getDevicePropagator(),
                             this->mTrkParams[iteration].CorrType,
                             mTimeFrameGPU->getFrameworkAllocator());

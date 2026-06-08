@@ -96,15 +96,20 @@ struct TrackerParamConfig : public o2::conf::ConfigurableParamHelper<TrackerPara
   bool shiftRefToCluster{true};            // TrackFit: after update shift the linearization reference to cluster
   bool repeatRefitOut{false};              // repeat outward refit using inward refit as a seed
   bool createArtefactLabels{false};        // create on-the-fly labels for the artefacts
+  bool trackFollowerTop[constants::MaxIter] = {};
+  bool trackFollowerBot[constants::MaxIter] = {};
+  float trackFollowerNSigmaCutZ = 1.f;
+  float trackFollowerNSigmaCutPhi = 1.f;
+  int trackFollowerMaxHypotheses = 1;
 
   int nThreads = 1;
   bool printMemory = false;
   size_t maxMemory = std::numeric_limits<size_t>::max();
   bool dropTFUponFailure = false;
-  bool fataliseUponFailure = true;       // granular management of the fatalisation in async mode
+  bool fataliseUponFailure = true; // granular management of the fatalisation in async mode
 
   // Selections on tracks sharing clusters
-  bool allowSharingFirstCluster = false; // allow first cluster sharing among tracks
+  bool allowSharingFirstCluster = false;  // allow first cluster sharing among tracks
   float sharedClusterMaxDeltaPhi = 0.05f; // Maximum allowed delta phi at the cluster position
   float sharedClusterMaxDeltaEta = 0.03f; // Maximum allowed delta eta at the cluster position
   bool sharedClusterOppositeSign = false; // Require opposite sign of the tracklets

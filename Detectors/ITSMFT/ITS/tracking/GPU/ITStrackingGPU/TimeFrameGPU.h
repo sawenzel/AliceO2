@@ -19,6 +19,7 @@
 #include "ITStracking/BoundedAllocator.h"
 #include "ITStracking/TimeFrame.h"
 #include "ITStracking/Configuration.h"
+#include "ITStracking/TrackExtensionHypothesis.h"
 #include "ITStrackingGPU/Utils.h"
 
 namespace o2::its::gpu
@@ -90,6 +91,7 @@ class TimeFrameGPU : public TimeFrame<NLayers>
   void createNeighboursDevice(const unsigned int layer);
   void createNeighboursLUTDevice(const int, const unsigned int);
   void createTrackITSExtDevice(const size_t);
+  void createTrackExtensionScratchDevice(const int nThreads, const int maxHypotheses);
   void downloadTrackITSExtDevice();
   void downloadCellsNeighboursDevice(std::vector<bounded_vector<CellNeighbour>>&, const int);
   void downloadNeighboursLUTDevice(bounded_vector<int>&, const int);
@@ -125,6 +127,8 @@ class TimeFrameGPU : public TimeFrame<NLayers>
 
   // Hybrid
   TrackITSExt* getDeviceTrackITSExt() { return mTrackITSExtDevice; }
+  TrackExtensionHypothesis<NLayers>* getDeviceActiveTrackExtensionHypotheses() { return mActiveTrackExtensionHypothesesDevice; }
+  TrackExtensionHypothesis<NLayers>* getDeviceNextTrackExtensionHypotheses() { return mNextTrackExtensionHypothesesDevice; }
   int* getDeviceNeighboursLUT(const int layer) { return mNeighboursLUTDevice[layer]; }
   gsl::span<int*> getDeviceNeighboursLUTs() { return mNeighboursLUTDevice; }
   CellNeighbour** getDeviceArrayNeighbours() { return mNeighboursDeviceArray; }
@@ -222,6 +226,8 @@ class TimeFrameGPU : public TimeFrame<NLayers>
   float** mCellSeedsChi2DeviceArray;
 
   TrackITSExt* mTrackITSExtDevice;
+  TrackExtensionHypothesis<NLayers>* mActiveTrackExtensionHypothesesDevice{nullptr};
+  TrackExtensionHypothesis<NLayers>* mNextTrackExtensionHypothesesDevice{nullptr};
   std::array<CellNeighbour*, MaxCells> mNeighboursDevice{};
   CellNeighbour** mNeighboursDeviceArray{nullptr};
   std::array<TrackingFrameInfo*, NLayers> mTrackingFrameInfoDevice;

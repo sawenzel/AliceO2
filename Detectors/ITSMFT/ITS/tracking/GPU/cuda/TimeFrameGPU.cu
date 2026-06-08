@@ -12,6 +12,7 @@
 
 #include <cuda_runtime.h>
 
+#include <algorithm>
 #include <unistd.h>
 #include <vector>
 
@@ -579,6 +580,21 @@ void TimeFrameGPU<NLayers>::createTrackITSExtDevice(const size_t nSeeds)
   mTrackITSExt = bounded_vector<TrackITSExt>(mNTracks, {}, this->getMemoryPool().get());
   allocMem(reinterpret_cast<void**>(&mTrackITSExtDevice), mNTracks * sizeof(o2::its::TrackITSExt), this->hasFrameworkAllocator(), (o2::gpu::GPUMemoryResource::MEMORY_GPU | o2::gpu::GPUMemoryResource::MEMORY_STACK));
   GPUChkErrS(cudaMemset(mTrackITSExtDevice, 0, mNTracks * sizeof(o2::its::TrackITSExt)));
+}
+
+template <int NLayers>
+void TimeFrameGPU<NLayers>::createTrackExtensionScratchDevice(const int nThreads, const int maxHypotheses)
+{
+  GPUTimer timer("reserving track extension scratch");
+  const size_t nHypotheses = static_cast<size_t>(std::max(1, nThreads)) * std::max(1, maxHypotheses);
+  GPULog("gpu-allocation: reserving {} track extension hypotheses per scratch buffer, for {:.2f} MB each.", nHypotheses, nHypotheses * sizeof(o2::its::TrackExtensionHypothesis<NLayers>) / constants::MB);
+  mActiveTrackExtensionHypothesesDevice = nullptr;
+  mNextTrackExtensionHypothesesDevice = nullptr;
+  if (nHypotheses == 0) {
+    return;
+  }
+  allocMem(reinterpret_cast<void**>(&mActiveTrackExtensionHypothesesDevice), nHypotheses * sizeof(o2::its::TrackExtensionHypothesis<NLayers>), this->hasFrameworkAllocator(), (o2::gpu::GPUMemoryResource::MEMORY_GPU | o2::gpu::GPUMemoryResource::MEMORY_STACK));
+  allocMem(reinterpret_cast<void**>(&mNextTrackExtensionHypothesesDevice), nHypotheses * sizeof(o2::its::TrackExtensionHypothesis<NLayers>), this->hasFrameworkAllocator(), (o2::gpu::GPUMemoryResource::MEMORY_GPU | o2::gpu::GPUMemoryResource::MEMORY_STACK));
 }
 
 template <int NLayers>
