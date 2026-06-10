@@ -9,19 +9,24 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-#ifdef __CLING__
+#ifndef O2_TF3_RECOWORKFLOW_H
+#define O2_TF3_RECOWORKFLOW_H
 
-#pragma link off all globals;
-#pragma link off all classes;
-#pragma link off all functions;
+#include "Framework/WorkflowSpec.h"
+#include <string>
 
-#pragma link C++ class o2::iotof::Digit + ;
-#pragma link C++ class std::vector < o2::iotof::Digit> + ;
+namespace o2::iotof
+{
+namespace reco_workflow
+{
 
-#pragma link C++ class o2::iotof::McLabelRef + ;
-#pragma link C++ class std::vector < o2::iotof::McLabelRef> + ;
+o2::framework::WorkflowSpec getWorkflow(bool useMC,
+                                        // const std::string& hitRecoConfig,
+                                        bool upstreamDigits = false,
+                                        bool upstreamClusters = false,
+                                        bool disableRootOutput = false);
+}
 
-#pragma link C++ class o2::iotof::LabeledDigit + ;
-#pragma link C++ class std::vector < o2::iotof::LabeledDigit> + ;
+} // namespace o2::iotof
 
 #endif

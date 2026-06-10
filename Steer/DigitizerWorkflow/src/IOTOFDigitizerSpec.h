@@ -9,19 +9,14 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-#ifdef __CLING__
+#ifndef STEER_DIGITIZERWORKFLOW_IOTOFDIGITIZER_H_
+#define STEER_DIGITIZERWORKFLOW_IOTOFDIGITIZER_H_
 
-#pragma link off all globals;
-#pragma link off all classes;
-#pragma link off all functions;
+#include "Framework/DataProcessorSpec.h"
 
-#pragma link C++ class o2::iotof::Digit + ;
-#pragma link C++ class std::vector < o2::iotof::Digit> + ;
-
-#pragma link C++ class o2::iotof::McLabelRef + ;
-#pragma link C++ class std::vector < o2::iotof::McLabelRef> + ;
-
-#pragma link C++ class o2::iotof::LabeledDigit + ;
-#pragma link C++ class std::vector < o2::iotof::LabeledDigit> + ;
+namespace o2::iotof
+{
+o2::framework::DataProcessorSpec getIOTOFDigitizerSpec(int channel, bool mctruth = true);
+} // namespace o2::iotof
 
 #endif

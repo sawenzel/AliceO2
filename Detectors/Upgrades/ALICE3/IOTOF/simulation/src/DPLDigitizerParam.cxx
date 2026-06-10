@@ -9,19 +9,14 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-#ifdef __CLING__
+#include "IOTOFSimulation/DPLDigitizerParam.h"
 
-#pragma link off all globals;
-#pragma link off all classes;
-#pragma link off all functions;
-
-#pragma link C++ class o2::iotof::Digit + ;
-#pragma link C++ class std::vector < o2::iotof::Digit> + ;
-
-#pragma link C++ class o2::iotof::McLabelRef + ;
-#pragma link C++ class std::vector < o2::iotof::McLabelRef> + ;
-
-#pragma link C++ class o2::iotof::LabeledDigit + ;
-#pragma link C++ class std::vector < o2::iotof::LabeledDigit> + ;
-
-#endif
+namespace o2
+{
+namespace iotof
+{
+// this makes sure that the constructor of the parameters is statically called
+// so that these params are part of the parameter database
+static auto& sDigitizerParamTF3 = o2::iotof::DPLDigitizerParam::Instance();
+} // namespace iotof
+} // namespace o2

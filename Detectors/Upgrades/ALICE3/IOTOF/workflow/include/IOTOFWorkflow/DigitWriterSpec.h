@@ -9,19 +9,18 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-#ifdef __CLING__
+#ifndef STEER_TF3DIGITWRITER_H_
+#define STEER_TF3DIGITWRITER_H_
 
-#pragma link off all globals;
-#pragma link off all classes;
-#pragma link off all functions;
+#include "Framework/DataProcessorSpec.h"
 
-#pragma link C++ class o2::iotof::Digit + ;
-#pragma link C++ class std::vector < o2::iotof::Digit> + ;
+namespace o2
+{
+namespace iotof
+{
 
-#pragma link C++ class o2::iotof::McLabelRef + ;
-#pragma link C++ class std::vector < o2::iotof::McLabelRef> + ;
+o2::framework::DataProcessorSpec getIOTOFDigitWriterSpec(bool mctruth = true, bool dec = false, bool calib = false);
+} // namespace iotof
+} // end namespace o2
 
-#pragma link C++ class o2::iotof::LabeledDigit + ;
-#pragma link C++ class std::vector < o2::iotof::LabeledDigit> + ;
-
-#endif
+#endif /* STEER_TF3DIGITWRITER_H_ */
