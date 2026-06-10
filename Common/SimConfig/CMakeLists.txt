@@ -20,7 +20,6 @@ o2_add_library(SimConfig
                        src/MatMapParams.cxx
                        src/InteractionDiamondParam.cxx
                        src/GlobalProcessCutSimParam.cxx
-		       src/FluenceWeightCalculator.cxx
                PUBLIC_LINK_LIBRARIES O2::CommonUtils
                                      O2::DetectorsCommonDataFormats O2::SimulationDataFormat
                                      FairRoot::Base Boost::program_options)
@@ -36,8 +35,7 @@ o2_target_root_dictionary(SimConfig
                                   include/SimConfig/G4Params.h
                                   include/SimConfig/DetectorLists.h
                                   include/SimConfig/GlobalProcessCutSimParam.h
-                                  include/SimConfig/MatMapParams.h
-				  include/SimConfig/FluenceWeightCalculator.h)
+                                  include/SimConfig/MatMapParams.h)
 
 o2_add_test(Config
             SOURCES test/TestConfig.cxx
