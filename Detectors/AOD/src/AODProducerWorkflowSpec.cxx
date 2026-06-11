@@ -1216,6 +1216,39 @@ void AODProducerWorkflowDPL::fillMCParticlesTable(o2::steer::MCKinematicsReader&
 
     mcReader.releaseTracksForSourceAndEvent(source, event);
   }
+
+  // Safety net for collision contexts that do not contain all MC collisions
+  // referenced by reconstructed-track labels. This happens when the per-timeframe
+  // context is trimmed upstream to drop the collisions borrowed from the
+  // neighbouring timeframe (collision-context overlap from --orbitsEarly): tracks
+  // reconstructed in this timeframe may still carry labels pointing into those
+  // dropped collisions. Such collisions are absent from mcColToEvSrc, so the loop
+  // above never visits their <source, event> and updateParticles never turns their
+  // keep-store entries into real McParticles row indices -- they keep the raw "keep"
+  // sentinel. Left untouched, the label table would resolve them to an arbitrary
+  // (wrong) McParticle row. Reset every keep-store entry of a non-stored
+  // <source, event> to -1 so that the dangling labels become "no MC particle".
+  // In standard (untrimmed) production every referenced collision is present, so
+  // all events with entries are visited and this pass is a no-op.
+  std::vector<std::vector<bool>> stored(mToStore.size());
+  for (size_t s = 0; s < mToStore.size(); ++s) {
+    stored[s].resize(mToStore[s].size(), false);
+  }
+  for (const auto& colInfo : mcColToEvSrc) {
+    if (colInfo.sourceID >= 0 && (size_t)colInfo.sourceID < stored.size() &&
+        colInfo.eventID >= 0 && (size_t)colInfo.eventID < stored[colInfo.sourceID].size()) {
+      stored[colInfo.sourceID][colInfo.eventID] = true;
+    }
+  }
+  for (size_t s = 0; s < mToStore.size(); ++s) {
+    for (size_t e = 0; e < mToStore[s].size(); ++e) {
+      if (!stored[s][e]) {
+        for (auto& entry : mToStore[s][e]) {
+          entry.second = -1;
+        }
+      }
+    }
+  }
 }
 
 template <typename MCTrackLabelCursorType, typename MCMFTTrackLabelCursorType, typename MCFwdTrackLabelCursorType>
