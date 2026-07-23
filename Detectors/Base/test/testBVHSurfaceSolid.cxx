@@ -19,7 +19,10 @@
 #include "../src/BoundedSurface.h"
 
 #include "TGeoBBox.h"
+#include "TGeoCone.h"
 #include "TGeoShape.h"
+#include "TGeoSphere.h"
+#include "TGeoTube.h"
 
 #include <array>
 #include <cmath>
@@ -119,6 +122,50 @@ void checkClose(double value, double reference, double tolerance = 1.e-9)
   BOOST_CHECK_SMALL(value - reference, tolerance);
 }
 
+std::array<double, 3> unitDirection(double x, double y, double z)
+{
+  const double length = std::sqrt(x * x + y * y + z * z);
+  return {x / length, y / length, z / length};
+}
+
+// Compare Contains against a reference ROOT shape on a regular grid. The fractional offsets keep
+// grid points away from exact shape boundaries, where inside/outside conventions may differ.
+void compareContainsGrid(const SurfaceSolid& solid, const TGeoShape& reference, double extent, int samples)
+{
+  for (int stepX = 0; stepX < samples; ++stepX) {
+    for (int stepY = 0; stepY < samples; ++stepY) {
+      for (int stepZ = 0; stepZ < samples; ++stepZ) {
+        const double point[3] = {-extent + 2. * extent * (stepX + 0.517) / samples,
+                                 -extent + 2. * extent * (stepY + 0.263) / samples,
+                                 -extent + 2. * extent * (stepZ + 0.741) / samples};
+        BOOST_TEST_CONTEXT("point = (" << point[0] << ", " << point[1] << ", " << point[2] << ")")
+        {
+          BOOST_CHECK_EQUAL(solid.Contains(point), reference.Contains(point));
+        }
+      }
+    }
+  }
+}
+
+// Compare the direction-appropriate distance function against a reference ROOT shape.
+void compareDistance(const SurfaceSolid& solid, const TGeoShape& reference, const std::array<double, 3>& point,
+                     const std::array<double, 3>& direction, double tolerance = 1.e-9)
+{
+  BOOST_TEST_CONTEXT("point = (" << point[0] << ", " << point[1] << ", " << point[2] << ") direction = ("
+                                 << direction[0] << ", " << direction[1] << ", " << direction[2] << ")")
+  {
+    const bool inside = reference.Contains(point.data());
+    BOOST_CHECK_EQUAL(solid.Contains(point.data()), inside);
+    if (inside) {
+      checkClose(solid.DistFromInside(point.data(), direction.data(), 3),
+                 reference.DistFromInside(point.data(), direction.data(), 3), tolerance);
+    } else {
+      checkClose(solid.DistFromOutside(point.data(), direction.data(), 3),
+                 reference.DistFromOutside(point.data(), direction.data(), 3), tolerance);
+    }
+  }
+}
+
 } // namespace
 
 BOOST_AUTO_TEST_CASE(PlanarBoxNavigationMatchesTGeoBBox)
@@ -178,9 +225,10 @@ BOOST_AUTO_TEST_CASE(PlanarBoxNavigationMatchesTGeoBBox)
   checkClose(solid.DistFromInside(fromCenter, alongX, 3), reference.DistFromInside(fromCenter, alongX, 3));
   checkClose(solid.DistFromInside(fromCenter, alongZ, 3), reference.DistFromInside(fromCenter, alongZ, 3));
 
+  // safeties against analytic distances (TGeo safeties may be weaker underestimates)
   const double outsideSafetyPoint[3] = {2.5, 0., 0.};
-  checkClose(solid.Safety(fromCenter, kTRUE), reference.Safety(fromCenter, kTRUE));
-  checkClose(solid.Safety(outsideSafetyPoint, kFALSE), reference.Safety(outsideSafetyPoint, kFALSE));
+  checkClose(solid.Safety(fromCenter, kTRUE), halfX);
+  checkClose(solid.Safety(outsideSafetyPoint, kFALSE), 2.5 - halfX);
 
   const double normalPoint[3] = {halfX, 0., 0.};
   double normal[3] = {0., 0., 0.};
@@ -549,4 +597,377 @@ BOOST_AUTO_TEST_CASE(TrimmedCurveBoundaries)
                                         Curve2D::makeLine({2., 0.}, {2., 2.})};
   BOOST_CHECK(!openWire.initialize(openCurves, WireRole::Outer, openStatus));
   BOOST_CHECK(openStatus == WireStatus::Open);
+}
+
+BOOST_AUTO_TEST_CASE(CurvedPlanarDiskKernels)
+{
+  using surf::Curve2D;
+
+  // annulus in the z = 0 plane: outer radius 2, hole radius 1
+  surf::CurvedPlanarBoundedSurface annulus;
+  std::string error;
+  BOOST_REQUIRE(annulus.initialize({0., 0., 0.}, {1., 0., 0.}, {0., 1., 0.},
+                                   {Curve2D::makeCircle({0., 0.}, 2.)},
+                                   {{Curve2D::makeCircle({0., 0.}, 1., true)}}, error));
+  BOOST_CHECK(!annulus.wasReoriented()); // outer CCW, hole CW: both already correctly oriented
+
+  // a skewed (non-orthonormal) frame is rejected
+  surf::CurvedPlanarBoundedSurface skewed;
+  BOOST_CHECK(!skewed.initialize({0., 0., 0.}, {1., 0., 0.}, {0.5, 1., 0.},
+                                 {Curve2D::makeCircle({0., 0.}, 2.)}, {}, error));
+
+  // on-surface classification: material, hole, outside, off-plane
+  BOOST_CHECK(annulus.containsPointOnSurface({1.5, 0., 0.}));
+  BOOST_CHECK(!annulus.containsPointOnSurface({0.5, 0., 0.}));
+  BOOST_CHECK(!annulus.containsPointOnSurface({3., 0., 0.}));
+  BOOST_CHECK(!annulus.containsPointOnSurface({1.5, 0., 0.5}));
+
+  // ray intersections: one hit through the material, none through the hole
+  std::vector<surf::RayHit> hits;
+  annulus.appendIntersections({1.5, 0., 1.}, {0., 0., -1.}, 0., 1.e30, hits);
+  BOOST_REQUIRE_EQUAL(hits.size(), 1u);
+  checkClose(hits.front().distance, 1.);
+  checkClose(hits.front().normal.zCoord, 1.);
+  hits.clear();
+  annulus.appendIntersections({0.5, 0., 1.}, {0., 0., -1.}, 0., 1.e30, hits);
+  BOOST_CHECK(hits.empty());
+
+  // exact patch distances: in-hole (to the hole rim), in-material off-plane, outside the rim,
+  // and the combined in-plane plus out-of-plane case
+  checkClose(annulus.distanceSqToPatch({0., 0., 0.}), 1.);
+  checkClose(annulus.distanceSqToPatch({1.5, 0., 2.}), 4.);
+  checkClose(annulus.distanceSqToPatch({4., 0., 0.}), 4.);
+  checkClose(annulus.distanceSqToPatch({0.5, 0., 1.}), 1.25);
+
+  // divergence-theorem contribution of an offset disk: (origin . normal) * area / 3
+  surf::CurvedPlanarBoundedSurface offsetDisk;
+  BOOST_REQUIRE(offsetDisk.initialize({0., 0., 2.}, {1., 0., 0.}, {0., 1., 0.},
+                                      {Curve2D::makeCircle({0., 0.}, 1.5)}, {}, error));
+  checkClose(offsetDisk.capacityContribution(), 2. * surf::kPi * 1.5 * 1.5 / 3., 1.e-9);
+  BOOST_CHECK(offsetDisk.capacityIsExact());
+}
+
+BOOST_AUTO_TEST_CASE(CylindricalSurfaceKernels)
+{
+  // full lateral cylinder, radius 2, height [-3, 3], axis z
+  surf::CylindricalBoundedSurface cylinder;
+  std::string error;
+  BOOST_REQUIRE(cylinder.initialize({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, 2., -3., 3., 0., surf::kTwoPi,
+                                    false, error));
+
+  // a transversal ray crosses the lateral surface twice: both hits must be reported
+  std::vector<surf::RayHit> hits;
+  cylinder.appendIntersections({-5., 0.5, 0.}, {1., 0., 0.}, 0., 1.e30, hits);
+  BOOST_REQUIRE_EQUAL(hits.size(), 2u);
+  const double chordHalf = std::sqrt(4. - 0.25);
+  checkClose(hits[0].distance, 5. - chordHalf);
+  checkClose(hits[1].distance, 5. + chordHalf);
+  // entering hit: outward normal opposes the ray direction; exiting hit: aligned
+  BOOST_CHECK_LT(hits[0].normal.xCoord, 0.);
+  BOOST_CHECK_GT(hits[1].normal.xCoord, 0.);
+
+  // tangential graze reports no hits (keeps crossing parity even)
+  hits.clear();
+  cylinder.appendIntersections({-5., 2., 0.}, {1., 0., 0.}, 0., 1.e30, hits);
+  BOOST_CHECK(hits.empty());
+
+  // axis-parallel ray never crosses the lateral surface
+  hits.clear();
+  cylinder.appendIntersections({0., 0., -5.}, {0., 0., 1.}, 0., 1.e30, hits);
+  BOOST_CHECK(hits.empty());
+
+  // exact patch distances: radial, above the rim, and the diagonal rim case
+  checkClose(cylinder.distanceSqToPatch({4., 0., 0.}), 4.);
+  checkClose(cylinder.distanceSqToPatch({0., 0., 5.}), 8.);
+  checkClose(cylinder.distanceSqToPatch({3., 0., 4.}), 2.);
+
+  // half cylinder (phi in [0, pi]): the phi trim filters hits and surface points
+  surf::CylindricalBoundedSurface halfCylinder;
+  BOOST_REQUIRE(halfCylinder.initialize({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, 2., -3., 3., 0., surf::kPi,
+                                        false, error));
+  BOOST_CHECK(halfCylinder.containsPointOnSurface({0., 2., 0.}));
+  BOOST_CHECK(!halfCylinder.containsPointOnSurface({0., -2., 0.}));
+  hits.clear();
+  halfCylinder.appendIntersections({0., -5., 0.}, {0., 1., 0.}, 0., 1.e30, hits);
+  BOOST_REQUIRE_EQUAL(hits.size(), 1u);
+  checkClose(hits.front().distance, 7.);
+}
+
+BOOST_AUTO_TEST_CASE(ClosedCylinderMatchesTGeoTube)
+{
+  constexpr double radius = 2.;
+  constexpr double halfHeight = 3.;
+
+  SurfaceSolid solid("closedCylinder");
+  BOOST_REQUIRE(solid.AddCylindricalSurface({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, radius, -halfHeight,
+                                            halfHeight));
+  // cap frames: outward normal is axisU x axisV, so the bottom cap flips axisV
+  BOOST_REQUIRE(solid.AddPlanarDiskSurface({0., 0., halfHeight}, {1., 0., 0.}, {0., 1., 0.}, radius));
+  BOOST_REQUIRE(solid.AddPlanarDiskSurface({0., 0., -halfHeight}, {1., 0., 0.}, {0., -1., 0.}, radius));
+  solid.CloseShape();
+
+  BOOST_CHECK(solid.IsClosed());
+  BOOST_CHECK(solid.IsOrientationConsistent());
+
+  TGeoTube reference("referenceTube", 0., radius, halfHeight);
+  compareContainsGrid(solid, reference, 4., 9);
+
+  compareDistance(solid, reference, {5., 0., 0.}, {-1., 0., 0.});
+  compareDistance(solid, reference, {0., 0., 5.}, {0., 0., -1.});
+  compareDistance(solid, reference, {5., 0.5, 1.}, {-1., 0., 0.});
+  compareDistance(solid, reference, {-4., -1., -2.}, unitDirection(1., 0.3, 0.5));
+  compareDistance(solid, reference, {0., 0., 0.}, {1., 0., 0.});
+  compareDistance(solid, reference, {0., 0., 0.}, {0., 0., 1.});
+  compareDistance(solid, reference, {0., 0., 0.}, unitDirection(1., 1., 1.));
+  compareDistance(solid, reference, {1., 0.5, -2.}, unitDirection(0.3, -0.4, 0.5));
+  compareDistance(solid, reference, {5., 2.5, 0.}, {-1., 0., 0.}); // grazing miss
+
+  // safeties against analytic distances (TGeo safeties may be weaker underestimates, so they
+  // are not compared directly)
+  const double center[3] = {0., 0., 0.};
+  const double insidePoint[3] = {1., 0.5, 1.};
+  const double radialOutside[3] = {4., 0., 0.};
+  const double axialOutside[3] = {0., 0., 5.};
+  const double cornerOutside[3] = {4., 0., 5.};
+  checkClose(solid.Safety(center, kTRUE), radius);
+  checkClose(solid.Safety(insidePoint, kTRUE), radius - std::sqrt(1.25));
+  checkClose(solid.Safety(radialOutside, kFALSE), 2.);
+  checkClose(solid.Safety(axialOutside, kFALSE), 2.);
+  checkClose(solid.Safety(cornerOutside, kFALSE), std::sqrt(8.)); // exact corner distance
+
+  // normals on the lateral surface and the caps
+  double normal[3] = {0., 0., 0.};
+  const double sidePoint[3] = {radius, 0., 1.};
+  const double alongX[3] = {1., 0., 0.};
+  solid.ComputeNormal(sidePoint, alongX, normal);
+  checkClose(normal[0], 1.);
+  checkClose(normal[1], 0.);
+  checkClose(normal[2], 0.);
+  const double capPoint[3] = {0.5, 0.5, halfHeight};
+  const double alongZ[3] = {0., 0., 1.};
+  solid.ComputeNormal(capPoint, alongZ, normal);
+  checkClose(normal[2], 1.);
+
+  checkClose(solid.Capacity(), reference.Capacity(), 1.e-9);
+
+  int meshVertices = 0;
+  int meshSegments = 0;
+  int meshPolygons = 0;
+  solid.GetMeshNumbers(meshVertices, meshSegments, meshPolygons);
+  BOOST_CHECK_GT(meshVertices, 0);
+  BOOST_CHECK_GT(meshPolygons, 0);
+}
+
+BOOST_AUTO_TEST_CASE(HollowCylinderMatchesTGeoTube)
+{
+  constexpr double innerRadius = 1.;
+  constexpr double outerRadius = 2.;
+  constexpr double halfHeight = 3.;
+
+  SurfaceSolid solid("hollowCylinder");
+  BOOST_REQUIRE(solid.AddCylindricalSurface({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, outerRadius, -halfHeight,
+                                            halfHeight));
+  BOOST_REQUIRE(solid.AddCylindricalSurface({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, innerRadius, -halfHeight,
+                                            halfHeight, 0., surf::kTwoPi, true));
+  BOOST_REQUIRE(solid.AddPlanarDiskSurface({0., 0., halfHeight}, {1., 0., 0.}, {0., 1., 0.}, outerRadius,
+                                           innerRadius));
+  BOOST_REQUIRE(solid.AddPlanarDiskSurface({0., 0., -halfHeight}, {1., 0., 0.}, {0., -1., 0.}, outerRadius,
+                                           innerRadius));
+  solid.CloseShape();
+
+  BOOST_CHECK(solid.IsClosed());
+  BOOST_CHECK(solid.IsOrientationConsistent());
+
+  TGeoTube reference("referenceHollowTube", innerRadius, outerRadius, halfHeight);
+  compareContainsGrid(solid, reference, 4., 9);
+
+  // from the hole the solid is entered through the inner wall
+  compareDistance(solid, reference, {0., 0., 0.}, {1., 0., 0.});
+  compareDistance(solid, reference, {0., 0., 2.}, unitDirection(0.4, 0.2, -1.));
+  // inside the material both walls are exit candidates
+  compareDistance(solid, reference, {1.5, 0., 0.}, {1., 0., 0.});
+  compareDistance(solid, reference, {1.5, 0., 0.}, {-1., 0., 0.});
+  compareDistance(solid, reference, {-1.2, 0.8, 1.}, unitDirection(-0.2, 0.9, 0.4));
+  compareDistance(solid, reference, {5., 0., 0.}, {-1., 0., 0.});
+
+  // analytic safety in the middle of the material: 0.5 to either wall
+  const double materialPoint[3] = {1.5, 0., 0.};
+  checkClose(solid.Safety(materialPoint, kTRUE), 0.5);
+
+  checkClose(solid.Capacity(), reference.Capacity(), 1.e-9);
+}
+
+BOOST_AUTO_TEST_CASE(SphereMatchesTGeoSphere)
+{
+  constexpr double radius = 2.5;
+
+  SurfaceSolid solid("fullSphere");
+  BOOST_REQUIRE(solid.AddSphericalSurface({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, radius));
+  solid.CloseShape();
+
+  // a full sphere is self-closing: no boundary edges at all
+  BOOST_CHECK(solid.IsClosed());
+  BOOST_CHECK(solid.IsOrientationConsistent());
+
+  TGeoSphere reference("referenceSphere", 0., radius);
+  compareContainsGrid(solid, reference, 3.5, 9);
+
+  compareDistance(solid, reference, {5., 0., 0.}, {-1., 0., 0.});
+  compareDistance(solid, reference, {0., 0., 0.}, {1., 0., 0.});
+  compareDistance(solid, reference, {0., 0., 0.}, unitDirection(1., 1., 1.));
+  compareDistance(solid, reference, {1., 1., 1.}, unitDirection(-0.3, 0.5, 0.8));
+  compareDistance(solid, reference, {-4., 0.5, 0.5}, {1., 0., 0.});
+  compareDistance(solid, reference, {-4., 2.6, 0.}, {1., 0., 0.}); // clean miss
+
+  // analytic safeties: |distance to center - radius|
+  const double insidePoint[3] = {1., 0., 0.};
+  const double outsidePoint[3] = {4., 0., 0.};
+  checkClose(solid.Safety(insidePoint, kTRUE), radius - 1.);
+  checkClose(solid.Safety(outsidePoint, kFALSE), 4. - radius);
+
+  double normal[3] = {0., 0., 0.};
+  const double surfacePoint[3] = {radius, 0., 0.};
+  const double alongX[3] = {1., 0., 0.};
+  solid.ComputeNormal(surfacePoint, alongX, normal);
+  checkClose(normal[0], 1.);
+
+  checkClose(solid.Capacity(), reference.Capacity(), 1.e-9);
+
+  int meshVertices = 0;
+  int meshSegments = 0;
+  int meshPolygons = 0;
+  solid.GetMeshNumbers(meshVertices, meshSegments, meshPolygons);
+  BOOST_CHECK_GT(meshVertices, 0);
+  BOOST_CHECK_GT(meshPolygons, 0);
+}
+
+BOOST_AUTO_TEST_CASE(SphericalSectionKernels)
+{
+  // upper hemisphere shell of radius 2 (theta in [0, pi/2], full phi)
+  surf::SphericalBoundedSurface hemisphere;
+  std::string error;
+  BOOST_REQUIRE(hemisphere.initialize({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, 2., 0., surf::kHalfPi, 0.,
+                                      surf::kTwoPi, false, error));
+
+  // divergence contribution of a centred hemisphere shell: 2 pi R^3 / 3
+  checkClose(hemisphere.capacityContribution(), 2. * surf::kPi * 8. / 3., 1.e-9);
+
+  // the polar-axis ray meets the sphere twice but only the upper hit is on the patch
+  std::vector<surf::RayHit> hits;
+  hemisphere.appendIntersections({0., 0., 5.}, {0., 0., -1.}, 0., 1.e30, hits);
+  BOOST_REQUIRE_EQUAL(hits.size(), 1u);
+  checkClose(hits.front().distance, 3.);
+  checkClose(hits.front().normal.zCoord, 1.);
+
+  // a transversal ray at z = 1 stays in the upper hemisphere: both hits reported
+  hits.clear();
+  hemisphere.appendIntersections({-5., 0., 1.}, {1., 0., 0.}, 0., 1.e30, hits);
+  BOOST_CHECK_EQUAL(hits.size(), 2u);
+
+  // the mirrored ray at z = -1 misses the trimmed patch entirely
+  hits.clear();
+  hemisphere.appendIntersections({-5., 0., -1.}, {1., 0., 0.}, 0., 1.e30, hits);
+  BOOST_CHECK(hits.empty());
+
+  // trim-aware surface point classification (equator lies on the trim boundary)
+  BOOST_CHECK(hemisphere.containsPointOnSurface({0., 0., 2.}));
+  BOOST_CHECK(hemisphere.containsPointOnSurface({2., 0., 0.}));
+  BOOST_CHECK(!hemisphere.containsPointOnSurface({0., 0., -2.}));
+
+  // patch distance: exact radially above the pole, conservative lower bound below the equator
+  checkClose(hemisphere.distanceSqToPatch({0., 0., 5.}), 9.);
+  BOOST_CHECK_LE(hemisphere.distanceSqToPatch({0., 0., -4.}), 4. + 1.e-9);
+}
+
+BOOST_AUTO_TEST_CASE(TruncatedConeMatchesTGeoCone)
+{
+  constexpr double halfHeight = 3.;
+  constexpr double radiusAtBottom = 2.;
+  constexpr double radiusAtTop = 1.;
+
+  SurfaceSolid solid("truncatedCone");
+  BOOST_REQUIRE(solid.AddConicalSurface({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, radiusAtBottom, radiusAtTop,
+                                        -halfHeight, halfHeight));
+  BOOST_REQUIRE(solid.AddPlanarDiskSurface({0., 0., halfHeight}, {1., 0., 0.}, {0., 1., 0.}, radiusAtTop));
+  BOOST_REQUIRE(solid.AddPlanarDiskSurface({0., 0., -halfHeight}, {1., 0., 0.}, {0., -1., 0.}, radiusAtBottom));
+  solid.CloseShape();
+
+  BOOST_CHECK(solid.IsClosed());
+  BOOST_CHECK(solid.IsOrientationConsistent());
+
+  TGeoCone reference("referenceCone", halfHeight, 0., radiusAtBottom, 0., radiusAtTop);
+  compareContainsGrid(solid, reference, 3.5, 9);
+
+  compareDistance(solid, reference, {5., 0., 0.}, {-1., 0., 0.});
+  compareDistance(solid, reference, {0., 0., 5.}, {0., 0., -1.});
+  compareDistance(solid, reference, {0., 0., 0.}, {1., 0., 0.});
+  compareDistance(solid, reference, {0., 0., 0.}, {0., 0., 1.});
+  compareDistance(solid, reference, {0., 0., 0.}, {0., 0., -1.});
+  compareDistance(solid, reference, {0.5, -0.3, 1.}, unitDirection(0.6, 0.4, 0.2));
+  compareDistance(solid, reference, {-4., 0.2, -2.}, unitDirection(1., 0.05, 0.3));
+
+  // central safety: exact distance to the lateral generator segment (2,-3)-(1,3) in (rho, z);
+  // TGeoCone's safety degenerates to 0 on the axis of an rmin = 0 cone, so no direct comparison
+  const double center[3] = {0., 0., 0.};
+  checkClose(solid.Safety(center, kTRUE), 9. / std::sqrt(37.));
+
+  // lateral-surface normal against the ROOT cone
+  double normal[3] = {0., 0., 0.};
+  double referenceNormal[3] = {0., 0., 0.};
+  const double sidePoint[3] = {1.5, 0., 0.};
+  const double alongX[3] = {1., 0., 0.};
+  solid.ComputeNormal(sidePoint, alongX, normal);
+  reference.ComputeNormal(sidePoint, alongX, referenceNormal);
+  checkClose(normal[0], referenceNormal[0]);
+  checkClose(normal[1], referenceNormal[1]);
+  checkClose(normal[2], referenceNormal[2]);
+
+  checkClose(solid.Capacity(), reference.Capacity(), 1.e-9);
+}
+
+BOOST_AUTO_TEST_CASE(ApexConeClosesWithSingleCap)
+{
+  // full cone: radius 3 at z = -1.5 shrinking to the apex at z = +1.5, closed by one cap
+  constexpr double halfHeight = 1.5;
+  constexpr double baseRadius = 3.;
+
+  SurfaceSolid solid("apexCone");
+  BOOST_REQUIRE(solid.AddConicalSurface({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, baseRadius, 0., -halfHeight,
+                                        halfHeight));
+  BOOST_REQUIRE(solid.AddPlanarDiskSurface({0., 0., -halfHeight}, {1., 0., 0.}, {0., -1., 0.}, baseRadius));
+  solid.CloseShape();
+
+  // the apex rim degenerates to a point, so one cap suffices for a closed manifold
+  BOOST_CHECK(solid.IsClosed());
+  BOOST_CHECK(solid.IsOrientationConsistent());
+
+  // analytic containment: inside iff |z| < halfHeight and rho < r(z) = halfHeight - z
+  const auto analyticInside = [&](double x, double y, double z) {
+    return std::abs(z) < halfHeight && std::hypot(x, y) < halfHeight - z;
+  };
+  const std::array<std::array<double, 3>, 7> probePoints{{{0., 0., 0.},
+                                                          {1., 0., 0.},
+                                                          {1.4, 0., 0.5},
+                                                          {0., 0., 1.4},
+                                                          {0., 0., 1.6},
+                                                          {2., 2., -1.},
+                                                          {2., 0., -1.}}};
+  for (const auto& probe : probePoints) {
+    BOOST_TEST_CONTEXT("point = (" << probe[0] << ", " << probe[1] << ", " << probe[2] << ")")
+    {
+      BOOST_CHECK_EQUAL(solid.Contains(probe.data()), analyticInside(probe[0], probe[1], probe[2]));
+    }
+  }
+
+  // radial exit through the slanted surface
+  const double insidePoint[3] = {0., 0., -1.};
+  const double alongX[3] = {1., 0., 0.};
+  checkClose(solid.DistFromInside(insidePoint, alongX, 3), 2.5);
+
+  // central safety is the exact distance to the slanted line rho + z = halfHeight
+  const double center[3] = {0., 0., 0.};
+  checkClose(solid.Safety(center, kTRUE), halfHeight / std::sqrt(2.), 1.e-9);
+
+  // exact capacity of a full cone: pi R^2 H / 3
+  checkClose(solid.Capacity(), surf::kPi * baseRadius * baseRadius * 2. * halfHeight / 3., 1.e-9);
 }

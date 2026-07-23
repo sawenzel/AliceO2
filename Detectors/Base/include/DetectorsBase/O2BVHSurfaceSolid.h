@@ -41,6 +41,35 @@ class O2BVHSurfaceSolid : public TGeoBBox
   bool AddPlanarSurface(const Point3D& origin, const Point3D& axisU, const Point3D& axisV,
                         const std::vector<Point2D>& outerWire,
                         const std::vector<std::vector<Point2D>>& innerWires = {});
+
+  /// Add an exact planar disk (or annulus when holeRadius > 0) centred at \a center, e.g. a
+  /// cylinder or cone end cap. \a axisU and \a axisV must be orthonormal; the outward normal is
+  /// axisU x axisV.
+  bool AddPlanarDiskSurface(const Point3D& center, const Point3D& axisU, const Point3D& axisV, double radius,
+                            double holeRadius = 0.);
+
+  /// Add a cylindrical lateral surface of given \a radius around \a axis. \a centerPoint is the
+  /// height reference (h = 0) on the axis, the height range runs along the (normalized) axis and
+  /// phi is measured from \a referenceAxisU (projected perpendicular to the axis). With
+  /// \a innerWall set, the surface bounds a hole and its outward normal points towards the axis.
+  bool AddCylindricalSurface(const Point3D& centerPoint, const Point3D& axis, const Point3D& referenceAxisU,
+                             double radius, double heightMin, double heightMax, double phiStart = 0.,
+                             double phiSweep = 6.283185307179586, bool innerWall = false);
+
+  /// Add a spherical surface of given \a radius around \a center, trimmed to a polar range
+  /// (theta from the +polarAxis pole) and a phi sweep from \a referenceAxisU. The default
+  /// arguments give a full, self-closing sphere.
+  bool AddSphericalSurface(const Point3D& center, const Point3D& polarAxis, const Point3D& referenceAxisU,
+                           double radius, double thetaMin = 0., double thetaMax = 3.141592653589793,
+                           double phiStart = 0., double phiSweep = 6.283185307179586, bool innerWall = false);
+
+  /// Add a conical lateral surface whose radius runs linearly from \a radiusAtMin at
+  /// \a heightMin to \a radiusAtMax at \a heightMax along \a axis; one radius may be zero (apex
+  /// cone). Frame and innerWall conventions as for AddCylindricalSurface.
+  bool AddConicalSurface(const Point3D& centerPoint, const Point3D& axis, const Point3D& referenceAxisU,
+                         double radiusAtMin, double radiusAtMax, double heightMin, double heightMax,
+                         double phiStart = 0., double phiSweep = 6.283185307179586, bool innerWall = false);
+
   void CloseShape(bool check = true);
 
   int GetNsurfaces() const;
@@ -79,7 +108,7 @@ class O2BVHSurfaceSolid : public TGeoBBox
 
  private:
   struct Impl;
-  Impl* fImpl = nullptr; //! private planar-surface implementation
+  Impl* fImpl = nullptr; //! private bounded-surface implementation
 
   ClassDefOverride(O2BVHSurfaceSolid, 1) // BVH surface-bounded shape class
 };
