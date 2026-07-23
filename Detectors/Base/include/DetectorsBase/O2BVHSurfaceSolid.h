@@ -42,11 +42,36 @@ class O2BVHSurfaceSolid : public TGeoBBox
                         const std::vector<Point2D>& outerWire,
                         const std::vector<std::vector<Point2D>>& innerWires = {});
 
-  /// Add an exact planar disk (or annulus when holeRadius > 0) centred at \a center, e.g. a
-  /// cylinder or cone end cap. \a axisU and \a axisV must be orthonormal; the outward normal is
-  /// axisU x axisV.
-  bool AddPlanarDiskSurface(const Point3D& center, const Point3D& axisU, const Point3D& axisV, double radius,
-                            double holeRadius = 0.);
+  /// One boundary curve of a curved planar surface, in the surface's local (u, v) frame. It is
+  /// either a straight line segment (\a lineStart -> \a lineEnd) or a circular arc (\a center,
+  /// \a radius, from \a startAngle to \a endAngle in radians; a full circle is a +/-2pi sweep).
+  /// This is the public, kernel-independent mirror of the internal Curve2D type.
+  struct PlanarBoundaryCurve {
+    enum Kind { Line, Arc };
+    Kind kind = Line;
+    Point2D lineStart{0., 0.};
+    Point2D lineEnd{0., 0.};
+    Point2D center{0., 0.};
+    double radius = 0.;
+    double startAngle = 0.;
+    double endAngle = 0.;
+
+    static PlanarBoundaryCurve makeLine(const Point2D& start, const Point2D& end)
+    {
+      return {Line, start, end, {0., 0.}, 0., 0., 0.};
+    }
+    static PlanarBoundaryCurve makeArc(const Point2D& c, double r, double start, double end)
+    {
+      return {Arc, {0., 0.}, {0., 0.}, c, r, start, end};
+    }
+  };
+
+  /// Add an exact planar surface bounded by general line/arc wires (e.g. a rounded rectangle,
+  /// a slot, a disk or an annulus). \a axisU and \a axisV must be orthonormal; the outward
+  /// normal is axisU x axisV. Wires are auto-reoriented (outer CCW, inner CW) as needed.
+  bool AddCurvedPlanarSurface(const Point3D& origin, const Point3D& axisU, const Point3D& axisV,
+                              const std::vector<PlanarBoundaryCurve>& outerWire,
+                              const std::vector<std::vector<PlanarBoundaryCurve>>& innerWires = {});
 
   /// Add a cylindrical lateral surface of given \a radius around \a axis. \a centerPoint is the
   /// height reference (h = 0) on the axis, the height range runs along the (normalized) axis and

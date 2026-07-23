@@ -978,11 +978,15 @@ struct CurveWire {
     if (curves.empty()) {
       return samples;
     }
-    const int arcSteps = std::max(1, segmentsPerArc);
     for (const auto& curve : curves) {
       if (curve.kind == CurveKind::Line) {
         samples.push_back(curve.startPoint());
       } else {
+        // Scale the chord count by the arc's sweep so a shared rim with a quadric wall (which
+        // uses lround(kArcSamples * sweep / 2pi) segments) samples the identical vertices and
+        // the closure half-edge check cancels. A full circle keeps segmentsPerArc chords.
+        const int arcSteps =
+          std::max(1, static_cast<int>(std::lround(segmentsPerArc * std::abs(curve.sweep()) / kTwoPi)));
         for (int step = 0; step < arcSteps; ++step) {
           samples.push_back(curve.pointAt(static_cast<double>(step) / arcSteps));
         }

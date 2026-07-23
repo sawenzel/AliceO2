@@ -47,6 +47,26 @@ std::vector<Point2D> rectangleWire(double extentU, double extentV)
   return {{0., 0.}, {extentU, 0.}, {extentU, extentV}, {0., extentV}};
 }
 
+using BoundaryCurve = SurfaceSolid::PlanarBoundaryCurve;
+
+// A full-circle boundary wire centred at (0,0) as a single +/-2pi arc (clockwise for holes).
+std::vector<BoundaryCurve> circleWire(double radius, bool clockwise = false)
+{
+  return {BoundaryCurve::makeArc({0., 0.}, radius, 0., clockwise ? -surf::kTwoPi : surf::kTwoPi)};
+}
+
+// Add a planar disk (or annulus when holeRadius > 0) via the general curved-planar API,
+// replacing the retired AddPlanarDiskSurface convenience.
+bool addDiskSurface(SurfaceSolid& solid, const Point3D& center, const Point3D& axisU, const Point3D& axisV,
+                    double radius, double holeRadius = 0.)
+{
+  std::vector<std::vector<BoundaryCurve>> inners;
+  if (holeRadius > 0.) {
+    inners.push_back(circleWire(holeRadius, true)); // clockwise hole: no reorientation needed
+  }
+  return solid.AddCurvedPlanarSurface(center, axisU, axisV, circleWire(radius), inners);
+}
+
 // Local frame (origin + parametric axes + rectangle extents) of a box face by index
 // (0:+x 1:-x 2:+y 3:-y 4:+z 5:-z), for a box centred at the origin.
 struct FaceFrame {
@@ -692,8 +712,8 @@ BOOST_AUTO_TEST_CASE(ClosedCylinderMatchesTGeoTube)
   BOOST_REQUIRE(solid.AddCylindricalSurface({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, radius, -halfHeight,
                                             halfHeight));
   // cap frames: outward normal is axisU x axisV, so the bottom cap flips axisV
-  BOOST_REQUIRE(solid.AddPlanarDiskSurface({0., 0., halfHeight}, {1., 0., 0.}, {0., 1., 0.}, radius));
-  BOOST_REQUIRE(solid.AddPlanarDiskSurface({0., 0., -halfHeight}, {1., 0., 0.}, {0., -1., 0.}, radius));
+  BOOST_REQUIRE(addDiskSurface(solid, {0., 0., halfHeight}, {1., 0., 0.}, {0., 1., 0.}, radius));
+  BOOST_REQUIRE(addDiskSurface(solid, {0., 0., -halfHeight}, {1., 0., 0.}, {0., -1., 0.}, radius));
   solid.CloseShape();
 
   BOOST_CHECK(solid.IsClosed());
@@ -759,9 +779,9 @@ BOOST_AUTO_TEST_CASE(HollowCylinderMatchesTGeoTube)
                                             halfHeight));
   BOOST_REQUIRE(solid.AddCylindricalSurface({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, innerRadius, -halfHeight,
                                             halfHeight, 0., surf::kTwoPi, true));
-  BOOST_REQUIRE(solid.AddPlanarDiskSurface({0., 0., halfHeight}, {1., 0., 0.}, {0., 1., 0.}, outerRadius,
+  BOOST_REQUIRE(addDiskSurface(solid, {0., 0., halfHeight}, {1., 0., 0.}, {0., 1., 0.}, outerRadius,
                                            innerRadius));
-  BOOST_REQUIRE(solid.AddPlanarDiskSurface({0., 0., -halfHeight}, {1., 0., 0.}, {0., -1., 0.}, outerRadius,
+  BOOST_REQUIRE(addDiskSurface(solid, {0., 0., -halfHeight}, {1., 0., 0.}, {0., -1., 0.}, outerRadius,
                                            innerRadius));
   solid.CloseShape();
 
@@ -878,8 +898,8 @@ BOOST_AUTO_TEST_CASE(TruncatedConeMatchesTGeoCone)
   SurfaceSolid solid("truncatedCone");
   BOOST_REQUIRE(solid.AddConicalSurface({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, radiusAtBottom, radiusAtTop,
                                         -halfHeight, halfHeight));
-  BOOST_REQUIRE(solid.AddPlanarDiskSurface({0., 0., halfHeight}, {1., 0., 0.}, {0., 1., 0.}, radiusAtTop));
-  BOOST_REQUIRE(solid.AddPlanarDiskSurface({0., 0., -halfHeight}, {1., 0., 0.}, {0., -1., 0.}, radiusAtBottom));
+  BOOST_REQUIRE(addDiskSurface(solid, {0., 0., halfHeight}, {1., 0., 0.}, {0., 1., 0.}, radiusAtTop));
+  BOOST_REQUIRE(addDiskSurface(solid, {0., 0., -halfHeight}, {1., 0., 0.}, {0., -1., 0.}, radiusAtBottom));
   solid.CloseShape();
 
   BOOST_CHECK(solid.IsClosed());
@@ -924,7 +944,7 @@ BOOST_AUTO_TEST_CASE(ApexConeClosesWithSingleCap)
   SurfaceSolid solid("apexCone");
   BOOST_REQUIRE(solid.AddConicalSurface({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, baseRadius, 0., -halfHeight,
                                         halfHeight));
-  BOOST_REQUIRE(solid.AddPlanarDiskSurface({0., 0., -halfHeight}, {1., 0., 0.}, {0., -1., 0.}, baseRadius));
+  BOOST_REQUIRE(addDiskSurface(solid, {0., 0., -halfHeight}, {1., 0., 0.}, {0., -1., 0.}, baseRadius));
   solid.CloseShape();
 
   // the apex rim degenerates to a point, so one cap suffices for a closed manifold
@@ -1112,6 +1132,71 @@ BOOST_AUTO_TEST_CASE(ContainsBoundaryPointsAndCapsule)
              surf::kPi * radius * radius * 2. * halfHeight + 4. * surf::kPi * radius * radius * radius / 3., 1.e-9);
 }
 
+BOOST_AUTO_TEST_CASE(CurvedPlanarStadiumPrism)
+{
+  // A stadium (rectangle with two semicircular ends) extruded along z: the two end caps are
+  // planar faces with mixed line+arc wires - the general curved-planar case a disk cannot
+  // express. Straight sides are flat rectangles; the round ends are half-cylinders.
+  constexpr double halfLen = 3.;    // straight half-length along x
+  constexpr double radius = 2.;     // corner radius and half-width along y
+  constexpr double halfHeight = 4.; // half-height along z
+
+  // Stadium cross-section boundary in the cap's local (u=x, v=y) frame, CCW: bottom line,
+  // right semicircle, top line, left semicircle.
+  const std::vector<BoundaryCurve> stadiumWire{
+    BoundaryCurve::makeLine({-halfLen, -radius}, {halfLen, -radius}),
+    BoundaryCurve::makeArc({halfLen, 0.}, radius, -surf::kHalfPi, surf::kHalfPi),
+    BoundaryCurve::makeLine({halfLen, radius}, {-halfLen, radius}),
+    BoundaryCurve::makeArc({-halfLen, 0.}, radius, surf::kHalfPi, 3. * surf::kHalfPi)};
+
+  SurfaceSolid solid("stadiumPrism");
+  // caps (outward +z / -z: the bottom cap flips axisV)
+  BOOST_REQUIRE(solid.AddCurvedPlanarSurface({0., 0., halfHeight}, {1., 0., 0.}, {0., 1., 0.}, stadiumWire));
+  BOOST_REQUIRE(solid.AddCurvedPlanarSurface({0., 0., -halfHeight}, {1., 0., 0.}, {0., -1., 0.}, stadiumWire));
+  // flat side walls at y = +/- radius (outward +/- y)
+  BOOST_REQUIRE(solid.AddPlanarSurface({-halfLen, radius, -halfHeight}, {0., 0., 1.}, {1., 0., 0.},
+                                       rectangleWire(2. * halfHeight, 2. * halfLen)));
+  BOOST_REQUIRE(solid.AddPlanarSurface({-halfLen, -radius, -halfHeight}, {1., 0., 0.}, {0., 0., 1.},
+                                       rectangleWire(2. * halfLen, 2. * halfHeight)));
+  // round ends as half-cylinders (outer walls)
+  BOOST_REQUIRE(solid.AddCylindricalSurface({halfLen, 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, radius, -halfHeight,
+                                            halfHeight, -surf::kHalfPi, surf::kPi));
+  BOOST_REQUIRE(solid.AddCylindricalSurface({-halfLen, 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, radius, -halfHeight,
+                                            halfHeight, surf::kHalfPi, surf::kPi));
+  solid.CloseShape();
+
+  BOOST_CHECK(solid.IsClosed());
+  BOOST_CHECK(solid.IsOrientationConsistent());
+
+  // exact capacity: (rectangle 2L x 2R + full circle pi R^2) x height 2H
+  checkClose(solid.Capacity(), (4. * halfLen * radius + surf::kPi * radius * radius) * 2. * halfHeight, 1.e-6);
+
+  const auto stadiumInside = [&](const double* point) {
+    if (std::abs(point[2]) > halfHeight) {
+      return false;
+    }
+    const double ax = std::abs(point[0]);
+    const double dx = ax > halfLen ? ax - halfLen : 0.;
+    return dx * dx + point[1] * point[1] <= radius * radius;
+  };
+  // deterministic grid spanning well beyond the solid on every axis
+  constexpr int samples = 21;
+  const double extentX = 6., extentY = 3.5, extentZ = 5.;
+  for (int stepX = 0; stepX < samples; ++stepX) {
+    for (int stepY = 0; stepY < samples; ++stepY) {
+      for (int stepZ = 0; stepZ < samples; ++stepZ) {
+        const double point[3] = {-extentX + 2. * extentX * (stepX + 0.517) / samples,
+                                 -extentY + 2. * extentY * (stepY + 0.263) / samples,
+                                 -extentZ + 2. * extentZ * (stepZ + 0.741) / samples};
+        BOOST_TEST_CONTEXT("point = (" << point[0] << ", " << point[1] << ", " << point[2] << ")")
+        {
+          BOOST_CHECK_EQUAL(solid.Contains(point), stadiumInside(point));
+        }
+      }
+    }
+  }
+}
+
 namespace
 {
 // Helpers writing the surface sidecar binary format (version 1) documented in
@@ -1163,6 +1248,31 @@ void appendPlaneRecord(std::vector<char>& bytes, const FaceFrame& frame)
   }
 }
 
+// plane record (type 1) for a disk/annulus cap: one full-circle outer arc wire, plus a
+// clockwise inner arc wire when holeRadius > 0. Exercises the arc-wire reader path.
+void appendDiskPlaneRecord(std::vector<char>& bytes, const Point3D& center, const Point3D& axisU,
+                           const Point3D& axisV, double radius, double holeRadius = 0.)
+{
+  appendU32(bytes, 1); // surfaceType plane
+  appendU32(bytes, 0); // flags
+  appendU32(bytes, 9); // nParams
+  appendDoubles(bytes, {center[0], center[1], center[2], axisU[0], axisU[1], axisU[2], axisV[0], axisV[1], axisV[2]});
+  const uint32_t nWires = holeRadius > 0. ? 2u : 1u;
+  appendU32(bytes, nWires);
+  appendU32(bytes, 0); // outer wire role
+  appendU32(bytes, 1); // one edge
+  appendU32(bytes, 1); // curveType arc
+  appendU32(bytes, 5); // nCurveParams
+  appendDoubles(bytes, {0., 0., radius, 0., 2. * surf::kPi}); // cu cv radius phiStart phiSweep (CCW full circle)
+  if (holeRadius > 0.) {
+    appendU32(bytes, 1); // inner wire role
+    appendU32(bytes, 1);
+    appendU32(bytes, 1); // arc
+    appendU32(bytes, 5);
+    appendDoubles(bytes, {0., 0., holeRadius, 0., -2. * surf::kPi}); // clockwise hole
+  }
+}
+
 std::filesystem::path writeSidecarFile(const std::string& name, const std::vector<char>& bytes)
 {
   const auto path = std::filesystem::temp_directory_path() / name;
@@ -1201,7 +1311,7 @@ BOOST_AUTO_TEST_CASE(SurfaceSidecarRoundTrip)
   compareDistance(box, referenceBox, {0., 0., 0.}, unitDirection(1., 1., 1.));
   checkClose(box.Capacity(), referenceBox.Capacity(), 1.e-9);
 
-  // quadric + disk records: closed cylinder (lateral wall + two caps) against TGeoTube
+  // quadric + arc-wire caps: closed cylinder (lateral wall + two disk caps) against TGeoTube
   constexpr double radius = 2.;
   constexpr double halfHeight = 3.;
 
@@ -1212,17 +1322,9 @@ BOOST_AUTO_TEST_CASE(SurfaceSidecarRoundTrip)
   appendU32(tubeBytes, 14); // nParams
   appendDoubles(tubeBytes, {0., 0., 0., 0., 0., 1., 1., 0., 0., radius, -halfHeight, halfHeight, 0., 2. * surf::kPi});
   appendU32(tubeBytes, 0); // nWires
-  // caps: outward normal is axisU x axisV, so the bottom cap flips axisV
-  appendU32(tubeBytes, 5);  // surfaceType planar-disk
-  appendU32(tubeBytes, 0);  // flags
-  appendU32(tubeBytes, 11); // nParams
-  appendDoubles(tubeBytes, {0., 0., halfHeight, 1., 0., 0., 0., 1., 0., radius, 0.});
-  appendU32(tubeBytes, 0); // nWires
-  appendU32(tubeBytes, 5);
-  appendU32(tubeBytes, 0);
-  appendU32(tubeBytes, 11);
-  appendDoubles(tubeBytes, {0., 0., -halfHeight, 1., 0., 0., 0., -1., 0., radius, 0.});
-  appendU32(tubeBytes, 0);
+  // caps as arc-wire plane records: outward normal is axisU x axisV, so the bottom cap flips axisV
+  appendDiskPlaneRecord(tubeBytes, {0., 0., halfHeight}, {1., 0., 0.}, {0., 1., 0.}, radius);
+  appendDiskPlaneRecord(tubeBytes, {0., 0., -halfHeight}, {1., 0., 0.}, {0., -1., 0.}, radius);
   const auto tubePath = writeSidecarFile("o2_sidecar_roundtrip_tube.bin", tubeBytes);
 
   SurfaceSolid tube("sidecarTube");

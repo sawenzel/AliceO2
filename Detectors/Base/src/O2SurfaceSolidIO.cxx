@@ -43,7 +43,6 @@ enum SurfaceType : uint32_t {
   kCylinder = 2,
   kCone = 3,
   kSphere = 4,
-  kPlanarDisk = 5,
 };
 
 enum CurveType : uint32_t {
@@ -79,30 +78,58 @@ O2BVHSurfaceSolid::Point3D point3(const std::vector<double>& p, size_t offset)
   return {p[offset], p[offset + 1], p[offset + 2]};
 }
 
-/// Convert the line-segment edges of a sidecar wire into the closed polygon vertex list
-/// expected by AddPlanarSurface. Consecutive edges must be connected end-to-start.
-bool wireToPolygon(const std::string& file, size_t surfaceIndex, const SidecarWire& wire,
-                   std::vector<O2BVHSurfaceSolid::Point2D>& polygon)
+/// Start/end (u, v) endpoints of a sidecar edge (line segment or circular arc).
+bool edgeEndpoints(const SidecarEdge& edge, O2BVHSurfaceSolid::Point2D& start, O2BVHSurfaceSolid::Point2D& end)
 {
-  polygon.clear();
-  polygon.reserve(wire.edges.size());
+  if (edge.curveType == kLineSegment && edge.params.size() >= 4) {
+    start = {edge.params[0], edge.params[1]};
+    end = {edge.params[2], edge.params[3]};
+    return true;
+  }
+  if (edge.curveType == kCircularArc && edge.params.size() >= 5) {
+    const double cu = edge.params[0], cv = edge.params[1], r = edge.params[2];
+    const double a0 = edge.params[3], a1 = edge.params[3] + edge.params[4];
+    start = {cu + r * std::cos(a0), cv + r * std::sin(a0)};
+    end = {cu + r * std::cos(a1), cv + r * std::sin(a1)};
+    return true;
+  }
+  return false;
+}
+
+/// Convert a sidecar wire into the public PlanarBoundaryCurve loop expected by
+/// AddCurvedPlanarSurface, validating that consecutive edges join end-to-start. Sets
+/// \a anyArc when the wire carries at least one circular-arc edge.
+bool wireToCurves(const std::string& file, size_t surfaceIndex, const SidecarWire& wire,
+                  std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>& curves, bool& anyArc)
+{
+  using Curve = O2BVHSurfaceSolid::PlanarBoundaryCurve;
+  curves.clear();
+  curves.reserve(wire.edges.size());
+  constexpr double kJoinTolerance = 1.e-9;
   for (size_t e = 0; e < wire.edges.size(); ++e) {
     const auto& edge = wire.edges[e];
-    if (edge.curveType != kLineSegment || edge.params.size() < 4) {
-      ::Error("LoadSurfaceSolid", "%s: surface %zu: planar wires support only line-segment edges in version 1",
-              file.c_str(), surfaceIndex);
+    O2BVHSurfaceSolid::Point2D start{}, end{};
+    if (!edgeEndpoints(edge, start, end)) {
+      ::Error("LoadSurfaceSolid", "%s: surface %zu: unsupported or malformed wire edge %zu", file.c_str(),
+              surfaceIndex, e);
       return false;
     }
-    const auto& next = wire.edges[(e + 1) % wire.edges.size()];
-    const double gapU = edge.params[2] - next.params[0];
-    const double gapV = edge.params[3] - next.params[1];
-    constexpr double kJoinTolerance = 1.e-9;
-    if (std::abs(gapU) > kJoinTolerance || std::abs(gapV) > kJoinTolerance) {
+    O2BVHSurfaceSolid::Point2D nextStart{}, nextEnd{};
+    if (!edgeEndpoints(wire.edges[(e + 1) % wire.edges.size()], nextStart, nextEnd)) {
+      return false;
+    }
+    if (std::abs(end[0] - nextStart[0]) > kJoinTolerance || std::abs(end[1] - nextStart[1]) > kJoinTolerance) {
       ::Error("LoadSurfaceSolid", "%s: surface %zu: wire edge %zu end does not join the next edge start",
               file.c_str(), surfaceIndex, e);
       return false;
     }
-    polygon.push_back({edge.params[0], edge.params[1]});
+    if (edge.curveType == kCircularArc) {
+      anyArc = true;
+      curves.push_back(Curve::makeArc({edge.params[0], edge.params[1]}, edge.params[2], edge.params[3],
+                                      edge.params[3] + edge.params[4]));
+    } else {
+      curves.push_back(Curve::makeLine(start, end));
+    }
   }
   return true;
 }
@@ -179,12 +206,15 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
           ::Error("LoadSurfaceSolid", "%s: plane surface %zu has %u parameters, expected 9", file.c_str(), s, nParams);
           return false;
         }
-        std::vector<O2BVHSurfaceSolid::Point2D> outer;
-        std::vector<std::vector<O2BVHSurfaceSolid::Point2D>> inners;
+        // Read every wire as a general line/arc loop. A pure line-segment loop keeps the
+        // polygon path (AddPlanarSurface, general-metric); any arc routes to the curved path.
+        std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve> outer;
+        std::vector<std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>> inners;
         bool haveOuter = false;
+        bool anyArc = false;
         for (const auto& wire : wires) {
-          std::vector<O2BVHSurfaceSolid::Point2D> polygon;
-          if (!wireToPolygon(file, s, wire, polygon)) {
+          std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve> curves;
+          if (!wireToCurves(file, s, wire, curves, anyArc)) {
             return false;
           }
           if (wire.role == 0) {
@@ -192,17 +222,34 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
               ::Error("LoadSurfaceSolid", "%s: plane surface %zu has more than one outer wire", file.c_str(), s);
               return false;
             }
-            outer = std::move(polygon);
+            outer = std::move(curves);
             haveOuter = true;
           } else {
-            inners.push_back(std::move(polygon));
+            inners.push_back(std::move(curves));
           }
         }
         if (!haveOuter) {
           ::Error("LoadSurfaceSolid", "%s: plane surface %zu has no outer wire", file.c_str(), s);
           return false;
         }
-        added = solid.AddPlanarSurface(point3(p, 0), point3(p, 3), point3(p, 6), outer, inners);
+        if (anyArc) {
+          added = solid.AddCurvedPlanarSurface(point3(p, 0), point3(p, 3), point3(p, 6), outer, inners);
+        } else {
+          const auto toPolygon = [](const std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>& curves) {
+            std::vector<O2BVHSurfaceSolid::Point2D> polygon;
+            polygon.reserve(curves.size());
+            for (const auto& c : curves) {
+              polygon.push_back(c.lineStart);
+            }
+            return polygon;
+          };
+          std::vector<std::vector<O2BVHSurfaceSolid::Point2D>> innerPolys;
+          innerPolys.reserve(inners.size());
+          for (const auto& inner : inners) {
+            innerPolys.push_back(toPolygon(inner));
+          }
+          added = solid.AddPlanarSurface(point3(p, 0), point3(p, 3), point3(p, 6), toPolygon(outer), innerPolys);
+        }
         break;
       }
       case kCylinder: {
@@ -232,15 +279,6 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
         }
         added = solid.AddSphericalSurface(point3(p, 0), point3(p, 3), point3(p, 6), p[9], p[10], p[11], p[12], p[13],
                                           innerWall);
-        break;
-      }
-      case kPlanarDisk: {
-        if (nParams != 11) {
-          ::Error("LoadSurfaceSolid", "%s: planar-disk surface %zu has %u parameters, expected 11", file.c_str(), s,
-                  nParams);
-          return false;
-        }
-        added = solid.AddPlanarDiskSurface(point3(p, 0), point3(p, 3), point3(p, 6), p[9], p[10]);
         break;
       }
       default:

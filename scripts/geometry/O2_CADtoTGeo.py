@@ -643,7 +643,7 @@ def build_surface_report(step_path: str, scale_to_cm: float) -> dict:
 
 SURFACE_SIDECAR_MAGIC = b"O2SS"
 SURFACE_SIDECAR_VERSION = 1
-SURFACE_TYPE_ENUM = {"plane": 1, "cylinder": 2, "cone": 3, "sphere": 4, "disk": 5}
+SURFACE_TYPE_ENUM = {"plane": 1, "cylinder": 2, "cone": 3, "sphere": 4}
 CURVE_TYPE_ENUM = {"line": 0, "arc": 1}
 SURFACE_FLAG_INNER_WALL = 1 << 0
 
@@ -651,11 +651,11 @@ SURFACE_FLAG_INNER_WALL = 1 << 0
 def write_surfaces_bin(path: _Path, surfaces: List[dict]):
     """
     Writes the surface sidecar. `surfaces` is a list of records:
-      {"type": "plane"|"cylinder"|"cone"|"sphere"|"disk",
+      {"type": "plane"|"cylinder"|"cone"|"sphere",
        "inner_wall": bool,              # quadrics only, default False
        "params": [float, ...],          # fixed per-type layout, see BVHSurfaceSolid.md
        "wires": [                       # planes only; quadrics carry their trim in params
-          {"role": "outer"|"inner",
+          {"role": "outer"|"inner",     # general line/arc loops (polygon, disk, rounded rect)
            "edges": [{"curve": "line"|"arc", "params": [float, ...]}, ...]},
        ]}
     """
@@ -692,17 +692,13 @@ def write_surfaces_bin(path: _Path, surfaces: List[dict]):
 # O2BVHSurfaceSolid only when *every* one of its faces can be extracted exactly; otherwise
 # the caller keeps the tessellated fallback (auto mode) or fails (required mode).
 #
-# Milestone status (scripts/geometry/BVHSurfaceSolid.md): planar polygon faces, circular
-# planar disks/annuli and the three quadrics (cylinder, cone, sphere) are extracted here.
-# Quadric trims are parametric rectangles (the only trim the C++ Add*Surface API supports);
-# faces trimmed by non-iso boundary curves force a fallback. Torus and free-form surfaces,
-# and planar faces mixing straight and curved boundaries, are still unsupported.
+# Milestone status (scripts/geometry/BVHSurfaceSolid.md): planar faces carry general line/arc
+# boundary wires (polygon, disk/annulus, rounded rectangle, slot, ...) and the three quadrics
+# (cylinder, cone, sphere) are extracted here. Quadric trims are still parametric rectangles
+# (the only trim the C++ Add*Surface API supports); quadric faces with non-iso boundary curves
+# force a fallback, as do torus/free-form surfaces and non-line/arc planar boundary curves.
 
 _EXTRACT_TOL = 1.e-7
-
-
-def _v_sub(a: List[float], b: List[float]) -> List[float]:
-    return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 
 
 def _v_dot(a: List[float], b: List[float]) -> float:
@@ -711,10 +707,6 @@ def _v_dot(a: List[float], b: List[float]) -> float:
 
 def _v_cross(a: List[float], b: List[float]) -> List[float]:
     return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
-
-
-def _v_norm(a: List[float]) -> float:
-    return math.sqrt(_v_dot(a, a))
 
 
 def _planar_frame(face, scale_to_cm: float):
@@ -756,57 +748,93 @@ def _face_wire_edges(face):
         wx.Next()
 
 
-def _planar_boundary_curve_types(face) -> set:
-    """Set of GeomAbs curve type names present on the planar face's boundary (excluding
-    degenerated edges). Used to route a planar face to the polygon or the disk extractor."""
-    types = set()
-    ex = TopExp_Explorer(face, TopAbs_EDGE)
-    while ex.More():
-        edge = ex.Current()
-        if not BRep_Tool.Degenerated(edge):
-            try:
-                gt = BRepAdaptor_Curve(edge).GetType()
-            except Exception:
-                gt = None
-            types.add(_CURVE_TYPE_NAMES.get(gt, "unknown"))
-        ex.Next()
-    return types
-
-
-def _extract_planar_polygon(face, scale_to_cm: float) -> Tuple[Optional[dict], Optional[str]]:
-    """Planar face bounded entirely by straight segments -> a 'plane' surface record."""
-    origin_cm, axis_u, axis_v = _planar_frame(face, scale_to_cm)
-    s = scale_to_cm
-
+def _planar_projector(origin_cm, axis_u, axis_v, s):
+    """Return project(gp_Pnt) -> (u, v): the point's plane-local coordinates in cm."""
     def project(pnt) -> Tuple[float, float]:
         rel = [pnt.X() * s - origin_cm[0], pnt.Y() * s - origin_cm[1], pnt.Z() * s - origin_cm[2]]
         return _v_dot(rel, axis_u), _v_dot(rel, axis_v)
+    return project
+
+
+def _arc_edge_params(edge, curve, project, s) -> Tuple[Optional[List[float]], Optional[str]]:
+    """Build [cu, cv, radius, startAngle, phiSweep] for a circular boundary edge.
+
+    The signed sweep is recovered by sampling the 3D edge in *wire-traversal* order (the edge
+    is walked backwards when its orientation is REVERSED relative to the underlying curve),
+    projecting each sample into the plane frame and unwrapping the polar angle. This is robust
+    to full circles (single periodic edge -> +/-2pi), arcs wider than pi, and either winding.
+    """
+    circ = curve.Circle()
+    cu, cv = project(circ.Location())
+    radius = circ.Radius() * s
+    first, last = curve.FirstParameter(), curve.LastParameter()
+    reversed_edge = edge.Orientation() == TopAbs_REVERSED
+    angles: List[float] = []
+    for tau in (0.0, 0.25, 0.5, 0.75, 1.0):
+        t = (1.0 - tau) if reversed_edge else tau
+        u, v = project(curve.Value(first + t * (last - first)))
+        angles.append(math.atan2(v - cv, u - cu))
+    unwrapped = [angles[0]]
+    for a in angles[1:]:
+        d = a - unwrapped[-1]
+        d -= 2.0 * math.pi * math.floor((d + math.pi) / (2.0 * math.pi))  # wrap into (-pi, pi]
+        unwrapped.append(unwrapped[-1] + d)
+    sweep = unwrapped[-1] - unwrapped[0]
+    if abs(sweep) < _EXTRACT_TOL:
+        return None, "planar arc edge has a degenerate sweep"
+    return [cu, cv, radius, unwrapped[0], sweep], None
+
+
+def extract_planar_face(face, scale_to_cm: float) -> Tuple[Optional[dict], Optional[str]]:
+    """Convert a planar TopoDS face into a sidecar 'plane' surface record with general
+    line/arc boundary wires (polygon, disk/annulus, rounded rectangle, slot, ...).
+
+    Each wire is walked in connected order; straight edges become 'line' segments and circular
+    edges become 'arc' segments in the plane's local (u, v) frame. Boundary edges that are
+    neither straight lines nor circular arcs (ellipses, splines, ...) force a fallback.
+    """
+    adaptor = BRepAdaptor_Surface(face)
+    if adaptor.GetType() != GeomAbs_Plane:
+        return None, f"not a plane ({_SURFACE_TYPE_NAMES.get(adaptor.GetType(), 'unknown')})"
+
+    origin_cm, axis_u, axis_v = _planar_frame(face, scale_to_cm)
+    s = scale_to_cm
+    project = _planar_projector(origin_cm, axis_u, axis_v, s)
 
     wires_out: List[dict] = []
     for wire, is_outer, edges in _face_wire_edges(face):
-        # BRepTools_WireExplorer walks the edges in connected order and yields each edge's
-        # start vertex, giving an ordered, closed polygon of the plane's local (u, v) points.
-        verts: List[Tuple[float, float]] = []
+        classified = []  # (edge, curve, geom_type, projected start (u, v))
         for edge, start_vertex in edges:
             if BRep_Tool.Degenerated(edge):
                 return None, "planar face has a degenerated boundary edge"
             try:
-                is_line = BRepAdaptor_Curve(edge).GetType() == GeomAbs_Line
+                curve = BRepAdaptor_Curve(edge)
+                gt = curve.GetType()
             except Exception:
-                is_line = False
-            if not is_line:
-                return None, "planar face boundary edge is not a line segment"
-            verts.append(project(BRep_Tool.Pnt(start_vertex)))
+                gt = None
+            if gt not in (GeomAbs_Line, GeomAbs_Circle):
+                name = _CURVE_TYPE_NAMES.get(gt, "unknown")
+                return None, f"planar boundary edge is a {name} curve (only line/circle supported)"
+            classified.append((edge, curve, gt, project(BRep_Tool.Pnt(start_vertex))))
 
-        if len(verts) < 3:
-            return None, "planar wire has fewer than 3 edges"
+        n = len(classified)
+        n_arcs = sum(1 for _, _, gt, _ in classified if gt == GeomAbs_Circle)
+        if n_arcs == 0 and n < 3:
+            return None, "planar polygon wire has fewer than 3 edges"
+        if n == 0:
+            return None, "planar face has an empty wire"
 
-        n = len(verts)
         seg_edges = []
-        for i in range(n):
-            u0, v0 = verts[i]
-            u1, v1 = verts[(i + 1) % n]
-            seg_edges.append({"curve": "line", "params": [u0, v0, u1, v1]})
+        for i, (edge, curve, gt, start_uv) in enumerate(classified):
+            if gt == GeomAbs_Line:
+                u0, v0 = start_uv
+                u1, v1 = classified[(i + 1) % n][3]
+                seg_edges.append({"curve": "line", "params": [u0, v0, u1, v1]})
+            else:
+                params, reason = _arc_edge_params(edge, curve, project, s)
+                if params is None:
+                    return None, reason
+                seg_edges.append({"curve": "arc", "params": params})
         wires_out.append({"role": "outer" if is_outer else "inner", "edges": seg_edges})
 
     if not wires_out:
@@ -816,82 +844,6 @@ def _extract_planar_polygon(face, scale_to_cm: float) -> Tuple[Optional[dict], O
         return None, f"planar face has {n_outer} outer wires (expected exactly 1)"
 
     return {"type": "plane", "params": list(origin_cm) + list(axis_u) + list(axis_v), "wires": wires_out}, None
-
-
-def _extract_planar_disk(face, scale_to_cm: float) -> Tuple[Optional[dict], Optional[str]]:
-    """Planar face bounded by concentric circle(s) -> a 'disk' (or annulus) surface record.
-
-    Every wire must be a single full circle (built from one or more circular-arc edges that
-    all lie on the same circle). The outer circle sets the radius; an optional concentric
-    inner circle sets the hole radius. This is what closes the end caps of a cylinder/cone.
-    """
-    origin_cm, axis_u, axis_v = _planar_frame(face, scale_to_cm)
-    s = scale_to_cm
-    outer = None  # (center_cm, radius_cm)
-    inners: List[Tuple[List[float], float]] = []
-    for wire, is_outer, edges in _face_wire_edges(face):
-        center = None
-        radius = None
-        for edge, _start_vertex in edges:
-            if BRep_Tool.Degenerated(edge):
-                return None, "disk face has a degenerated boundary edge"
-            try:
-                curve = BRepAdaptor_Curve(edge)
-                is_circle = curve.GetType() == GeomAbs_Circle
-            except Exception:
-                is_circle = False
-            if not is_circle:
-                return None, "disk boundary edge is not a circular arc"
-            circ = curve.Circle()
-            c = _xyz(circ.Location(), s)
-            r = circ.Radius() * s
-            if center is None:
-                center, radius = c, r
-            elif _v_norm(_v_sub(c, center)) > _EXTRACT_TOL or abs(r - radius) > _EXTRACT_TOL:
-                return None, "disk wire edges lie on different circles (not a simple annulus)"
-        if radius is None:
-            return None, "disk wire has no edges"
-        if is_outer:
-            outer = (center, radius)
-        else:
-            inners.append((center, radius))
-
-    if outer is None:
-        return None, "disk face has no outer circle"
-    if len(inners) > 1:
-        return None, "disk face has more than one hole"
-    hole_radius = 0.0
-    if inners:
-        hole_center, hole_radius = inners[0]
-        if _v_norm(_v_sub(hole_center, outer[0])) > 1.e-6 * max(1.0, outer[1]):
-            return None, "disk hole is not concentric with the outer circle"
-
-    center_cm = outer[0]
-    return {"type": "disk",
-            "params": list(center_cm) + list(axis_u) + list(axis_v) + [outer[1], hole_radius]}, None
-
-
-def extract_planar_face(face, scale_to_cm: float) -> Tuple[Optional[dict], Optional[str]]:
-    """Convert a planar TopoDS face into a sidecar surface record.
-
-    Straight-edged faces become a polygonal 'plane'; faces bounded by concentric circles
-    become a 'disk'/annulus. Faces that mix straight and curved boundary edges, or use other
-    curve kinds, are rejected (the version-1 sidecar has no general planar arc-wire support).
-    """
-    adaptor = BRepAdaptor_Surface(face)
-    if adaptor.GetType() != GeomAbs_Plane:
-        return None, f"not a plane ({_SURFACE_TYPE_NAMES.get(adaptor.GetType(), 'unknown')})"
-
-    curve_types = _planar_boundary_curve_types(face)
-    if not curve_types:
-        return None, "planar face has no boundary edges"
-    if curve_types == {"line"}:
-        return _extract_planar_polygon(face, scale_to_cm)
-    if curve_types == {"circle"}:
-        return _extract_planar_disk(face, scale_to_cm)
-    if "line" in curve_types and "circle" in curve_types:
-        return None, "planar face mixes straight and circular boundary edges (unsupported)"
-    return None, f"planar face has unsupported boundary curve(s): {sorted(curve_types)}"
 
 
 def _quadric_phi_range(ax3, umin: float, umax: float) -> Tuple[float, float]:
