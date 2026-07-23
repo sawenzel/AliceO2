@@ -53,14 +53,25 @@ from pathlib import Path as _Path
 from typing import Dict, List, Optional, Pattern, Tuple
 
 from OCC.Core.Bnd import Bnd_Box
+from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
 from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Common
 from OCC.Core.BRepBndLib import brepbndlib
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Transform
 from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh
 from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeBox
+from OCC.Core.BRepTools import breptools
 from OCC.Core.BRep import BRep_Tool
+from OCC.Core.GeomAbs import (
+    GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone, GeomAbs_Sphere, GeomAbs_Torus,
+    GeomAbs_BezierSurface, GeomAbs_BSplineSurface, GeomAbs_SurfaceOfRevolution,
+    GeomAbs_SurfaceOfExtrusion, GeomAbs_OffsetSurface, GeomAbs_OtherSurface,
+    GeomAbs_Line, GeomAbs_Circle, GeomAbs_Ellipse, GeomAbs_Hyperbola, GeomAbs_Parabola,
+    GeomAbs_BezierCurve, GeomAbs_BSplineCurve, GeomAbs_OffsetCurve, GeomAbs_OtherCurve,
+)
+from OCC.Core.TopExp import TopExp_Explorer
 from OCC.Core.TopLoc import TopLoc_Location
-from OCC.Core.TopAbs import TopAbs_REVERSED
+from OCC.Core.TopAbs import TopAbs_REVERSED, TopAbs_WIRE, TopAbs_EDGE
+from OCC.Core.TopoDS import topods
 from OCC.Extend.TopologyUtils import TopologyExplorer
 
 from OCC.Core.STEPCAFControl import STEPCAFControl_Reader
@@ -358,6 +369,319 @@ def write_facets_bin(path: _Path, triangles):
                 float(b[0]), float(b[1]), float(b[2]),
                 float(c[0]), float(c[1]), float(c[2]),
             ))
+
+
+# -------------------------------
+# Exact-surface classification probes (--surface-report)
+# -------------------------------
+#
+# These probes classify each face of a leaf CAD solid by its analytic surface type and
+# report whether the whole solid could be converted exactly to an O2BVHSurfaceSolid
+# (see scripts/geometry/BVHSurfaceSolid.md). They never modify the emitted geometry.
+
+_SURFACE_TYPE_NAMES = {
+    GeomAbs_Plane: "plane",
+    GeomAbs_Cylinder: "cylinder",
+    GeomAbs_Cone: "cone",
+    GeomAbs_Sphere: "sphere",
+    GeomAbs_Torus: "torus",
+    GeomAbs_BezierSurface: "bezier",
+    GeomAbs_BSplineSurface: "bspline",
+    GeomAbs_SurfaceOfRevolution: "revolution",
+    GeomAbs_SurfaceOfExtrusion: "extrusion",
+    GeomAbs_OffsetSurface: "offset",
+    GeomAbs_OtherSurface: "other",
+}
+
+_CURVE_TYPE_NAMES = {
+    GeomAbs_Line: "line",
+    GeomAbs_Circle: "circle",
+    GeomAbs_Ellipse: "ellipse",
+    GeomAbs_Hyperbola: "hyperbola",
+    GeomAbs_Parabola: "parabola",
+    GeomAbs_BezierCurve: "bezier",
+    GeomAbs_BSplineCurve: "bspline",
+    GeomAbs_OffsetCurve: "offset",
+    GeomAbs_OtherCurve: "other",
+}
+
+# Current C++ support matrix (keep in sync with O2BVHSurfaceSolid):
+#  - planar faces: general polygon/arc wires -> boundary curves must be lines or circles
+#  - cylinder/cone/sphere: only parametric-rectangle trims (Add*Surface API)
+_SUPPORTED_SURFACE_TYPES = {"plane", "cylinder", "cone", "sphere"}
+_SUPPORTED_PLANAR_CURVES = {"line", "circle"}
+
+
+def _xyz(v, scale: float = 1.0) -> List[float]:
+    return [v.X() * scale, v.Y() * scale, v.Z() * scale]
+
+
+def _surface_params(adaptor: BRepAdaptor_Surface, surf_type: str, scale_to_cm: float) -> dict:
+    """Extracts the analytic parameters (lengths in cm, angles in rad) for simple types."""
+    s = scale_to_cm
+    try:
+        if surf_type == "plane":
+            pln = adaptor.Plane()
+            ax3 = pln.Position()
+            return {
+                "origin_cm": _xyz(ax3.Location(), s),
+                "normal": _xyz(pln.Axis().Direction()),
+                "axis_u": _xyz(ax3.XDirection()),
+                "axis_v": _xyz(ax3.YDirection()),
+            }
+        if surf_type == "cylinder":
+            cyl = adaptor.Cylinder()
+            ax3 = cyl.Position()
+            return {
+                "origin_cm": _xyz(ax3.Location(), s),
+                "axis": _xyz(cyl.Axis().Direction()),
+                "ref_axis_u": _xyz(ax3.XDirection()),
+                "radius_cm": cyl.Radius() * s,
+            }
+        if surf_type == "cone":
+            cone = adaptor.Cone()
+            ax3 = cone.Position()
+            return {
+                "origin_cm": _xyz(ax3.Location(), s),
+                "axis": _xyz(cone.Axis().Direction()),
+                "ref_axis_u": _xyz(ax3.XDirection()),
+                "ref_radius_cm": cone.RefRadius() * s,
+                "half_angle_rad": cone.SemiAngle(),
+                "apex_cm": _xyz(cone.Apex(), s),
+            }
+        if surf_type == "sphere":
+            sph = adaptor.Sphere()
+            ax3 = sph.Position()
+            return {
+                "center_cm": _xyz(ax3.Location(), s),
+                "polar_axis": _xyz(ax3.Direction()),
+                "ref_axis_u": _xyz(ax3.XDirection()),
+                "radius_cm": sph.Radius() * s,
+            }
+        if surf_type == "torus":
+            tor = adaptor.Torus()
+            ax3 = tor.Position()
+            return {
+                "center_cm": _xyz(ax3.Location(), s),
+                "axis": _xyz(ax3.Direction()),
+                "major_radius_cm": tor.MajorRadius() * s,
+                "minor_radius_cm": tor.MinorRadius() * s,
+            }
+    except Exception as exc:
+        return {"error": f"parameter extraction failed: {exc}"}
+    return {}
+
+
+def _edge_pcurve_is_iso(edge, face, uv_bounds) -> bool:
+    """
+    True when the edge's 2D pcurve on the face is an iso-parametric segment
+    (u = const or v = const within tolerance). Used to detect parametric-rectangle
+    trims on quadric faces, the only trim kind the C++ side supports today.
+    """
+    try:
+        curve2d, first, last = BRep_Tool.CurveOnSurface(edge, face)
+    except Exception:
+        return False
+    if curve2d is None:
+        return False
+    us, vs = [], []
+    for i in range(5):
+        t = first + (last - first) * i / 4.0
+        p = curve2d.Value(t)
+        us.append(p.X())
+        vs.append(p.Y())
+    umin, umax, vmin, vmax = uv_bounds
+    tol_u = 1e-6 * max(1.0, abs(umax - umin))
+    tol_v = 1e-6 * max(1.0, abs(vmax - vmin))
+    return (max(us) - min(us) <= tol_u) or (max(vs) - min(vs) <= tol_v)
+
+
+def classify_face(face, scale_to_cm: float) -> dict:
+    """Classifies a single TopoDS face: analytic type, parameters, wires and edges."""
+    adaptor = BRepAdaptor_Surface(face)
+    surf_type = _SURFACE_TYPE_NAMES.get(adaptor.GetType(), "unknown")
+
+    try:
+        uv_bounds = list(breptools.UVBounds(face))
+    except Exception:
+        uv_bounds = [float("nan")] * 4
+
+    record = {
+        "type": surf_type,
+        "orientation_reversed": face.Orientation() == TopAbs_REVERSED,
+        "uv_bounds": uv_bounds,
+        "params": _surface_params(adaptor, surf_type, scale_to_cm),
+        "wires": [],
+    }
+
+    try:
+        outer_wire = breptools.OuterWire(face)
+    except Exception:
+        outer_wire = None
+
+    wx = TopExp_Explorer(face, TopAbs_WIRE)
+    while wx.More():
+        wire = topods.Wire(wx.Current())
+        curve_types: Dict[str, int] = {}
+        n_edges = 0
+        n_degenerated = 0
+        all_pcurves_iso = True
+
+        ex = TopExp_Explorer(wire, TopAbs_EDGE)
+        while ex.More():
+            edge = topods.Edge(ex.Current())
+            n_edges += 1
+            if BRep_Tool.Degenerated(edge):
+                # degenerate edges (sphere poles, cone apex) carry no 3D curve;
+                # their pcurves are iso lines by construction
+                n_degenerated += 1
+            else:
+                try:
+                    ctype = _CURVE_TYPE_NAMES.get(BRepAdaptor_Curve(edge).GetType(), "unknown")
+                except Exception:
+                    ctype = "unknown"
+                curve_types[ctype] = curve_types.get(ctype, 0) + 1
+                if not _edge_pcurve_is_iso(edge, face, uv_bounds):
+                    all_pcurves_iso = False
+            ex.Next()
+
+        record["wires"].append({
+            "outer": bool(outer_wire is not None and wire.IsSame(outer_wire)),
+            "n_edges": n_edges,
+            "n_degenerated": n_degenerated,
+            "curve_types": curve_types,
+            "all_pcurves_iso": all_pcurves_iso,
+        })
+        wx.Next()
+
+    return record
+
+
+def face_supported(record: dict) -> Tuple[bool, Optional[str]]:
+    """Evaluates one classify_face record against the current C++ support matrix."""
+    surf_type = record["type"]
+    if surf_type not in _SUPPORTED_SURFACE_TYPES:
+        return False, f"unsupported surface type '{surf_type}'"
+
+    curve_types = set()
+    for w in record["wires"]:
+        curve_types.update(w["curve_types"].keys())
+
+    if surf_type == "plane":
+        bad = curve_types - _SUPPORTED_PLANAR_CURVES
+        if bad:
+            return False, f"plane with unsupported boundary curves: {sorted(bad)}"
+        record["trim_kind"] = "wires"
+        return True, None
+
+    # quadrics: only a single parametric-rectangle trim is representable today
+    if not all(w["all_pcurves_iso"] for w in record["wires"]):
+        record["trim_kind"] = "general"
+        return False, f"{surf_type} with general (non-parametric-rectangle) trim"
+    if len(record["wires"]) > 1:
+        record["trim_kind"] = "general"
+        return False, f"{surf_type} with multiple trim wires (holes)"
+    record["trim_kind"] = "parametric-rectangle"
+    return True, None
+
+
+def build_surface_report(step_path: str, scale_to_cm: float) -> dict:
+    """Builds the JSON-serializable exact-conversion eligibility report over def_shapes."""
+    volumes = {}
+    n_eligible = 0
+    face_type_counts: Dict[str, int] = {}
+    curve_type_counts: Dict[str, int] = {}
+    fallback_reasons: Dict[str, int] = {}
+
+    for lid, shape in def_shapes.items():
+        faces = []
+        for face in TopologyExplorer(shape).faces():
+            rec = classify_face(face, scale_to_cm)
+            ok, reason = face_supported(rec)
+            rec["supported"] = ok
+            if reason:
+                rec["reason"] = reason
+                fallback_reasons[reason] = fallback_reasons.get(reason, 0) + 1
+            faces.append(rec)
+
+            face_type_counts[rec["type"]] = face_type_counts.get(rec["type"], 0) + 1
+            for w in rec["wires"]:
+                for ctype, n in w["curve_types"].items():
+                    curve_type_counts[ctype] = curve_type_counts.get(ctype, 0) + n
+
+        eligible = bool(faces) and all(f["supported"] for f in faces)
+        if eligible:
+            n_eligible += 1
+        volumes[lid] = {
+            "name": def_names.get(lid, ""),
+            "n_faces": len(faces),
+            "eligible": eligible,
+            "faces": faces,
+        }
+
+    return {
+        "report_version": 1,
+        "step_file": step_path,
+        "scale_to_cm": scale_to_cm,
+        "summary": {
+            "n_volumes": len(volumes),
+            "n_eligible": n_eligible,
+            "face_type_counts": face_type_counts,
+            "curve_type_counts": curve_type_counts,
+            "fallback_reasons": fallback_reasons,
+        },
+        "volumes": volumes,
+    }
+
+
+# -------------------------------
+# Surface sidecar binary IO
+# -------------------------------
+# Versioned binary sidecar for exact surfaces (surfaces_*.bin). The format is documented
+# in scripts/geometry/BVHSurfaceSolid.md ("Surface sidecar format") and read by the C++
+# loader o2::base::LoadSurfaceSolid (DetectorsBase/O2SurfaceSolidIO.h).
+
+SURFACE_SIDECAR_MAGIC = b"O2SS"
+SURFACE_SIDECAR_VERSION = 1
+SURFACE_TYPE_ENUM = {"plane": 1, "cylinder": 2, "cone": 3, "sphere": 4, "disk": 5}
+CURVE_TYPE_ENUM = {"line": 0, "arc": 1}
+SURFACE_FLAG_INNER_WALL = 1 << 0
+
+
+def write_surfaces_bin(path: _Path, surfaces: List[dict]):
+    """
+    Writes the surface sidecar. `surfaces` is a list of records:
+      {"type": "plane"|"cylinder"|"cone"|"sphere"|"disk",
+       "inner_wall": bool,              # quadrics only, default False
+       "params": [float, ...],          # fixed per-type layout, see BVHSurfaceSolid.md
+       "wires": [                       # planes only; quadrics carry their trim in params
+          {"role": "outer"|"inner",
+           "edges": [{"curve": "line"|"arc", "params": [float, ...]}, ...]},
+       ]}
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(SURFACE_SIDECAR_MAGIC)
+        f.write(struct.pack("<III", SURFACE_SIDECAR_VERSION, len(surfaces), 0))
+        for srec in surfaces:
+            stype = SURFACE_TYPE_ENUM[srec["type"]]
+            flags = SURFACE_FLAG_INNER_WALL if srec.get("inner_wall") else 0
+            params = [float(p) for p in srec.get("params", [])]
+            f.write(struct.pack("<III", stype, flags, len(params)))
+            if params:
+                f.write(struct.pack(f"<{len(params)}d", *params))
+            wires = srec.get("wires", [])
+            f.write(struct.pack("<I", len(wires)))
+            for w in wires:
+                role = 0 if w.get("role", "outer") == "outer" else 1
+                edges = w.get("edges", [])
+                f.write(struct.pack("<II", role, len(edges)))
+                for e in edges:
+                    ctype = CURVE_TYPE_ENUM[e["curve"]]
+                    cparams = [float(x) for x in e["params"]]
+                    f.write(struct.pack("<II", ctype, len(cparams)))
+                    if cparams:
+                        f.write(struct.pack(f"<{len(cparams)}d", *cparams))
 
 
 # -------------------------------
@@ -1093,6 +1417,7 @@ def clip_shape_to_box(shape, clip_box: ClipBox, clip_box_shape, local_to_world: 
 logical_volumes: Dict[str, list] = {}     # def_lid -> triangles
 def_names: Dict[str, str] = {}           # def_lid -> human display name (may be "")
 def_volumes_cm3: Dict[str, float] = {}   # def_lid -> volume in cm^3 (leaf only)
+def_shapes: Dict[str, object] = {}       # def_lid -> (possibly clipped) TopoDS shape (leaf only)
 assemblies = set()                       # def_lid
 placements = []                          # (parent_def_lid, child_def_lid, gp_Trsf local)
 top_defs = set()                         # top definition lids
@@ -1269,6 +1594,7 @@ def expand_definition(
                     return None
 
             def_volumes_cm3[def_key] = volume_cm3
+            def_shapes[def_key] = shape
 
             do_meshing = (meshparam is not None) and meshparam.get("do_meshing", None) is True
             logical_volumes[def_key] = triangulate_CAD_solid(shape, meshparam=meshparam, scale_to_cm=scale_to_cm) if do_meshing else triangulate_asbbox(shape, scale_to_cm=scale_to_cm)
@@ -1286,10 +1612,11 @@ def extract_graph(
     clip_deduplicate: str = "intact",
     name_filter: Optional[NameFilter] = None,
 ):
-    global logical_volumes, def_names, def_volumes_cm3, assemblies, placements, top_defs, visited_defs
+    global logical_volumes, def_names, def_volumes_cm3, def_shapes, assemblies, placements, top_defs, visited_defs
     logical_volumes = {}
     def_names = {}
     def_volumes_cm3 = {}
+    def_shapes = {}
     assemblies = set()
     placements = []
     top_defs = set()
@@ -1395,6 +1722,7 @@ def emit_root_macro(
     bom_mass_unit: str = "kg",
     g4_nist_json: Optional[str] = None,
     mat_cfg: Optional[MatMatchConfig] = None,
+    surface_report: Optional[str] = None,
 ):
     if (step_unit or "auto").lower() == "auto":
         detected = detect_step_length_unit(step_path)
@@ -1423,6 +1751,21 @@ def emit_root_macro(
     out_folder = out_folder.expanduser().resolve()
     out_folder.mkdir(parents=True, exist_ok=True)
 
+    # --- optional exact-surface eligibility report (does not modify the emitted geometry) ---
+    if surface_report:
+        report = build_surface_report(step_path, scale_to_cm)
+        report_path = _Path(surface_report).expanduser().resolve()
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(report, indent=1))
+        summ = report["summary"]
+        print(f"Surface report: {summ['n_eligible']}/{summ['n_volumes']} logical volumes eligible "
+              f"for exact O2BVHSurfaceSolid conversion")
+        print(f"  face types: {summ['face_type_counts']}")
+        if summ["fallback_reasons"]:
+            top = sorted(summ["fallback_reasons"].items(), key=lambda kv: -kv[1])[:5]
+            for reason, count in top:
+                print(f"  fallback ({count}x): {reason}")
+        print(f"Wrote surface report: {report_path}")
 
     # --- Geant4 NIST material DB (optional but recommended) ---
     g4db: Optional[Dict[str, dict]] = None
@@ -1614,6 +1957,7 @@ def main():
     ap.add_argument("--include-name", action="append", default=[], help="Only convert CAD labels whose XCAF name or label entry matches this regex; may be repeated. Matching an assembly includes its subtree.")
     ap.add_argument("--exclude-name", action="append", default=[], help="Skip CAD labels/subtrees whose XCAF name or label entry matches this regex; may be repeated.")
     ap.add_argument("--name-filter-case-sensitive", action="store_true", help="Make --include-name/--exclude-name matching case-sensitive (default: case-insensitive)")
+    ap.add_argument("--surface-report", default=None, metavar="PATH", help="Write a JSON report classifying each face by analytic surface type and each logical volume by exact O2BVHSurfaceSolid conversion eligibility. Does not change the generated geometry output.")
 
     # NEW: BOM / material support
     ap.add_argument("--materials-csv", default=None, help="BOM CSV file providing material + mass per part (optional)")
@@ -1686,6 +2030,7 @@ def main():
         bom_mass_unit=args.bom_mass_unit,
         g4_nist_json=args.g4_nist_json,
         mat_cfg=mat_cfg,
+        surface_report=args.surface_report,
     )
     out_macro.write_text(code)
 

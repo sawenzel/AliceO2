@@ -15,6 +15,7 @@
 #include <boost/test/unit_test.hpp>
 
 #include "DetectorsBase/O2BVHSurfaceSolid.h"
+#include "DetectorsBase/O2SurfaceSolidIO.h"
 
 #include "../src/BoundedSurface.h"
 
@@ -26,6 +27,10 @@
 
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <initializer_list>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -42,70 +47,49 @@ std::vector<Point2D> rectangleWire(double extentU, double extentV)
   return {{0., 0.}, {extentU, 0.}, {extentU, extentV}, {0., extentV}};
 }
 
-// Add a single box face by index (0:+x 1:-x 2:+y 3:-y 4:+z 5:-z) of a box centred at "center".
-// When "reversed" is set the face's parametric axes are swapped, which flips the outward normal
-// inward without changing the covered rectangle - used to build an orientation-inconsistent
-// fixture.
+// Local frame (origin + parametric axes + rectangle extents) of a box face by index
+// (0:+x 1:-x 2:+y 3:-y 4:+z 5:-z), for a box centred at the origin.
+struct FaceFrame {
+  Point3D origin;
+  Point3D axisU;
+  Point3D axisV;
+  double extentU;
+  double extentV;
+};
+
+FaceFrame boxFaceFrame(int faceIndex, double halfX, double halfY, double halfZ)
+{
+  switch (faceIndex) {
+    case 0:
+      return {{halfX, -halfY, -halfZ}, {0., 1., 0.}, {0., 0., 1.}, 2. * halfY, 2. * halfZ};
+    case 1:
+      return {{-halfX, -halfY, -halfZ}, {0., 0., 1.}, {0., 1., 0.}, 2. * halfZ, 2. * halfY};
+    case 2:
+      return {{-halfX, halfY, -halfZ}, {0., 0., 1.}, {1., 0., 0.}, 2. * halfZ, 2. * halfX};
+    case 3:
+      return {{-halfX, -halfY, -halfZ}, {1., 0., 0.}, {0., 0., 1.}, 2. * halfX, 2. * halfZ};
+    case 4:
+      return {{-halfX, -halfY, halfZ}, {1., 0., 0.}, {0., 1., 0.}, 2. * halfX, 2. * halfY};
+    default:
+      return {{-halfX, -halfY, -halfZ}, {0., 1., 0.}, {1., 0., 0.}, 2. * halfY, 2. * halfX};
+  }
+}
+
+// Add a single box face by index of a box centred at "center". When "reversed" is set the
+// face's parametric axes are swapped, which flips the outward normal inward without changing
+// the covered rectangle - used to build an orientation-inconsistent fixture.
 bool addBoxFace(SurfaceSolid& solid, int faceIndex, double halfX, double halfY, double halfZ, bool reversed = false,
                 const Point3D& center = {0., 0., 0.})
 {
-  Point3D origin{};
-  Point3D axisU{};
-  Point3D axisV{};
-  double extentU = 0.;
-  double extentV = 0.;
-  switch (faceIndex) {
-    case 0:
-      origin = {halfX, -halfY, -halfZ};
-      axisU = {0., 1., 0.};
-      axisV = {0., 0., 1.};
-      extentU = 2. * halfY;
-      extentV = 2. * halfZ;
-      break;
-    case 1:
-      origin = {-halfX, -halfY, -halfZ};
-      axisU = {0., 0., 1.};
-      axisV = {0., 1., 0.};
-      extentU = 2. * halfZ;
-      extentV = 2. * halfY;
-      break;
-    case 2:
-      origin = {-halfX, halfY, -halfZ};
-      axisU = {0., 0., 1.};
-      axisV = {1., 0., 0.};
-      extentU = 2. * halfZ;
-      extentV = 2. * halfX;
-      break;
-    case 3:
-      origin = {-halfX, -halfY, -halfZ};
-      axisU = {1., 0., 0.};
-      axisV = {0., 0., 1.};
-      extentU = 2. * halfX;
-      extentV = 2. * halfZ;
-      break;
-    case 4:
-      origin = {-halfX, -halfY, halfZ};
-      axisU = {1., 0., 0.};
-      axisV = {0., 1., 0.};
-      extentU = 2. * halfX;
-      extentV = 2. * halfY;
-      break;
-    default:
-      origin = {-halfX, -halfY, -halfZ};
-      axisU = {0., 1., 0.};
-      axisV = {1., 0., 0.};
-      extentU = 2. * halfY;
-      extentV = 2. * halfX;
-      break;
-  }
+  FaceFrame frame = boxFaceFrame(faceIndex, halfX, halfY, halfZ);
   if (reversed) {
-    std::swap(axisU, axisV);
-    std::swap(extentU, extentV);
+    std::swap(frame.axisU, frame.axisV);
+    std::swap(frame.extentU, frame.extentV);
   }
   for (int dimension = 0; dimension < 3; ++dimension) {
-    origin[dimension] += center[dimension];
+    frame.origin[dimension] += center[dimension];
   }
-  return solid.AddPlanarSurface(origin, axisU, axisV, rectangleWire(extentU, extentV));
+  return solid.AddPlanarSurface(frame.origin, frame.axisU, frame.axisV, rectangleWire(frame.extentU, frame.extentV));
 }
 
 void addBoxSurfaces(SurfaceSolid& solid, double halfX, double halfY, double halfZ,
@@ -1126,4 +1110,148 @@ BOOST_AUTO_TEST_CASE(ContainsBoundaryPointsAndCapsule)
   // exact capacity: cylinder plus a full sphere from the two hemispheres
   checkClose(capsule.Capacity(),
              surf::kPi * radius * radius * 2. * halfHeight + 4. * surf::kPi * radius * radius * radius / 3., 1.e-9);
+}
+
+namespace
+{
+// Helpers writing the surface sidecar binary format (version 1) documented in
+// scripts/geometry/BVHSurfaceSolid.md. Kept independent of the loader implementation so the
+// test is a true round-trip through the documented byte layout.
+void appendU32(std::vector<char>& bytes, uint32_t value)
+{
+  const char* raw = reinterpret_cast<const char*>(&value);
+  bytes.insert(bytes.end(), raw, raw + sizeof(value));
+}
+
+void appendDoubles(std::vector<char>& bytes, std::initializer_list<double> values)
+{
+  for (const double value : values) {
+    const char* raw = reinterpret_cast<const char*>(&value);
+    bytes.insert(bytes.end(), raw, raw + sizeof(value));
+  }
+}
+
+void appendSidecarHeader(std::vector<char>& bytes, uint32_t nSurfaces)
+{
+  bytes.insert(bytes.end(), {'O', '2', 'S', 'S'});
+  appendU32(bytes, 1); // version
+  appendU32(bytes, nSurfaces);
+  appendU32(bytes, 0); // reserved
+}
+
+// plane record (type 1) with a single rectangular outer wire of four line-segment edges
+void appendPlaneRecord(std::vector<char>& bytes, const FaceFrame& frame)
+{
+  appendU32(bytes, 1); // surfaceType plane
+  appendU32(bytes, 0); // flags
+  appendU32(bytes, 9); // nParams
+  appendDoubles(bytes, {frame.origin[0], frame.origin[1], frame.origin[2], frame.axisU[0], frame.axisU[1],
+                        frame.axisU[2], frame.axisV[0], frame.axisV[1], frame.axisV[2]});
+  appendU32(bytes, 1); // nWires
+  appendU32(bytes, 0); // wireRole outer
+  appendU32(bytes, 4); // nEdges
+  const double extentU = frame.extentU;
+  const double extentV = frame.extentV;
+  const std::array<std::array<double, 4>, 4> edges{{{0., 0., extentU, 0.},
+                                                    {extentU, 0., extentU, extentV},
+                                                    {extentU, extentV, 0., extentV},
+                                                    {0., extentV, 0., 0.}}};
+  for (const auto& edge : edges) {
+    appendU32(bytes, 0); // curveType line
+    appendU32(bytes, 4); // nCurveParams
+    appendDoubles(bytes, {edge[0], edge[1], edge[2], edge[3]});
+  }
+}
+
+std::filesystem::path writeSidecarFile(const std::string& name, const std::vector<char>& bytes)
+{
+  const auto path = std::filesystem::temp_directory_path() / name;
+  std::ofstream out(path, std::ios::binary);
+  out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+  BOOST_REQUIRE(out.good());
+  return path;
+}
+} // namespace
+
+BOOST_AUTO_TEST_CASE(SurfaceSidecarRoundTrip)
+{
+  // planar box: six plane records with polygon wires, loaded and compared against TGeoBBox
+  constexpr double halfX = 1.;
+  constexpr double halfY = 2.;
+  constexpr double halfZ = 3.;
+
+  std::vector<char> boxBytes;
+  appendSidecarHeader(boxBytes, 6);
+  for (int faceIndex = 0; faceIndex < 6; ++faceIndex) {
+    appendPlaneRecord(boxBytes, boxFaceFrame(faceIndex, halfX, halfY, halfZ));
+  }
+  const auto boxPath = writeSidecarFile("o2_sidecar_roundtrip_box.bin", boxBytes);
+
+  SurfaceSolid box("sidecarBox");
+  BOOST_REQUIRE(o2::base::LoadSurfaceSolid(boxPath.string(), box));
+  std::filesystem::remove(boxPath);
+  BOOST_CHECK_EQUAL(box.GetNsurfaces(), 6);
+  box.CloseShape();
+  BOOST_CHECK(box.IsClosed());
+  BOOST_CHECK(box.IsOrientationConsistent());
+
+  TGeoBBox referenceBox("referenceBox", halfX, halfY, halfZ);
+  compareContainsGrid(box, referenceBox, 4., 7);
+  compareDistance(box, referenceBox, {5., 0.5, 0.5}, {-1., 0., 0.});
+  compareDistance(box, referenceBox, {0., 0., 0.}, unitDirection(1., 1., 1.));
+  checkClose(box.Capacity(), referenceBox.Capacity(), 1.e-9);
+
+  // quadric + disk records: closed cylinder (lateral wall + two caps) against TGeoTube
+  constexpr double radius = 2.;
+  constexpr double halfHeight = 3.;
+
+  std::vector<char> tubeBytes;
+  appendSidecarHeader(tubeBytes, 3);
+  appendU32(tubeBytes, 2);  // surfaceType cylinder
+  appendU32(tubeBytes, 0);  // flags (outer wall)
+  appendU32(tubeBytes, 14); // nParams
+  appendDoubles(tubeBytes, {0., 0., 0., 0., 0., 1., 1., 0., 0., radius, -halfHeight, halfHeight, 0., 2. * surf::kPi});
+  appendU32(tubeBytes, 0); // nWires
+  // caps: outward normal is axisU x axisV, so the bottom cap flips axisV
+  appendU32(tubeBytes, 5);  // surfaceType planar-disk
+  appendU32(tubeBytes, 0);  // flags
+  appendU32(tubeBytes, 11); // nParams
+  appendDoubles(tubeBytes, {0., 0., halfHeight, 1., 0., 0., 0., 1., 0., radius, 0.});
+  appendU32(tubeBytes, 0); // nWires
+  appendU32(tubeBytes, 5);
+  appendU32(tubeBytes, 0);
+  appendU32(tubeBytes, 11);
+  appendDoubles(tubeBytes, {0., 0., -halfHeight, 1., 0., 0., 0., -1., 0., radius, 0.});
+  appendU32(tubeBytes, 0);
+  const auto tubePath = writeSidecarFile("o2_sidecar_roundtrip_tube.bin", tubeBytes);
+
+  SurfaceSolid tube("sidecarTube");
+  BOOST_REQUIRE(o2::base::LoadSurfaceSolid(tubePath.string(), tube));
+  std::filesystem::remove(tubePath);
+  BOOST_CHECK_EQUAL(tube.GetNsurfaces(), 3);
+  tube.CloseShape();
+  BOOST_CHECK(tube.IsClosed());
+  BOOST_CHECK(tube.IsOrientationConsistent());
+
+  TGeoTube referenceTube("referenceTube", 0., radius, halfHeight);
+  compareContainsGrid(tube, referenceTube, 4., 7);
+  compareDistance(tube, referenceTube, {5., 0.5, 1.}, {-1., 0., 0.});
+  compareDistance(tube, referenceTube, {0., 0., 0.}, unitDirection(1., 1., 1.));
+  checkClose(tube.Capacity(), referenceTube.Capacity(), 1.e-9);
+
+  // malformed input must be rejected without loading surfaces
+  const auto badPath = writeSidecarFile("o2_sidecar_bad_magic.bin", {'X', 'X', 'X', 'X', 0, 0, 0, 0});
+  SurfaceSolid bad("sidecarBad");
+  BOOST_CHECK(!o2::base::LoadSurfaceSolid(badPath.string(), bad));
+  std::filesystem::remove(badPath);
+  BOOST_CHECK_EQUAL(bad.GetNsurfaces(), 0);
+  BOOST_CHECK(!o2::base::LoadSurfaceSolid("/nonexistent/o2_sidecar_missing.bin", bad));
+
+  // truncated file: valid header announcing a surface that never follows
+  std::vector<char> truncatedBytes;
+  appendSidecarHeader(truncatedBytes, 1);
+  const auto truncatedPath = writeSidecarFile("o2_sidecar_truncated.bin", truncatedBytes);
+  SurfaceSolid truncated("sidecarTruncated");
+  BOOST_CHECK(!o2::base::LoadSurfaceSolid(truncatedPath.string(), truncated));
+  std::filesystem::remove(truncatedPath);
 }
