@@ -301,3 +301,128 @@ BOOST_AUTO_TEST_CASE(SolidClosureDetectsMissingAndReversedFaces)
   BOOST_CHECK(reversed.IsClosed());
   BOOST_CHECK(!reversed.IsOrientationConsistent());
 }
+
+BOOST_AUTO_TEST_CASE(NumericalConventions)
+{
+  using surf::WireRole;
+  using surf::WireStatus;
+  using surf::WireClassification;
+
+  // near-boundary point classification: a unit square wire, points offset from the bottom edge.
+  WireStatus status = WireStatus::Valid;
+  auto square = makeWire({{0., 0.}, {1., 0.}, {1., 1.}, {0., 1.}}, WireRole::Outer, status);
+  BOOST_REQUIRE(status == WireStatus::Valid);
+
+  // within tolerance of an edge -> Boundary, on both sides
+  BOOST_CHECK(square.classify({0.5, 0.5 * surf::kTolerance}) == WireClassification::Boundary);
+  BOOST_CHECK(square.classify({0.5, -0.5 * surf::kTolerance}) == WireClassification::Boundary);
+  // clearly beyond tolerance -> Inside / Outside
+  BOOST_CHECK(square.classify({0.5, 1.e3 * surf::kTolerance}) == WireClassification::Inside);
+  BOOST_CHECK(square.classify({0.5, -1.e3 * surf::kTolerance}) == WireClassification::Outside);
+
+  // near-tangent rays against a planar surface in the z = 0 plane.
+  surf::PlanarBoundedSurface plane;
+  std::string planeError;
+  BOOST_REQUIRE(plane.initialize({0., 0., 0.}, {1., 0., 0.}, {0., 1., 0.},
+                                 {{0., 0.}, {1., 0.}, {1., 1.}, {0., 1.}}, {}, planeError));
+
+  const surf::Vec3 origin{0.5, 0.5, 1.};
+  double distance = 0.;
+  surf::Vec3 hitNormal{};
+
+  // direction almost parallel to the plane (tiny z component) -> grazing miss
+  const surf::Vec3 grazing = surf::normalized({1., 0., 0.1 * surf::kTolerance});
+  BOOST_CHECK(!plane.intersectRay(origin, grazing, 0., 1.e30, distance, hitNormal));
+
+  // steeper direction -> real intersection at the plane
+  const surf::Vec3 steep = surf::normalized({0., 0., -1.});
+  BOOST_REQUIRE(plane.intersectRay(origin, steep, 0., 1.e30, distance, hitNormal));
+  checkClose(distance, 1.);
+
+  // a hit rejected when it falls below the minimum ray parameter
+  BOOST_CHECK(!plane.intersectRay(origin, steep, 2., 1.e30, distance, hitNormal));
+
+  // duplicate-intersection clustering respects kIntersectionTolerance.
+  BOOST_CHECK(surf::sameIntersection(1., 1. + 0.1 * surf::kIntersectionTolerance));
+  BOOST_CHECK(!surf::sameIntersection(1., 1. + 1.e3 * surf::kIntersectionTolerance));
+}
+
+BOOST_AUTO_TEST_CASE(WireDataModel)
+{
+  using surf::WireRole;
+  using surf::WireStatus;
+  using surf::WireClassification;
+
+  // outer square wire: area, orientation, parametric AABB, and boundary sampling.
+  WireStatus status = WireStatus::Valid;
+  auto square = makeWire({{0., 0.}, {2., 0.}, {2., 3.}, {0., 3.}}, WireRole::Outer, status);
+  BOOST_REQUIRE(status == WireStatus::Valid);
+  checkClose(square.signedArea(), 6.);
+
+  surf::Vec2 lower{1.e30, 1.e30};
+  surf::Vec2 upper{-1.e30, -1.e30};
+  square.parametricBounds(lower, upper);
+  checkClose(lower.uCoord, 0.);
+  checkClose(lower.vCoord, 0.);
+  checkClose(upper.uCoord, 2.);
+  checkClose(upper.vCoord, 3.);
+
+  // the sampled boundary is the closed vertex ring (first vertex repeated at the end).
+  const auto samples = square.sampledBoundary();
+  BOOST_CHECK_EQUAL(samples.size(), square.vertices.size() + 1);
+  checkClose(samples.front().uCoord, samples.back().uCoord);
+  checkClose(samples.front().vCoord, samples.back().vCoord);
+
+  // edge distance / projection (closest point) on the bottom edge.
+  const surf::SurfaceEdge bottom{{0., 0.}, {2., 0.}};
+  double parameter = -1.;
+  const surf::Vec2 projected = bottom.closestPoint({1., 5.}, parameter);
+  checkClose(projected.uCoord, 1.);
+  checkClose(projected.vCoord, 0.);
+  checkClose(parameter, 0.5);
+  // projection is clamped to the segment endpoints.
+  bottom.closestPoint({-5., 1.}, parameter);
+  checkClose(parameter, 0.);
+  bottom.closestPoint({5., 1.}, parameter);
+  checkClose(parameter, 1.);
+  checkClose(std::sqrt(bottom.distanceSq({1., 4.})), 4.);
+
+  // reversed wire: same shape, opposite winding sign, identical parametric AABB.
+  WireStatus reversedStatus = WireStatus::Valid;
+  auto reversed = makeWire({{0., 0.}, {0., 3.}, {2., 3.}, {2., 0.}}, WireRole::Outer, reversedStatus);
+  BOOST_CHECK(reversedStatus == WireStatus::Reversed);
+  checkClose(reversed.signedArea(), 6.); // normalized back to CCW (positive)
+  surf::Vec2 reversedLower{1.e30, 1.e30};
+  surf::Vec2 reversedUpper{-1.e30, -1.e30};
+  reversed.parametricBounds(reversedLower, reversedUpper);
+  checkClose(reversedUpper.uCoord, 2.);
+  checkClose(reversedUpper.vCoord, 3.);
+
+  // open wire via an explicit non-closing edge list is rejected.
+  surf::SurfaceWire scratch;
+  const std::vector<surf::SurfaceEdge> openEdges{{{0., 0.}, {2., 0.}}, {{2., 0.}, {2., 3.}}, {{2., 3.}, {1., 1.}}};
+  BOOST_CHECK(!scratch.initializeFromEdges(openEdges, WireRole::Outer, status));
+  BOOST_CHECK(status == WireStatus::Open);
+
+  // point-on-edge classification.
+  BOOST_CHECK(square.classify({1., 0.}) == WireClassification::Boundary);
+  BOOST_CHECK(square.classify({1., 1.5}) == WireClassification::Inside);
+  BOOST_CHECK(square.classify({3., 1.5}) == WireClassification::Outside);
+
+  // square-with-hole: a planar surface with one inner (hole) wire.
+  surf::PlanarBoundedSurface holedFace;
+  std::string faceError;
+  const std::vector<surf::Vec2> outer{{0., 0.}, {4., 0.}, {4., 4.}, {0., 4.}};
+  const std::vector<std::vector<surf::Vec2>> holes{{{1., 1.}, {3., 1.}, {3., 3.}, {1., 3.}}};
+  BOOST_REQUIRE(holedFace.initialize({0., 0., 0.}, {1., 0., 0.}, {0., 1., 0.}, outer, holes, faceError));
+
+  bool boundary = false;
+  BOOST_CHECK(holedFace.containsLocal({0.5, 0.5}, &boundary)); // in material, outside the hole
+  BOOST_CHECK(!boundary);
+  BOOST_CHECK(!holedFace.containsLocal({2., 2.})); // inside the hole -> not on the patch
+  BOOST_CHECK(holedFace.containsLocal({2., 1.}, &boundary)); // on the hole boundary -> on the patch
+  BOOST_CHECK(boundary);
+
+  // the trimmed area accounts for the hole (16 - 4).
+  checkClose(holedFace.area(), 12.);
+}
