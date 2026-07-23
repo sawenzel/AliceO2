@@ -42,10 +42,12 @@ std::vector<Point2D> rectangleWire(double extentU, double extentV)
   return {{0., 0.}, {extentU, 0.}, {extentU, extentV}, {0., extentV}};
 }
 
-// Add a single box face by index (0:+x 1:-x 2:+y 3:-y 4:+z 5:-z). When "reversed" is set the
-// face's parametric axes are swapped, which flips the outward normal inward without changing the
-// covered rectangle - used to build an orientation-inconsistent fixture.
-bool addBoxFace(SurfaceSolid& solid, int faceIndex, double halfX, double halfY, double halfZ, bool reversed = false)
+// Add a single box face by index (0:+x 1:-x 2:+y 3:-y 4:+z 5:-z) of a box centred at "center".
+// When "reversed" is set the face's parametric axes are swapped, which flips the outward normal
+// inward without changing the covered rectangle - used to build an orientation-inconsistent
+// fixture.
+bool addBoxFace(SurfaceSolid& solid, int faceIndex, double halfX, double halfY, double halfZ, bool reversed = false,
+                const Point3D& center = {0., 0., 0.})
 {
   Point3D origin{};
   Point3D axisU{};
@@ -100,13 +102,17 @@ bool addBoxFace(SurfaceSolid& solid, int faceIndex, double halfX, double halfY, 
     std::swap(axisU, axisV);
     std::swap(extentU, extentV);
   }
+  for (int dimension = 0; dimension < 3; ++dimension) {
+    origin[dimension] += center[dimension];
+  }
   return solid.AddPlanarSurface(origin, axisU, axisV, rectangleWire(extentU, extentV));
 }
 
-void addBoxSurfaces(SurfaceSolid& solid, double halfX, double halfY, double halfZ)
+void addBoxSurfaces(SurfaceSolid& solid, double halfX, double halfY, double halfZ,
+                    const Point3D& center = {0., 0., 0.})
 {
   for (int faceIndex = 0; faceIndex < 6; ++faceIndex) {
-    BOOST_REQUIRE(addBoxFace(solid, faceIndex, halfX, halfY, halfZ));
+    BOOST_REQUIRE(addBoxFace(solid, faceIndex, halfX, halfY, halfZ, false, center));
   }
 }
 
@@ -970,4 +976,154 @@ BOOST_AUTO_TEST_CASE(ApexConeClosesWithSingleCap)
 
   // exact capacity of a full cone: pi R^2 H / 3
   checkClose(solid.Capacity(), surf::kPi * baseRadius * baseRadius * 2. * halfHeight / 3., 1.e-9);
+}
+
+BOOST_AUTO_TEST_CASE(BVHConstructionAndTraversal)
+{
+  constexpr double halfX = 1.;
+  constexpr double halfY = 2.;
+  constexpr double halfZ = 3.;
+
+  SurfaceSolid solid("bvhBox");
+  addBoxSurfaces(solid, halfX, halfY, halfZ);
+  BOOST_CHECK(!solid.HasBVH()); // built only in CloseShape
+  solid.CloseShape();
+  BOOST_REQUIRE(solid.HasBVH());
+
+  // the BVH root box must enclose the exact solid bounds and stay conservative: not tighter
+  // than the exact bounds, not looser than the documented expansion (plus float rounding)
+  Point3D lower{};
+  Point3D upper{};
+  BOOST_REQUIRE(solid.GetBVHRootBounds(lower, upper));
+  const Point3D exactLower{-halfX, -halfY, -halfZ};
+  const Point3D exactUpper{halfX, halfY, halfZ};
+  constexpr double boxSlack = 2. * surf::kBVHBoxTolerance;
+  for (int dimension = 0; dimension < 3; ++dimension) {
+    BOOST_TEST_CONTEXT("dimension = " << dimension)
+    {
+      BOOST_CHECK(lower[dimension] <= exactLower[dimension]);
+      BOOST_CHECK(lower[dimension] >= exactLower[dimension] - boxSlack);
+      BOOST_CHECK(upper[dimension] >= exactUpper[dimension]);
+      BOOST_CHECK(upper[dimension] <= exactUpper[dimension] + boxSlack);
+    }
+  }
+
+  // a ray through the box must traverse (at least) the entry and exit face leaves ...
+  BOOST_CHECK_GE(solid.CountBVHRayCandidates({-2., 0., 0.}, {1., 0., 0.}), 2);
+  // ... while a ray pointing away from the solid reaches no leaf at all
+  BOOST_CHECK_EQUAL(solid.CountBVHRayCandidates({0., 5., 0.}, {0., 1., 0.}), 0);
+
+  // two disjoint boxes: BVH pruning with well-separated primitive clusters. The union of two
+  // closed manifolds is still a closed manifold, and parity containment handles it naturally.
+  constexpr double half = 1.;
+  constexpr double centerX = 3.;
+  SurfaceSolid twoBoxes("twoBoxes");
+  addBoxSurfaces(twoBoxes, half, half, half, {-centerX, 0., 0.});
+  addBoxSurfaces(twoBoxes, half, half, half, {centerX, 0., 0.});
+  twoBoxes.CloseShape();
+  BOOST_REQUIRE(twoBoxes.HasBVH());
+  BOOST_CHECK_EQUAL(twoBoxes.GetNsurfaces(), 12);
+  BOOST_CHECK(twoBoxes.IsClosed());
+  BOOST_CHECK(twoBoxes.IsOrientationConsistent());
+
+  const auto analyticInside = [&](const double* point) {
+    return (std::abs(std::abs(point[0]) - centerX) < half) && std::abs(point[1]) < half && std::abs(point[2]) < half;
+  };
+  constexpr int samples = 9;
+  constexpr double extent = 5.;
+  for (int stepX = 0; stepX < samples; ++stepX) {
+    for (int stepY = 0; stepY < samples; ++stepY) {
+      for (int stepZ = 0; stepZ < samples; ++stepZ) {
+        const double point[3] = {-extent + 2. * extent * (stepX + 0.517) / samples,
+                                 -extent + 2. * extent * (stepY + 0.263) / samples,
+                                 -extent + 2. * extent * (stepZ + 0.741) / samples};
+        BOOST_TEST_CONTEXT("point = (" << point[0] << ", " << point[1] << ", " << point[2] << ")")
+        {
+          const bool bvhInside = twoBoxes.Contains(point);
+          BOOST_CHECK_EQUAL(bvhInside, twoBoxes.Contains_Loop(point));
+          BOOST_CHECK_EQUAL(bvhInside, analyticInside(point));
+        }
+      }
+    }
+  }
+}
+
+BOOST_AUTO_TEST_CASE(ContainsBoundaryPointsAndCapsule)
+{
+  constexpr double halfX = 1.;
+  constexpr double halfY = 2.;
+  constexpr double halfZ = 3.;
+
+  SurfaceSolid box("boundaryBox");
+  addBoxSurfaces(box, halfX, halfY, halfZ);
+  box.CloseShape();
+
+  // boundary policy: points exactly on faces, edges and vertices count as inside,
+  // in the BVH-accelerated path and in the trivial loop alike
+  const std::array<std::array<double, 3>, 6> boundaryPoints{{{halfX, 0., 0.},          // face
+                                                             {0., -halfY, 0.},        // face
+                                                             {halfX, halfY, 0.},      // edge
+                                                             {-halfX, 0., halfZ},     // edge
+                                                             {halfX, halfY, halfZ},   // vertex
+                                                             {-halfX, -halfY, -halfZ} // vertex
+                                                            }};
+  for (const auto& point : boundaryPoints) {
+    BOOST_TEST_CONTEXT("point = (" << point[0] << ", " << point[1] << ", " << point[2] << ")")
+    {
+      BOOST_CHECK(box.Contains(point.data()));
+      BOOST_CHECK(box.Contains_Loop(point.data()));
+    }
+  }
+
+  // capsule: cylinder barrel closed by two spherical endcaps - a mixed quadric fixture with no
+  // ROOT primitive equivalent, cross-validated against the trivial loop and the analytic shape
+  constexpr double radius = 1.;
+  constexpr double halfHeight = 1.5;
+  SurfaceSolid capsule("capsule");
+  BOOST_REQUIRE(capsule.AddCylindricalSurface({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, radius, -halfHeight,
+                                              halfHeight));
+  BOOST_REQUIRE(capsule.AddSphericalSurface({0., 0., halfHeight}, {0., 0., 1.}, {1., 0., 0.}, radius, 0.,
+                                            surf::kPi / 2.));
+  BOOST_REQUIRE(capsule.AddSphericalSurface({0., 0., -halfHeight}, {0., 0., -1.}, {1., 0., 0.}, radius, 0.,
+                                            surf::kPi / 2.));
+  capsule.CloseShape();
+  BOOST_REQUIRE(capsule.HasBVH());
+  BOOST_CHECK(capsule.IsClosed());
+  BOOST_CHECK(capsule.IsOrientationConsistent());
+
+  const auto capsuleInside = [&](const double* point) {
+    const double axialDistance = std::max(0., std::abs(point[2]) - halfHeight);
+    return std::hypot(point[0], point[1], axialDistance) < radius;
+  };
+  constexpr int samples = 9;
+  constexpr double extent = 3.;
+  for (int stepX = 0; stepX < samples; ++stepX) {
+    for (int stepY = 0; stepY < samples; ++stepY) {
+      for (int stepZ = 0; stepZ < samples; ++stepZ) {
+        const double point[3] = {-extent + 2. * extent * (stepX + 0.517) / samples,
+                                 -extent + 2. * extent * (stepY + 0.263) / samples,
+                                 -extent + 2. * extent * (stepZ + 0.741) / samples};
+        BOOST_TEST_CONTEXT("point = (" << point[0] << ", " << point[1] << ", " << point[2] << ")")
+        {
+          const bool bvhInside = capsule.Contains(point);
+          BOOST_CHECK_EQUAL(bvhInside, capsule.Contains_Loop(point));
+          BOOST_CHECK_EQUAL(bvhInside, capsuleInside(point));
+        }
+      }
+    }
+  }
+
+  // a few characteristic capsule points, incl. points exactly on the barrel and cap surfaces
+  const double onBarrel[3] = {radius, 0., 0.5};
+  const double onCapApex[3] = {0., 0., halfHeight + radius};
+  const double aboveApex[3] = {0., 0., halfHeight + radius + 0.01};
+  const double onRim[3] = {radius, 0., halfHeight}; // shared cylinder/sphere rim
+  BOOST_CHECK(capsule.Contains(onBarrel));
+  BOOST_CHECK(capsule.Contains(onCapApex));
+  BOOST_CHECK(!capsule.Contains(aboveApex));
+  BOOST_CHECK(capsule.Contains(onRim));
+
+  // exact capacity: cylinder plus a full sphere from the two hemispheres
+  checkClose(capsule.Capacity(),
+             surf::kPi * radius * radius * 2. * halfHeight + 4. * surf::kPi * radius * radius * radius / 3., 1.e-9);
 }

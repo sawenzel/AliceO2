@@ -70,10 +70,21 @@ class O2BVHSurfaceSolid : public TGeoBBox
                          double radiusAtMin, double radiusAtMax, double heightMin, double heightMax,
                          double phiStart = 0., double phiSweep = 6.283185307179586, bool innerWall = false);
 
+  /// Finalize the shape: compute the bounding box, the display mesh, the closure/orientation
+  /// diagnostics (when \a check is set) and build the BVH acceleration structure over the
+  /// bounded-surface AABBs used by the navigation queries.
   void CloseShape(bool check = true);
 
   int GetNsurfaces() const;
   bool IsDefined() const;
+
+  /// Whether the BVH acceleration structure has been built (after CloseShape).
+  bool HasBVH() const;
+  /// Fill the BVH root-node bounding box; returns false when no BVH has been built.
+  bool GetBVHRootBounds(Point3D& lower, Point3D& upper) const;
+  /// Diagnostic/test hook: number of candidate surface patches whose BVH leaf boxes the given
+  /// ray traverses (counted with multiplicity per leaf primitive). Returns -1 without a BVH.
+  int CountBVHRayCandidates(const Point3D& point, const Point3D& direction) const;
 
   /// Whether the closed shape forms a closed 2-manifold (every boundary edge shared by two faces).
   /// Meaningful only after CloseShape(); detects e.g. missing faces.
@@ -102,6 +113,9 @@ class O2BVHSurfaceSolid : public TGeoBBox
   Double_t DistFromInside(const Double_t* point, const Double_t* dir, Int_t iact = 1,
                           Double_t step = TGeoShape::Big(), Double_t* safe = nullptr) const override;
   bool Contains(const Double_t* point) const override;
+  /// Trivial non-BVH Contains looping over all surfaces; kept for debugging and
+  /// cross-validation of the BVH-accelerated path (see O2Tessellated::Contains_Loop).
+  bool Contains_Loop(const Double_t* point) const;
   Double_t Safety(const Double_t* point, Bool_t in = kTRUE) const override;
   void ComputeNormal(const Double_t* point, const Double_t* dir, Double_t* norm) const override;
   Double_t Capacity() const override;
