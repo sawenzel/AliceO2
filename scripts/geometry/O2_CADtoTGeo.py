@@ -59,7 +59,7 @@ from OCC.Core.BRepBndLib import brepbndlib
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Transform
 from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh
 from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeBox
-from OCC.Core.BRepTools import breptools
+from OCC.Core.BRepTools import breptools, BRepTools_WireExplorer
 from OCC.Core.BRep import BRep_Tool
 from OCC.Core.GeomAbs import (
     GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone, GeomAbs_Sphere, GeomAbs_Torus,
@@ -682,6 +682,150 @@ def write_surfaces_bin(path: _Path, surfaces: List[dict]):
                     f.write(struct.pack("<II", ctype, len(cparams)))
                     if cparams:
                         f.write(struct.pack(f"<{len(cparams)}d", *cparams))
+
+
+# -------------------------------
+# Exact-surface extraction (--exact-surfaces)
+# -------------------------------
+# Turn OpenCascade faces into the sidecar surface records written by write_surfaces_bin.
+# This is the exact counterpart of the tessellation path: a leaf solid is emitted as an
+# O2BVHSurfaceSolid only when *every* one of its faces can be extracted exactly; otherwise
+# the caller keeps the tessellated fallback (auto mode) or fails (required mode).
+#
+# Milestone status (scripts/geometry/BVHSurfaceSolid.md): planar faces are extracted here;
+# cylindrical/spherical/conical face extraction is a follow-up milestone, so quadric faces
+# currently report "not implemented" and force a fallback.
+
+
+def _v_sub(a: List[float], b: List[float]) -> List[float]:
+    return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+
+
+def _v_dot(a: List[float], b: List[float]) -> float:
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def _v_cross(a: List[float], b: List[float]) -> List[float]:
+    return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+
+
+def extract_planar_face(face, scale_to_cm: float) -> Tuple[Optional[dict], Optional[str]]:
+    """Convert a planar TopoDS face into a sidecar 'plane' surface record.
+
+    Returns (record, None) on success or (None, reason) when the face cannot be represented
+    exactly with the version-1 planar sidecar, i.e. it is not a plane or a boundary edge is
+    not a straight line segment (planar wires support only line segments in version 1; arcs
+    on planes wait for general curve-wire sidecar support).
+    """
+    adaptor = BRepAdaptor_Surface(face)
+    if adaptor.GetType() != GeomAbs_Plane:
+        return None, f"not a plane ({_SURFACE_TYPE_NAMES.get(adaptor.GetType(), 'unknown')})"
+
+    pln = adaptor.Plane()
+    ax3 = pln.Position()
+    s = scale_to_cm
+    origin_cm = _xyz(ax3.Location(), s)
+    axis_u = _xyz(ax3.XDirection())
+    ydir = _xyz(ax3.YDirection())
+    normal = _xyz(pln.Axis().Direction())
+
+    # Choose the sign of axisV so that (axisU x axisV) equals the *outward* face normal.
+    # OpenCascade encodes outward as the surface normal for a FORWARD face and its opposite
+    # for a REVERSED one; the sign flip below is also robust to a left-handed OCC ax3, where
+    # XDirection x YDirection = -planeNormal.
+    outward_sign = -1.0 if face.Orientation() == TopAbs_REVERSED else 1.0
+    if outward_sign * _v_dot(_v_cross(axis_u, ydir), normal) > 0.0:
+        axis_v = ydir
+    else:
+        axis_v = [-c for c in ydir]
+
+    def project(pnt) -> Tuple[float, float]:
+        rel = [pnt.X() * s - origin_cm[0], pnt.Y() * s - origin_cm[1], pnt.Z() * s - origin_cm[2]]
+        return _v_dot(rel, axis_u), _v_dot(rel, axis_v)
+
+    try:
+        outer_wire = breptools.OuterWire(face)
+    except Exception:
+        outer_wire = None
+
+    wires_out: List[dict] = []
+    wx = TopExp_Explorer(face, TopAbs_WIRE)
+    while wx.More():
+        wire = topods.Wire(wx.Current())
+        # BRepTools_WireExplorer walks the edges in connected order and yields each edge's
+        # start vertex, giving an ordered, closed polygon of the plane's local (u, v) points.
+        verts: List[Tuple[float, float]] = []
+        we = BRepTools_WireExplorer(wire, face)
+        while we.More():
+            edge = we.Current()
+            if BRep_Tool.Degenerated(edge):
+                return None, "planar face has a degenerated boundary edge"
+            try:
+                is_line = BRepAdaptor_Curve(edge).GetType() == GeomAbs_Line
+            except Exception:
+                is_line = False
+            if not is_line:
+                return None, "planar face boundary edge is not a line segment"
+            verts.append(project(BRep_Tool.Pnt(we.CurrentVertex())))
+            we.Next()
+
+        if len(verts) < 3:
+            return None, "planar wire has fewer than 3 edges"
+
+        n = len(verts)
+        edges = []
+        for i in range(n):
+            u0, v0 = verts[i]
+            u1, v1 = verts[(i + 1) % n]
+            edges.append({"curve": "line", "params": [u0, v0, u1, v1]})
+        role = "outer" if (outer_wire is not None and wire.IsSame(outer_wire)) else "inner"
+        wires_out.append({"role": role, "edges": edges})
+        wx.Next()
+
+    if not wires_out:
+        return None, "planar face has no wires"
+    n_outer = sum(1 for w in wires_out if w["role"] == "outer")
+    if n_outer != 1:
+        return None, f"planar face has {n_outer} outer wires (expected exactly 1)"
+
+    return {"type": "plane", "params": list(origin_cm) + list(axis_u) + list(axis_v), "wires": wires_out}, None
+
+
+# Face extractors dispatched by analytic surface type. Only planes are wired up so far; the
+# cylindrical/spherical/conical extractors slot in here in the next milestone.
+_FACE_EXTRACTORS = {
+    "plane": extract_planar_face,
+}
+
+
+def extract_surfaces_for_shape(shape, scale_to_cm: float) -> Tuple[Optional[List[dict]], List[str]]:
+    """Attempt to extract every face of a leaf solid into exact sidecar surface records.
+
+    Returns (surfaces, []) when all faces are supported, or (None, reasons) listing why the
+    solid cannot be represented exactly (one reason per unsupported face). A shape with no
+    faces is treated as unsupported.
+    """
+    surfaces: List[dict] = []
+    reasons: List[str] = []
+    n_faces = 0
+    for face in TopologyExplorer(shape).faces():
+        n_faces += 1
+        adaptor = BRepAdaptor_Surface(face)
+        surf_type = _SURFACE_TYPE_NAMES.get(adaptor.GetType(), "unknown")
+        extractor = _FACE_EXTRACTORS.get(surf_type)
+        if extractor is None:
+            reasons.append(f"{surf_type} face extraction not implemented yet")
+            continue
+        record, reason = extractor(face, scale_to_cm)
+        if record is None:
+            reasons.append(reason or f"{surf_type} face not supported")
+        else:
+            surfaces.append(record)
+    if n_faces == 0:
+        return None, ["shape has no faces"]
+    if reasons:
+        return None, reasons
+    return surfaces, []
 
 
 # -------------------------------
@@ -1774,12 +1918,19 @@ def emit_root_macro(
     mat_cfg: Optional[MatMatchConfig] = None,
     surface_report: Optional[str] = None,
     surface_files: Optional[Dict[str, str]] = None,
+    exact_surfaces: str = "off",
 ):
     # surface_files: def_lid -> absolute path of an exact-surface sidecar (surfaces_*.bin).
     # Volumes listed here are emitted as O2BVHSurfaceSolid via emit_surface_solid_cpp;
-    # all others keep the tessellated fallback. Callers are responsible for writing the
-    # sidecar files (the eligibility-driven extraction populating this map is a later
-    # milestone; until then the default None leaves the output unchanged).
+    # all others keep the tessellated fallback. This map is normally populated internally
+    # from exact_surfaces ("off"|"auto"|"required"); an explicit surface_files argument (used
+    # by tests) is honoured as-is and only when exact_surfaces == "off".
+    #
+    # exact_surfaces mode:
+    #   off      : tessellated output only (default; leaves generated output unchanged).
+    #   auto     : emit O2BVHSurfaceSolid for every leaf solid whose faces all extract
+    #              exactly, tessellated fallback otherwise.
+    #   required : like auto, but abort if any leaf solid cannot be represented exactly.
     if (step_unit or "auto").lower() == "auto":
         detected = detect_step_length_unit(step_path)
         scale_to_cm = step_unit_scale_to_cm(detected)
@@ -1822,6 +1973,47 @@ def emit_root_macro(
             for reason, count in top:
                 print(f"  fallback ({count}x): {reason}")
         print(f"Wrote surface report: {report_path}")
+
+    # --- exact-surface extraction (auto/required modes) ---
+    exact_mode = (exact_surfaces or "off").lower()
+    if exact_mode not in ("off", "auto", "required"):
+        raise ValueError(f"exact_surfaces must be off|auto|required, got {exact_surfaces!r}")
+    if exact_mode == "off":
+        surface_files = surface_files or {}
+    else:
+        if surface_files:
+            raise ValueError("surface_files cannot be combined with --exact-surfaces auto|required")
+        surface_files = {}
+        failures: Dict[str, List[str]] = {}  # def_lid -> unsupported-face reasons
+        for lid, shape in def_shapes.items():
+            surfaces, reasons = extract_surfaces_for_shape(shape, scale_to_cm)
+            if surfaces is None:
+                failures[lid] = reasons
+                continue
+            disp = def_names.get(lid, "")
+            volname = sanitize_filename(disp) if disp else "vol"
+            fpath = (out_folder / f"surfaces_{volname}_{sanitize_filename(lid)}.bin").resolve()
+            write_surfaces_bin(fpath, surfaces)
+            surface_files[lid] = str(fpath)
+        n_leaf = len(def_shapes)
+        print(f"Exact-surface extraction ({exact_mode}): {len(surface_files)}/{n_leaf} leaf solids "
+              f"represented exactly, {len(failures)} fall back to tessellation")
+        if failures:
+            # Aggregate reasons for a compact, useful report.
+            reason_counts: Dict[str, int] = {}
+            for reasons in failures.values():
+                for r in reasons:
+                    reason_counts[r] = reason_counts.get(r, 0) + 1
+            for reason, count in sorted(reason_counts.items(), key=lambda kv: -kv[1]):
+                print(f"  fallback ({count} face(s)): {reason}")
+            if exact_mode == "required":
+                lines = [f"--exact-surfaces required: {len(failures)}/{n_leaf} leaf solid(s) cannot be "
+                         f"represented exactly:"]
+                for lid in sorted(failures):
+                    name = def_names.get(lid, "") or lid
+                    uniq = sorted(set(failures[lid]))
+                    lines.append(f"  {name} [{lid}]: {'; '.join(uniq)}")
+                raise ValueError("\n".join(lines))
 
     # --- Geant4 NIST material DB (optional but recommended) ---
     g4db: Optional[Dict[str, dict]] = None
@@ -2026,6 +2218,7 @@ def main():
     ap.add_argument("--exclude-name", action="append", default=[], help="Skip CAD labels/subtrees whose XCAF name or label entry matches this regex; may be repeated.")
     ap.add_argument("--name-filter-case-sensitive", action="store_true", help="Make --include-name/--exclude-name matching case-sensitive (default: case-insensitive)")
     ap.add_argument("--surface-report", default=None, metavar="PATH", help="Write a JSON report classifying each face by analytic surface type and each logical volume by exact O2BVHSurfaceSolid conversion eligibility. Does not change the generated geometry output.")
+    ap.add_argument("--exact-surfaces", default="off", choices=["off", "auto", "required"], help="Emit exact O2BVHSurfaceSolid shapes instead of TGeoTessellated where possible. 'off' (default): tessellated only. 'auto': exact for each leaf solid whose faces all extract exactly, tessellated fallback otherwise. 'required': fail with a report if any leaf solid cannot be represented exactly. Writes a surfaces_*.bin sidecar per exact volume.")
 
     # NEW: BOM / material support
     ap.add_argument("--materials-csv", default=None, help="BOM CSV file providing material + mass per part (optional)")
@@ -2099,6 +2292,7 @@ def main():
         g4_nist_json=args.g4_nist_json,
         mat_cfg=mat_cfg,
         surface_report=args.surface_report,
+        exact_surfaces=args.exact_surfaces,
     )
     out_macro.write_text(code)
 
