@@ -30,6 +30,7 @@ o2_add_library(DetectorsBase
                        src/VMCSeederService.cxx
                        src/GlobalParams.cxx
                        src/O2Tessellated.cxx
+                       src/O2BVHSurfaceSolid.cxx
                        src/TGeoGeometryUtils.cxx
                        src/CADGeometryUtils.cxx
                PUBLIC_LINK_LIBRARIES FairRoot::Base
@@ -68,7 +69,15 @@ o2_target_root_dictionary(DetectorsBase
                                   include/DetectorsBase/SimFieldUtils.h
                                   include/DetectorsBase/GlobalParams.h
                                   include/DetectorsBase/O2Tessellated.h
+                                  include/DetectorsBase/O2BVHSurfaceSolid.h
                                   )
+
+o2_add_test(
+  BVHSurfaceSolid
+  SOURCES test/testBVHSurfaceSolid.cxx
+  COMPONENT_NAME DetectorsBase
+  PUBLIC_LINK_LIBRARIES O2::DetectorsBase ROOT::Geom
+  LABELS detectorsbase)
 
 if(BUILD_SIMULATION)
   if (NOT APPLE)
