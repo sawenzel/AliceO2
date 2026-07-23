@@ -187,19 +187,72 @@ only for visualization and fallback paths.
 	- Navigation must never depend on display triangles.
 	- Acceptance test: `GetBuffer3D` returns nonzero vertices/segments/polygons and ROOT can draw a simple solid.
 
+## Surface sidecar format
+
+Version 1 of the exact-surface sidecar (`surfaces_<VOLNAME>_<LID>.bin`), written by
+`write_surfaces_bin` in `scripts/geometry/O2_CADtoTGeo.py` and read by
+`o2::base::LoadSurfaceSolid` (`Detectors/Base/include/DetectorsBase/O2SurfaceSolidIO.h`).
+All integers are little-endian `uint32`, all geometry values are little-endian `float64`,
+lengths in cm, angles in radians.
+
+```
+header:
+  char[4]  magic        = "O2SS"
+  uint32   version      = 1
+  uint32   nSurfaces
+  uint32   reserved     = 0
+per surface (nSurfaces times):
+  uint32   surfaceType     1=plane 2=cylinder 3=cone 4=sphere 5=planar-disk
+  uint32   flags           bit 0: innerWall (quadrics: outward normal towards the axis/center)
+  uint32   nParams
+  float64  params[nParams]  fixed per-type layout, see below
+  uint32   nWires
+  per wire (nWires times):
+    uint32   wireRole      0=outer 1=inner (hole)
+    uint32   nEdges
+    per edge (nEdges times):
+      uint32   curveType     0=line segment 1=circular arc
+      uint32   nCurveParams
+      float64  curveParams[nCurveParams]
+        line: u0 v0 u1 v1
+        arc:  cu cv radius phiStart phiSweep (signed sweep, full circle = +/-2*pi)
+```
+
+Per-type `params` layouts (matching the `O2BVHSurfaceSolid::Add*Surface` signatures):
+
+- plane (9): origin xyz, axisU xyz, axisV xyz. The trim is carried in the wire block;
+  version-1 loaders require all edges to be line segments (`AddPlanarSurface` polygon
+  wires); exactly one outer wire, holes as inner wires.
+- cylinder (14): centerPoint xyz, axis xyz, referenceAxisU xyz, radius, heightMin,
+  heightMax, phiStart, phiSweep. Wire block empty in v1 (trim is the parametric rectangle).
+- cone (15): centerPoint xyz, axis xyz, referenceAxisU xyz, radiusAtMin, radiusAtMax,
+  heightMin, heightMax, phiStart, phiSweep. Wire block empty in v1.
+- sphere (14): center xyz, polarAxis xyz, referenceAxisU xyz, radius, thetaMin, thetaMax,
+  phiStart, phiSweep. Wire block empty in v1.
+- planar-disk (11): center xyz, axisU xyz, axisV xyz, radius, holeRadius. Wire block empty
+  in v1 (`AddPlanarDiskSurface` builds the circular trim wires itself).
+
+The `nParams`/`nCurveParams` counts make every record self-describing, so future minor
+extensions can add trailing parameters or new curve types without breaking version-1
+readers that choose to skip them; incompatible changes bump `version`. The wire block on
+quadric surfaces is reserved for general `(u, v)`-domain trims once the C++ side supports
+them.
+
 ## CAD conversion milestones
 
-- [ ] Add exact-surface extraction probes to `O2_CADtoTGeo.py` without changing default output.
+- [x] Add exact-surface extraction probes to `O2_CADtoTGeo.py` without changing default output.
 	- Use OpenCascade face/surface adaptors to classify faces by analytic surface type.
 	- For each simple shape, collect: face type, orientation, surface parameters, boundary wires/edges, and whether all faces are supported.
 	- Deliverable: a `--surface-report` or debug JSON path that reports exact-conversion eligibility per logical volume.
 	- Validation: run on one STEP example and confirm existing `geom.C`/facet output is unchanged.
+	- Done 2026-07-23: `--surface-report <path>` writes a JSON report built from a new `def_shapes` store (the possibly clipped leaf shape). `classify_face` (`BRepAdaptor_Surface` type + per-type parameters in cm + `TopAbs_REVERSED` orientation + UV bounds), wire/edge probing (`BRepAdaptor_Curve` types, degenerated-edge handling) and `face_supported` encode the current C++ support matrix: planes need line/circle boundaries, quadrics need a single parametric-rectangle trim (detected by sampling each edge's pcurve for iso-parametric u/v). Validated on `oTOF_V3_R92cm.step`: output folders byte-identical with/without the flag; report finds 1607 planar faces / 9116 line edges, 2/3 volumes eligible (the third is a faceless leaf).
 
-- [ ] Design and document the generated surface sidecar format.
+- [x] Design and document the generated surface sidecar format.
 	- It should be versioned and independent of Python object pickling.
 	- Candidate: compact binary sidecar similar to `facets_*.bin`, with magic/version, surface count, type enum, orientation, parameters, wire count, edge count, edge curve records, and optional display mesh.
 	- Deliverable: format description in this file and loader skeleton in generated C++ macro.
 	- Validation: round-trip one planar box sidecar into an `O2BVHSurfaceSolid`.
+	- Done 2026-07-23: format documented in the "Surface sidecar format" section above; Python writer `write_surfaces_bin` added to `O2_CADtoTGeo.py`. Deviation from the original deliverable: the loader is a shared library function `o2::base::LoadSurfaceSolid` (`Detectors/Base/include/DetectorsBase/O2SurfaceSolidIO.h` + `src/O2SurfaceSolidIO.cxx`) rather than code pasted into the generated macro, because the macro needs libO2DetectorsBase anyway to instantiate the solid and the unit test can then exercise the exact same parser; `emit_cpp_prelude` will only gain a thin call in the "generated C++ macro support" milestone. Validated by the `SurfaceSidecarRoundTrip` unit test (C++-written box sidecar vs `TGeoBBox`, cylinder+caps sidecar vs `TGeoTube`, bad-magic/truncation rejection) plus a cross-language parity run: Python-written box and tube sidecars loaded via `LoadSurfaceSolid` in a ROOT macro with 0 `Contains` mismatches and exact capacities.
 
 - [ ] Add generated C++ macro support for `O2BVHSurfaceSolid`.
 	- Extend `emit_cpp_prelude` with a `LoadSurfaceSolid(...)` helper and include the new header.
@@ -296,3 +349,9 @@ only for visualization and fallback paths.
 	- Testing policy per review feedback: `Safety` is never compared against ROOT shapes (TGeo safeties are legitimate underestimates and e.g. `TGeoCone::Safety` returns 0 on the axis of an `rmin = 0` cone); safety checks use analytic expected distances instead. `Contains`/distance functions are still compared against `TGeoTube`/`TGeoSphere`/`TGeoCone` on grids and ray sets.
 	- Validation: full `DetectorsBase` ninja build in `/data/swenzel/sw/BUILD/O2-latest/O2` and the focused `ctest -R BVHSurfaceSolid` run pass (15 test cases). The `testMatBudLUT` failure in the same label is unrelated (missing `libO2TPCSimulation.so` in the partial build). `g4Config.C` and generated `scripts/geometry/STEP_examples/` artifacts remain intentionally out of the commit.
 - 2026-07-23: Completed the first two navigation milestones: `CloseShape`/BVH construction and BVH-accelerated `Contains` (details in the milestone notes above). Key implementation points: BVH lives in the transient `Impl` (`std::unique_ptr<Bvh>` built from per-surface conservative AABBs expanded by the new documented `kBVHBoxTolerance` and rounded outward in the float conversion); generic `visitRayCandidates` (bvh2 ray traversal) and `visitPointCandidates` (explicit stack, point-in-box) visitors on `Impl` will be reused by the upcoming `DistFromOutside`/`DistFromInside`/`Safety` milestones; `max_leaf_size = 1` (the bvh2 traversal does not box-test a leaf start node, and analytic patches are expensive - found via a diagnostic ray-candidate count of 6 instead of 0 on a miss ray when the whole 6-face box collapsed into one root leaf). `DistFromOutside`/`DistFromInside`/`Safety`/`ComputeNormal` still loop over all surfaces - they are the next milestones. Environment note for running builds/tests: use `eval "$(alienv printenv O2/latest-swenzel-bvhsurfacesolid-o2,ninja/latest,CMake/latest)"` (comma-separated package list), then `ninja`/`ctest` in `/data/swenzel/sw/BUILD/O2-latest/O2`. Focused `ctest -R BVHSurfaceSolid` passes (17 test cases).
+- 2026-07-23: Completed the first two CAD conversion milestones (surface-report probes and the sidecar format), enabling data-driven testing with real CAD input.
+	- `O2_CADtoTGeo.py`: new exact-surface classification section (`classify_face`, `face_supported`, `build_surface_report`), a `def_shapes` leaf-shape store, the `--surface-report <path>` flag, and the sidecar writer `write_surfaces_bin` (not yet called by the pipeline; the extraction milestones will hook it up). Default output verified byte-identical.
+	- Sidecar format v1 documented in this file ("Surface sidecar format"); C++ reader `o2::base::LoadSurfaceSolid` in `DetectorsBase` (new files `O2SurfaceSolidIO.h/.cxx`, registered in CMake, no dictionary entry needed). `testBVHSurfaceSolid.cxx` gained a `boxFaceFrame` helper refactor and the `SurfaceSidecarRoundTrip` case (18 test cases total, all pass).
+	- Environment notes: pythonOCC needs a PYTHONPATH fix after `alienv` (`export PYTHONPATH=/data/swenzel/sw/slc9_x86-64/pythonOCC/v7.9.3-local1/lib/python3.10/site-packages:$PYTHONPATH`). An incremental ninja build after the CMakeLists change failed in rootcling dictionary regeneration (stale captured LD_LIBRARY_PATH); a full `./alibuild/aliBuild build O2` fixed it. For interpreted ROOT macros against the solid: use `R__ADD_INCLUDE_PATH($O2_ROOT/include)` + `R__LOAD_LIBRARY(libO2DetectorsBase)` inside the macro (exporting `ROOT_INCLUDE_PATH` breaks ROOT's C++ modules), and declare the `LoadSurfaceSolid` prototype manually since `O2SurfaceSolidIO.h` is not a dictionary header.
+	- Support-matrix caveat surfaced by the probes: the C++ quadric API only accepts parametric-rectangle trims, so `auto`-mode conversion of quadric faces with general trim wires will fall back to tessellation until general `(u, v)` wires on quadrics are implemented; the report's `trim_kind` field tracks how often this occurs in real CAD data.
+	- `g4Config.C` and generated `scripts/geometry/STEP_examples/` artifacts remain intentionally out of the commit.
