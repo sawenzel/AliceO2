@@ -44,5 +44,6 @@
 #pragma link C++ class o2::data::Stack + ;
 
 #pragma link C++ class o2::base::O2Tessellated - ;
+#pragma link C++ class o2::base::O2BVHSurfaceSolid - ;
 
 #endif
