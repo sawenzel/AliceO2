@@ -46,6 +46,13 @@ class O2BVHSurfaceSolid : public TGeoBBox
   int GetNsurfaces() const;
   bool IsDefined() const;
 
+  /// Whether the closed shape forms a closed 2-manifold (every boundary edge shared by two faces).
+  /// Meaningful only after CloseShape(); detects e.g. missing faces.
+  bool IsClosed() const;
+  /// Whether all shared boundary edges are traversed in opposite directions after CloseShape();
+  /// detects e.g. reversed faces (inconsistent outward normals).
+  bool IsOrientationConsistent() const;
+
   void ComputeBBox() override;
 
   int DistancetoPrimitive(int, int) override { return 99999; }
