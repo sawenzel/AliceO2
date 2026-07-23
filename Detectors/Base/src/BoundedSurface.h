@@ -234,6 +234,24 @@ struct SurfaceEdge {
   /// Squared distance from a parametric point to this edge.
   double distanceSq(const Vec2& point) const { return pointSegmentDistanceSq(point, start, end); }
 
+  /// Closest point on this edge to \a point. Returns the projected point and its clamped
+  /// parameter \a parameter in [0, 1] (0 at start, 1 at end). Degenerate edges return start.
+  Vec2 closestPoint(const Vec2& point, double& parameter) const
+  {
+    const Vec2 segmentVector = end - start;
+    const double segmentLengthSq = segmentVector.uCoord * segmentVector.uCoord +
+                                   segmentVector.vCoord * segmentVector.vCoord;
+    if (segmentLengthSq <= kToleranceSq) {
+      parameter = 0.;
+      return start;
+    }
+    const double projection = ((point.uCoord - start.uCoord) * segmentVector.uCoord +
+                               (point.vCoord - start.vCoord) * segmentVector.vCoord) /
+                              segmentLengthSq;
+    parameter = std::max(0., std::min(1., projection));
+    return {start.uCoord + parameter * segmentVector.uCoord, start.vCoord + parameter * segmentVector.vCoord};
+  }
+
   /// Accumulate the edge endpoints into a parametric axis-aligned bounding box.
   void extendBounds(Vec2& lower, Vec2& upper) const
   {
@@ -397,6 +415,34 @@ struct SurfaceWire {
       area += currentVertex.uCoord * nextVertex.vCoord - nextVertex.uCoord * currentVertex.vCoord;
     }
     return 0.5 * area;
+  }
+
+  /// Accumulate this wire's vertices into a parametric axis-aligned bounding box. This is
+  /// independent of any concrete surface so cylinders, spheres and cones can reuse it.
+  void parametricBounds(Vec2& lower, Vec2& upper) const
+  {
+    for (const auto& vertex : vertices) {
+      lower.uCoord = std::min(lower.uCoord, vertex.uCoord);
+      lower.vCoord = std::min(lower.vCoord, vertex.vCoord);
+      upper.uCoord = std::max(upper.uCoord, vertex.uCoord);
+      upper.vCoord = std::max(upper.vCoord, vertex.vCoord);
+    }
+  }
+
+  /// Ordered, closed boundary polyline of this wire in its parametric domain. For the current
+  /// line-segment edges this is simply the de-duplicated vertex ring closed back to the first
+  /// vertex; it gives a stable hook for visualization and for future curved edges (which would
+  /// sample themselves into additional points here) without exposing the vertex storage.
+  std::vector<Vec2> sampledBoundary() const
+  {
+    std::vector<Vec2> samples;
+    if (vertices.empty()) {
+      return samples;
+    }
+    samples.reserve(vertices.size() + 1);
+    samples.insert(samples.end(), vertices.begin(), vertices.end());
+    samples.push_back(vertices.front());
+    return samples;
   }
 
   WireClassification classify(const Vec2& point) const
