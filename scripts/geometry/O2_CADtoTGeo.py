@@ -1169,8 +1169,8 @@ def trsf_to_tgeo(trsf: gp_Trsf, name: str, scale_to_cm: float) -> str:
 """
 
 
-def emit_cpp_prelude() -> str:
-    return """#include <TGeoManager.h>
+def emit_cpp_prelude(exact_surfaces: bool = False) -> str:
+    prelude = """#include <TGeoManager.h>
 #include <TFile.h>
 #include <fstream>
 #include <functional>
@@ -1198,6 +1198,42 @@ static void LoadFacets(const std::string& file, TGeoTessellated* solid, bool che
   solid->CloseShape(check, true);
 }
 """
+    if not exact_surfaces:
+        return prelude
+
+    # Exact-surface solids need the O2 DetectorsBase library. The macro stays loadable in
+    # ROOT interpreted mode: O2BVHSurfaceSolid.h is part of the ROOT dictionary module so
+    # it can be included textually, while O2SurfaceSolidIO.h is not -- its single free
+    # function is declared by prototype instead (the symbol resolves from
+    # libO2DetectorsBase). Do not export ROOT_INCLUDE_PATH for this; R__ADD_INCLUDE_PATH
+    # keeps ROOT's C++ modules intact.
+    prelude += """
+// --- exact-surface solid support (requires the ALICE O2 environment) ---
+R__ADD_INCLUDE_PATH($O2_ROOT/include)
+R__LOAD_LIBRARY(libO2DetectorsBase)
+#include "DetectorsBase/O2BVHSurfaceSolid.h"
+// O2SurfaceSolidIO.h is not part of the ROOT dictionary module; declare the loader
+// prototype directly (the symbol resolves from libO2DetectorsBase).
+namespace o2
+{
+namespace base
+{
+bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid);
+} // namespace base
+} // namespace o2
+
+static void LoadSurfaces(const std::string& file, o2::base::O2BVHSurfaceSolid* solid, bool check=false)
+{
+  if (!o2::base::LoadSurfaceSolid(file, *solid)) {
+    throw std::runtime_error("Cannot load surface sidecar: " + file);
+  }
+  solid->CloseShape(check);
+  if (check && (!solid->IsClosed() || !solid->IsOrientationConsistent())) {
+    throw std::runtime_error("Surface solid not closed/orientation-consistent: " + file);
+  }
+}
+"""
+    return prelude
 
 
 def emit_materials_cpp(
@@ -1293,6 +1329,20 @@ def emit_tessellated_cpp(lid: str, vol_display_name: str, facet_abspath: str, nt
     out = []
     out.append(f'  TGeoTessellated *solid_{safe} = new TGeoTessellated("{shape_name}", {ntriangles});')
     out.append(f'  LoadFacets("{facet_abspath}", solid_{safe}, check);')
+    out.append(f'  TGeoVolume *vol_{safe} = new TGeoVolume("{shape_name}", solid_{safe}, {medium_var});')
+    return "\n".join(out)
+
+
+def emit_surface_solid_cpp(lid: str, vol_display_name: str, surface_abspath: str, medium_var: str) -> str:
+    """Exact-surface counterpart of emit_tessellated_cpp: the volume gets an
+    O2BVHSurfaceSolid filled from a surface sidecar file (see BVHSurfaceSolid.md,
+    "Surface sidecar format"). Requires emit_cpp_prelude(exact_surfaces=True)."""
+    safe = sanitize_cpp_name(lid)
+    shape_name = vol_display_name if vol_display_name else lid
+
+    out = []
+    out.append(f'  auto *solid_{safe} = new o2::base::O2BVHSurfaceSolid("{shape_name}");')
+    out.append(f'  LoadSurfaces("{surface_abspath}", solid_{safe}, check);')
     out.append(f'  TGeoVolume *vol_{safe} = new TGeoVolume("{shape_name}", solid_{safe}, {medium_var});')
     return "\n".join(out)
 
@@ -1723,7 +1773,13 @@ def emit_root_macro(
     g4_nist_json: Optional[str] = None,
     mat_cfg: Optional[MatMatchConfig] = None,
     surface_report: Optional[str] = None,
+    surface_files: Optional[Dict[str, str]] = None,
 ):
+    # surface_files: def_lid -> absolute path of an exact-surface sidecar (surfaces_*.bin).
+    # Volumes listed here are emitted as O2BVHSurfaceSolid via emit_surface_solid_cpp;
+    # all others keep the tessellated fallback. Callers are responsible for writing the
+    # sidecar files (the eligibility-driven extraction populating this map is a later
+    # milestone; until then the default None leaves the output unchanged).
     if (step_unit or "auto").lower() == "auto":
         detected = detect_step_length_unit(step_path)
         scale_to_cm = step_unit_scale_to_cm(detected)
@@ -1838,8 +1894,16 @@ def emit_root_macro(
     materials_cpp, medium_var_map = emit_materials_cpp(used_materials)
 
     # --- emit C++ macro ---
+    surface_files = surface_files or {}
+    unknown_surface_lids = set(surface_files) - set(logical_volumes)
+    if unknown_surface_lids:
+        raise ValueError(f"surface_files references unknown logical volumes: {sorted(unknown_surface_lids)}")
+    if surface_files:
+        print(f"Emitting {len(surface_files)}/{len(logical_volumes)} logical volumes as exact O2BVHSurfaceSolid "
+              f"(macro requires the ALICE O2 environment)")
+
     cpp: List[str] = []
-    cpp.append(emit_cpp_prelude())
+    cpp.append(emit_cpp_prelude(exact_surfaces=bool(surface_files)))
 
     cpp.append("TGeoVolume* build(bool check=true) {")
     cpp.append('  if (!gGeoManager) { throw std::runtime_error("gGeoManager is null. Call build_and_export() or create a TGeoManager first."); }')
@@ -1854,7 +1918,11 @@ def emit_root_macro(
             mat_name = normalize_material_name(lid_to_bom[lid].material)
             med = medium_var_map.get(mat_name, "med_Default")
 
-        cpp.append(emit_tessellated_cpp(lid, def_names.get(lid, ""), facet_files[lid], ntriangles, med))
+        if lid in surface_files:
+            sidecar = str(_Path(surface_files[lid]).expanduser().resolve()).replace("\\", "\\\\")
+            cpp.append(emit_surface_solid_cpp(lid, def_names.get(lid, ""), sidecar, med))
+        else:
+            cpp.append(emit_tessellated_cpp(lid, def_names.get(lid, ""), facet_files[lid], ntriangles, med))
 
     for lid in sorted(assemblies):
         cpp.append(emit_assembly_cpp(lid, def_names.get(lid, "")))
