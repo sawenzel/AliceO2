@@ -72,7 +72,7 @@ only for visualization and fallback paths.
 	- Validation: build the `DetectorsBase` target and load the dictionary in ROOT.
 	- Done 2026-07-22: skeleton plus first planar implementation added and object-compiled with the configured O2 build flags; full CMake target build is blocked by the unrelated non-tested macro report noted below.
 
-- [ ] Introduce private bounded-surface, wire, and edge interfaces used by the solid implementation.
+- [x] Introduce private bounded-surface, wire, and edge interfaces used by the solid implementation.
 	- Keep it private to `Detectors/Base/src` unless another package has a clear need for it.
 	- `BoundedSurface` owns one analytic support surface plus trim wires in that surface's parametric domain.
 	- `SurfaceWire` represents one closed oriented boundary loop: one outer wire plus zero or more inner wires for holes.
@@ -81,6 +81,7 @@ only for visualization and fallback paths.
 	- Deliverable: interface plus one trivial test/dummy surface used only by unit tests.
 	- Validation: build and a focused unit test that constructs the solid with one dummy surface.
 	- Partial 2026-07-22: private concrete `SurfaceWire` and `PlanarBoundedSurface` types exist; a generic bounded-surface interface and dummy test surface remain open.
+	- Done 2026-07-23: extracted a private header `Detectors/Base/src/BoundedSurface.h` (namespace `o2::base::surface`) with `SurfaceEdge`, `SurfaceWire` (role + status), the abstract `BoundedSurface` interface (`conservativeBounds`, `intersectRay` returning the oriented hit normal, `distanceSqToPatch`, `normalAt`, `containsPointOnSurface`, `capacityContribution` + `capacityIsExact`, `appendDisplayMesh`, `appendDirectedEdges`), `PlanarBoundedSurface`, and a trivial `DummyBoundedSurface`. `O2BVHSurfaceSolid` now stores `std::vector<std::unique_ptr<BoundedSurface>>` and navigates polymorphically. Test `DummyBoundedSurfaceInterface` exercises the interface.
 
 - [ ] Define numerical conventions in code and tests.
 	- Choose tolerances for ray `t`, boundary checks, duplicate intersection clustering, and point-on-surface classification.
@@ -104,10 +105,11 @@ only for visualization and fallback paths.
 	- Acceptance test: build an exact box from six planar surfaces and compare navigation against `TGeoBBox`.
 	- Done 2026-07-22: initial planar kernels, display triangulation, loop-based navigation, and exact box comparison test added. BVH acceleration remains a later milestone.
 
-- [ ] Implement wire orientation and closure validation for planar surfaces.
+- [x] Implement wire orientation and closure validation for planar surfaces.
 	- Detect open wires, self-evident degeneracies, zero area, and orientation inconsistent with solid outward normals.
 	- Do not silently repair complex invalid input unless the repair is simple and logged.
 	- Acceptance test: intentionally reversed face, missing face, and duplicated edge fixtures.
+	- Done 2026-07-23: `SurfaceWire::initialize` now takes a `WireRole` and returns a `WireStatus`, rejecting non-finite, too-few-vertex/open, zero-area and self-touching (pinched) wires, and normalizing orientation (outer CCW, inner CW) as a logged simple repair (`O2BVHSurfaceSolid` warns when a wire was re-oriented). Solid-level `validateClosure` runs in `CloseShape` using a directed half-edge (manifold) check plus signed-volume sanity, exposed via `IsClosed()` / `IsOrientationConsistent()` and emitted as warnings. Tests `WireValidationAndOrientation` and `SolidClosureDetectsMissingAndReversedFaces` cover reversed/open/zero-area/pinched wires and missing/reversed face fixtures.
 
 - [ ] Add curve classes for trimmed surface boundaries.
 	- Start with line and circle arc boundaries, because these cover many mechanical STEP faces.
@@ -263,6 +265,7 @@ only for visualization and fallback paths.
 - Is exact `Capacity()` required for the first usable version, or is a documented visualization-mesh approximation acceptable initially?
 - Which exact surface types are mandatory for the first milestone: planar only, planar plus cylinders, or the full planar/cylinder/cone/sphere set?
 - What is the expected persistence format for generated exact CAD data: binary sidecar, JSON sidecar, direct generated C++ construction, or ROOT streaming only?
+	- Decision 2026-07-23: ROOT persistence of the solid is deliberately deprioritized for now. The current implementation keeps all surface data in a transient private `Impl` (`fImpl //!`), so a streamed-then-read solid comes back empty; this is acceptable while the shape is under active development. Add a streamable persistent representation (a POD mirror of the surfaces streamed like `O2Tessellated`'s `fVertices`/`fFacets`, rebuilt via `CloseShape(false)` on read) once the surface/navigation functionality is complete.
 - Should `Contains` classify boundary points as inside, outside, or follow ROOT primitive behavior exactly case by case?
 - Are OpenCascade circle/ellipse/BSpline trim curves required for the first converter milestone, or can unsupported trims force tessellated fallback?
 - Should the internal wire model mirror OpenCascade orientation exactly, or normalize to an O2 convention at import time and keep the original orientation only for diagnostics?
@@ -272,3 +275,5 @@ only for visualization and fallback paths.
 
 - 2026-07-22: Plan created from the initial project note, current `O2Tessellated` implementation, `DetectorsBase` CMake integration, and the current `O2_CADtoTGeo.py` tessellated emission path. No implementation has started yet.
 - 2026-07-22: Added first `O2BVHSurfaceSolid` implementation with private line-trimmed planar surfaces, display triangulation, loop-based TGeo navigation methods, ROOT dictionary wiring, and `Detectors/Base/test/testBVHSurfaceSolid.cxx`. Validated by object-compiling the new implementation and test with `/data/swenzel/sw/BUILD/O2-latest/O2/compile_commands.json`, then manually linking/running the focused Boost test against a temporary ROOT dictionary: `*** No errors detected`. Full `O2lib-DetectorsBase` build currently stops during CMake regeneration because `O2ReportNonTestedMacros` reports existing `scripts/geometry/STEP_examples/oTOF_TGeo_clip_xminus/geom.C` as untested.
+- 2026-07-23: Confirmed a clean full build via `./alibuild/aliBuild build O2 --debug`. Reviewed the initial two milestones and committed the code, build wiring, and this plan on branch `swenzel/bvhsurfacesolid` (`g4Config.C` and the generated `scripts/geometry/STEP_examples/` artifacts intentionally left out of the commit). Decision recorded: ROOT persistence of the solid is deprioritized until the surface/navigation functionality is complete (see Open questions).
+- 2026-07-23: Completed the private bounded-surface/wire/edge interface milestone and the planar wire orientation & closure validation milestone. Added `Detectors/Base/src/BoundedSurface.h` (abstract `BoundedSurface`, `SurfaceEdge`, role/status-aware `SurfaceWire`, `PlanarBoundedSurface`, `DummyBoundedSurface`, and `validateClosure`), refactored `O2BVHSurfaceSolid` to navigate polymorphically over `std::unique_ptr<BoundedSurface>` with entering/exiting decided by the per-hit oriented normal, added `IsClosed()` / `IsOrientationConsistent()`, and extended the unit test with dummy-surface, wire-validation, and missing/reversed-face fixtures. Both source and test object-compile with the configured O2 flags.
