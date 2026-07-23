@@ -54,6 +54,11 @@ inline constexpr double kAreaTolerance = 1.e-18;         ///< degenerate (zero) 
 inline constexpr double kRayTolerance = 1.e-9;           ///< minimum positive ray parameter t
 inline constexpr double kIntersectionTolerance = 1.e-7;  ///< clustering of near-equal intersections
 inline constexpr double kClosureQuantum = 1.e-7;         ///< vertex quantization for closure matching
+/// Expansion of the per-surface BVH leaf AABBs (in double, before the outward float rounding).
+/// It must dominate every length tolerance used by navigation queries (kTolerance boundary
+/// classification, kIntersectionTolerance clustering) so a point or ray hit within tolerance of
+/// a patch is never pruned away by the BVH traversal.
+inline constexpr double kBVHBoxTolerance = 1.e-3;
 /// @}
 
 /// A 2D point/vector in a surface's parametric (u, v) domain.

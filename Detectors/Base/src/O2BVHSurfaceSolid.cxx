@@ -13,6 +13,10 @@
 
 #include "BoundedSurface.h"
 
+// the third-party BVH headers plus extra kernels, shared with O2Tessellated
+#include "bvh2_third_party.h"
+#include "bvh2_extra_kernels.h"
+
 #include "TBuffer.h"
 #include "TBuffer3D.h"
 #include "TBuffer3DTypes.h"
@@ -31,6 +35,14 @@ ClassImp(O2BVHSurfaceSolid);
 
 namespace
 {
+// float BVH types following the O2Tessellated::BuildBVH pattern
+using BVHScalar = float;
+using BVHBBox = bvh::v2::BBox<BVHScalar, 3>;
+using BVHVec3 = bvh::v2::Vec<BVHScalar, 3>;
+using BVHNode = bvh::v2::Node<BVHScalar, 3>;
+using BVH = bvh::v2::Bvh<BVHNode>;
+using BVHRay = bvh::v2::Ray<BVHScalar, 3>;
+
 Vec2 makeVec2(const O2BVHSurfaceSolid::Point2D& point)
 {
   return {point[0], point[1]};
@@ -45,6 +57,43 @@ Vec3 makeVec3(const Double_t* point)
 {
   return {point[0], point[1], point[2]};
 }
+
+// The arbitrary skew test direction used for parity-based containment: probes all normals and
+// avoids evident symmetries (same as O2Tessellated), normalized so hit distances are lengths.
+const Vec3 kContainsTestDirection = normalized({1., 1.41421356237, 1.73205080757});
+
+// Ray-parity evaluation of a full intersection list (sorts hits in place). Near-equal
+// intersections are clustered (shared edges/vertices seen by several surfaces). A cluster whose
+// hits all enter or all exit is one genuine crossing; a mixed cluster means the ray grazes an
+// edge or corner tangentially (e.g. the rim where a cap meets a wall) and must contribute even
+// parity.
+bool oddCrossingParity(std::vector<RayHit>& hits, const Vec3& rayDirection)
+{
+  std::sort(hits.begin(), hits.end(),
+            [](const RayHit& firstHit, const RayHit& secondHit) { return firstHit.distance < secondHit.distance; });
+
+  int crossings = 0;
+  size_t hitIndex = 0;
+  while (hitIndex < hits.size()) {
+    bool entering = false;
+    bool exiting = false;
+    size_t clusterEnd = hitIndex;
+    while (clusterEnd < hits.size() &&
+           (clusterEnd == hitIndex || sameIntersection(hits[clusterEnd].distance, hits[clusterEnd - 1].distance))) {
+      if (dot(hits[clusterEnd].normal, rayDirection) < 0.) {
+        entering = true;
+      } else {
+        exiting = true;
+      }
+      ++clusterEnd;
+    }
+    if (entering != exiting) {
+      ++crossings;
+    }
+    hitIndex = clusterEnd;
+  }
+  return (crossings & 1) != 0;
+}
 } // namespace
 
 struct O2BVHSurfaceSolid::Impl {
@@ -53,6 +102,101 @@ struct O2BVHSurfaceSolid::Impl {
   std::vector<std::array<int, 3>> displayTriangles;
   ClosureReport closure;
   bool defined = false;
+  std::unique_ptr<BVH> bvh; //!< acceleration structure over the surface AABBs (built in CloseShape)
+
+  /// Build the BVH over per-surface conservative AABBs. Boxes are expanded by the documented
+  /// kBVHBoxTolerance and then rounded outward during the double->float conversion so no
+  /// tolerance-level boundary hit can be missed by the float traversal.
+  void buildBVH()
+  {
+    bvh.reset();
+    if (surfaces.empty()) {
+      return;
+    }
+
+    std::vector<BVHBBox> primitiveBoxes;
+    std::vector<BVHVec3> primitiveCenters;
+    primitiveBoxes.reserve(surfaces.size());
+    primitiveCenters.reserve(surfaces.size());
+    for (const auto& surface : surfaces) {
+      Vec3 lowerCorner{TGeoShape::Big(), TGeoShape::Big(), TGeoShape::Big()};
+      Vec3 upperCorner{-TGeoShape::Big(), -TGeoShape::Big(), -TGeoShape::Big()};
+      surface->conservativeBounds(lowerCorner, upperCorner);
+      BVHBBox primitiveBox;
+      for (int dimension = 0; dimension < 3; ++dimension) {
+        primitiveBox.min[dimension] = std::nextafterf(
+          static_cast<float>(component(lowerCorner, dimension) - kBVHBoxTolerance),
+          -std::numeric_limits<float>::infinity());
+        primitiveBox.max[dimension] = std::nextafterf(
+          static_cast<float>(component(upperCorner, dimension) + kBVHBoxTolerance),
+          std::numeric_limits<float>::infinity());
+      }
+      primitiveBoxes.push_back(primitiveBox);
+      primitiveCenters.emplace_back(primitiveBox.get_center());
+    }
+
+    typename bvh::v2::DefaultBuilder<BVHNode>::Config config;
+    config.quality = bvh::v2::DefaultBuilder<BVHNode>::Quality::High;
+    // One analytic patch per leaf: patch intersections are far more expensive than node box
+    // tests (unlike triangles), and the bvh2 traversal enters a leaf start node without a box
+    // test, so a default-sized (up to 8 primitives) single-leaf tree would defeat all pruning
+    // for small solids.
+    config.max_leaf_size = 1;
+    bvh = std::make_unique<BVH>(bvh::v2::DefaultBuilder<BVHNode>::build(primitiveBoxes, primitiveCenters, config));
+  }
+
+  /// Visit every surface whose BVH leaf box is traversed by the (unbounded) ray.
+  template <typename SurfaceVisitor>
+  void visitRayCandidates(const Vec3& rayOrigin, const Vec3& rayDirection, SurfaceVisitor&& visitor) const
+  {
+    BVHRay ray(BVHVec3(rayOrigin.xCoord, rayOrigin.yCoord, rayOrigin.zCoord),
+               BVHVec3(rayDirection.xCoord, rayDirection.yCoord, rayDirection.zCoord), 0.f,
+               std::numeric_limits<BVHScalar>::max());
+    static constexpr bool useRobustTraversal = true;
+    bvh::v2::GrowingStack<BVH::Index> stack;
+    bvh->intersect<false, useRobustTraversal>(ray, bvh->get_root().index, stack,
+                                              [&](size_t beginPrimitive, size_t endPrimitive) {
+                                                for (size_t primitive = beginPrimitive; primitive < endPrimitive;
+                                                     ++primitive) {
+                                                  visitor(*surfaces[bvh->prim_ids[primitive]]);
+                                                }
+                                                return false; // keep traversing
+                                              });
+  }
+
+  /// Visit every surface whose BVH leaf box contains the point; stops early (returning true)
+  /// once the visitor returns true. The leaf boxes are expanded by kBVHBoxTolerance, so a point
+  /// within navigation tolerance of a patch is never missed.
+  template <typename SurfaceVisitor>
+  bool visitPointCandidates(const Vec3& point, SurfaceVisitor&& visitor) const
+  {
+    const BVHVec3 testPoint(point.xCoord, point.yCoord, point.zCoord);
+    std::vector<size_t> nodeStack{0}; // start from the root node
+    while (!nodeStack.empty()) {
+      const auto& node = bvh->nodes[nodeStack.back()];
+      nodeStack.pop_back();
+      if (!bvh::v2::extra::contains(node.get_bbox(), testPoint)) {
+        continue;
+      }
+      if (node.is_leaf()) {
+        const auto beginPrimitive = node.index.first_id();
+        const auto endPrimitive = beginPrimitive + node.index.prim_count();
+        for (auto primitive = beginPrimitive; primitive < endPrimitive; ++primitive) {
+          if (visitor(*surfaces[bvh->prim_ids[primitive]])) {
+            return true;
+          }
+        }
+      } else {
+        const auto firstChild = node.index.first_id();
+        for (size_t child : {firstChild, firstChild + 1}) {
+          if (child < bvh->nodes.size()) {
+            nodeStack.push_back(child);
+          }
+        }
+      }
+    }
+    return false;
+  }
 };
 
 O2BVHSurfaceSolid::O2BVHSurfaceSolid() : TGeoBBox(), fImpl(new Impl)
@@ -236,6 +380,7 @@ void O2BVHSurfaceSolid::CloseShape(bool check)
   }
 
   ComputeBBox();
+  fImpl->buildBVH();
 
   fImpl->displayVertices.clear();
   fImpl->displayTriangles.clear();
@@ -272,6 +417,34 @@ int O2BVHSurfaceSolid::GetNsurfaces() const
 bool O2BVHSurfaceSolid::IsDefined() const
 {
   return fImpl != nullptr && fImpl->defined;
+}
+
+bool O2BVHSurfaceSolid::HasBVH() const
+{
+  return fImpl != nullptr && fImpl->bvh != nullptr;
+}
+
+bool O2BVHSurfaceSolid::GetBVHRootBounds(Point3D& lower, Point3D& upper) const
+{
+  if (!HasBVH()) {
+    return false;
+  }
+  const auto rootBox = fImpl->bvh->get_root().get_bbox();
+  for (int dimension = 0; dimension < 3; ++dimension) {
+    lower[dimension] = rootBox.min[dimension];
+    upper[dimension] = rootBox.max[dimension];
+  }
+  return true;
+}
+
+int O2BVHSurfaceSolid::CountBVHRayCandidates(const Point3D& point, const Point3D& direction) const
+{
+  if (!HasBVH()) {
+    return -1;
+  }
+  int candidates = 0;
+  fImpl->visitRayCandidates(makeVec3(point), makeVec3(direction), [&](const BoundedSurface&) { ++candidates; });
+  return candidates;
 }
 
 bool O2BVHSurfaceSolid::IsClosed() const
@@ -437,47 +610,44 @@ bool O2BVHSurfaceSolid::Contains(const Double_t* point) const
     return false;
   }
 
+  if (fImpl->bvh == nullptr) {
+    // before CloseShape there is no acceleration structure yet; stay usable via the plain loop
+    return Contains_Loop(point);
+  }
+
+  // boundary policy: a point within tolerance of any surface patch counts as inside
+  if (fImpl->visitPointCandidates(
+        testPoint, [&](const BoundedSurface& surface) { return surface.containsPointOnSurface(testPoint); })) {
+    return true;
+  }
+
+  std::vector<RayHit> hits;
+  hits.reserve(8);
+  fImpl->visitRayCandidates(testPoint, kContainsTestDirection, [&](const BoundedSurface& surface) {
+    surface.appendIntersections(testPoint, kContainsTestDirection, kRayTolerance, TGeoShape::Big(), hits);
+  });
+  return oddCrossingParity(hits, kContainsTestDirection);
+}
+
+bool O2BVHSurfaceSolid::Contains_Loop(const Double_t* point) const
+{
+  if (fImpl == nullptr || fImpl->surfaces.empty()) {
+    return false;
+  }
+
+  const Vec3 testPoint = makeVec3(point);
   for (const auto& surface : fImpl->surfaces) {
     if (surface->containsPointOnSurface(testPoint)) {
       return true;
     }
   }
 
-  const Vec3 testDirection = normalized({1., 1.41421356237, 1.73205080757});
   std::vector<RayHit> hits;
   hits.reserve(2 * fImpl->surfaces.size());
   for (const auto& surface : fImpl->surfaces) {
-    surface->appendIntersections(testPoint, testDirection, kRayTolerance, TGeoShape::Big(), hits);
+    surface->appendIntersections(testPoint, kContainsTestDirection, kRayTolerance, TGeoShape::Big(), hits);
   }
-
-  std::sort(hits.begin(), hits.end(),
-            [](const RayHit& firstHit, const RayHit& secondHit) { return firstHit.distance < secondHit.distance; });
-
-  // Cluster near-equal intersections (shared edges/vertices seen by several surfaces). A cluster
-  // whose hits all enter or all exit is one genuine crossing; a mixed cluster means the ray
-  // grazes an edge or corner tangentially (e.g. the rim where a cap meets a wall) and must
-  // contribute even parity.
-  int crossings = 0;
-  size_t hitIndex = 0;
-  while (hitIndex < hits.size()) {
-    bool entering = false;
-    bool exiting = false;
-    size_t clusterEnd = hitIndex;
-    while (clusterEnd < hits.size() &&
-           (clusterEnd == hitIndex || sameIntersection(hits[clusterEnd].distance, hits[clusterEnd - 1].distance))) {
-      if (dot(hits[clusterEnd].normal, testDirection) < 0.) {
-        entering = true;
-      } else {
-        exiting = true;
-      }
-      ++clusterEnd;
-    }
-    if (entering != exiting) {
-      ++crossings;
-    }
-    hitIndex = clusterEnd;
-  }
-  return (crossings & 1) != 0;
+  return oddCrossingParity(hits, kContainsTestDirection);
 }
 
 Double_t O2BVHSurfaceSolid::DistFromOutside(const Double_t* point, const Double_t* dir, Int_t, Double_t stepmax,
