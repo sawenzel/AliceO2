@@ -426,3 +426,127 @@ BOOST_AUTO_TEST_CASE(WireDataModel)
   // the trimmed area accounts for the hole (16 - 4).
   checkClose(holedFace.area(), 12.);
 }
+
+BOOST_AUTO_TEST_CASE(TrimmedCurveBoundaries)
+{
+  using surf::Curve2D;
+  using surf::CurveWire;
+  using surf::WireClassification;
+  using surf::WireRole;
+  using surf::WireStatus;
+
+  // --- line curve: endpoint, tangent, bounds, projection -------------------------------------
+  const Curve2D line = Curve2D::makeLine({0., 0.}, {4., 0.});
+  checkClose(line.startPoint().uCoord, 0.);
+  checkClose(line.endPoint().uCoord, 4.);
+  const surf::Vec2 lineTangent = line.tangentAt(0.5);
+  checkClose(lineTangent.uCoord, 1.);
+  checkClose(lineTangent.vCoord, 0.);
+
+  double lineParameter = -1.;
+  const surf::Vec2 lineProjection = line.closestPoint({1., 5.}, lineParameter);
+  checkClose(lineProjection.uCoord, 1.);
+  checkClose(lineProjection.vCoord, 0.);
+  checkClose(lineParameter, 0.25);
+  checkClose(std::sqrt(line.distanceSq({1., 5.})), 5.);
+
+  // --- arc curve: endpoint, tangent, exact bounds, projection --------------------------------
+  // quarter circle of radius 2 centred at the origin, from angle 0 to pi/2.
+  const Curve2D quarter = Curve2D::makeArc({0., 0.}, 2., 0., surf::kHalfPi);
+  checkClose(quarter.startPoint().uCoord, 2.);
+  checkClose(quarter.startPoint().vCoord, 0.);
+  checkClose(quarter.endPoint().uCoord, 0.);
+  checkClose(quarter.endPoint().vCoord, 2.);
+  // tangent at the start of a CCW arc points in +v.
+  const surf::Vec2 arcTangent = quarter.tangentAt(0.);
+  checkClose(arcTangent.uCoord, 0.);
+  checkClose(arcTangent.vCoord, 1.);
+
+  // the quarter arc's exact bounding box is [0, 2] x [0, 2] (no cardinal extreme inside).
+  surf::Vec2 arcLower{1.e30, 1.e30};
+  surf::Vec2 arcUpper{-1.e30, -1.e30};
+  quarter.extendBounds(arcLower, arcUpper);
+  checkClose(arcLower.uCoord, 0.);
+  checkClose(arcLower.vCoord, 0.);
+  checkClose(arcUpper.uCoord, 2.);
+  checkClose(arcUpper.vCoord, 2.);
+
+  // projection of a far radial point lands on the circle (distance = |d - r|).
+  double arcParameter = -1.;
+  const surf::Vec2 arcProjection = quarter.closestPoint({5., 5.}, arcParameter);
+  checkClose(std::hypot(arcProjection.uCoord, arcProjection.vCoord), 2.);
+  checkClose(arcParameter, 0.5);
+
+  // a full circle's exact bounding box spans the whole diameter in both axes.
+  const Curve2D circle = Curve2D::makeCircle({1., -1.}, 3.);
+  surf::Vec2 circleLower{1.e30, 1.e30};
+  surf::Vec2 circleUpper{-1.e30, -1.e30};
+  circle.extendBounds(circleLower, circleUpper);
+  checkClose(circleLower.uCoord, -2.);
+  checkClose(circleUpper.uCoord, 4.);
+  checkClose(circleLower.vCoord, -4.);
+  checkClose(circleUpper.vCoord, 2.);
+
+  // --- disk: one full-circle outer wire ------------------------------------------------------
+  WireStatus status = WireStatus::Valid;
+  CurveWire disk;
+  BOOST_REQUIRE(disk.initialize({Curve2D::makeCircle({0., 0.}, 2.)}, WireRole::Outer, status));
+  BOOST_CHECK(status == WireStatus::Valid);
+  // exact area of the disk is pi * r^2.
+  checkClose(disk.signedArea(), surf::kPi * 4., 1.e-9);
+  BOOST_CHECK(disk.classify({0., 0.}) == WireClassification::Inside);
+  BOOST_CHECK(disk.classify({1.5, 0.}) == WireClassification::Inside);
+  BOOST_CHECK(disk.classify({3., 0.}) == WireClassification::Outside);
+  BOOST_CHECK(disk.classify({0., 3.}) == WireClassification::Outside);
+  BOOST_CHECK(disk.classify({2., 0.}) == WireClassification::Boundary);
+  BOOST_CHECK(disk.classify({0., -2.}) == WireClassification::Boundary);
+
+  // a clockwise circle used as an outer wire is re-oriented to counter-clockwise.
+  WireStatus reversedStatus = WireStatus::Valid;
+  CurveWire reversedDisk;
+  BOOST_REQUIRE(reversedDisk.initialize({Curve2D::makeCircle({0., 0.}, 2., true)}, WireRole::Outer, reversedStatus));
+  BOOST_CHECK(reversedStatus == WireStatus::Reversed);
+  checkClose(reversedDisk.signedArea(), surf::kPi * 4., 1.e-9);
+
+  // --- annulus: outer disk (CCW) minus an inner hole wire (CW) --------------------------------
+  WireStatus outerStatus = WireStatus::Valid;
+  WireStatus holeStatus = WireStatus::Valid;
+  CurveWire outerRing;
+  CurveWire innerRing;
+  BOOST_REQUIRE(outerRing.initialize({Curve2D::makeCircle({0., 0.}, 3.)}, WireRole::Outer, outerStatus));
+  BOOST_REQUIRE(innerRing.initialize({Curve2D::makeCircle({0., 0.}, 1.)}, WireRole::Inner, holeStatus));
+  BOOST_CHECK(holeStatus == WireStatus::Reversed); // CCW circle normalized to CW for a hole
+  BOOST_CHECK_LT(innerRing.signedArea(), 0.);
+  // net annulus area = pi * (R^2 - r^2).
+  checkClose(outerRing.signedArea() + innerRing.signedArea(), surf::kPi * (9. - 1.), 1.e-9);
+
+  // a point in the material (between radii) is inside the outer ring and outside the inner hole.
+  const surf::Vec2 materialPoint{2., 0.};
+  BOOST_CHECK(outerRing.classify(materialPoint) == WireClassification::Inside);
+  BOOST_CHECK(innerRing.classify(materialPoint) == WireClassification::Outside);
+  // a point inside the hole is inside both rings (so subtracted from the material).
+  const surf::Vec2 holePoint{0.2, 0.};
+  BOOST_CHECK(outerRing.classify(holePoint) == WireClassification::Inside);
+  BOOST_CHECK(innerRing.classify(holePoint) == WireClassification::Inside);
+
+  // --- mixed line + arc loop: a stadium / half-disk closed by a diameter ---------------------
+  // upper half-disk: diameter along v = 0 from (-2,0) to (2,0), closed by a CCW semicircle.
+  WireStatus halfStatus = WireStatus::Valid;
+  CurveWire halfDisk;
+  const std::vector<Curve2D> halfDiskCurves{Curve2D::makeLine({-2., 0.}, {2., 0.}),
+                                            Curve2D::makeArc({0., 0.}, 2., 0., surf::kPi)};
+  BOOST_REQUIRE(halfDisk.initialize(halfDiskCurves, WireRole::Outer, halfStatus));
+  BOOST_CHECK(halfStatus == WireStatus::Valid);
+  checkClose(halfDisk.signedArea(), 0.5 * surf::kPi * 4., 1.e-9); // half of pi*r^2
+  BOOST_CHECK(halfDisk.classify({0., 1.}) == WireClassification::Inside);
+  BOOST_CHECK(halfDisk.classify({0., -1.}) == WireClassification::Outside);
+  BOOST_CHECK(halfDisk.classify({0., 0.}) == WireClassification::Boundary);
+
+  // an open curve loop is rejected.
+  WireStatus openStatus = WireStatus::Valid;
+  CurveWire openWire;
+  const std::vector<Curve2D> openCurves{Curve2D::makeLine({0., 0.}, {2., 0.}),
+                                        Curve2D::makeLine({2., 0.}, {2., 2.})};
+  BOOST_CHECK(!openWire.initialize(openCurves, WireRole::Outer, openStatus));
+  BOOST_CHECK(openStatus == WireStatus::Open);
+}

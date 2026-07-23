@@ -539,6 +539,407 @@ inline std::vector<std::array<int, 3>> triangulateSimpleWire(const SurfaceWire& 
   return triangles;
 }
 
+/// \name Angular constants for parametric arc curves
+/// @{
+inline constexpr double kPi = 3.14159265358979323846;
+inline constexpr double kTwoPi = 2. * kPi;
+inline constexpr double kHalfPi = 0.5 * kPi;
+/// @}
+
+/// Kind of a 2D trimmed boundary curve.
+enum class CurveKind { Line, ///< straight line segment
+                       Arc   ///< circular arc
+};
+
+/// One trimmed boundary curve segment in a surface's parametric (u, v) domain.
+///
+/// A single value type carries either a straight line segment or a circular arc, so a wire can
+/// mix both kinds without heap allocation or virtual dispatch. Lines store their two endpoints;
+/// arcs store a centre, radius and the start/end angles (in radians) — the signed sweep
+/// (endAngle - startAngle) runs counter-clockwise when positive and clockwise when negative, and
+/// a full circle is simply a +/-2pi sweep. All operations the trimming/winding machinery needs
+/// are provided exactly for both kinds: endpoints, unit tangent, exact axis-aligned bounding-box
+/// contribution, point projection, exact signed-area contribution (Green's theorem), and
+/// horizontal-ray crossings for robust point-in-wire winding.
+///
+/// Keeping curves surface-independent lets planar, cylindrical, spherical and conical surfaces
+/// reuse the same trimming model in their parametric domains.
+struct Curve2D {
+  CurveKind kind = CurveKind::Line;
+  Vec2 lineStart;         ///< line: start point (unused for arcs)
+  Vec2 lineEnd;           ///< line: end point (unused for arcs)
+  Vec2 center;            ///< arc: circle centre (unused for lines)
+  double radius = 0.;     ///< arc: circle radius
+  double startAngle = 0.; ///< arc: start angle [rad]
+  double endAngle = 0.;   ///< arc: end angle [rad] (sweep = endAngle - startAngle)
+
+  static Curve2D makeLine(const Vec2& start, const Vec2& end)
+  {
+    Curve2D curve;
+    curve.kind = CurveKind::Line;
+    curve.lineStart = start;
+    curve.lineEnd = end;
+    return curve;
+  }
+
+  static Curve2D makeArc(const Vec2& arcCenter, double arcRadius, double arcStartAngle, double arcEndAngle)
+  {
+    Curve2D curve;
+    curve.kind = CurveKind::Arc;
+    curve.center = arcCenter;
+    curve.radius = arcRadius;
+    curve.startAngle = arcStartAngle;
+    curve.endAngle = arcEndAngle;
+    return curve;
+  }
+
+  /// Full circle as one arc curve (counter-clockwise unless \a clockwise is set).
+  static Curve2D makeCircle(const Vec2& arcCenter, double arcRadius, bool clockwise = false)
+  {
+    return makeArc(arcCenter, arcRadius, 0., clockwise ? -kTwoPi : kTwoPi);
+  }
+
+  bool isArc() const { return kind == CurveKind::Arc; }
+
+  double sweep() const { return endAngle - startAngle; }
+
+  /// Basic structural validity (finite data, positive radius for arcs).
+  bool valid() const
+  {
+    if (kind == CurveKind::Line) {
+      return finite(lineStart) && finite(lineEnd);
+    }
+    return finite(center) && std::isfinite(radius) && radius > kTolerance && std::isfinite(startAngle) &&
+           std::isfinite(endAngle);
+  }
+
+  Vec2 pointAtAngle(double angle) const
+  {
+    return {center.uCoord + radius * std::cos(angle), center.vCoord + radius * std::sin(angle)};
+  }
+
+  /// Point at curve parameter \a parameter in [0, 1] (0 at the start, 1 at the end).
+  Vec2 pointAt(double parameter) const
+  {
+    if (kind == CurveKind::Line) {
+      return {lineStart.uCoord + parameter * (lineEnd.uCoord - lineStart.uCoord),
+              lineStart.vCoord + parameter * (lineEnd.vCoord - lineStart.vCoord)};
+    }
+    return pointAtAngle(startAngle + parameter * sweep());
+  }
+
+  Vec2 startPoint() const { return kind == CurveKind::Line ? lineStart : pointAtAngle(startAngle); }
+  Vec2 endPoint() const { return kind == CurveKind::Line ? lineEnd : pointAtAngle(endAngle); }
+
+  /// Unit tangent at parameter \a parameter, pointing in the direction of increasing parameter.
+  Vec2 tangentAt(double parameter) const
+  {
+    if (kind == CurveKind::Line) {
+      const Vec2 delta{lineEnd.uCoord - lineStart.uCoord, lineEnd.vCoord - lineStart.vCoord};
+      const double length = std::sqrt(delta.uCoord * delta.uCoord + delta.vCoord * delta.vCoord);
+      if (length <= kTolerance) {
+        return {0., 0.};
+      }
+      return {delta.uCoord / length, delta.vCoord / length};
+    }
+    const double angle = startAngle + parameter * sweep();
+    const double direction = sweep() >= 0. ? 1. : -1.;
+    return {-direction * std::sin(angle), direction * std::cos(angle)};
+  }
+
+  /// True if \a angle lies within the arc's angular sweep (accounting for direction and wrap).
+  bool angleInSweep(double angle) const
+  {
+    const double totalSweep = sweep();
+    const double magnitude = std::abs(totalSweep);
+    if (magnitude >= kTwoPi - kTolerance) {
+      return true; // full circle
+    }
+    double delta = (totalSweep >= 0.) ? (angle - startAngle) : (startAngle - angle);
+    delta -= kTwoPi * std::floor(delta / kTwoPi); // wrap into [0, 2pi)
+    return delta <= magnitude + kTolerance;
+  }
+
+  /// Map an angle known to lie within the sweep to a clamped parameter in [0, 1].
+  double angleParameter(double angle) const
+  {
+    const double totalSweep = sweep();
+    if (std::abs(totalSweep) <= kTolerance) {
+      return 0.;
+    }
+    double delta = (totalSweep >= 0.) ? (angle - startAngle) : (startAngle - angle);
+    delta -= kTwoPi * std::floor(delta / kTwoPi);
+    return std::max(0., std::min(1., delta / std::abs(totalSweep)));
+  }
+
+  /// Accumulate this curve's exact extent into a parametric axis-aligned bounding box.
+  void extendBounds(Vec2& lower, Vec2& upper) const
+  {
+    auto include = [&](const Vec2& point) {
+      lower.uCoord = std::min(lower.uCoord, point.uCoord);
+      lower.vCoord = std::min(lower.vCoord, point.vCoord);
+      upper.uCoord = std::max(upper.uCoord, point.uCoord);
+      upper.vCoord = std::max(upper.vCoord, point.vCoord);
+    };
+    include(startPoint());
+    include(endPoint());
+    if (kind == CurveKind::Arc) {
+      // include the axis-extreme points (angles 0, pi/2, pi, 3pi/2) that fall within the sweep
+      const double cardinalAngles[4] = {0., kHalfPi, kPi, 3. * kHalfPi};
+      for (double cardinal : cardinalAngles) {
+        if (angleInSweep(cardinal)) {
+          include(pointAtAngle(cardinal));
+        }
+      }
+    }
+  }
+
+  /// Closest point on the curve to \a point, returning the clamped parameter in \a parameter.
+  Vec2 closestPoint(const Vec2& point, double& parameter) const
+  {
+    if (kind == CurveKind::Line) {
+      const Vec2 segment{lineEnd.uCoord - lineStart.uCoord, lineEnd.vCoord - lineStart.vCoord};
+      const double lengthSq = segment.uCoord * segment.uCoord + segment.vCoord * segment.vCoord;
+      if (lengthSq <= kToleranceSq) {
+        parameter = 0.;
+        return lineStart;
+      }
+      const double projection = ((point.uCoord - lineStart.uCoord) * segment.uCoord +
+                                 (point.vCoord - lineStart.vCoord) * segment.vCoord) /
+                                lengthSq;
+      parameter = std::max(0., std::min(1., projection));
+      return {lineStart.uCoord + parameter * segment.uCoord, lineStart.vCoord + parameter * segment.vCoord};
+    }
+    // arc: project radially onto the circle, then clamp the angle to the sweep
+    const double deltaU = point.uCoord - center.uCoord;
+    const double deltaV = point.vCoord - center.vCoord;
+    if (deltaU * deltaU + deltaV * deltaV <= kToleranceSq) {
+      parameter = 0.; // point at the centre: every arc point is equidistant
+      return startPoint();
+    }
+    const double angle = std::atan2(deltaV, deltaU);
+    if (angleInSweep(angle)) {
+      parameter = angleParameter(angle);
+      return pointAtAngle(angle);
+    }
+    const Vec2 startCandidate = startPoint();
+    const Vec2 endCandidate = endPoint();
+    if (surface::distanceSq(point, startCandidate) <= surface::distanceSq(point, endCandidate)) {
+      parameter = 0.;
+      return startCandidate;
+    }
+    parameter = 1.;
+    return endCandidate;
+  }
+
+  /// Squared distance from \a point to the curve.
+  double distanceSq(const Vec2& point) const
+  {
+    double parameter = 0.;
+    return surface::distanceSq(point, closestPoint(point, parameter));
+  }
+
+  /// Exact contribution of this directed curve to the enclosed signed area,
+  /// i.e. (1/2) * integral of (u dv - v du) along the curve (Green's theorem).
+  double signedAreaContribution() const
+  {
+    if (kind == CurveKind::Line) {
+      return 0.5 * (lineStart.uCoord * lineEnd.vCoord - lineEnd.uCoord * lineStart.vCoord);
+    }
+    return 0.5 * (radius * center.uCoord * (std::sin(endAngle) - std::sin(startAngle)) -
+                  radius * center.vCoord * (std::cos(endAngle) - std::cos(startAngle)) +
+                  radius * radius * (endAngle - startAngle));
+  }
+
+  /// Number of times a horizontal ray from \a point towards +u crosses this curve, using a
+  /// half-open convention so that shared endpoints and tangent extrema are not double-counted.
+  int rightwardCrossings(const Vec2& point) const
+  {
+    auto segmentCrossing = [&](const Vec2& first, const Vec2& second, double exactIntersectU) {
+      const bool firstAbove = first.vCoord > point.vCoord;
+      const bool secondAbove = second.vCoord > point.vCoord;
+      if (firstAbove == secondAbove) {
+        return false;
+      }
+      return point.uCoord < exactIntersectU;
+    };
+
+    if (kind == CurveKind::Line) {
+      const bool firstAbove = lineStart.vCoord > point.vCoord;
+      const bool secondAbove = lineEnd.vCoord > point.vCoord;
+      if (firstAbove == secondAbove) {
+        return 0;
+      }
+      const double intersectU = lineStart.uCoord + (point.vCoord - lineStart.vCoord) *
+                                                     (lineEnd.uCoord - lineStart.uCoord) /
+                                                     (lineEnd.vCoord - lineStart.vCoord);
+      return (point.uCoord < intersectU) ? 1 : 0;
+    }
+
+    // Split the arc into v-monotonic sub-arcs at its top/bottom extreme angles (cos(theta) = 0,
+    // i.e. theta = pi/2 + k*pi). On each sub-arc cos(theta) keeps a constant sign, so the exact u
+    // at v = point.v is centre.u +/- r*sqrt(1 - sin^2), with the sign taken from the sub-arc.
+    const double totalSweep = sweep();
+    if (std::abs(totalSweep) <= kTolerance || radius <= kTolerance) {
+      return 0;
+    }
+    std::array<double, 8> breakParameters{};
+    int breakCount = 0;
+    breakParameters[breakCount++] = 0.;
+    const double lowAngle = std::min(startAngle, endAngle);
+    const double highAngle = std::max(startAngle, endAngle);
+    const int firstK = static_cast<int>(std::floor((lowAngle - kHalfPi) / kPi)) - 1;
+    const int lastK = static_cast<int>(std::ceil((highAngle - kHalfPi) / kPi)) + 1;
+    for (int k = firstK; k <= lastK && breakCount < 7; ++k) {
+      const double extremeAngle = kHalfPi + k * kPi;
+      if (extremeAngle <= lowAngle + kTolerance || extremeAngle >= highAngle - kTolerance) {
+        continue;
+      }
+      const double extremeParameter = (extremeAngle - startAngle) / totalSweep;
+      if (extremeParameter > kTolerance && extremeParameter < 1. - kTolerance) {
+        breakParameters[breakCount++] = extremeParameter;
+      }
+    }
+    breakParameters[breakCount++] = 1.;
+    std::sort(breakParameters.begin(), breakParameters.begin() + breakCount);
+
+    double ratio = (point.vCoord - center.vCoord) / radius;
+    ratio = std::max(-1., std::min(1., ratio));
+    const double cosMagnitude = std::sqrt(std::max(0., 1. - ratio * ratio));
+
+    int crossings = 0;
+    for (int index = 0; index + 1 < breakCount; ++index) {
+      const Vec2 subStart = pointAt(breakParameters[index]);
+      const Vec2 subEnd = pointAt(breakParameters[index + 1]);
+      const double midAngle = startAngle + 0.5 * (breakParameters[index] + breakParameters[index + 1]) * totalSweep;
+      const double cosSign = std::cos(midAngle) >= 0. ? 1. : -1.;
+      const double intersectU = center.uCoord + cosSign * radius * cosMagnitude;
+      if (segmentCrossing(subStart, subEnd, intersectU)) {
+        ++crossings;
+      }
+    }
+    return crossings;
+  }
+};
+
+/// One closed, oriented boundary loop built from Curve2D segments (lines and/or arcs).
+///
+/// This is the curved counterpart to SurfaceWire: it keeps the same role/status/orientation
+/// conventions (outer loops wind counter-clockwise, inner/hole loops clockwise) but supports
+/// exact circular boundaries. It is deliberately surface-independent so every analytic surface
+/// can reuse it for parametric-domain trimming and winding.
+struct CurveWire {
+  std::vector<Curve2D> curves;
+  WireRole role = WireRole::Outer;
+
+  /// Build and validate the wire from an ordered, closed list of curves.
+  bool initialize(const std::vector<Curve2D>& inputCurves, WireRole wireRole, WireStatus& status)
+  {
+    role = wireRole;
+    curves = inputCurves;
+
+    if (curves.empty()) {
+      status = WireStatus::TooFewVertices;
+      return false;
+    }
+    for (size_t index = 0; index < curves.size(); ++index) {
+      if (!curves[index].valid()) {
+        status = WireStatus::NonFinite;
+        return false;
+      }
+      const Vec2 currentEnd = curves[index].endPoint();
+      const Vec2 nextStart = curves[(index + 1) % curves.size()].startPoint();
+      if (surface::distanceSq(currentEnd, nextStart) > kToleranceSq) {
+        status = WireStatus::Open;
+        return false;
+      }
+    }
+
+    const double area = signedArea();
+    if (std::abs(area) <= kAreaTolerance) {
+      status = WireStatus::ZeroArea;
+      return false;
+    }
+
+    const bool wantPositiveArea = (role == WireRole::Outer);
+    if ((area > 0.) != wantPositiveArea) {
+      reverse();
+      status = WireStatus::Reversed;
+      return true;
+    }
+    status = WireStatus::Valid;
+    return true;
+  }
+
+  /// Reverse the loop orientation in place (order and per-curve direction).
+  void reverse()
+  {
+    std::reverse(curves.begin(), curves.end());
+    for (auto& curve : curves) {
+      if (curve.kind == CurveKind::Line) {
+        std::swap(curve.lineStart, curve.lineEnd);
+      } else {
+        std::swap(curve.startAngle, curve.endAngle);
+      }
+    }
+  }
+
+  /// Exact signed area enclosed by the loop (positive when counter-clockwise).
+  double signedArea() const
+  {
+    double area = 0.;
+    for (const auto& curve : curves) {
+      area += curve.signedAreaContribution();
+    }
+    return area;
+  }
+
+  /// Accumulate the loop's exact extent into a parametric axis-aligned bounding box.
+  void parametricBounds(Vec2& lower, Vec2& upper) const
+  {
+    for (const auto& curve : curves) {
+      curve.extendBounds(lower, upper);
+    }
+  }
+
+  /// Classify a parametric point against the closed loop (inside / outside / on-boundary).
+  WireClassification classify(const Vec2& point) const
+  {
+    for (const auto& curve : curves) {
+      if (curve.distanceSq(point) <= kToleranceSq) {
+        return WireClassification::Boundary;
+      }
+    }
+    int crossings = 0;
+    for (const auto& curve : curves) {
+      crossings += curve.rightwardCrossings(point);
+    }
+    return (crossings % 2 == 1) ? WireClassification::Inside : WireClassification::Outside;
+  }
+
+  /// Ordered, closed boundary polyline; arcs are sampled into \a segmentsPerArc chords. This is a
+  /// mesh-independent hook for visualization and tessellated fallback of curved boundaries.
+  std::vector<Vec2> sampledBoundary(int segmentsPerArc = 24) const
+  {
+    std::vector<Vec2> samples;
+    if (curves.empty()) {
+      return samples;
+    }
+    const int arcSteps = std::max(1, segmentsPerArc);
+    for (const auto& curve : curves) {
+      if (curve.kind == CurveKind::Line) {
+        samples.push_back(curve.startPoint());
+      } else {
+        for (int step = 0; step < arcSteps; ++step) {
+          samples.push_back(curve.pointAt(static_cast<double>(step) / arcSteps));
+        }
+      }
+    }
+    samples.push_back(samples.front());
+    return samples;
+  }
+};
+
 /// Abstract analytic surface patch: one support surface plus its trim wires.
 ///
 /// Concrete surfaces (planar, and later cylindrical/spherical/conical) implement the kernels
