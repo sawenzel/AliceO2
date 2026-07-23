@@ -258,29 +258,48 @@ bool O2BVHSurfaceSolid::AddPlanarSurface(const Point3D& origin, const Point3D& a
   return true;
 }
 
-bool O2BVHSurfaceSolid::AddPlanarDiskSurface(const Point3D& center, const Point3D& axisU, const Point3D& axisV,
-                                             double radius, double holeRadius)
+namespace
+{
+/// Translate a public PlanarBoundaryCurve wire into the internal Curve2D loop.
+std::vector<Curve2D> makeCurveWire(const std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>& wire)
+{
+  std::vector<Curve2D> curves;
+  curves.reserve(wire.size());
+  for (const auto& c : wire) {
+    if (c.kind == O2BVHSurfaceSolid::PlanarBoundaryCurve::Arc) {
+      curves.push_back(Curve2D::makeArc({c.center[0], c.center[1]}, c.radius, c.startAngle, c.endAngle));
+    } else {
+      curves.push_back(Curve2D::makeLine({c.lineStart[0], c.lineStart[1]}, {c.lineEnd[0], c.lineEnd[1]}));
+    }
+  }
+  return curves;
+}
+} // namespace
+
+bool O2BVHSurfaceSolid::AddCurvedPlanarSurface(const Point3D& origin, const Point3D& axisU, const Point3D& axisV,
+                                               const std::vector<PlanarBoundaryCurve>& outerWire,
+                                               const std::vector<std::vector<PlanarBoundaryCurve>>& innerWires)
 {
   if (fImpl == nullptr) {
     fImpl = new Impl;
   }
   if (fImpl->defined) {
-    Error("AddPlanarDiskSurface", "Shape %s already fully defined. Not adding", GetName());
+    Error("AddCurvedPlanarSurface", "Shape %s already fully defined. Not adding", GetName());
     return false;
   }
 
-  const std::vector<Curve2D> outerCurves{Curve2D::makeCircle({0., 0.}, radius)};
+  const std::vector<Curve2D> outerCurves = makeCurveWire(outerWire);
   std::vector<std::vector<Curve2D>> innerCurves;
-  if (holeRadius > 0.) {
-    // build the hole clockwise so no orientation repair (and warning) is needed
-    innerCurves.push_back({Curve2D::makeCircle({0., 0.}, holeRadius, true)});
+  innerCurves.reserve(innerWires.size());
+  for (const auto& innerWire : innerWires) {
+    innerCurves.push_back(makeCurveWire(innerWire));
   }
 
   auto surface = std::make_unique<CurvedPlanarBoundedSurface>();
   std::string errorMessage;
-  if (!surface->initialize(makeVec3(center), makeVec3(axisU), makeVec3(axisV), outerCurves, innerCurves,
+  if (!surface->initialize(makeVec3(origin), makeVec3(axisU), makeVec3(axisV), outerCurves, innerCurves,
                            errorMessage)) {
-    Error("AddPlanarDiskSurface", "%s", errorMessage.c_str());
+    Error("AddCurvedPlanarSurface", "%s", errorMessage.c_str());
     return false;
   }
 
