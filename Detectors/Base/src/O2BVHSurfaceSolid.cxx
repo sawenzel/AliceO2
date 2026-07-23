@@ -114,6 +114,117 @@ bool O2BVHSurfaceSolid::AddPlanarSurface(const Point3D& origin, const Point3D& a
   return true;
 }
 
+bool O2BVHSurfaceSolid::AddPlanarDiskSurface(const Point3D& center, const Point3D& axisU, const Point3D& axisV,
+                                             double radius, double holeRadius)
+{
+  if (fImpl == nullptr) {
+    fImpl = new Impl;
+  }
+  if (fImpl->defined) {
+    Error("AddPlanarDiskSurface", "Shape %s already fully defined. Not adding", GetName());
+    return false;
+  }
+
+  const std::vector<Curve2D> outerCurves{Curve2D::makeCircle({0., 0.}, radius)};
+  std::vector<std::vector<Curve2D>> innerCurves;
+  if (holeRadius > 0.) {
+    // build the hole clockwise so no orientation repair (and warning) is needed
+    innerCurves.push_back({Curve2D::makeCircle({0., 0.}, holeRadius, true)});
+  }
+
+  auto surface = std::make_unique<CurvedPlanarBoundedSurface>();
+  std::string errorMessage;
+  if (!surface->initialize(makeVec3(center), makeVec3(axisU), makeVec3(axisV), outerCurves, innerCurves,
+                           errorMessage)) {
+    Error("AddPlanarDiskSurface", "%s", errorMessage.c_str());
+    return false;
+  }
+
+  fImpl->surfaces.emplace_back(std::move(surface));
+  fImpl->displayVertices.clear();
+  fImpl->displayTriangles.clear();
+  return true;
+}
+
+bool O2BVHSurfaceSolid::AddCylindricalSurface(const Point3D& centerPoint, const Point3D& axis,
+                                              const Point3D& referenceAxisU, double radius, double heightMin,
+                                              double heightMax, double phiStart, double phiSweep, bool innerWall)
+{
+  if (fImpl == nullptr) {
+    fImpl = new Impl;
+  }
+  if (fImpl->defined) {
+    Error("AddCylindricalSurface", "Shape %s already fully defined. Not adding", GetName());
+    return false;
+  }
+
+  auto surface = std::make_unique<CylindricalBoundedSurface>();
+  std::string errorMessage;
+  if (!surface->initialize(makeVec3(centerPoint), makeVec3(axis), makeVec3(referenceAxisU), radius, heightMin,
+                           heightMax, phiStart, phiSweep, innerWall, errorMessage)) {
+    Error("AddCylindricalSurface", "%s", errorMessage.c_str());
+    return false;
+  }
+
+  fImpl->surfaces.emplace_back(std::move(surface));
+  fImpl->displayVertices.clear();
+  fImpl->displayTriangles.clear();
+  return true;
+}
+
+bool O2BVHSurfaceSolid::AddSphericalSurface(const Point3D& center, const Point3D& polarAxis,
+                                            const Point3D& referenceAxisU, double radius, double thetaMin,
+                                            double thetaMax, double phiStart, double phiSweep, bool innerWall)
+{
+  if (fImpl == nullptr) {
+    fImpl = new Impl;
+  }
+  if (fImpl->defined) {
+    Error("AddSphericalSurface", "Shape %s already fully defined. Not adding", GetName());
+    return false;
+  }
+
+  auto surface = std::make_unique<SphericalBoundedSurface>();
+  std::string errorMessage;
+  if (!surface->initialize(makeVec3(center), makeVec3(polarAxis), makeVec3(referenceAxisU), radius, thetaMin,
+                           thetaMax, phiStart, phiSweep, innerWall, errorMessage)) {
+    Error("AddSphericalSurface", "%s", errorMessage.c_str());
+    return false;
+  }
+
+  fImpl->surfaces.emplace_back(std::move(surface));
+  fImpl->displayVertices.clear();
+  fImpl->displayTriangles.clear();
+  return true;
+}
+
+bool O2BVHSurfaceSolid::AddConicalSurface(const Point3D& centerPoint, const Point3D& axis,
+                                          const Point3D& referenceAxisU, double radiusAtMin, double radiusAtMax,
+                                          double heightMin, double heightMax, double phiStart, double phiSweep,
+                                          bool innerWall)
+{
+  if (fImpl == nullptr) {
+    fImpl = new Impl;
+  }
+  if (fImpl->defined) {
+    Error("AddConicalSurface", "Shape %s already fully defined. Not adding", GetName());
+    return false;
+  }
+
+  auto surface = std::make_unique<ConicalBoundedSurface>();
+  std::string errorMessage;
+  if (!surface->initialize(makeVec3(centerPoint), makeVec3(axis), makeVec3(referenceAxisU), radiusAtMin,
+                           radiusAtMax, heightMin, heightMax, phiStart, phiSweep, innerWall, errorMessage)) {
+    Error("AddConicalSurface", "%s", errorMessage.c_str());
+    return false;
+  }
+
+  fImpl->surfaces.emplace_back(std::move(surface));
+  fImpl->displayVertices.clear();
+  fImpl->displayTriangles.clear();
+  return true;
+}
+
 void O2BVHSurfaceSolid::CloseShape(bool check)
 {
   if (fImpl == nullptr) {
@@ -333,27 +444,38 @@ bool O2BVHSurfaceSolid::Contains(const Double_t* point) const
   }
 
   const Vec3 testDirection = normalized({1., 1.41421356237, 1.73205080757});
-  std::vector<double> intersections;
-  intersections.reserve(fImpl->surfaces.size());
+  std::vector<RayHit> hits;
+  hits.reserve(2 * fImpl->surfaces.size());
   for (const auto& surface : fImpl->surfaces) {
-    double intersectionDistance = 0.;
-    Vec3 hitNormal;
-    if (surface->intersectRay(testPoint, testDirection, kRayTolerance, TGeoShape::Big(), intersectionDistance,
-                              hitNormal)) {
-      intersections.push_back(intersectionDistance);
-    }
+    surface->appendIntersections(testPoint, testDirection, kRayTolerance, TGeoShape::Big(), hits);
   }
 
-  std::sort(intersections.begin(), intersections.end());
+  std::sort(hits.begin(), hits.end(),
+            [](const RayHit& firstHit, const RayHit& secondHit) { return firstHit.distance < secondHit.distance; });
+
+  // Cluster near-equal intersections (shared edges/vertices seen by several surfaces). A cluster
+  // whose hits all enter or all exit is one genuine crossing; a mixed cluster means the ray
+  // grazes an edge or corner tangentially (e.g. the rim where a cap meets a wall) and must
+  // contribute even parity.
   int crossings = 0;
-  double previousIntersection = 0.;
-  bool hasPreviousIntersection = false;
-  for (const double intersection : intersections) {
-    if (!hasPreviousIntersection || !sameIntersection(intersection, previousIntersection)) {
-      ++crossings;
-      previousIntersection = intersection;
-      hasPreviousIntersection = true;
+  size_t hitIndex = 0;
+  while (hitIndex < hits.size()) {
+    bool entering = false;
+    bool exiting = false;
+    size_t clusterEnd = hitIndex;
+    while (clusterEnd < hits.size() &&
+           (clusterEnd == hitIndex || sameIntersection(hits[clusterEnd].distance, hits[clusterEnd - 1].distance))) {
+      if (dot(hits[clusterEnd].normal, testDirection) < 0.) {
+        entering = true;
+      } else {
+        exiting = true;
+      }
+      ++clusterEnd;
     }
+    if (entering != exiting) {
+      ++crossings;
+    }
+    hitIndex = clusterEnd;
   }
   return (crossings & 1) != 0;
 }
@@ -371,16 +493,17 @@ Double_t O2BVHSurfaceSolid::DistFromOutside(const Double_t* point, const Double_
   const Vec3 rayOrigin = makeVec3(point);
   const Vec3 rayDirection = makeVec3(dir);
   double bestDistance = TGeoShape::Big();
-  const double maxDistance = std::min(stepmax, bestDistance);
+  std::vector<RayHit> hits;
   for (const auto& surface : fImpl->surfaces) {
-    double intersectionDistance = 0.;
-    Vec3 hitNormal;
-    if (surface->intersectRay(rayOrigin, rayDirection, kRayTolerance, maxDistance, intersectionDistance, hitNormal)) {
+    hits.clear();
+    // the shrinking upper bound prunes surfaces that cannot beat the current best hit
+    surface->appendIntersections(rayOrigin, rayDirection, kRayTolerance, std::min(stepmax, bestDistance), hits);
+    for (const auto& hit : hits) {
       // entering: the outward normal opposes the ray direction
-      if (dot(hitNormal, rayDirection) >= -kTolerance) {
+      if (dot(hit.normal, rayDirection) >= -kTolerance) {
         continue;
       }
-      bestDistance = std::min(bestDistance, intersectionDistance);
+      bestDistance = std::min(bestDistance, hit.distance);
     }
   }
   return bestDistance;
@@ -399,16 +522,17 @@ Double_t O2BVHSurfaceSolid::DistFromInside(const Double_t* point, const Double_t
   const Vec3 rayOrigin = makeVec3(point);
   const Vec3 rayDirection = makeVec3(dir);
   double bestDistance = TGeoShape::Big();
-  const double maxDistance = std::min(stepmax, bestDistance);
+  std::vector<RayHit> hits;
   for (const auto& surface : fImpl->surfaces) {
-    double intersectionDistance = 0.;
-    Vec3 hitNormal;
-    if (surface->intersectRay(rayOrigin, rayDirection, kRayTolerance, maxDistance, intersectionDistance, hitNormal)) {
+    hits.clear();
+    // the shrinking upper bound prunes surfaces that cannot beat the current best hit
+    surface->appendIntersections(rayOrigin, rayDirection, kRayTolerance, std::min(stepmax, bestDistance), hits);
+    for (const auto& hit : hits) {
       // exiting: the outward normal is aligned with the ray direction
-      if (dot(hitNormal, rayDirection) <= kTolerance) {
+      if (dot(hit.normal, rayDirection) <= kTolerance) {
         continue;
       }
-      bestDistance = std::min(bestDistance, intersectionDistance);
+      bestDistance = std::min(bestDistance, hit.distance);
     }
   }
   return bestDistance;
