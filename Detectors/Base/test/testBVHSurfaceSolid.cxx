@@ -55,6 +55,21 @@ std::vector<BoundaryCurve> circleWire(double radius, bool clockwise = false)
   return {BoundaryCurve::makeArc({0., 0.}, radius, 0., clockwise ? -surf::kTwoPi : surf::kTwoPi)};
 }
 
+// A rectangular trim loop in a quadric's (u, v) parametric domain, as four line boundary curves
+// (u = phi, v = height or theta). Wound counter-clockwise; the kernel reorients as needed.
+std::vector<BoundaryCurve> paramRectWire(double uMin, double uMax, double vMin, double vMax)
+{
+  return {BoundaryCurve::makeLine({uMin, vMin}, {uMax, vMin}), BoundaryCurve::makeLine({uMax, vMin}, {uMax, vMax}),
+          BoundaryCurve::makeLine({uMax, vMax}, {uMin, vMax}), BoundaryCurve::makeLine({uMin, vMax}, {uMin, vMin})};
+}
+
+// Same rectangle as paramRectWire but as internal Curve2D segments, for direct kernel-level tests.
+std::vector<surf::Curve2D> paramRectWireCurves(double uMin, double uMax, double vMin, double vMax)
+{
+  return {surf::Curve2D::makeLine({uMin, vMin}, {uMax, vMin}), surf::Curve2D::makeLine({uMax, vMin}, {uMax, vMax}),
+          surf::Curve2D::makeLine({uMax, vMax}, {uMin, vMax}), surf::Curve2D::makeLine({uMin, vMax}, {uMin, vMin})};
+}
+
 // Add a planar disk (or annulus when holeRadius > 0) via the general curved-planar API,
 // replacing the retired AddPlanarDiskSurface convenience.
 bool addDiskSurface(SurfaceSolid& solid, const Point3D& center, const Point3D& axisU, const Point3D& axisV,
@@ -1197,6 +1212,141 @@ BOOST_AUTO_TEST_CASE(CurvedPlanarStadiumPrism)
   }
 }
 
+BOOST_AUTO_TEST_CASE(WireTrimmedCylinderMatchesTube)
+{
+  constexpr double radius = 2.;
+  constexpr double halfHeight = 3.;
+
+  // lateral wall via the wire-trim overload: the trim is the full parametric rectangle
+  // phi in [0, 2pi] x h in [-hh, hh] expressed as four line edges, which must behave exactly like
+  // the scalar rectangle path (equivalence check).
+  SurfaceSolid solid("wireTrimmedCylinder");
+  BOOST_REQUIRE(solid.AddCylindricalSurface({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, radius, -halfHeight,
+                                            halfHeight, 0., surf::kTwoPi, false,
+                                            paramRectWire(0., surf::kTwoPi, -halfHeight, halfHeight)));
+  BOOST_REQUIRE(addDiskSurface(solid, {0., 0., halfHeight}, {1., 0., 0.}, {0., 1., 0.}, radius));
+  BOOST_REQUIRE(addDiskSurface(solid, {0., 0., -halfHeight}, {1., 0., 0.}, {0., -1., 0.}, radius));
+  solid.CloseShape();
+
+  BOOST_CHECK(solid.IsClosed());
+  BOOST_CHECK(solid.IsOrientationConsistent());
+
+  TGeoTube reference("wireTrimTube", 0., radius, halfHeight);
+  compareContainsGrid(solid, reference, 4., 9);
+  compareDistance(solid, reference, {5., 0., 0.}, {-1., 0., 0.});
+  compareDistance(solid, reference, {0., 0., 5.}, {0., 0., -1.});
+  compareDistance(solid, reference, {-4., -1., -2.}, unitDirection(1., 0.3, 0.5));
+  compareDistance(solid, reference, {0., 0., 0.}, unitDirection(1., 1., 1.));
+  compareDistance(solid, reference, {5., 2.5, 0.}, {-1., 0., 0.}); // grazing miss
+
+  // capacity is numerically integrated for a wire trim; the wall integrand is constant here so it
+  // stays accurate, but compare with a relaxed tolerance to reflect the quadrature
+  checkClose(solid.Capacity(), reference.Capacity(), 1.e-6);
+
+  double normal[3] = {0., 0., 0.};
+  const double sidePoint[3] = {radius, 0., 1.};
+  const double alongX[3] = {1., 0., 0.};
+  solid.ComputeNormal(sidePoint, alongX, normal);
+  checkClose(normal[0], 1.);
+  checkClose(normal[1], 0.);
+  checkClose(normal[2], 0.);
+}
+
+BOOST_AUTO_TEST_CASE(WireTrimmedConeMatchesCone)
+{
+  constexpr double halfHeight = 3.;
+  constexpr double radiusAtBottom = 2.;
+  constexpr double radiusAtTop = 1.;
+
+  SurfaceSolid solid("wireTrimmedCone");
+  BOOST_REQUIRE(solid.AddConicalSurface({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, radiusAtBottom, radiusAtTop,
+                                        -halfHeight, halfHeight, 0., surf::kTwoPi, false,
+                                        paramRectWire(0., surf::kTwoPi, -halfHeight, halfHeight)));
+  BOOST_REQUIRE(addDiskSurface(solid, {0., 0., halfHeight}, {1., 0., 0.}, {0., 1., 0.}, radiusAtTop));
+  BOOST_REQUIRE(addDiskSurface(solid, {0., 0., -halfHeight}, {1., 0., 0.}, {0., -1., 0.}, radiusAtBottom));
+  solid.CloseShape();
+
+  BOOST_CHECK(solid.IsClosed());
+  BOOST_CHECK(solid.IsOrientationConsistent());
+
+  TGeoCone reference("wireTrimCone", halfHeight, 0., radiusAtBottom, 0., radiusAtTop);
+  compareContainsGrid(solid, reference, 3.5, 9);
+  compareDistance(solid, reference, {5., 0., 0.}, {-1., 0., 0.});
+  compareDistance(solid, reference, {0., 0., 0.}, {1., 0., 0.});
+  compareDistance(solid, reference, {-4., 0.2, -2.}, unitDirection(1., 0.05, 0.3));
+  // varying integrand -> looser quadrature tolerance
+  checkClose(solid.Capacity(), reference.Capacity(), 1.e-3);
+}
+
+BOOST_AUTO_TEST_CASE(WireTrimmedQuadricKernels)
+{
+  using surf::Curve2D;
+  using surf::Vec3;
+  std::string error;
+
+  const auto onCylinder = [](double phi, double height) {
+    return Vec3{2. * std::cos(phi), 2. * std::sin(phi), height};
+  };
+
+  // (1) cylinder wall with a rectangular window (hole) in (phi, h): phi in [2.0, 2.5], h in [-1, 1]
+  surf::CylindricalBoundedSurface windowed;
+  const std::vector<Curve2D> outer{Curve2D::makeLine({0., -3.}, {surf::kTwoPi, -3.}),
+                                   Curve2D::makeLine({surf::kTwoPi, -3.}, {surf::kTwoPi, 3.}),
+                                   Curve2D::makeLine({surf::kTwoPi, 3.}, {0., 3.}),
+                                   Curve2D::makeLine({0., 3.}, {0., -3.})};
+  const std::vector<Curve2D> hole{Curve2D::makeLine({2.0, -1.}, {2.5, -1.}), Curve2D::makeLine({2.5, -1.}, {2.5, 1.}),
+                                  Curve2D::makeLine({2.5, 1.}, {2.0, 1.}), Curve2D::makeLine({2.0, 1.}, {2.0, -1.})};
+  BOOST_REQUIRE(windowed.initialize({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, 2., -3., 3., 0., surf::kTwoPi, false,
+                                    outer, {hole}, error));
+  BOOST_CHECK(windowed.containsPointOnSurface(onCylinder(0.5, 0.)));    // material
+  BOOST_CHECK(windowed.containsPointOnSurface(onCylinder(2.25, 2.5)));  // material above the window
+  BOOST_CHECK(!windowed.containsPointOnSurface(onCylinder(2.25, 0.)));  // inside the window
+  BOOST_CHECK(windowed.containsPointOnSurface(onCylinder(2.25, 1.)));   // on the window edge (boundary)
+
+  // a radial ray into the window is filtered out; a radial ray into material registers one hit
+  std::vector<surf::RayHit> hits;
+  windowed.appendIntersections({0., 0., 0.}, {std::cos(2.25), std::sin(2.25), 0.}, 0., 1.e30, hits);
+  BOOST_CHECK(hits.empty());
+  hits.clear();
+  windowed.appendIntersections({0., 0., 0.}, {std::cos(0.5), std::sin(0.5), 0.}, 0., 1.e30, hits);
+  BOOST_REQUIRE_EQUAL(hits.size(), 1u);
+  checkClose(hits.front().distance, 2.);
+
+  // (2) arc trim: a parametric circle (disk in (phi, h)) centred at (pi, 0), radius 0.5
+  surf::CylindricalBoundedSurface arcTrim;
+  const std::vector<Curve2D> arcOuter{Curve2D::makeCircle({surf::kPi, 0.}, 0.5)};
+  BOOST_REQUIRE(arcTrim.initialize({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, 2., -1., 1., 0., surf::kTwoPi, false,
+                                   arcOuter, {}, error));
+  BOOST_CHECK(arcTrim.containsPointOnSurface(onCylinder(surf::kPi, 0.)));         // centre of the disk
+  BOOST_CHECK(!arcTrim.containsPointOnSurface(onCylinder(surf::kPi, 0.6)));       // outside in h
+  BOOST_CHECK(!arcTrim.containsPointOnSurface(onCylinder(surf::kPi + 0.6, 0.)));  // outside in phi
+  BOOST_CHECK_GT(std::abs(arcTrim.capacityContribution()), 0.);
+
+  // (3) sphere section reproduced as a (phi, theta) rectangle wire must match the scalar section
+  const auto onSphere = [](double theta, double phi) {
+    return Vec3{2. * std::sin(theta) * std::cos(phi), 2. * std::sin(theta) * std::sin(phi), 2. * std::cos(theta)};
+  };
+  surf::SphericalBoundedSurface sphereWire;
+  BOOST_REQUIRE(sphereWire.initialize({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, 2., surf::kHalfPi / 2., surf::kHalfPi,
+                                      0., surf::kHalfPi, false,
+                                      paramRectWireCurves(0., surf::kHalfPi, surf::kHalfPi / 2., surf::kHalfPi), {},
+                                      error));
+  surf::SphericalBoundedSurface sphereScalar;
+  BOOST_REQUIRE(sphereScalar.initialize({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, 2., surf::kHalfPi / 2.,
+                                        surf::kHalfPi, 0., surf::kHalfPi, false, error));
+  BOOST_CHECK(sphereWire.containsPointOnSurface(onSphere(surf::kPi / 3., surf::kPi / 4.)));      // inside the section
+  BOOST_CHECK(!sphereWire.containsPointOnSurface(onSphere(surf::kPi / 6., surf::kPi / 4.)));     // theta too small
+  BOOST_CHECK(!sphereWire.containsPointOnSurface(onSphere(surf::kPi / 3., 3. * surf::kPi / 4.))); // phi outside
+  checkClose(sphereWire.capacityContribution(), sphereScalar.capacityContribution(), 1.e-3);
+
+  // (4) a trim spanning more than a full turn in phi is rejected
+  surf::CylindricalBoundedSurface tooWide;
+  const std::vector<Curve2D> wideOuter{Curve2D::makeLine({0., -1.}, {7., -1.}), Curve2D::makeLine({7., -1.}, {7., 1.}),
+                                       Curve2D::makeLine({7., 1.}, {0., 1.}), Curve2D::makeLine({0., 1.}, {0., -1.})};
+  BOOST_CHECK(!tooWide.initialize({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, 2., -1., 1., 0., surf::kTwoPi, false,
+                                  wideOuter, {}, error));
+}
+
 namespace
 {
 // Helpers writing the surface sidecar binary format (version 1) documented in
@@ -1356,4 +1506,48 @@ BOOST_AUTO_TEST_CASE(SurfaceSidecarRoundTrip)
   SurfaceSolid truncated("sidecarTruncated");
   BOOST_CHECK(!o2::base::LoadSurfaceSolid(truncatedPath.string(), truncated));
   std::filesystem::remove(truncatedPath);
+}
+
+BOOST_AUTO_TEST_CASE(WireTrimmedSidecarRoundTrip)
+{
+  // a cylinder record carrying a (line) trim wire block in its (phi, h) domain must load through
+  // the wire-taking Add* overload and navigate like the equivalent scalar cylinder
+  constexpr double radius = 2.;
+  constexpr double halfHeight = 3.;
+
+  std::vector<char> bytes;
+  appendSidecarHeader(bytes, 3);
+  appendU32(bytes, 2);  // surfaceType cylinder
+  appendU32(bytes, 0);  // flags (outer wall)
+  appendU32(bytes, 14); // nParams
+  appendDoubles(bytes, {0., 0., 0., 0., 0., 1., 1., 0., 0., radius, -halfHeight, halfHeight, 0., 2. * surf::kPi});
+  appendU32(bytes, 1); // nWires
+  appendU32(bytes, 0); // outer wire role
+  appendU32(bytes, 4); // nEdges
+  const std::array<std::array<double, 4>, 4> edges{{{0., -halfHeight, 2. * surf::kPi, -halfHeight},
+                                                    {2. * surf::kPi, -halfHeight, 2. * surf::kPi, halfHeight},
+                                                    {2. * surf::kPi, halfHeight, 0., halfHeight},
+                                                    {0., halfHeight, 0., -halfHeight}}};
+  for (const auto& edge : edges) {
+    appendU32(bytes, 0); // curveType line
+    appendU32(bytes, 4); // nCurveParams
+    appendDoubles(bytes, {edge[0], edge[1], edge[2], edge[3]});
+  }
+  appendDiskPlaneRecord(bytes, {0., 0., halfHeight}, {1., 0., 0.}, {0., 1., 0.}, radius);
+  appendDiskPlaneRecord(bytes, {0., 0., -halfHeight}, {1., 0., 0.}, {0., -1., 0.}, radius);
+  const auto path = writeSidecarFile("o2_sidecar_wiretrim_cylinder.bin", bytes);
+
+  SurfaceSolid solid("sidecarWireCylinder");
+  BOOST_REQUIRE(o2::base::LoadSurfaceSolid(path.string(), solid));
+  std::filesystem::remove(path);
+  BOOST_CHECK_EQUAL(solid.GetNsurfaces(), 3);
+  solid.CloseShape();
+  BOOST_CHECK(solid.IsClosed());
+  BOOST_CHECK(solid.IsOrientationConsistent());
+
+  TGeoTube reference("wireTrimSidecarTube", 0., radius, halfHeight);
+  compareContainsGrid(solid, reference, 4., 7);
+  compareDistance(solid, reference, {5., 0.5, 1.}, {-1., 0., 0.});
+  compareDistance(solid, reference, {0., 0., 0.}, unitDirection(1., 1., 1.));
+  checkClose(solid.Capacity(), reference.Capacity(), 1.e-6);
 }
