@@ -48,7 +48,45 @@ enum SurfaceType : uint32_t {
 enum CurveType : uint32_t {
   kLineSegment = 0,
   kCircularArc = 1,
+  kBSpline2D = 2,
 };
+
+/// Parse a bspline (curveType 2) edge record laid out as
+/// [degree, nPoles, poles(2*nPoles), weights(nPoles), knots(nPoles+degree+1)] into a public
+/// PlanarBoundaryCurve. Returns false on a malformed / truncated record.
+bool parseBSplineEdge(const std::vector<double>& params, O2BVHSurfaceSolid::PlanarBoundaryCurve& curve)
+{
+  if (params.size() < 2) {
+    return false;
+  }
+  const int degree = static_cast<int>(std::lround(params[0]));
+  const int nPoles = static_cast<int>(std::lround(params[1]));
+  if (degree < 1 || nPoles < degree + 1) {
+    return false;
+  }
+  const size_t nKnots = static_cast<size_t>(nPoles) + degree + 1;
+  const size_t expected = 2 + 2 * static_cast<size_t>(nPoles) + static_cast<size_t>(nPoles) + nKnots;
+  if (params.size() < expected) {
+    return false;
+  }
+  std::vector<O2BVHSurfaceSolid::Point2D> poles(nPoles);
+  size_t offset = 2;
+  for (int i = 0; i < nPoles; ++i) {
+    poles[i] = {params[offset], params[offset + 1]};
+    offset += 2;
+  }
+  std::vector<double> weights(nPoles);
+  for (int i = 0; i < nPoles; ++i) {
+    weights[i] = params[offset++];
+  }
+  std::vector<double> knots(nKnots);
+  for (size_t i = 0; i < nKnots; ++i) {
+    knots[i] = params[offset++];
+  }
+  curve = O2BVHSurfaceSolid::PlanarBoundaryCurve::makeBSpline(degree, std::move(poles), std::move(weights),
+                                                             std::move(knots));
+  return true;
+}
 
 struct SidecarEdge {
   uint32_t curveType = 0;
@@ -93,6 +131,16 @@ bool edgeEndpoints(const SidecarEdge& edge, O2BVHSurfaceSolid::Point2D& start, O
     end = {cu + r * std::cos(a1), cv + r * std::sin(a1)};
     return true;
   }
+  if (edge.curveType == kBSpline2D) {
+    // for a clamped B-spline the first/last poles are the curve endpoints
+    O2BVHSurfaceSolid::PlanarBoundaryCurve curve;
+    if (!parseBSplineEdge(edge.params, curve)) {
+      return false;
+    }
+    start = curve.poles.front();
+    end = curve.poles.back();
+    return true;
+  }
   return false;
 }
 
@@ -105,7 +153,11 @@ bool wireToCurves(const std::string& file, size_t surfaceIndex, const SidecarWir
   using Curve = O2BVHSurfaceSolid::PlanarBoundaryCurve;
   curves.clear();
   curves.reserve(wire.edges.size());
-  constexpr double kJoinTolerance = 1.e-9;
+  // The extractor projects/samples curve endpoints in the surface frame, so a line vertex and the
+  // shared endpoint of a neighbouring arc or B-spline can differ by the extractor's ~1e-6 sampling
+  // precision. The kernel's own CurveWire closure tolerance is looser, so accept that join gap
+  // here (a stricter 1e-9 wrongly rejected mixed line/arc/bspline loops such as D-shaped caps).
+  constexpr double kJoinTolerance = 1.e-5;
   for (size_t e = 0; e < wire.edges.size(); ++e) {
     const auto& edge = wire.edges[e];
     O2BVHSurfaceSolid::Point2D start{}, end{};
@@ -127,6 +179,14 @@ bool wireToCurves(const std::string& file, size_t surfaceIndex, const SidecarWir
       anyArc = true;
       curves.push_back(Curve::makeArc({edge.params[0], edge.params[1]}, edge.params[2], edge.params[3],
                                       edge.params[3] + edge.params[4]));
+    } else if (edge.curveType == kBSpline2D) {
+      anyArc = true; // a bspline is a curved edge, so route the plane through AddCurvedPlanarSurface
+      Curve curve;
+      if (!parseBSplineEdge(edge.params, curve)) {
+        ::Error("LoadSurfaceSolid", "%s: surface %zu: malformed bspline wire edge %zu", file.c_str(), surfaceIndex, e);
+        return false;
+      }
+      curves.push_back(std::move(curve));
     } else {
       curves.push_back(Curve::makeLine(start, end));
     }
