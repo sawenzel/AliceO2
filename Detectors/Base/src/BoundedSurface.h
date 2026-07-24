@@ -997,6 +997,207 @@ struct CurveWire {
   }
 };
 
+/// \name Curve-wire trim helpers for quadric parametric domains
+/// A quadric (cylinder, cone, sphere) can carry a general line/arc CurveWire trim in its
+/// periodic (u, v) parameter domain (u = phi, v = height or theta) in place of the scalar
+/// parametric rectangle. These free helpers keep the outer/inner-wire classification, the
+/// numerical capacity quadrature and the phi unwrapping in one place so all three quadric
+/// surfaces reuse them. The trim wire is a non-wrapping loop within one phi window (<= 2pi).
+/// @{
+
+/// Shift \a angle by whole turns to lie as close as possible to the window [uMin, uMax], so a
+/// raw atan2 result can be classified against a trim wire whose phi range may straddle the
+/// atan2 branch cut.
+inline double unwrapAngleInto(double angle, double uMin, double uMax)
+{
+  const double windowCenter = 0.5 * (uMin + uMax);
+  return angle - kTwoPi * std::round((angle - windowCenter) / kTwoPi);
+}
+
+/// Classify a parametric point against a curve-wire trim: one outer loop plus optional inner
+/// (hole) loops. Returns true when the point is inside or on the boundary of the outer loop and
+/// not strictly inside any hole; \a boundary (when given) reports an on-boundary hit.
+inline bool curveTrimContains(const CurveWire& outerWire, const std::vector<CurveWire>& innerWires,
+                              const Vec2& point, bool* boundary = nullptr)
+{
+  if (boundary != nullptr) {
+    *boundary = false;
+  }
+  const auto outerClassification = outerWire.classify(point);
+  if (outerClassification == WireClassification::Outside) {
+    return false;
+  }
+  if (outerClassification == WireClassification::Boundary) {
+    if (boundary != nullptr) {
+      *boundary = true;
+    }
+    return true;
+  }
+  for (const auto& innerWire : innerWires) {
+    const auto innerClassification = innerWire.classify(point);
+    if (innerClassification == WireClassification::Boundary) {
+      if (boundary != nullptr) {
+        *boundary = true;
+      }
+      return true;
+    }
+    if (innerClassification == WireClassification::Inside) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/// Numerically integrate \a integrand(u, v) over the curve-wire-trimmed region (outer loop
+/// minus holes) by midpoint quadrature on a regular grid across the outer loop's parametric
+/// bounding box. Used for the (inexact) capacity contribution of wire-trimmed quadric patches;
+/// the untrimmed rectangle path keeps its exact closed form.
+template <typename Integrand>
+double integrateOverCurveTrim(const CurveWire& outerWire, const std::vector<CurveWire>& innerWires,
+                              const Integrand& integrand, int samplesPerAxis = 256)
+{
+  Vec2 lower{std::numeric_limits<double>::infinity(), std::numeric_limits<double>::infinity()};
+  Vec2 upper{-std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity()};
+  outerWire.parametricBounds(lower, upper);
+  if (!finite(lower) || !finite(upper) || samplesPerAxis < 1) {
+    return 0.;
+  }
+  const double stepU = (upper.uCoord - lower.uCoord) / samplesPerAxis;
+  const double stepV = (upper.vCoord - lower.vCoord) / samplesPerAxis;
+  const double cellArea = stepU * stepV;
+  double sum = 0.;
+  for (int indexU = 0; indexU < samplesPerAxis; ++indexU) {
+    const double uCoord = lower.uCoord + (indexU + 0.5) * stepU;
+    for (int indexV = 0; indexV < samplesPerAxis; ++indexV) {
+      const double vCoord = lower.vCoord + (indexV + 0.5) * stepV;
+      if (curveTrimContains(outerWire, innerWires, {uCoord, vCoord})) {
+        sum += integrand(uCoord, vCoord) * cellArea;
+      }
+    }
+  }
+  return sum;
+}
+
+/// Build validated outer and inner trim wires from Curve2D loops and report the outer loop's
+/// parametric bounding box. Wires are auto-reoriented (outer CCW, inner CW). Rejects a trim
+/// that spans more than a full turn in phi (u), which a non-wrapping line/arc loop cannot
+/// represent. Shared by the three quadric surfaces.
+inline bool buildCurveTrim(const std::vector<Curve2D>& outerTrim,
+                           const std::vector<std::vector<Curve2D>>& innerTrims, CurveWire& outerWire,
+                           std::vector<CurveWire>& innerWires, Vec2& lower, Vec2& upper,
+                           std::string& errorMessage)
+{
+  WireStatus status = WireStatus::Valid;
+  if (!outerWire.initialize(outerTrim, WireRole::Outer, status)) {
+    errorMessage = std::string("quadric outer trim wire invalid: ") + wireStatusMessage(status);
+    return false;
+  }
+  innerWires.clear();
+  innerWires.reserve(innerTrims.size());
+  for (const auto& innerLoop : innerTrims) {
+    CurveWire innerWire;
+    WireStatus innerStatus = WireStatus::Valid;
+    if (!innerWire.initialize(innerLoop, WireRole::Inner, innerStatus)) {
+      errorMessage = std::string("quadric inner trim wire invalid: ") + wireStatusMessage(innerStatus);
+      return false;
+    }
+    innerWires.push_back(std::move(innerWire));
+  }
+  lower = {std::numeric_limits<double>::infinity(), std::numeric_limits<double>::infinity()};
+  upper = {-std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity()};
+  outerWire.parametricBounds(lower, upper);
+  if (!finite(lower) || !finite(upper)) {
+    errorMessage = "quadric trim wire has non-finite parametric bounds";
+    return false;
+  }
+  if (upper.uCoord - lower.uCoord > kTwoPi + kTolerance) {
+    errorMessage = "quadric trim wire spans more than a full turn in phi";
+    return false;
+  }
+  return true;
+}
+
+/// Sub-sample a curve-wire loop in its (u, v) parameter domain, splitting each edge so that its
+/// span in u (phi) is chorded at \a segmentsPerTurn chords per full turn. A u = const edge (a
+/// phi seam or a straight generator) stays a single segment, while a v = const edge (a rim
+/// spanning phi) is chorded like an adjacent circular cap — so a straight parametric line, which
+/// maps to a *curved* 3D edge, matches the neighbouring surfaces' rim sampling and shared rims
+/// cancel in the solid-closure half-edge check. Returns the open ordered sample ring.
+inline std::vector<Vec2> sampleCurveWireByU(const CurveWire& wire, int segmentsPerTurn = kArcSamples)
+{
+  std::vector<Vec2> samples;
+  for (const auto& curve : wire.curves) {
+    Vec2 lower{std::numeric_limits<double>::infinity(), std::numeric_limits<double>::infinity()};
+    Vec2 upper{-std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity()};
+    curve.extendBounds(lower, upper);
+    const double uSpan = upper.uCoord - lower.uCoord;
+    int steps = std::max(1, static_cast<int>(std::lround(segmentsPerTurn * uSpan / kTwoPi)));
+    if (curve.kind == CurveKind::Arc) {
+      steps = std::max(steps, static_cast<int>(std::lround(segmentsPerTurn * std::abs(curve.sweep()) / kTwoPi)));
+      steps = std::max(steps, 1);
+    }
+    for (int step = 0; step < steps; ++step) {
+      samples.push_back(curve.pointAt(static_cast<double>(step) / steps));
+    }
+  }
+  return samples;
+}
+
+/// Append the display triangulation of a wire-trimmed quadric patch: sub-sample the outer trim
+/// loop in (u, v), map each sample to 3D with \a mapUV, and ear-clip the sampled polygon (holes
+/// are omitted from the display mesh, as for the planar surfaces — visualization never drives
+/// navigation).
+template <typename MapUV>
+void appendCurveTrimMesh(const CurveWire& outerWire, const MapUV& mapUV, std::vector<Vec3>& vertices,
+                         std::vector<std::array<int, 3>>& triangles)
+{
+  SurfaceWire sampledWire;
+  sampledWire.vertices = sampleCurveWireByU(outerWire);
+  if (sampledWire.vertices.size() < 3) {
+    return;
+  }
+  const int firstVertexIndex = static_cast<int>(vertices.size());
+  for (const auto& sample : sampledWire.vertices) {
+    vertices.push_back(mapUV(sample.uCoord, sample.vCoord));
+  }
+  for (const auto& triangle : triangulateSimpleWire(sampledWire)) {
+    triangles.push_back(
+      {firstVertexIndex + triangle[0], firstVertexIndex + triangle[1], firstVertexIndex + triangle[2]});
+  }
+}
+
+/// Append the 3D directed boundary edges of a wire-trimmed quadric patch for the solid-closure
+/// half-edge check. \a orientationSign must be positive when the (u, v) -> 3D map \a mapUV is
+/// orientation-consistent with the outward-of-solid normal (so a CCW parametric loop yields a
+/// CCW 3D loop as seen from outside) and negative otherwise; each edge is reversed when it is
+/// negative.
+template <typename MapUV>
+void appendCurveTrimEdges(const CurveWire& outerWire, const std::vector<CurveWire>& innerWires,
+                          const MapUV& mapUV, double orientationSign,
+                          std::vector<std::pair<Vec3, Vec3>>& edges)
+{
+  auto appendLoop = [&](const CurveWire& wire) {
+    const auto samples = sampleCurveWireByU(wire);
+    const size_t sampleCount = samples.size();
+    for (size_t sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex) {
+      const Vec2& current = samples[sampleIndex];
+      const Vec2& next = samples[(sampleIndex + 1) % sampleCount];
+      const Vec3 edgeStart = mapUV(current.uCoord, current.vCoord);
+      const Vec3 edgeEnd = mapUV(next.uCoord, next.vCoord);
+      if (orientationSign >= 0.) {
+        edges.emplace_back(edgeStart, edgeEnd);
+      } else {
+        edges.emplace_back(edgeEnd, edgeStart);
+      }
+    }
+  };
+  appendLoop(outerWire);
+  for (const auto& innerWire : innerWires) {
+    appendLoop(innerWire);
+  }
+}
+/// @}
+
 /// Abstract analytic surface patch: one support surface plus its trim wires.
 ///
 /// Concrete surfaces (planar, and later cylindrical/spherical/conical) implement the kernels
@@ -1585,6 +1786,40 @@ class CylindricalBoundedSurface final : public BoundedSurface
     return true;
   }
 
+  /// Wire-trimmed overload: the scalar arguments define the cylinder surface (frame, radius) and
+  /// a nominal window; the outer/inner Curve2D loops in the periodic (phi[rad], h[cm]) domain are
+  /// authoritative for containment. The conservative window (used for the AABB, display mesh and
+  /// the Safety lower bound) is tightened to the outer loop's parametric bounds.
+  bool initialize(const Vec3& centerPoint, const Vec3& axis, const Vec3& referenceAxisU, double radius,
+                  double heightMin, double heightMax, double phiStart, double phiSweep, bool innerWall,
+                  const std::vector<Curve2D>& outerTrim, const std::vector<std::vector<Curve2D>>& innerTrims,
+                  std::string& errorMessage)
+  {
+    if (!initialize(centerPoint, axis, referenceAxisU, radius, heightMin, heightMax, phiStart, phiSweep, innerWall,
+                    errorMessage)) {
+      return false;
+    }
+    Vec2 lower, upper;
+    if (!buildCurveTrim(outerTrim, innerTrims, mTrimOuter, mTrimInner, lower, upper, errorMessage)) {
+      return false;
+    }
+    mPhiStart = lower.uCoord;
+    mPhiSweep = std::min(kTwoPi, upper.uCoord - lower.uCoord);
+    mHeightMin = lower.vCoord;
+    mHeightMax = upper.vCoord;
+    mHasWireTrim = true;
+    return true;
+  }
+
+  bool hasWireTrim() const { return mHasWireTrim; }
+
+  /// True if the (phi, h) point lies in the trim wire (phi unwrapped into the wire window).
+  bool pointInTrim(double phi, double height) const
+  {
+    const double uCoord = unwrapAngleInto(phi, mPhiStart, mPhiStart + mPhiSweep);
+    return curveTrimContains(mTrimOuter, mTrimInner, {uCoord, height});
+  }
+
   /// Build an orthonormal frame (U, V, W) with W along \a axis and U the projection of
   /// \a referenceAxisU perpendicular to W. Shared by all axis-symmetric quadric surfaces.
   static bool makeFrame(const Vec3& axis, const Vec3& referenceAxisU, Vec3& axisU, Vec3& axisV, Vec3& axisW,
@@ -1635,8 +1870,14 @@ class CylindricalBoundedSurface final : public BoundedSurface
     if (std::abs(radialDistance - mRadius) > kTolerance) {
       return false;
     }
-    return heightInRange(localPoint.zCoord) &&
-           (radialDistance <= kTolerance || phiInSweep(std::atan2(localPoint.yCoord, localPoint.xCoord)));
+    if (radialDistance <= kTolerance) {
+      return !mHasWireTrim && heightInRange(localPoint.zCoord); // phi is undefined on the axis
+    }
+    const double phi = std::atan2(localPoint.yCoord, localPoint.xCoord);
+    if (mHasWireTrim) {
+      return pointInTrim(phi, localPoint.zCoord);
+    }
+    return heightInRange(localPoint.zCoord) && phiInSweep(phi);
   }
 
   void appendIntersections(const Vec3& rayOrigin, const Vec3& rayDirection, double minDistance,
@@ -1672,7 +1913,12 @@ class CylindricalBoundedSurface final : public BoundedSurface
       const double hitU = localOrigin.xCoord + candidate * localDirection.xCoord;
       const double hitV = localOrigin.yCoord + candidate * localDirection.yCoord;
       const double hitHeight = localOrigin.zCoord + candidate * localDirection.zCoord;
-      if (!heightInRange(hitHeight) || !phiInSweep(std::atan2(hitV, hitU))) {
+      const double hitPhi = std::atan2(hitV, hitU);
+      if (mHasWireTrim) {
+        if (!pointInTrim(hitPhi, hitHeight)) {
+          continue;
+        }
+      } else if (!heightInRange(hitHeight) || !phiInSweep(hitPhi)) {
         continue;
       }
       const double radialDistance = std::hypot(hitU, hitV);
@@ -1681,9 +1927,11 @@ class CylindricalBoundedSurface final : public BoundedSurface
     }
   }
 
-  /// Exact distance to the trimmed patch: the (rho, h) and phi contributions separate, so the
-  /// in-sweep case reduces to a 2D point/segment distance in the (rho, h) half-plane and the
-  /// off-sweep case to the 3D distance to the nearest straight seam edge.
+  /// Distance to the trimmed patch. For the parametric rectangle this is exact: the (rho, h) and
+  /// phi contributions separate, so the in-sweep case reduces to a 2D point/segment distance in
+  /// the (rho, h) half-plane and the off-sweep case to the 3D distance to the nearest straight
+  /// seam edge. For a wire trim the same value is a conservative lower bound (the wire region is
+  /// contained in this rectangle window), which keeps Safety safe.
   double distanceSqToPatch(const Vec3& point) const override
   {
     const Vec3 localPoint = toLocal(point);
@@ -1711,9 +1959,16 @@ class CylindricalBoundedSurface final : public BoundedSurface
            mNormalSign;
   }
 
-  /// Exact divergence-theorem contribution: (1/3) Int (X . n) dA over the (phi, h) rectangle.
+  /// Exact divergence-theorem contribution over the (phi, h) rectangle; for a wire trim the same
+  /// integrand (1/3) X . n |X_phi x X_h| (with |X_phi x X_h| = radius) is integrated numerically.
   double capacityContribution() const override
   {
+    if (mHasWireTrim) {
+      return integrateOverCurveTrim(mTrimOuter, mTrimInner, [this](double phi, double height) {
+        const Vec3 surfacePoint = pointAt(phi, height);
+        return dot(surfacePoint, normalAt(surfacePoint)) * mRadius / 3.;
+      });
+    }
     const double endPhi = mPhiStart + mPhiSweep;
     const double phiFactor = dot(mCenter, mAxisU) * (std::sin(endPhi) - std::sin(mPhiStart)) -
                              dot(mCenter, mAxisV) * (std::cos(endPhi) - std::cos(mPhiStart));
@@ -1721,7 +1976,7 @@ class CylindricalBoundedSurface final : public BoundedSurface
     return mNormalSign * mRadius * height * (phiFactor + mRadius * mPhiSweep) / 3.;
   }
 
-  bool capacityIsExact() const override { return true; }
+  bool capacityIsExact() const override { return !mHasWireTrim; }
 
   void conservativeBounds(Vec3& lower, Vec3& upper) const override
   {
@@ -1754,6 +2009,11 @@ class CylindricalBoundedSurface final : public BoundedSurface
 
   void appendDisplayMesh(std::vector<Vec3>& vertices, std::vector<std::array<int, 3>>& triangles) const override
   {
+    if (mHasWireTrim) {
+      appendCurveTrimMesh(mTrimOuter, [this](double phi, double height) { return pointAt(phi, height); }, vertices,
+                          triangles);
+      return;
+    }
     const int segments = rimSegments();
     const int firstVertexIndex = static_cast<int>(vertices.size());
     for (int step = 0; step <= segments; ++step) {
@@ -1770,6 +2030,13 @@ class CylindricalBoundedSurface final : public BoundedSurface
 
   void appendDirectedEdges(std::vector<std::pair<Vec3, Vec3>>& edges) const override
   {
+    if (mHasWireTrim) {
+      // the (phi, h) -> 3D map is orientation-consistent with the outward normal, so a CCW trim
+      // loop yields a CCW 3D loop for an outer wall; the sign is just mNormalSign
+      appendCurveTrimEdges(mTrimOuter, mTrimInner,
+                           [this](double phi, double height) { return pointAt(phi, height); }, mNormalSign, edges);
+      return;
+    }
     // patch boundary traversed counter-clockwise as seen along the outward normal: for an
     // outer wall the bottom rim runs with +phi and the top rim against it (reversed for an
     // inner wall), so shared rims with correctly-oriented caps cancel in the half-edge check
@@ -1805,6 +2072,9 @@ class CylindricalBoundedSurface final : public BoundedSurface
   double mPhiStart = 0.;
   double mPhiSweep = kTwoPi;
   double mNormalSign = 1.;
+  bool mHasWireTrim = false;
+  CurveWire mTrimOuter;
+  std::vector<CurveWire> mTrimInner;
 };
 
 /// A bounded spherical surface: a sphere of given radius around a center, trimmed to a
@@ -1851,6 +2121,40 @@ class SphericalBoundedSurface final : public BoundedSurface
     return true;
   }
 
+  /// Wire-trimmed overload: the scalar arguments define the sphere surface (frame, radius) and a
+  /// nominal window; the outer/inner Curve2D loops in the (phi[rad], theta[rad]) domain are
+  /// authoritative for containment. The conservative window is tightened to the outer loop's
+  /// parametric bounds (u = phi, v = theta).
+  bool initialize(const Vec3& center, const Vec3& polarAxis, const Vec3& referenceAxisU, double radius,
+                  double thetaMin, double thetaMax, double phiStart, double phiSweep, bool innerWall,
+                  const std::vector<Curve2D>& outerTrim, const std::vector<std::vector<Curve2D>>& innerTrims,
+                  std::string& errorMessage)
+  {
+    if (!initialize(center, polarAxis, referenceAxisU, radius, thetaMin, thetaMax, phiStart, phiSweep, innerWall,
+                    errorMessage)) {
+      return false;
+    }
+    Vec2 lower, upper;
+    if (!buildCurveTrim(outerTrim, innerTrims, mTrimOuter, mTrimInner, lower, upper, errorMessage)) {
+      return false;
+    }
+    mPhiStart = lower.uCoord;
+    mPhiSweep = std::min(kTwoPi, upper.uCoord - lower.uCoord);
+    mThetaMin = std::max(0., lower.vCoord);
+    mThetaMax = std::min(kPi, upper.vCoord);
+    mHasWireTrim = true;
+    return true;
+  }
+
+  bool hasWireTrim() const { return mHasWireTrim; }
+
+  /// True if the (phi, theta) point lies in the trim wire (phi unwrapped into the wire window).
+  bool pointInTrim(double phi, double theta) const
+  {
+    const double uCoord = unwrapAngleInto(phi, mPhiStart, mPhiStart + mPhiSweep);
+    return curveTrimContains(mTrimOuter, mTrimInner, {uCoord, theta});
+  }
+
   bool fullSweep() const { return mPhiSweep >= kTwoPi - kTolerance; }
 
   bool fullPolarRange() const
@@ -1873,10 +2177,17 @@ class SphericalBoundedSurface final : public BoundedSurface
     }
     const double thetaTolerance = angularTolerance(mRadius);
     const double theta = std::acos(std::max(-1., std::min(1., localPoint.zCoord / pointRadius)));
+    const double transverseDistance = std::hypot(localPoint.xCoord, localPoint.yCoord);
+    if (mHasWireTrim) {
+      if (transverseDistance <= kTolerance) {
+        // on the polar axis phi is degenerate; accept by the wire's theta (v) range
+        return theta >= mThetaMin - thetaTolerance && theta <= mThetaMax + thetaTolerance;
+      }
+      return pointInTrim(std::atan2(localPoint.yCoord, localPoint.xCoord), theta);
+    }
     if (theta < mThetaMin - thetaTolerance || theta > mThetaMax + thetaTolerance) {
       return false;
     }
-    const double transverseDistance = std::hypot(localPoint.xCoord, localPoint.yCoord);
     if (transverseDistance <= kTolerance) {
       return true; // on the polar axis phi is degenerate
     }
@@ -1956,9 +2267,17 @@ class SphericalBoundedSurface final : public BoundedSurface
            (mNormalSign / pointRadius);
   }
 
-  /// Exact divergence-theorem contribution over the (theta, phi) rectangle.
+  /// Exact divergence-theorem contribution over the (theta, phi) rectangle; for a wire trim the
+  /// same integrand (1/3) X . n |X_phi x X_theta| (with |X_phi x X_theta| = R^2 sin theta) is
+  /// integrated numerically over the (phi, theta) domain.
   double capacityContribution() const override
   {
+    if (mHasWireTrim) {
+      return integrateOverCurveTrim(mTrimOuter, mTrimInner, [this](double phi, double theta) {
+        const Vec3 surfacePoint = pointAt(theta, phi);
+        return dot(surfacePoint, normalAt(surfacePoint)) * mRadius * mRadius * std::sin(theta) / 3.;
+      });
+    }
     const double endPhi = mPhiStart + mPhiSweep;
     const double phiFactor = dot(mCenter, mAxisU) * (std::sin(endPhi) - std::sin(mPhiStart)) -
                              dot(mCenter, mAxisV) * (std::cos(endPhi) - std::cos(mPhiStart));
@@ -1974,7 +2293,7 @@ class SphericalBoundedSurface final : public BoundedSurface
            3.;
   }
 
-  bool capacityIsExact() const override { return true; }
+  bool capacityIsExact() const override { return !mHasWireTrim; }
 
   void conservativeBounds(Vec3& lower, Vec3& upper) const override
   {
@@ -1998,6 +2317,11 @@ class SphericalBoundedSurface final : public BoundedSurface
 
   void appendDisplayMesh(std::vector<Vec3>& vertices, std::vector<std::array<int, 3>>& triangles) const override
   {
+    if (mHasWireTrim) {
+      appendCurveTrimMesh(mTrimOuter, [this](double phi, double theta) { return pointAt(theta, phi); }, vertices,
+                          triangles);
+      return;
+    }
     const int phiSteps = phiSegments();
     const int thetaSteps = thetaSegments();
     const int firstVertexIndex = static_cast<int>(vertices.size());
@@ -2019,6 +2343,13 @@ class SphericalBoundedSurface final : public BoundedSurface
 
   void appendDirectedEdges(std::vector<std::pair<Vec3, Vec3>>& edges) const override
   {
+    if (mHasWireTrim) {
+      // the (phi, theta) -> 3D map is orientation-*reversed* relative to the outward normal
+      // (X_phi x X_theta points inward), so the sign is -mNormalSign
+      appendCurveTrimEdges(mTrimOuter, mTrimInner, [this](double phi, double theta) { return pointAt(theta, phi); },
+                           -mNormalSign, edges);
+      return;
+    }
     // boundary of the (theta, phi) rectangle, traversed counter-clockwise for an outer wall;
     // pole rims are degenerate points and full-sweep phi seams cancel, so both are skipped
     auto emitEdge = [&](const Vec3& edgeStart, const Vec3& edgeEnd) {
@@ -2067,6 +2398,9 @@ class SphericalBoundedSurface final : public BoundedSurface
   double mPhiStart = 0.;
   double mPhiSweep = kTwoPi;
   double mNormalSign = 1.;
+  bool mHasWireTrim = false;
+  CurveWire mTrimOuter;
+  std::vector<CurveWire> mTrimInner;
 };
 
 /// A bounded conical surface: radius varies linearly with the height along the axis,
@@ -2116,6 +2450,41 @@ class ConicalBoundedSurface final : public BoundedSurface
     return true;
   }
 
+  /// Wire-trimmed overload: the scalar arguments define the cone surface (frame, linear radius
+  /// law r(h)) and a nominal window; the outer/inner Curve2D loops in the periodic (phi[rad],
+  /// h[cm]) domain are authoritative for containment. The radius law is pinned from the scalar
+  /// (radiusAtMin, radiusAtMax, heightMin, heightMax) before the window is tightened to the
+  /// outer loop's parametric bounds.
+  bool initialize(const Vec3& centerPoint, const Vec3& axis, const Vec3& referenceAxisU, double radiusAtMin,
+                  double radiusAtMax, double heightMin, double heightMax, double phiStart, double phiSweep,
+                  bool innerWall, const std::vector<Curve2D>& outerTrim,
+                  const std::vector<std::vector<Curve2D>>& innerTrims, std::string& errorMessage)
+  {
+    if (!initialize(centerPoint, axis, referenceAxisU, radiusAtMin, radiusAtMax, heightMin, heightMax, phiStart,
+                    phiSweep, innerWall, errorMessage)) {
+      return false;
+    }
+    Vec2 lower, upper;
+    if (!buildCurveTrim(outerTrim, innerTrims, mTrimOuter, mTrimInner, lower, upper, errorMessage)) {
+      return false;
+    }
+    mPhiStart = lower.uCoord;
+    mPhiSweep = std::min(kTwoPi, upper.uCoord - lower.uCoord);
+    mHeightMin = lower.vCoord;
+    mHeightMax = upper.vCoord;
+    mHasWireTrim = true;
+    return true;
+  }
+
+  bool hasWireTrim() const { return mHasWireTrim; }
+
+  /// True if the (phi, h) point lies in the trim wire (phi unwrapped into the wire window).
+  bool pointInTrim(double phi, double height) const
+  {
+    const double uCoord = unwrapAngleInto(phi, mPhiStart, mPhiStart + mPhiSweep);
+    return curveTrimContains(mTrimOuter, mTrimInner, {uCoord, height});
+  }
+
   bool fullSweep() const { return mPhiSweep >= kTwoPi - kTolerance; }
 
   double radiusAt(double height) const { return mRadius0 + mSlope * height; }
@@ -2146,16 +2515,20 @@ class ConicalBoundedSurface final : public BoundedSurface
   bool containsPointOnSurface(const Vec3& point) const override
   {
     const Vec3 localPoint = toLocal(point);
-    if (!heightInRange(localPoint.zCoord)) {
-      return false;
-    }
     const double surfaceRadius = radiusAt(localPoint.zCoord);
     const double radialDistance = std::hypot(localPoint.xCoord, localPoint.yCoord);
     // |rho - r(h)| overestimates the true surface distance by sqrt(1 + slope^2)
     if (std::abs(radialDistance - surfaceRadius) > kTolerance * std::sqrt(1. + mSlope * mSlope)) {
       return false;
     }
-    return radialDistance <= kTolerance || phiInSweep(std::atan2(localPoint.yCoord, localPoint.xCoord));
+    if (radialDistance <= kTolerance) {
+      return !mHasWireTrim && heightInRange(localPoint.zCoord); // phi is undefined near the apex
+    }
+    const double phi = std::atan2(localPoint.yCoord, localPoint.xCoord);
+    if (mHasWireTrim) {
+      return pointInTrim(phi, localPoint.zCoord);
+    }
+    return heightInRange(localPoint.zCoord) && phiInSweep(phi);
   }
 
   void appendIntersections(const Vec3& rayOrigin, const Vec3& rayDirection, double minDistance,
@@ -2208,16 +2581,18 @@ class ConicalBoundedSurface final : public BoundedSurface
       if (hitSurfaceRadius < -kTolerance) {
         continue; // mirror nappe of the infinite cone
       }
-      if (!heightInRange(hitHeight)) {
-        continue;
-      }
       const double hitU = localOrigin.xCoord + candidate * localDirection.xCoord;
       const double hitV = localOrigin.yCoord + candidate * localDirection.yCoord;
       const double radialDistance = std::hypot(hitU, hitV);
       if (radialDistance <= kTolerance) {
         continue; // apex hit: the normal is undefined there
       }
-      if (!phiInSweep(std::atan2(hitV, hitU))) {
+      const double hitPhi = std::atan2(hitV, hitU);
+      if (mHasWireTrim) {
+        if (!pointInTrim(hitPhi, hitHeight)) {
+          continue;
+        }
+      } else if (!heightInRange(hitHeight) || !phiInSweep(hitPhi)) {
         continue;
       }
       const double normalScale = mNormalSign / std::sqrt(1. + mSlope * mSlope);
@@ -2227,9 +2602,11 @@ class ConicalBoundedSurface final : public BoundedSurface
     }
   }
 
-  /// Exact distance to the trimmed patch: for an in-sweep azimuth the problem reduces to the
-  /// 2D distance to the straight generator segment in the (rho, h) half-plane; off-sweep the
-  /// nearest point lies on one of the two straight seam generators.
+  /// Distance to the trimmed patch. For the parametric rectangle this is exact: for an in-sweep
+  /// azimuth the problem reduces to the 2D distance to the straight generator segment in the
+  /// (rho, h) half-plane; off-sweep the nearest point lies on one of the two straight seam
+  /// generators. For a wire trim the same value is a conservative lower bound (the wire region
+  /// is contained in this rectangle window), which keeps Safety safe.
   double distanceSqToPatch(const Vec3& point) const override
   {
     const Vec3 localPoint = toLocal(point);
@@ -2259,10 +2636,18 @@ class ConicalBoundedSurface final : public BoundedSurface
            normalScale;
   }
 
-  /// Exact divergence-theorem contribution: (1/3) Int (X . n) dA over the (phi, h) rectangle;
-  /// the area element and the normal's sqrt(1 + slope^2) factors cancel.
+  /// Exact divergence-theorem contribution over the (phi, h) rectangle; for a wire trim the same
+  /// integrand (1/3) X . n |X_phi x X_h| (with |X_phi x X_h| = r(h) sqrt(1 + slope^2)) is
+  /// integrated numerically.
   double capacityContribution() const override
   {
+    if (mHasWireTrim) {
+      const double slopeFactor = std::sqrt(1. + mSlope * mSlope);
+      return integrateOverCurveTrim(mTrimOuter, mTrimInner, [this, slopeFactor](double phi, double height) {
+        const Vec3 surfacePoint = pointAt(phi, height);
+        return dot(surfacePoint, normalAt(surfacePoint)) * radiusAt(height) * slopeFactor / 3.;
+      });
+    }
     const double endPhi = mPhiStart + mPhiSweep;
     const double phiFactor = dot(mCenter, mAxisU) * (std::sin(endPhi) - std::sin(mPhiStart)) -
                              dot(mCenter, mAxisV) * (std::cos(endPhi) - std::cos(mPhiStart));
@@ -2272,7 +2657,7 @@ class ConicalBoundedSurface final : public BoundedSurface
            (phiFactor + (mRadius0 - mSlope * dot(mCenter, mAxisW)) * mPhiSweep) / 3.;
   }
 
-  bool capacityIsExact() const override { return true; }
+  bool capacityIsExact() const override { return !mHasWireTrim; }
 
   void conservativeBounds(Vec3& lower, Vec3& upper) const override
   {
@@ -2304,6 +2689,11 @@ class ConicalBoundedSurface final : public BoundedSurface
 
   void appendDisplayMesh(std::vector<Vec3>& vertices, std::vector<std::array<int, 3>>& triangles) const override
   {
+    if (mHasWireTrim) {
+      appendCurveTrimMesh(mTrimOuter, [this](double phi, double height) { return pointAt(phi, height); }, vertices,
+                          triangles);
+      return;
+    }
     const int segments = rimSegments();
     const int firstVertexIndex = static_cast<int>(vertices.size());
     for (int step = 0; step <= segments; ++step) {
@@ -2325,6 +2715,13 @@ class ConicalBoundedSurface final : public BoundedSurface
 
   void appendDirectedEdges(std::vector<std::pair<Vec3, Vec3>>& edges) const override
   {
+    if (mHasWireTrim) {
+      // the (phi, h) -> 3D map is orientation-consistent with the outward normal (as for the
+      // cylinder), so the sign is just mNormalSign
+      appendCurveTrimEdges(mTrimOuter, mTrimInner,
+                           [this](double phi, double height) { return pointAt(phi, height); }, mNormalSign, edges);
+      return;
+    }
     // same boundary orientation as the cylinder; an apex rim degenerates to a point and is
     // skipped so an apex cone closes against just one cap
     const int segments = rimSegments();
@@ -2364,6 +2761,9 @@ class ConicalBoundedSurface final : public BoundedSurface
   double mPhiStart = 0.;
   double mPhiSweep = kTwoPi;
   double mNormalSign = 1.;
+  bool mHasWireTrim = false;
+  CurveWire mTrimOuter;
+  std::vector<CurveWire> mTrimInner;
 };
 
 /// A trivial bounded surface (a single 3D triangle) used only by unit tests to exercise the

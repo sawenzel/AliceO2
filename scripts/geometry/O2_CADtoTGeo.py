@@ -61,6 +61,7 @@ from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh
 from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeBox
 from OCC.Core.BRepTools import breptools, BRepTools_WireExplorer
 from OCC.Core.BRep import BRep_Tool
+from OCC.Core.Geom2dAdaptor import Geom2dAdaptor_Curve
 from OCC.Core.GeomAbs import (
     GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone, GeomAbs_Sphere, GeomAbs_Torus,
     GeomAbs_BezierSurface, GeomAbs_BSplineSurface, GeomAbs_SurfaceOfRevolution,
@@ -694,9 +695,12 @@ def write_surfaces_bin(path: _Path, surfaces: List[dict]):
 #
 # Milestone status (scripts/geometry/BVHSurfaceSolid.md): planar faces carry general line/arc
 # boundary wires (polygon, disk/annulus, rounded rectangle, slot, ...) and the three quadrics
-# (cylinder, cone, sphere) are extracted here. Quadric trims are still parametric rectangles
-# (the only trim the C++ Add*Surface API supports); quadric faces with non-iso boundary curves
-# force a fallback, as do torus/free-form surfaces and non-line/arc planar boundary curves.
+# (cylinder, cone, sphere) are extracted here. A quadric face with a single iso-parametric wire
+# stays on the scalar parametric-rectangle path (byte-identical); any other supported trim (a
+# hole/window, or a non-iso straight-line boundary) is emitted as a general line trim wire in
+# the surface's (phi, height/theta) domain. Quadric arc/spline pcurve boundaries still force a
+# fallback (a circular pcurve does not survive the non-uniform u->phi, v->length/latitude remap
+# as a circle), as do torus/free-form surfaces and non-line/arc planar boundary curves.
 
 _EXTRACT_TOL = 1.e-7
 
@@ -863,17 +867,90 @@ def _quadric_phi_range(ax3, umin: float, umax: float) -> Tuple[float, float]:
     return phi_start, sweep
 
 
-def extract_cylindrical_face(face, scale_to_cm: float) -> Tuple[Optional[dict], Optional[str]]:
-    """Cylindrical face trimmed to a parametric rectangle -> a 'cylinder' surface record.
+def _quadric_line_wire(face, phi_of_u, v_of_v) -> Tuple[Optional[List[dict]], Optional[str]]:
+    """Build general line-only trim wires in a quadric face's parametric (phi, v) domain.
 
-    OCC parametrizes the cylinder as U = azimuth, V = height along the axis. Boundary edges
-    that are not iso-parametric (so the trim is not a rectangle) are rejected."""
+    Every boundary edge's 2D pcurve must be a straight line: a circular pcurve arc does not
+    survive the non-uniform (u -> phi, v -> height/theta) remap as a circle (u is in radians and
+    v carries a length/latitude scale, so the image is an ellipse), so arc/spline pcurves force a
+    fallback. \a phi_of_u maps the OCC angular u to the C++ phi (identity or negation for a
+    left-handed frame); \a v_of_v maps the OCC v to the C++ height (cm) or polar angle (rad).
+    Returns (wires, None) with exactly one outer wire plus inner holes, or (None, reason).
+    """
+    wires_out: List[dict] = []
+    for _wire, is_outer, edges in _face_wire_edges(face):
+        points = []  # ordered (phi, v) start points in wire-traversal order
+        for edge, _start_vertex in edges:
+            curve2d, first, last = BRep_Tool.CurveOnSurface(edge, face)
+            if curve2d is None:
+                return None, "quadric boundary edge has no 2D pcurve"
+            if Geom2dAdaptor_Curve(curve2d).GetType() != GeomAbs_Line:
+                return None, "quadric boundary edge pcurve is not a straight line (only line trims supported)"
+            param = last if edge.Orientation() == TopAbs_REVERSED else first
+            p = curve2d.Value(param)
+            points.append((phi_of_u(p.X()), v_of_v(p.Y())))
+        if len(points) < 3:
+            return None, "quadric trim wire has fewer than 3 line edges"
+        seg_edges = []
+        n = len(points)
+        for i in range(n):
+            u0, v0 = points[i]
+            u1, v1 = points[(i + 1) % n]
+            seg_edges.append({"curve": "line", "params": [u0, v0, u1, v1]})
+        wires_out.append({"role": "outer" if is_outer else "inner", "edges": seg_edges})
+    if not wires_out:
+        return None, "quadric face has no wires"
+    n_outer = sum(1 for w in wires_out if w["role"] == "outer")
+    if n_outer != 1:
+        return None, f"quadric face has {n_outer} outer trim wires (expected exactly 1)"
+    return wires_out, None
+
+
+def _quadric_trim_fills_uv_box(face, uv_bounds) -> bool:
+    """True when a quadric face's trim is exactly its parametric-rectangle UV bounding box, so the
+    scalar (phiStart, phiSweep, ...) parameters describe it faithfully and no wire block is needed
+    (keeping the common cylinder/tube/cone/sphere output byte-identical).
+
+    A single line-bounded wire whose (u, v) polygon area equals the UV box area is the full
+    rectangle. This is stricter than every-edge-iso: an L-shaped or notched face has all-iso edges
+    too but a smaller area, and a face with a hole has more than one wire - both must take the
+    general wire path instead of being silently filled in."""
+    umin, umax, vmin, vmax = uv_bounds
+    box_area = abs((umax - umin) * (vmax - vmin))
+    if box_area <= _EXTRACT_TOL:
+        return False
+    wires = list(_face_wire_edges(face))
+    if len(wires) != 1:
+        return False
+    _wire, _is_outer, edges = wires[0]
+    points = []
+    for edge, _start_vertex in edges:
+        curve2d, first, last = BRep_Tool.CurveOnSurface(edge, face)
+        if curve2d is None or Geom2dAdaptor_Curve(curve2d).GetType() != GeomAbs_Line:
+            return False
+        param = last if edge.Orientation() == TopAbs_REVERSED else first
+        p = curve2d.Value(param)
+        points.append((p.X(), p.Y()))
+    area = 0.0
+    n = len(points)
+    for i in range(n):
+        u0, v0 = points[i]
+        u1, v1 = points[(i + 1) % n]
+        area += u0 * v1 - u1 * v0
+    return abs(0.5 * area - box_area) <= 1e-6 * box_area
+
+
+def extract_cylindrical_face(face, scale_to_cm: float) -> Tuple[Optional[dict], Optional[str]]:
+    """Cylindrical face -> a 'cylinder' surface record.
+
+    OCC parametrizes the cylinder as U = azimuth, V = height along the axis. A single
+    iso-parametric wire is emitted as the scalar parametric rectangle (byte-identical to before);
+    any other supported trim (a hole/window, or a non-iso straight-line boundary) is emitted as a
+    line trim wire in the (phi[rad], h[cm]) domain. Non-line pcurve boundaries force a fallback."""
     adaptor = BRepAdaptor_Surface(face)
     if adaptor.GetType() != GeomAbs_Cylinder:
         return None, "not a cylinder"
     umin, umax, vmin, vmax = breptools.UVBounds(face)
-    if not _quadric_trim_is_rectangular(face, (umin, umax, vmin, vmax)):
-        return None, "cylindrical face has a non-rectangular (non-iso) trim"
     cyl = adaptor.Cylinder()
     ax3 = cyl.Position()
     s = scale_to_cm
@@ -882,12 +959,20 @@ def extract_cylindrical_face(face, scale_to_cm: float) -> Tuple[Optional[dict], 
     ref_u = _xyz(ax3.XDirection())
     radius = cyl.Radius() * s
     height_min, height_max = vmin * s, vmax * s
-    phi_start, phi_sweep = _quadric_phi_range(ax3, umin, umax)
     if height_max - height_min <= _EXTRACT_TOL:
         return None, "cylindrical face has a degenerate height range"
+    phi_start, phi_sweep = _quadric_phi_range(ax3, umin, umax)
     inner_wall = face.Orientation() == TopAbs_REVERSED
     params = list(center) + list(axis) + list(ref_u) + [radius, height_min, height_max, phi_start, phi_sweep]
-    return {"type": "cylinder", "inner_wall": inner_wall, "params": params}, None
+    record = {"type": "cylinder", "inner_wall": inner_wall, "params": params}
+    if _quadric_trim_fills_uv_box(face, (umin, umax, vmin, vmax)):
+        return record, None  # trim is exactly the parametric rectangle: the scalar params suffice
+    phi_of_u = (lambda u: u) if ax3.Direct() else (lambda u: -u)
+    wires, reason = _quadric_line_wire(face, phi_of_u, lambda v: v * s)
+    if wires is None:
+        return None, reason
+    record["wires"] = wires
+    return record, None
 
 
 def extract_conical_face(face, scale_to_cm: float) -> Tuple[Optional[dict], Optional[str]]:
@@ -900,8 +985,6 @@ def extract_conical_face(face, scale_to_cm: float) -> Tuple[Optional[dict], Opti
     if adaptor.GetType() != GeomAbs_Cone:
         return None, "not a cone"
     umin, umax, vmin, vmax = breptools.UVBounds(face)
-    if not _quadric_trim_is_rectangular(face, (umin, umax, vmin, vmax)):
-        return None, "conical face has a non-rectangular (non-iso) trim"
     cone = adaptor.Cone()
     ax3 = cone.Position()
     s = scale_to_cm
@@ -926,7 +1009,16 @@ def extract_conical_face(face, scale_to_cm: float) -> Tuple[Optional[dict], Opti
     inner_wall = face.Orientation() == TopAbs_REVERSED
     params = (list(center) + list(axis) + list(ref_u) +
               [r_lo * s, r_hi * s, h_lo * s, h_hi * s, phi_start, phi_sweep])
-    return {"type": "cone", "inner_wall": inner_wall, "params": params}, None
+    record = {"type": "cone", "inner_wall": inner_wall, "params": params}
+    if _quadric_trim_fills_uv_box(face, (umin, umax, vmin, vmax)):
+        return record, None  # trim is exactly the parametric rectangle: the scalar params suffice
+    # OCC V (ruling-line distance) maps to the C++ axial height h = v cos(alpha), in cm
+    phi_of_u = (lambda u: u) if ax3.Direct() else (lambda u: -u)
+    wires, reason = _quadric_line_wire(face, phi_of_u, lambda v: v * cos_a * s)
+    if wires is None:
+        return None, reason
+    record["wires"] = wires
+    return record, None
 
 
 def extract_spherical_face(face, scale_to_cm: float) -> Tuple[Optional[dict], Optional[str]]:
@@ -939,8 +1031,6 @@ def extract_spherical_face(face, scale_to_cm: float) -> Tuple[Optional[dict], Op
     if adaptor.GetType() != GeomAbs_Sphere:
         return None, "not a sphere"
     umin, umax, vmin, vmax = breptools.UVBounds(face)
-    if not _quadric_trim_is_rectangular(face, (umin, umax, vmin, vmax)):
-        return None, "spherical face has a non-rectangular (non-iso) trim"
     sph = adaptor.Sphere()
     ax3 = sph.Position()
     s = scale_to_cm
@@ -955,21 +1045,16 @@ def extract_spherical_face(face, scale_to_cm: float) -> Tuple[Optional[dict], Op
     phi_start, phi_sweep = _quadric_phi_range(ax3, umin, umax)
     params = list(center) + list(polar_axis) + list(ref_u) + [radius, theta_min, theta_max, phi_start, phi_sweep]
     inner_wall = face.Orientation() == TopAbs_REVERSED
-    return {"type": "sphere", "inner_wall": inner_wall, "params": params}, None
-
-
-def _quadric_trim_is_rectangular(face, uv_bounds) -> bool:
-    """True when every boundary edge of a quadric face is iso-parametric (u = const or
-    v = const), i.e. the trim is a parametric rectangle - the only quadric trim the C++
-    Add*Surface API represents. Degenerated edges (seam/pole) are ignored."""
-    ex = TopExp_Explorer(face, TopAbs_EDGE)
-    while ex.More():
-        edge = ex.Current()
-        if not BRep_Tool.Degenerated(edge):
-            if not _edge_pcurve_is_iso(edge, face, uv_bounds):
-                return False
-        ex.Next()
-    return True
+    record = {"type": "sphere", "inner_wall": inner_wall, "params": params}
+    if _quadric_trim_fills_uv_box(face, (umin, umax, vmin, vmax)):
+        return record, None  # trim is exactly the parametric rectangle: the scalar params suffice
+    # OCC V (latitude) maps to the C++ polar angle theta = pi/2 - v (rad)
+    phi_of_u = (lambda u: u) if ax3.Direct() else (lambda u: -u)
+    wires, reason = _quadric_line_wire(face, phi_of_u, lambda v: 0.5 * math.pi - v)
+    if wires is None:
+        return None, reason
+    record["wires"] = wires
+    return record, None
 
 
 # Face extractors dispatched by analytic surface type. Planar faces cover both straight-edged
