@@ -62,6 +62,11 @@ from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeBox
 from OCC.Core.BRepTools import breptools, BRepTools_WireExplorer
 from OCC.Core.BRep import BRep_Tool
 from OCC.Core.Geom2dAdaptor import Geom2dAdaptor_Curve
+from OCC.Core.Geom import Geom_TrimmedCurve
+from OCC.Core.Geom2d import Geom2d_TrimmedCurve
+from OCC.Core.GeomConvert import geomconvert
+from OCC.Core.Geom2dConvert import geom2dconvert
+from OCC.Core.Convert import Convert_TgtThetaOver2
 from OCC.Core.GeomAbs import (
     GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone, GeomAbs_Sphere, GeomAbs_Torus,
     GeomAbs_BezierSurface, GeomAbs_BSplineSurface, GeomAbs_SurfaceOfRevolution,
@@ -407,10 +412,15 @@ _CURVE_TYPE_NAMES = {
 }
 
 # Current C++ support matrix (keep in sync with O2BVHSurfaceSolid):
-#  - planar faces: general polygon/arc wires -> boundary curves must be lines or circles
-#  - cylinder/cone/sphere: only parametric-rectangle trims (Add*Surface API)
+#  - planar faces: general line/arc/B-spline boundary wires
+#  - cylinder/cone/sphere: parametric-rectangle trims, or a general line/arc/B-spline trim in the
+#    (phi, height/theta) domain (holes allowed); the trim must not wrap more than a full turn in phi
 _SUPPORTED_SURFACE_TYPES = {"plane", "cylinder", "cone", "sphere"}
-_SUPPORTED_PLANAR_CURVES = {"line", "circle"}
+_SUPPORTED_PLANAR_CURVES = {"line", "circle", "bspline", "bezier"}
+# Boundary curves whose 2D pcurve the quadric extractor can turn into an exact (phi, v) trim edge:
+# a straight line stays a line; circle/ellipse/bezier/B-spline pcurves are converted to a B-spline
+# and transformed by the affine (u, v) -> (phi, height/theta) map (a B-spline is closed under it).
+_SUPPORTED_QUADRIC_CURVES = {"line", "circle", "ellipse", "bspline", "bezier"}
 
 
 def _xyz(v, scale: float = 1.0) -> List[float]:
@@ -575,14 +585,15 @@ def face_supported(record: dict) -> Tuple[bool, Optional[str]]:
         record["trim_kind"] = "wires"
         return True, None
 
-    # quadrics: only a single parametric-rectangle trim is representable today
-    if not all(w["all_pcurves_iso"] for w in record["wires"]):
+    # quadrics: a parametric-rectangle trim, or a general line/arc/B-spline trim in the (phi, v)
+    # domain (holes allowed). Only the boundary-curve type limits eligibility now; a genuinely
+    # phi-wrapping (> full turn) trim is still caught at extraction time.
+    bad = curve_types - _SUPPORTED_QUADRIC_CURVES
+    if bad:
         record["trim_kind"] = "general"
-        return False, f"{surf_type} with general (non-parametric-rectangle) trim"
-    if len(record["wires"]) > 1:
-        record["trim_kind"] = "general"
-        return False, f"{surf_type} with multiple trim wires (holes)"
-    record["trim_kind"] = "parametric-rectangle"
+        return False, f"{surf_type} with unsupported trim curves: {sorted(bad)}"
+    is_rectangle = len(record["wires"]) == 1 and all(w["all_pcurves_iso"] for w in record["wires"])
+    record["trim_kind"] = "parametric-rectangle" if is_rectangle else "general"
     return True, None
 
 
@@ -645,7 +656,7 @@ def build_surface_report(step_path: str, scale_to_cm: float) -> dict:
 SURFACE_SIDECAR_MAGIC = b"O2SS"
 SURFACE_SIDECAR_VERSION = 1
 SURFACE_TYPE_ENUM = {"plane": 1, "cylinder": 2, "cone": 3, "sphere": 4}
-CURVE_TYPE_ENUM = {"line": 0, "arc": 1}
+CURVE_TYPE_ENUM = {"line": 0, "arc": 1, "bspline": 2}
 SURFACE_FLAG_INNER_WALL = 1 << 0
 
 
@@ -693,14 +704,16 @@ def write_surfaces_bin(path: _Path, surfaces: List[dict]):
 # O2BVHSurfaceSolid only when *every* one of its faces can be extracted exactly; otherwise
 # the caller keeps the tessellated fallback (auto mode) or fails (required mode).
 #
-# Milestone status (scripts/geometry/BVHSurfaceSolid.md): planar faces carry general line/arc
-# boundary wires (polygon, disk/annulus, rounded rectangle, slot, ...) and the three quadrics
-# (cylinder, cone, sphere) are extracted here. A quadric face with a single iso-parametric wire
-# stays on the scalar parametric-rectangle path (byte-identical); any other supported trim (a
-# hole/window, or a non-iso straight-line boundary) is emitted as a general line trim wire in
-# the surface's (phi, height/theta) domain. Quadric arc/spline pcurve boundaries still force a
-# fallback (a circular pcurve does not survive the non-uniform u->phi, v->length/latitude remap
-# as a circle), as do torus/free-form surfaces and non-line/arc planar boundary curves.
+# Milestone status (scripts/geometry/BVHSurfaceSolid.md): planar faces carry general line/arc/
+# B-spline boundary wires (polygon, disk/annulus, rounded rectangle, slot, spline-bounded plate,
+# ...) and the three quadrics (cylinder, cone, sphere) are extracted here. A quadric face with a
+# single iso-parametric wire stays on the scalar parametric-rectangle path (byte-identical); any
+# other supported trim (a hole/window, or a non-iso line/arc/B-spline boundary) is emitted as a
+# general trim wire in the surface's (phi, height/theta) domain. Curved pcurves (circle/ellipse/
+# Bezier/B-spline) are converted to a B-spline whose poles are pushed through the *affine* (u, v)
+# -> (phi, height/theta) map, which is exact (a B-spline is closed under affine maps; an
+# anisotropic map merely turns a circle into an exactly-represented ellipse). Torus/free-form
+# surfaces and B-spline/other *surface* types still force the tessellated fallback.
 
 _EXTRACT_TOL = 1.e-7
 
@@ -789,9 +802,71 @@ def _arc_edge_params(edge, curve, project, s) -> Tuple[Optional[List[float]], Op
     return [cu, cv, radius, unwrapped[0], sweep], None
 
 
+def _bspline_flat_params(first: float, last: float, reversed_edge: bool, pole_xform, to_bspline):
+    """Flat sidecar B-spline record [degree, nPoles, poles(2*nPoles), weights(nPoles),
+    knots(nPoles+degree+1)] for a curve segment [first, last].
+
+    `to_bspline(lo, hi)` trims the source curve to [lo, hi] and returns a clamped (Geom or Geom2d)
+    BSplineCurve; `pole_xform(pole)` maps one control point to its output (u, v). The curve is
+    trimmed *before* conversion so the parametrisation matches the edge; a periodic result is made
+    non-periodic. Poles/weights/knots are reversed when the edge runs opposite the curve."""
+    lo, hi = (first, last) if first <= last else (last, first)
+    bs = to_bspline(lo, hi)
+    if bs is None:
+        return None
+    if bs.IsPeriodic():
+        bs.SetNotPeriodic()
+    degree = bs.Degree()
+    nb = bs.NbPoles()
+    if degree < 1 or nb < degree + 1:
+        return None
+    poles = []
+    weights = []
+    for i in range(1, nb + 1):
+        u, v = pole_xform(bs.Pole(i))
+        poles.append((u, v))
+        weights.append(bs.Weight(i))
+    flat = []
+    for i in range(1, bs.NbKnots() + 1):
+        flat.extend([bs.Knot(i)] * bs.Multiplicity(i))
+    if len(flat) != nb + degree + 1:
+        return None
+    if reversed_edge:
+        poles.reverse()
+        weights.reverse()
+        span = flat[0] + flat[-1]
+        flat = [span - k for k in reversed(flat)]
+    params = [float(degree), float(nb)]
+    for u, v in poles:
+        params.extend([float(u), float(v)])
+    params.extend(float(w) for w in weights)
+    params.extend(float(k) for k in flat)
+    return params
+
+
+def _planar_bspline_edge_params(edge, project) -> Optional[List[float]]:
+    """Sidecar B-spline record for a planar face's B-spline / Bezier boundary edge.
+
+    The 3D boundary curve lies in the plane, so projecting its control poles into the plane frame
+    (an affine map) yields the exact 2D B-spline. Returns None on failure (caller falls back)."""
+    try:
+        curve3d, first, last = BRep_Tool.Curve(edge)
+        if curve3d is None:
+            return None
+        reversed_edge = edge.Orientation() == TopAbs_REVERSED
+
+        def to_bspline(lo, hi):
+            trimmed = Geom_TrimmedCurve(curve3d, lo, hi)
+            return geomconvert.CurveToBSplineCurve(trimmed, Convert_TgtThetaOver2)
+
+        return _bspline_flat_params(first, last, reversed_edge, project, to_bspline)
+    except Exception:
+        return None
+
+
 def extract_planar_face(face, scale_to_cm: float) -> Tuple[Optional[dict], Optional[str]]:
     """Convert a planar TopoDS face into a sidecar 'plane' surface record with general
-    line/arc boundary wires (polygon, disk/annulus, rounded rectangle, slot, ...).
+    line/arc/B-spline boundary wires (polygon, disk/annulus, rounded rectangle, slot, ...).
 
     Each wire is walked in connected order; straight edges become 'line' segments and circular
     edges become 'arc' segments in the plane's local (u, v) frame. Boundary edges that are
@@ -816,14 +891,15 @@ def extract_planar_face(face, scale_to_cm: float) -> Tuple[Optional[dict], Optio
                 gt = curve.GetType()
             except Exception:
                 gt = None
-            if gt not in (GeomAbs_Line, GeomAbs_Circle):
+            if gt not in (GeomAbs_Line, GeomAbs_Circle, GeomAbs_BSplineCurve, GeomAbs_BezierCurve):
                 name = _CURVE_TYPE_NAMES.get(gt, "unknown")
-                return None, f"planar boundary edge is a {name} curve (only line/circle supported)"
+                return None, f"planar boundary edge is a {name} curve (only line/circle/bspline supported)"
             classified.append((edge, curve, gt, project(BRep_Tool.Pnt(start_vertex))))
 
         n = len(classified)
-        n_arcs = sum(1 for _, _, gt, _ in classified if gt == GeomAbs_Circle)
-        if n_arcs == 0 and n < 3:
+        n_curved = sum(1 for _, _, gt, _ in classified
+                       if gt in (GeomAbs_Circle, GeomAbs_BSplineCurve, GeomAbs_BezierCurve))
+        if n_curved == 0 and n < 3:
             return None, "planar polygon wire has fewer than 3 edges"
         if n == 0:
             return None, "planar face has an empty wire"
@@ -834,11 +910,16 @@ def extract_planar_face(face, scale_to_cm: float) -> Tuple[Optional[dict], Optio
                 u0, v0 = start_uv
                 u1, v1 = classified[(i + 1) % n][3]
                 seg_edges.append({"curve": "line", "params": [u0, v0, u1, v1]})
-            else:
+            elif gt == GeomAbs_Circle:
                 params, reason = _arc_edge_params(edge, curve, project, s)
                 if params is None:
                     return None, reason
                 seg_edges.append({"curve": "arc", "params": params})
+            else:  # B-spline / Bezier: project the 3D poles into the plane frame
+                params = _planar_bspline_edge_params(edge, project)
+                if params is None:
+                    return None, "planar B-spline boundary edge extraction failed"
+                seg_edges.append({"curve": "bspline", "params": params})
         wires_out.append({"role": "outer" if is_outer else "inner", "edges": seg_edges})
 
     if not wires_out:
@@ -867,36 +948,57 @@ def _quadric_phi_range(ax3, umin: float, umax: float) -> Tuple[float, float]:
     return phi_start, sweep
 
 
-def _quadric_line_wire(face, phi_of_u, v_of_v) -> Tuple[Optional[List[dict]], Optional[str]]:
-    """Build general line-only trim wires in a quadric face's parametric (phi, v) domain.
+def _quadric_trim_wire(face, map_uv) -> Tuple[Optional[List[dict]], Optional[str]]:
+    """Build general line/arc/B-spline trim wires in a quadric face's parametric (phi, v) domain.
 
-    Every boundary edge's 2D pcurve must be a straight line: a circular pcurve arc does not
-    survive the non-uniform (u -> phi, v -> height/theta) remap as a circle (u is in radians and
-    v carries a length/latitude scale, so the image is an ellipse), so arc/spline pcurves force a
-    fallback. \a phi_of_u maps the OCC angular u to the C++ phi (identity or negation for a
-    left-handed frame); \a v_of_v maps the OCC v to the C++ height (cm) or polar angle (rad).
+    \a map_uv(u, v) is the *affine* map from the OCC face parameters to the C++ (phi, height/theta)
+    domain (phi = +/-u + offset; height/theta linear in v). Straight pcurve edges stay lines; every
+    curved pcurve (circle/ellipse/Bezier/B-spline) is converted to a B-spline and its poles are
+    transformed by \a map_uv. Because the map is affine and a B-spline is closed under affine maps,
+    the transformed poles describe the trim edge *exactly* in (phi, v) - even for a circle, which an
+    anisotropic map turns into an ellipse (represented exactly as the rational B-spline). Line edges
+    keep the shared-vertex chaining (each line ends at the next edge's start) for a tight closure.
     Returns (wires, None) with exactly one outer wire plus inner holes, or (None, reason).
     """
     wires_out: List[dict] = []
     for _wire, is_outer, edges in _face_wire_edges(face):
-        points = []  # ordered (phi, v) start points in wire-traversal order
+        parsed = []  # per edge: {"kind": "line", "start": (phi, v)} or {"kind": "bspline", ...}
         for edge, _start_vertex in edges:
             curve2d, first, last = BRep_Tool.CurveOnSurface(edge, face)
             if curve2d is None:
                 return None, "quadric boundary edge has no 2D pcurve"
-            if Geom2dAdaptor_Curve(curve2d).GetType() != GeomAbs_Line:
-                return None, "quadric boundary edge pcurve is not a straight line (only line trims supported)"
-            param = last if edge.Orientation() == TopAbs_REVERSED else first
-            p = curve2d.Value(param)
-            points.append((phi_of_u(p.X()), v_of_v(p.Y())))
-        if len(points) < 3:
-            return None, "quadric trim wire has fewer than 3 line edges"
+            reversed_edge = edge.Orientation() == TopAbs_REVERSED
+            ctype = Geom2dAdaptor_Curve(curve2d).GetType()
+            if ctype == GeomAbs_Line:
+                param = last if reversed_edge else first
+                p = curve2d.Value(param)
+                parsed.append({"kind": "line", "start": map_uv(p.X(), p.Y())})
+            elif ctype in (GeomAbs_Circle, GeomAbs_Ellipse, GeomAbs_BSplineCurve, GeomAbs_BezierCurve):
+                def to_bspline(lo, hi, c2=curve2d):
+                    trimmed = Geom2d_TrimmedCurve(c2, lo, hi)
+                    return geom2dconvert.CurveToBSplineCurve(trimmed, Convert_TgtThetaOver2)
+
+                params = _bspline_flat_params(first, last, reversed_edge,
+                                              lambda p: map_uv(p.X(), p.Y()), to_bspline)
+                if params is None:
+                    return None, "quadric B-spline pcurve extraction failed"
+                parsed.append({"kind": "bspline", "params": params, "start": (params[2], params[3])})
+            else:
+                name = _CURVE_TYPE_NAMES.get(ctype, "unknown")
+                return None, f"quadric boundary pcurve is a {name} curve (unsupported)"
+        n = len(parsed)
+        if n == 0:
+            return None, "quadric trim wire has no edges"
+        if all(p["kind"] == "line" for p in parsed) and n < 3:
+            return None, "quadric line trim wire has fewer than 3 edges"
         seg_edges = []
-        n = len(points)
-        for i in range(n):
-            u0, v0 = points[i]
-            u1, v1 = points[(i + 1) % n]
-            seg_edges.append({"curve": "line", "params": [u0, v0, u1, v1]})
+        for i, p in enumerate(parsed):
+            if p["kind"] == "line":
+                u0, v0 = p["start"]
+                u1, v1 = parsed[(i + 1) % n]["start"]
+                seg_edges.append({"curve": "line", "params": [u0, v0, u1, v1]})
+            else:
+                seg_edges.append({"curve": "bspline", "params": p["params"]})
         wires_out.append({"role": "outer" if is_outer else "inner", "edges": seg_edges})
     if not wires_out:
         return None, "quadric face has no wires"
@@ -968,7 +1070,8 @@ def extract_cylindrical_face(face, scale_to_cm: float) -> Tuple[Optional[dict], 
     if _quadric_trim_fills_uv_box(face, (umin, umax, vmin, vmax)):
         return record, None  # trim is exactly the parametric rectangle: the scalar params suffice
     phi_of_u = (lambda u: u) if ax3.Direct() else (lambda u: -u)
-    wires, reason = _quadric_line_wire(face, phi_of_u, lambda v: v * s)
+    # affine (u, v) -> (phi[rad], h[cm]); OCC V is the height along the axis
+    wires, reason = _quadric_trim_wire(face, lambda u, v: (phi_of_u(u), v * s))
     if wires is None:
         return None, reason
     record["wires"] = wires
@@ -1014,7 +1117,7 @@ def extract_conical_face(face, scale_to_cm: float) -> Tuple[Optional[dict], Opti
         return record, None  # trim is exactly the parametric rectangle: the scalar params suffice
     # OCC V (ruling-line distance) maps to the C++ axial height h = v cos(alpha), in cm
     phi_of_u = (lambda u: u) if ax3.Direct() else (lambda u: -u)
-    wires, reason = _quadric_line_wire(face, phi_of_u, lambda v: v * cos_a * s)
+    wires, reason = _quadric_trim_wire(face, lambda u, v: (phi_of_u(u), v * cos_a * s))
     if wires is None:
         return None, reason
     record["wires"] = wires
@@ -1050,7 +1153,7 @@ def extract_spherical_face(face, scale_to_cm: float) -> Tuple[Optional[dict], Op
         return record, None  # trim is exactly the parametric rectangle: the scalar params suffice
     # OCC V (latitude) maps to the C++ polar angle theta = pi/2 - v (rad)
     phi_of_u = (lambda u: u) if ax3.Direct() else (lambda u: -u)
-    wires, reason = _quadric_line_wire(face, phi_of_u, lambda v: 0.5 * math.pi - v)
+    wires, reason = _quadric_trim_wire(face, lambda u, v: (phi_of_u(u), 0.5 * math.pi - v))
     if wires is None:
         return None, reason
     record["wires"] = wires

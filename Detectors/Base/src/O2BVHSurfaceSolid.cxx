@@ -268,6 +268,13 @@ std::vector<Curve2D> makeCurveWire(const std::vector<O2BVHSurfaceSolid::PlanarBo
   for (const auto& c : wire) {
     if (c.kind == O2BVHSurfaceSolid::PlanarBoundaryCurve::Arc) {
       curves.push_back(Curve2D::makeArc({c.center[0], c.center[1]}, c.radius, c.startAngle, c.endAngle));
+    } else if (c.kind == O2BVHSurfaceSolid::PlanarBoundaryCurve::BSpline) {
+      std::vector<Vec2> poles;
+      poles.reserve(c.poles.size());
+      for (const auto& pole : c.poles) {
+        poles.push_back({pole[0], pole[1]});
+      }
+      curves.push_back(Curve2D::makeBSpline(c.degree, std::move(poles), c.weights, c.knots));
     } else {
       curves.push_back(Curve2D::makeLine({c.lineStart[0], c.lineStart[1]}, {c.lineEnd[0], c.lineEnd[1]}));
     }

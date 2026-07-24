@@ -624,6 +624,91 @@ BOOST_AUTO_TEST_CASE(TrimmedCurveBoundaries)
   BOOST_CHECK(openStatus == WireStatus::Open);
 }
 
+BOOST_AUTO_TEST_CASE(BSplineTrimCurveKernels)
+{
+  using surf::Curve2D;
+  using surf::CurveWire;
+  using surf::Vec2;
+  using surf::WireClassification;
+  using surf::WireRole;
+  using surf::WireStatus;
+
+  // --- non-rational cubic B-spline: validity, clamped endpoints, convex-hull bounds ------------
+  const std::vector<Vec2> poles{{0., 0.}, {1., 2.}, {2., -1.}, {3., 1.}, {4., 0.}};
+  const std::vector<double> knots{0., 0., 0., 0., 0.5, 1., 1., 1., 1.};
+  const Curve2D spline = Curve2D::makeBSpline(3, poles, {}, knots);
+  BOOST_CHECK(spline.valid());
+  checkClose(spline.startPoint().uCoord, 0.);
+  checkClose(spline.startPoint().vCoord, 0.);
+  checkClose(spline.endPoint().uCoord, 4.);
+  checkClose(spline.endPoint().vCoord, 0.);
+  // extendBounds returns the (conservative) control-point convex-hull box
+  Vec2 lower{1.e30, 1.e30};
+  Vec2 upper{-1.e30, -1.e30};
+  spline.extendBounds(lower, upper);
+  checkClose(lower.uCoord, 0.);
+  checkClose(upper.uCoord, 4.);
+  checkClose(lower.vCoord, -1.);
+  checkClose(upper.vCoord, 2.);
+
+  // --- rational quadratic B-spline: an exact NURBS quarter circle -----------------------------
+  const std::vector<Vec2> circlePoles{{1., 0.}, {1., 1.}, {0., 1.}};
+  const std::vector<double> circleWeights{1., std::sqrt(0.5), 1.};
+  const std::vector<double> circleKnots{0., 0., 0., 1., 1., 1.};
+  const Curve2D quarter = Curve2D::makeBSpline(2, circlePoles, circleWeights, circleKnots);
+  BOOST_CHECK(quarter.valid());
+  for (int index = 0; index <= 8; ++index) {
+    const Vec2 point = quarter.pointAt(static_cast<double>(index) / 8);
+    checkClose(std::hypot(point.uCoord, point.vCoord), 1., 1.e-9);
+  }
+
+  // --- closed loop (B-spline top + three closing lines): area vs a fine-polygon reference ------
+  const std::vector<Curve2D> loop{spline, Curve2D::makeLine({4., 0.}, {4., -3.}),
+                                  Curve2D::makeLine({4., -3.}, {0., -3.}), Curve2D::makeLine({0., -3.}, {0., 0.})};
+  WireStatus status = WireStatus::Valid;
+  CurveWire wire;
+  BOOST_REQUIRE(wire.initialize(loop, WireRole::Outer, status));
+  double referenceArea = 0.;
+  const auto boundarySamples = wire.sampledBoundary();
+  for (size_t k = 0; k + 1 < boundarySamples.size(); ++k) {
+    referenceArea += 0.5 * (boundarySamples[k].uCoord * boundarySamples[k + 1].vCoord -
+                            boundarySamples[k + 1].uCoord * boundarySamples[k].vCoord);
+  }
+  // wire.signedArea() is the exact Gauss-Legendre value; referenceArea is a chord-polyline
+  // approximation of it, so compare at the sampling-accuracy level rather than machine precision
+  checkClose(wire.signedArea(), std::abs(referenceArea), 1.e-4);
+
+  // classify inside / outside / boundary
+  BOOST_CHECK(wire.classify({2., -1.5}) == WireClassification::Inside);
+  BOOST_CHECK(wire.classify({2., -2.9}) == WireClassification::Inside);
+  BOOST_CHECK(wire.classify({-1., -1.}) == WireClassification::Outside);
+  BOOST_CHECK(wire.classify({2., 5.}) == WireClassification::Outside);
+  BOOST_CHECK(wire.classify({0., 0.}) == WireClassification::Boundary);  // on the B-spline start
+  BOOST_CHECK(wire.classify({2., -3.}) == WireClassification::Boundary); // on the bottom line
+
+  // --- horizontal-tangent case: a scanline tangent to a smooth apex must not flip parity -------
+  // downward arch: quadratic B-spline (0,0) -> apex (1,1) -> (2,0), closed by the baseline.
+  const Curve2D arch = Curve2D::makeBSpline(2, {{0., 0.}, {1., 2.}, {2., 0.}}, {}, {0., 0., 0., 1., 1., 1.});
+  checkClose(arch.pointAt(0.5).vCoord, 1.); // apex height
+  WireStatus archStatus = WireStatus::Valid;
+  CurveWire archRegion;
+  BOOST_REQUIRE(archRegion.initialize({arch, Curve2D::makeLine({2., 0.}, {0., 0.})}, WireRole::Outer, archStatus));
+  BOOST_CHECK(archRegion.classify({1., 0.5}) == WireClassification::Inside);
+  BOOST_CHECK(archRegion.classify({1., 1.5}) == WireClassification::Outside);
+  // scanline v = 1 is tangent to the apex to the right of these points: a robust kernel counts an
+  // even number of crossings so both points classify Outside.
+  BOOST_CHECK(archRegion.classify({-1., 1.}) == WireClassification::Outside);
+  BOOST_CHECK(archRegion.classify({3., 1.}) == WireClassification::Outside);
+
+  // --- reversal keeps the same geometric image (poles/knots complemented) ----------------------
+  Curve2D reversed = spline;
+  reversed.reverseInPlace();
+  checkClose(reversed.startPoint().uCoord, 4.);
+  checkClose(reversed.endPoint().uCoord, 0.);
+  checkClose(reversed.pointAt(0.25).uCoord, spline.pointAt(0.75).uCoord, 1.e-9);
+  checkClose(reversed.pointAt(0.25).vCoord, spline.pointAt(0.75).vCoord, 1.e-9);
+}
+
 BOOST_AUTO_TEST_CASE(CurvedPlanarDiskKernels)
 {
   using surf::Curve2D;
@@ -1550,4 +1635,140 @@ BOOST_AUTO_TEST_CASE(WireTrimmedSidecarRoundTrip)
   compareDistance(solid, reference, {5., 0.5, 1.}, {-1., 0., 0.});
   compareDistance(solid, reference, {0., 0., 0.}, unitDirection(1., 1., 1.));
   checkClose(solid.Capacity(), reference.Capacity(), 1.e-6);
+}
+
+namespace
+{
+// Append a plane record whose rectangular outer wire has its bottom edge as a degree-3 B-spline
+// with collinear poles — geometrically identical to the straight edge, so the box still closes,
+// but it exercises the whole B-spline sidecar pipeline (curveType 2 reader -> kernel).
+void appendBSplineEdgePlaneRecord(std::vector<char>& bytes, const FaceFrame& frame)
+{
+  appendU32(bytes, 1); // surfaceType plane
+  appendU32(bytes, 0); // flags
+  appendU32(bytes, 9); // nParams
+  appendDoubles(bytes, {frame.origin[0], frame.origin[1], frame.origin[2], frame.axisU[0], frame.axisU[1],
+                        frame.axisU[2], frame.axisV[0], frame.axisV[1], frame.axisV[2]});
+  appendU32(bytes, 1); // nWires
+  appendU32(bytes, 0); // wireRole outer
+  appendU32(bytes, 4); // nEdges
+  const double extentU = frame.extentU;
+  const double extentV = frame.extentV;
+  // edge 0: collinear cubic B-spline from (0, 0) to (extentU, 0)
+  appendU32(bytes, 2);  // curveType bspline
+  appendU32(bytes, 22); // nCurveParams = 2 + 2*4 + 4 + 8
+  appendDoubles(bytes, {3., 4.,                                                          // degree, nPoles
+                        0., 0., extentU / 3., 0., 2. * extentU / 3., 0., extentU, 0.,    // poles
+                        1., 1., 1., 1.,                                                  // weights
+                        0., 0., 0., 0., 1., 1., 1., 1.});                                // clamped knots
+  const std::array<std::array<double, 4>, 3> lines{
+    {{extentU, 0., extentU, extentV}, {extentU, extentV, 0., extentV}, {0., extentV, 0., 0.}}};
+  for (const auto& edge : lines) {
+    appendU32(bytes, 0); // curveType line
+    appendU32(bytes, 4); // nCurveParams
+    appendDoubles(bytes, {edge[0], edge[1], edge[2], edge[3]});
+  }
+}
+
+// A rational quadratic B-spline (NURBS) quarter circle from angle a0 to a0 + pi/2, in the (u, v)
+// domain, centred at (cu, cv) with radius r. Four of these form an exact circle.
+surf::Curve2D quarterCircleBSpline(double cu, double cv, double r, double a0)
+{
+  const double a1 = a0 + surf::kHalfPi;
+  const double aMid = 0.5 * (a0 + a1);
+  const std::vector<surf::Vec2> poles{{cu + r * std::cos(a0), cv + r * std::sin(a0)},
+                                      {cu + r * std::sqrt(2.) * std::cos(aMid), cv + r * std::sqrt(2.) * std::sin(aMid)},
+                                      {cu + r * std::cos(a1), cv + r * std::sin(a1)}};
+  return surf::Curve2D::makeBSpline(2, poles, {1., std::sqrt(0.5), 1.}, {0., 0., 0., 1., 1., 1.});
+}
+} // namespace
+
+BOOST_AUTO_TEST_CASE(BSplineSidecarRoundTrip)
+{
+  // a closed box whose first face carries a (collinear) B-spline boundary edge round-trips through
+  // the sidecar reader and navigates identically to TGeoBBox
+  constexpr double halfX = 1.;
+  constexpr double halfY = 2.;
+  constexpr double halfZ = 3.;
+
+  std::vector<char> bytes;
+  appendSidecarHeader(bytes, 6);
+  appendBSplineEdgePlaneRecord(bytes, boxFaceFrame(0, halfX, halfY, halfZ));
+  for (int faceIndex = 1; faceIndex < 6; ++faceIndex) {
+    appendPlaneRecord(bytes, boxFaceFrame(faceIndex, halfX, halfY, halfZ));
+  }
+  const auto path = writeSidecarFile("o2_sidecar_bspline_box.bin", bytes);
+
+  SurfaceSolid box("sidecarBSplineBox");
+  BOOST_REQUIRE(o2::base::LoadSurfaceSolid(path.string(), box));
+  std::filesystem::remove(path);
+  BOOST_CHECK_EQUAL(box.GetNsurfaces(), 6);
+  box.CloseShape();
+  BOOST_CHECK(box.IsClosed());
+  BOOST_CHECK(box.IsOrientationConsistent());
+
+  TGeoBBox reference("bsplineBoxRef", halfX, halfY, halfZ);
+  compareContainsGrid(box, reference, 4., 7);
+  compareDistance(box, reference, {5., 0.5, 0.5}, {-1., 0., 0.});
+  compareDistance(box, reference, {0., 0., 0.}, unitDirection(1., 1., 1.));
+  checkClose(box.Capacity(), reference.Capacity(), 1.e-6);
+}
+
+BOOST_AUTO_TEST_CASE(BSplineWindowInCylinderWall)
+{
+  using surf::Curve2D;
+  using surf::Vec3;
+  std::string error;
+
+  const auto onCylinder = [](double phi, double height) {
+    return Vec3{2. * std::cos(phi), 2. * std::sin(phi), height};
+  };
+
+  // an exact circular trim in (phi, h) built from four NURBS quarter arcs must classify identically
+  // to the same circle expressed as one exact arc Curve2D — validating the B-spline trim path on a
+  // quadric against the closed-form arc path.
+  const double centrePhi = surf::kPi;
+  const double trimRadius = 0.5;
+  surf::CylindricalBoundedSurface bsplineDisk;
+  const std::vector<Curve2D> bsplineOuter{quarterCircleBSpline(centrePhi, 0., trimRadius, 0.),
+                                          quarterCircleBSpline(centrePhi, 0., trimRadius, surf::kHalfPi),
+                                          quarterCircleBSpline(centrePhi, 0., trimRadius, surf::kPi),
+                                          quarterCircleBSpline(centrePhi, 0., trimRadius, 3. * surf::kHalfPi)};
+  BOOST_REQUIRE(bsplineDisk.initialize({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, 2., -1., 1., 0., surf::kTwoPi, false,
+                                       bsplineOuter, {}, error));
+  BOOST_CHECK(!bsplineDisk.capacityIsExact()); // B-spline (wire) trim -> numeric capacity
+
+  surf::CylindricalBoundedSurface arcDisk;
+  BOOST_REQUIRE(arcDisk.initialize({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, 2., -1., 1., 0., surf::kTwoPi, false,
+                                   {Curve2D::makeCircle({centrePhi, 0.}, trimRadius)}, {}, error));
+
+  // classification agrees across a grid of the (phi, h) neighbourhood of the trim (skip a thin band
+  // around the boundary, where the exact-arc and sampled-B-spline classifications can legitimately
+  // differ by the sampling tolerance)
+  int compared = 0;
+  for (int phiStep = -12; phiStep <= 12; ++phiStep) {
+    const double phi = centrePhi + 0.09 * phiStep;
+    for (int hStep = -12; hStep <= 12; ++hStep) {
+      const double height = 0.09 * hStep;
+      // radial distance in (phi, h) from the trim centre; skip the boundary band
+      const double distToCentre = std::hypot(phi - centrePhi, height);
+      if (std::abs(distToCentre - trimRadius) < 5.e-3) {
+        continue;
+      }
+      const Vec3 point = onCylinder(phi, height);
+      BOOST_CHECK_EQUAL(bsplineDisk.containsPointOnSurface(point), arcDisk.containsPointOnSurface(point));
+      ++compared;
+    }
+  }
+  BOOST_CHECK_GT(compared, 100);
+
+  // a radial ray into the B-spline window (its centre) registers exactly one wall hit; a ray well
+  // outside the window (opposite side of the cylinder) misses the trimmed patch
+  std::vector<surf::RayHit> hits;
+  bsplineDisk.appendIntersections({0., 0., 0.}, {std::cos(centrePhi), std::sin(centrePhi), 0.}, 0., 1.e30, hits);
+  BOOST_REQUIRE_EQUAL(hits.size(), 1u);
+  checkClose(hits.front().distance, 2.);
+  hits.clear();
+  bsplineDisk.appendIntersections({0., 0., 0.}, {std::cos(0.), std::sin(0.), 0.}, 0., 1.e30, hits);
+  BOOST_CHECK(hits.empty());
 }

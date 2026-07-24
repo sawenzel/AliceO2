@@ -42,12 +42,13 @@ class O2BVHSurfaceSolid : public TGeoBBox
                         const std::vector<Point2D>& outerWire,
                         const std::vector<std::vector<Point2D>>& innerWires = {});
 
-  /// One boundary curve of a curved planar surface, in the surface's local (u, v) frame. It is
-  /// either a straight line segment (\a lineStart -> \a lineEnd) or a circular arc (\a center,
-  /// \a radius, from \a startAngle to \a endAngle in radians; a full circle is a +/-2pi sweep).
-  /// This is the public, kernel-independent mirror of the internal Curve2D type.
+  /// One boundary curve of a curved planar surface, in the surface's local (u, v) frame. It is a
+  /// straight line segment (\a lineStart -> \a lineEnd), a circular arc (\a center, \a radius,
+  /// from \a startAngle to \a endAngle in radians; a full circle is a +/-2pi sweep) or a clamped
+  /// (rational) B-spline (\a degree, \a poles, optional \a weights, clamped flat \a knots). This
+  /// is the public, kernel-independent mirror of the internal Curve2D type.
   struct PlanarBoundaryCurve {
-    enum Kind { Line, Arc };
+    enum Kind { Line, Arc, BSpline };
     Kind kind = Line;
     Point2D lineStart{0., 0.};
     Point2D lineEnd{0., 0.};
@@ -55,14 +56,39 @@ class O2BVHSurfaceSolid : public TGeoBBox
     double radius = 0.;
     double startAngle = 0.;
     double endAngle = 0.;
+    int degree = 0;                    ///< B-spline degree
+    std::vector<Point2D> poles;        ///< B-spline control points
+    std::vector<double> weights;       ///< B-spline weights (empty ⇒ non-rational)
+    std::vector<double> knots;         ///< B-spline clamped flat knot vector
 
     static PlanarBoundaryCurve makeLine(const Point2D& start, const Point2D& end)
     {
-      return {Line, start, end, {0., 0.}, 0., 0., 0.};
+      PlanarBoundaryCurve curve;
+      curve.kind = Line;
+      curve.lineStart = start;
+      curve.lineEnd = end;
+      return curve;
     }
     static PlanarBoundaryCurve makeArc(const Point2D& c, double r, double start, double end)
     {
-      return {Arc, {0., 0.}, {0., 0.}, c, r, start, end};
+      PlanarBoundaryCurve curve;
+      curve.kind = Arc;
+      curve.center = c;
+      curve.radius = r;
+      curve.startAngle = start;
+      curve.endAngle = end;
+      return curve;
+    }
+    static PlanarBoundaryCurve makeBSpline(int splineDegree, std::vector<Point2D> splinePoles,
+                                           std::vector<double> splineWeights, std::vector<double> splineKnots)
+    {
+      PlanarBoundaryCurve curve;
+      curve.kind = BSpline;
+      curve.degree = splineDegree;
+      curve.poles = std::move(splinePoles);
+      curve.weights = std::move(splineWeights);
+      curve.knots = std::move(splineKnots);
+      return curve;
     }
   };
 
