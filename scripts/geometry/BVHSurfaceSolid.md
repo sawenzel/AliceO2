@@ -141,6 +141,158 @@ only for visualization and fallback paths.
 	- Conservative default: leave unsupported surfaces on the existing tessellated fallback path.
 	- Optional later path: add bounded torus analytically; keep BSpline/Bezier tessellated unless a robust exact kernel is designed.
 	- Deliverable: converter support matrix documented in this file and in the script help.
+	- Decision 2026-07-24 (informed by the ALICE3_CAD_pure.step real-CAD test): the umbrella above is
+	  split into three concrete, independently-shippable milestones below, ordered by value/cost as measured
+	  on that assembly (55 unique unplaced parts; only 3/55 convert today). The measured blocker ranking:
+	  B-spline dominates (44/55 volumes touch it, 34/55 are blocked *only* by it), then torus and
+	  quadric-curved trims (15 volumes each). Crucially the B-spline story separates into **trim curves**
+	  (cheap, surface stays exact) vs **surfaces** (expensive, exactness-vs-tessellation trade-off) — do the
+	  first before the second.
+
+- [x] **B-spline trim curves on analytic surfaces** (highest value/cost ratio — do first). SCOPED PLAN below.
+	- Done 2026-07-24: implemented all five scoped steps. Kernel (`BoundedSurface.h`): a third `Curve2D`
+	  kind `BSpline` carrying degree/poles/weights/clamped-flat-knots, with de Boor (`bsplineEval` via
+	  Piegl DersBasisFuns, rational-aware) evaluation, clamped endpoints, control-hull `extendBounds`,
+	  exact Gauss-Legendre-per-knot-span `signedAreaContribution` (non-rational exact, rational numeric),
+	  robust `rightwardCrossings` via an adaptively-flattened on-curve polyline reusing the existing
+	  half-open canonical-endpoint seam convention, polyline-based `closestPoint`/`distanceSq`, and
+	  `reverseInPlace` (poles/weights reversed, knots complemented). A **lazily-cached** flattened
+	  polyline (`bsplineCache`) makes the dense per-point winding/distance queries (numeric capacity
+	  integration, point-in-wire grids) pay the de Boor sampling only once — without it `CloseShape`'s
+	  capacity integration re-sampled every bspline per grid point and hung. `CurvedPlanarBoundedSurface`
+	  reports `capacityIsExact()==false` when any wire is a bspline. Public POD `PlanarBoundaryCurve`
+	  gained a `makeBSpline` case (reused by the planar and quadric wire overloads). Sidecar: `curveType=2`
+	  (`O2SurfaceSolidIO.cxx` `parseBSplineEdge`); relaxed the reader `kJoinTolerance` to `1e-5` AND added
+	  a matching kernel `kWireJoinTolerance = 1e-5` for `CurveWire` closure (the reader relax alone was
+	  insufficient — the kernel's `1e-9` `CurveWire` closure was the real gate for mixed line/bspline
+	  loops, incl. the pre-existing D-cap bug). Python (`O2_CADtoTGeo.py`): `extract_planar_face` emits
+	  bspline/Bezier boundary edges (3D poles projected into the plane frame); the three quadric
+	  extractors call a new `_quadric_trim_wire` that keeps line edges as lines and converts every curved
+	  pcurve (circle/ellipse/Bezier/bspline) to a bspline whose poles are transformed by the affine
+	  `(u,v)->(phi,height/theta)` map (exact; the old arc-on-quadric ellipse gate is thereby closed too);
+	  `face_supported` / `_SUPPORTED_*_CURVES` reconciled. Tests: `BSplineTrimCurveKernels`,
+	  `BSplineSidecarRoundTrip`, `BSplineWindowInCylinderWall` (26 cases, `ctest -R BVHSurfaceSolid`
+	  green). **End-to-end**: `ST1A38495_01` and `ST1A38526_01` (previously blocked purely by bspline
+	  trims) now convert under `--exact-surfaces auto`; each loads via `LoadSurfaceSolid` and matches the
+	  accelerated `O2Tessellated` `Contains` with **0 mismatches over 20k random points** (and BVH==loop),
+	  capacity within 0.17-0.24% of the divergence-theorem mesh volume. **ALICE3 coverage 3/55 -> 7/55.**
+	  Known: `IsClosed()` may warn (two exact faces sharing one 3D bspline edge carry different pcurve
+	  parametrizations, so equal-count chord sampling gives slightly different 3D points — the documented
+	  scope caveat; navigation stays exact). Remaining ceiling is bspline *surfaces* (34/55 blocked only by
+	  them) and torus.
+	- Motivation: on real CAD, whole all-analytic parts are blocked purely by *trim* B-splines, not
+	  B-spline surfaces. Example studied: `ST1A38495_01` (lid `0:1:1:10`, 65 faces) and `ST1A38526_01`
+	  (lid `0:1:1:11`, 53 faces) — every surface is plane/cylinder/cone, yet each is blocked by ~20 faces
+	  whose trim wires contain a B-spline: bspline planar boundary loops (`{line:6, bspline:3}`), and
+	  cylinders/cones bounded by a bspline pcurve (inner hole `{bspline:2, circle:2}`, outer `{bspline:2,
+	  line:2}`). **0** of the blocking quadric faces there are pure line/arc — so the earlier "quadric
+	  arc-pcurve" fix does not rescue them; a bspline *trim-edge* type does.
+	- Key insight #1: the ray/surface hit stays **fully analytic** (plane/quadric). Only the 2D trimming test
+	  and boundary sampling need the B-spline. Point-in-wire reduces to a scalar root-find `C_v(t) - v0 = 0`
+	  in parameter space, **not** a 3D ray/surface intersection.
+	- Key insight #2 (de-risks the quadric path AND subsumes the old arc-on-quadric gap): the quadric
+	  `(U,V)→(phi,h)`/`(phi,theta)` remap is **affine** for all three families (cylinder `h=V`; cone
+	  `h=V·cosα`; sphere `theta=π/2−V`; `phi=±U+offset`). A B-spline is **closed under affine maps** — just
+	  transform its control-point poles (same degree/knots/weights). So a bspline pcurve maps to a bspline in
+	  `(phi,h)` *exactly* (no ellipse problem — that problem was specific to the *arc* `Curve2D` type, which an
+	  anisotropic map turns into an ellipse). Bonus: convert *arc* pcurves on quadrics to bsplines
+	  (`Geom2dConvert`) and transform poles too, so this one edge type also closes the 2297-face
+	  "quadric trim edge pcurve not a straight line" fallback — verify the affine claim by round-tripping a
+	  sampled 3D point.
+
+	SCOPED IMPLEMENTATION PLAN (bottom-up; each step builds + tests before the next):
+
+	1. **Kernel — 2D B-spline `Curve2D` variant** in `Detectors/Base/src/BoundedSurface.h`.
+	   - Add a third `Curve2D` kind (line=0, arc=1, bspline=2) carrying degree `p`, poles `(u,v)[]`, weights
+	     `w[]` (all 1 ⇒ non-rational), and a clamped flat knot vector (length `nPoles+p+1`). Bézier is the
+	     single-span special case.
+	   - Implement the ops `CurveWire` already calls, matching existing conventions:
+	     - `startPoint`/`endPoint`: de Boor evaluation at the parameter ends.
+	     - `extendBounds`: conservative AABB = control-point convex-hull box (exact bound; matches the
+	       conservative-box philosophy of the BVH).
+	     - `signedAreaContribution`: `∮(u dv − v du)/2` by Gauss–Legendre per Bézier span
+	       (`ceil((2p)/2)+1` points is exact for non-rational degree `p`; rational ⇒ numeric, flagged).
+	     - **`rightwardCrossings(point)`** (the core): decompose to Bézier spans (knot insertion); per span
+	       cull by control-point convex hull (all `v` one side of `v0` ⇒ skip); solve `C_v(t)=v0` on survivors
+	       (cubic ⇒ Cardano/3×3 companion; general ⇒ recursive de Casteljau / Bézier clipping); count roots
+	       with `C_u(t*)>u0` using the sign of `dC_v/dt` and the **existing half-open canonical-endpoint
+	       convention** in `CurveWire::classify` (reuse the shared-loop-endpoint trick to avoid seam
+	       double-counts).
+	     - `closestPoint`/`distanceSq`: conservative **lower bound** (distance to the control-point convex
+	       hull), consistent with the wire-trimmed-quadric `Safety` policy; exact boundary distance deferred.
+	     - `sampledBoundary`/chord sampling: adaptive de Casteljau to a flatness tolerance (visualization +
+	       closure half-edge check).
+	   - Unit test `BSplineTrimCurveKernels` (isolated): a planar bspline outer loop — `classify`
+	     inside/outside/boundary, area vs a fine-polygon reference, crossings incl. a horizontal-tangent case.
+
+	2. **Public API** — extend the `PlanarBoundaryCurve` POD (reused by both planar and quadric `(u,v)`
+	   overloads) with a bspline case (`int kind`, `int degree`, `std::vector<std::array<double,2>> poles`,
+	   `std::vector<double> weights, knots`). No new `Add*Surface` entry points needed — the existing
+	   `AddCurvedPlanarSurface` and the quadric wire overloads already take `PlanarBoundaryCurve` wires.
+
+	3. **Sidecar + reader** (`O2SurfaceSolidIO.cxx`, format section above). Add `curveType = 2` (bspline2d),
+	   record = `degree, nPoles` then poles `2*nPoles`, weights `nPoles`, flat knots `nPoles+degree+1` — packed
+	   in the self-describing `curveParams[]` (bump not required; `nCurveParams` stays generic). `wireToCurves`
+	   parses it into the kernel `Curve2D`. **Also relax `kJoinTolerance`** from `1e-9` here: the `{line:…,
+	   bspline:…}` mixed loops in these parts need line/bspline endpoints to join within the extractor's
+	   ~`1e-6`, and this is the same pre-existing D-cap bug — fold the one-line relaxation in as a prerequisite.
+	   Test `BSplineSidecarRoundTrip`: write a bspline wire block, read via `LoadSurfaceSolid`, compare
+	   `Contains`/area to the in-memory kernel; confirm line/arc round-trips stay byte-identical.
+
+	4. **Python extractor** (`O2_CADtoTGeo.py`). Emit bspline pcurve records from `Geom2d` in **both** paths:
+	   - `extract_planar_face`: bspline planar boundary edges (fixes `plane with unsupported boundary curves`).
+	   - `_quadric_line_wire`: bspline (and arc, via `Geom2dConvert` → bspline) pcurves, applying the **affine
+	     `(U,V)→(phi,h)/(phi,theta)` pole transform** (same map used for the scalar bounds, incl. the
+	     left-handed-frame `phi` mirror). Get the pcurve via `BRep_Tool.CurveOnSurface`
+	     (`Geom2d_BSplineCurve`: degree, poles, weights, knots+mults → flat vector; Bezier via
+	     `Geom2dConvert`). Remove the "arc pcurve / bspline falls back" gates for the trim path.
+	   - Reconcile `_SUPPORTED_PLANAR_CURVES` / `face_supported` so the eligibility report matches the extractor
+	     (bspline trims now supported; bspline *surfaces* still not).
+
+	5. **End-to-end validation** (reuse the ALICE3 harness). Convert `ST1A38495_01` and `ST1A38526_01` under
+	   `--exact-surfaces auto`; load each via `LoadSurfaceSolid`; compare `Contains` against the accelerated
+	   `O2Tessellated` (NOT ROOT `TGeoTessellated`) over a grid + fixed-seed random set, and capacity against
+	   the divergence-theorem mesh volume; expect boundary-band-only mismatches. Add a synthetic
+	   `BSplineHoleInCylinder` fixture (cylinder with a bspline-bounded window) with an analytic/tessellated
+	   reference. Re-run the ALICE3 sweep and record the new coverage number.
+
+	SCOPE BOUNDARIES (explicitly out of Point 1 — keep the change focused):
+	- B-spline *surfaces* are untouched (that is Point 3, and carries the exactness-vs-tessellation caveat).
+	- **Capacity** of a bspline-trimmed face is numerically integrated → `capacityIsExact()==false` (same
+	  policy already used for wire-trimmed quadrics); **`Safety`/distance** returns a conservative lower bound.
+	- **Closure diagnostic caveat:** two exact faces sharing one 3D bspline edge each carry their *own* pcurve
+	  (different parametrizations of the same 3D curve), so equal-count chord sampling can give slightly
+	  different 3D points and the `IsClosed`/half-edge check may *warn*. Navigation (`Contains`) is exact
+	  regardless — it uses the analytic hit + the exact root-find trim test, never the sampling. Accept the
+	  warning initially; consistent shared-3D-edge sampling is a later refinement if the warnings are noisy.
+	- Validation: `ST1A38495_01` converts under `--exact-surfaces auto` and matches `O2Tessellated` `Contains`
+	  to the mesh-precision band; `ninja` + `ctest -R BVHSurfaceSolid` green; line/arc output byte-identical.
+
+- [ ] **Bounded torus** (analytic; second-largest single analytic blocker).
+	- Motivation: 15 ALICE3 volumes touch a torus; near-miss `ST2487455_002` (lid `0:1:1:8`) is a single
+	  torus face away from exact (cyl + 2 cone + 2 plane + 1 torus).
+	- Approach: a `TorusBoundedSurface` with a `(phi_ring, phi_tube)` parametric domain and the same optional
+	  `CurveWire` trim + inner-wall conventions as the quadrics. Ray/torus is a quartic — use a stable quartic
+	  solver (closed-form Ferrari or a numerically-robust companion-matrix root finder); mind grazing/tangent
+	  double roots for `Contains` parity, as already handled for cylinder/cone.
+
+- [ ] **B-spline / NURBS bounded surfaces** (bulk coverage; largest effort — do last).
+	- Motivation: the dominant blocker. On ALICE3, 34/55 volumes are blocked *only* by bspline and 44/55
+	  touch it; every analytic capability combined tops out at ~11/55. Majority exact coverage of a real
+	  assembly fundamentally requires a genuine bspline surface kernel (surface + trim).
+	- Approach: a `BSplineBoundedSurface` with a genuine **iterative** ray/surface intersection (unlike the
+	  closed-form quadrics). Grounded, well-established methods: Newton from a seed (fast, not globally
+	  robust alone); **Bézier clipping** — Nishita, Sederberg & Kakimoto, *"Ray tracing trimmed rational
+	  surface patches"*, SIGGRAPH 1990 (handles intersection **and** trimming together); or subdivision into a
+	  BVH of Bézier sub-patches + Newton refine (fits our architecture best — see the subdivision-BVH
+	  performance milestone, which this reuses). The 2D trim test is shared with the analytic surfaces.
+	- Reference to validate against: OpenCASCADE's own `IntCurvesFace` / `Geom(2d)API` already ray-cast and
+	  trim these — cross-check the intersector against it.
+	- Exactness caveat (be honest before committing): an iterative intersector is exact-*to-a-tolerance*. For a
+	  bspline *surface* the marginal `Contains` fidelity over a fine adaptive tessellation in the existing BVH
+	  is much smaller than it was for quadrics (where exactness was cheap and free). Weigh against simply
+	  keeping bspline surfaces on the tessellated fallback. The trim-curve milestone above does **not** carry
+	  this caveat — there the surface stays exact and cheap, so the win is unambiguous.
 
 ## BVHSurfaceSolid navigation milestones
 
@@ -187,6 +339,21 @@ only for visualization and fallback paths.
 	- Navigation must never depend on display triangles.
 	- Acceptance test: `GetBuffer3D` returns nonzero vertices/segments/polygons and ROOT can draw a simple solid.
 
+- [ ] **Subdivision-BVH acceleration for curved surface patches** (performance; revisit after correctness).
+	- Motivation: today each surface is one BVH leaf with one *conservative* AABB. For curved patches this box
+	  is loose — a trimmed-arc cylinder/sphere gets the full-cylinder / full-sphere envelope (observed in the
+	  ALICE3 test: `ComputeBBox` over-covers the ~117° channel arc). Loose leaves inflate ray-candidate counts
+	  and every candidate is an expensive analytic patch test.
+	- Idea (wanted even for the *existing* analytic planes/quadrics, not only for bspline): subdivide each
+	  curved patch in its parametric domain into sub-patches, bound each sub-patch tightly, and store the
+	  sub-patches as BVH leaves referencing the same analytic surface plus a parametric sub-window. Navigation
+	  stays **exact** — only the acceleration granularity changes.
+	- Build it generically over `BoundedSurface` (a leaf = surface pointer + parametric sub-window) so every
+	  curved surface opts in with one shared mechanism, and so the eventual `BSplineBoundedSurface` reuses the
+	  exact same subdivision structure its intersector needs.
+	- Acceptance test: ray-candidate counts drop materially on a trimmed-arc quadric fixture vs. the current
+	  single-box leaf, with `Contains`/distance results bit-for-bit unchanged.
+
 ## Surface sidecar format
 
 Version 1 of the exact-surface sidecar (`surfaces_<VOLNAME>_<LID>.bin`), written by
@@ -211,23 +378,27 @@ per surface (nSurfaces times):
     uint32   wireRole      0=outer 1=inner (hole)
     uint32   nEdges
     per edge (nEdges times):
-      uint32   curveType     0=line segment 1=circular arc
+      uint32   curveType     0=line segment 1=circular arc 2=bspline (2D, clamped)
       uint32   nCurveParams
       float64  curveParams[nCurveParams]
-        line: u0 v0 u1 v1
-        arc:  cu cv radius phiStart phiSweep (signed sweep, full circle = +/-2*pi)
+        line:    u0 v0 u1 v1
+        arc:     cu cv radius phiStart phiSweep (signed sweep, full circle = +/-2*pi)
+        bspline: degree nPoles poles[2*nPoles] weights[nPoles] knots[nPoles+degree+1]
+                 (clamped flat knot vector; weights all 1 => non-rational; Bezier is the
+                  single-span special case)
 ```
 
 Per-type `params` layouts (matching the `O2BVHSurfaceSolid::Add*Surface` signatures):
 
 - plane (9): origin xyz, axisU xyz, axisV xyz. The trim is carried in the wire block as
-  general line/arc loops (polygon, disk/annulus, rounded rectangle, slot, ...); exactly one
-  outer wire, holes as inner wires. A pure line-segment loop loads through `AddPlanarSurface`
-  (polygon); any arc edge loads through `AddCurvedPlanarSurface` (`CurvedPlanarBoundedSurface`,
-  orthonormal frame). A disk is one full-circle outer wire; an annulus adds an inner circle.
+  general line/arc/bspline loops (polygon, disk/annulus, rounded rectangle, slot,
+  spline-bounded plate, ...); exactly one outer wire, holes as inner wires. A pure line-segment
+  loop loads through `AddPlanarSurface` (polygon); any arc or bspline edge loads through
+  `AddCurvedPlanarSurface` (`CurvedPlanarBoundedSurface`, orthonormal frame). A disk is one
+  full-circle outer wire; an annulus adds an inner circle.
 - cylinder (14): centerPoint xyz, axis xyz, referenceAxisU xyz, radius, heightMin,
   heightMax, phiStart, phiSweep. An empty wire block means the trim is the scalar parametric
-  rectangle. A non-empty wire block carries a general line/arc trim in the periodic
+  rectangle. A non-empty wire block carries a general line/arc/bspline trim in the periodic
   `(u, v) = (phi[rad], h[cm])` domain (one outer wire, holes as inner wires); it is
   authoritative and the scalar params then act as the frame + a conservative window.
 - cone (15): centerPoint xyz, axis xyz, referenceAxisU xyz, radiusAtMin, radiusAtMax,
@@ -241,8 +412,13 @@ The `nParams`/`nCurveParams` counts make every record self-describing, so future
 extensions can add trailing parameters or new curve types without breaking version-1
 readers that choose to skip them; incompatible changes bump `version`. A quadric trim wire
 must be a non-wrapping loop within one phi window (`<= 2pi`); the writer emits it only when
-the face is not the plain parametric rectangle, and only with line edges (a circular pcurve
-arc does not survive the non-uniform `u -> phi`, `v -> length/latitude` remap as an arc).
+the face is not the plain parametric rectangle. Line edges stay lines; every curved pcurve
+(circle/ellipse/Bezier/bspline) is converted to a bspline and its poles are pushed through the
+*affine* `(u, v) -> (phi, height/theta)` map (a bspline is closed under affine maps, so this is
+exact - an anisotropic map merely turns a circle into an exactly-represented ellipse-bspline).
+Consecutive edge endpoints may differ by the extractor's ~1e-6 projection precision; the reader
+joins within `kJoinTolerance = 1e-5` and the kernel's `CurveWire` accepts the loop within the
+matching `kWireJoinTolerance = 1e-5` (both looser than the `1e-9` boundary tolerance).
 
 ## CAD conversion milestones
 
@@ -389,4 +565,27 @@ arc does not survive the non-uniform `u -> phi`, `v -> length/latitude` remap as
 	- Design note: extraction success (not the `--surface-report`/`face_supported` eligibility) is the source of truth for `auto`/`required`. Reconciled 2026-07-23 once the quadric extractors and general planar line+arc wires landed: `_SUPPORTED_PLANAR_CURVES = {line, circle}` now matches what the extractor actually emits (mixed line+arc planar wires), so the eligibility report and the emitter agree. The remaining superset is quadric faces with non-parametric-rectangle trims, which the report may still call eligible but the extractor rejects.
 	- Validation: `--help`, one smoke run per mode on a generated centered box STEP, cylinder STEP `auto`-fallback / `required`-fail; the extracted box sidecar loads via `LoadSurfaceSolid`, closes with consistent orientation, `Capacity` = 0.192 exactly, 0 `Contains` mismatches vs `TGeoBBox` over 2e5 points. No C++ changes, so no rebuild needed. `g4Config.C` and generated `scripts/geometry/STEP_examples/` artifacts remain intentionally out of the commit.
 	- Next milestone: cylindrical/spherical/conical face extraction — add extractors to `_FACE_EXTRACTORS` reusing the C++ `Add{Cylindrical,Spherical,Conical}Surface` parametric-rectangle API, preserving OCC face orientation for outward normals.
+- 2026-07-24: Real-CAD assessment on `scripts/geometry/STEP_examples/ALICE3_CAD_pure.step` (30.7 MiB, 103 leaf
+	placements, **55 unique unplaced parts**) — no code change, planning only. Ran `--print-tree`,
+	`--surface-report`, and a full `--exact-surfaces auto --mesh` sweep, and cross-checked `Contains` of the
+	exact solid against the accelerated `O2Tessellated` (not ROOT `TGeoTessellated`, whose `Contains` fills
+	concavities on thin shells and is unreliable). Findings that shaped the new milestones:
+	- **Coverage 3/55 (~5.5%)** today (family `ST1A38494_002/003/004`, thin curved channels). Those 3 are
+	  exact: `Contains` matches `O2Tessellated` to 1.4e-4 over 681k points (residual = mesh precision band)
+	  and capacity matches the divergence-theorem mesh volume to <0.05%. So the kernel is correct; the ceiling
+	  is the CAD *extractor's* surface/trim-type coverage.
+	- **B-spline is the dominant blocker**: 44/55 volumes touch it, 34/55 are blocked *only* by it; all
+	  analytic capabilities combined (quadric-curved trims + torus + revolution + extrusion) top out at
+	  ~11/55. The bspline story splits into **trim curves** (cheap; surface stays exact) and **surfaces**
+	  (expensive; exactness-vs-tessellation trade-off).
+	- Concrete study of `ST1A38495_01`/`ST1A38526_01`: all-analytic surfaces (plane/cyl/cone), blocked purely
+	  by bspline *trim* curves — 0 of the blocking quadric faces are pure line/arc, so the arc-pcurve fix does
+	  not help them; a 2D bspline trim-edge type does.
+	- Added three concrete surface milestones (bspline trim curves → torus → bspline surfaces) under "Surface
+	  representation milestones" and a "Subdivision-BVH acceleration for curved surface patches" performance
+	  milestone under the navigation section. **Recommended next implementation target: bspline trim curves**
+	  (surgical, high value, surface stays exact). Also re-confirmed the still-open pre-existing planar
+	  line+arc `kJoinTolerance` reader bug (did not trigger on this dataset because blocking faces are rejected
+	  upstream, but remains a real one-line-ish fix for D-shaped caps).
 - 2026-07-24: Completed "Support general curved (line/arc `CurveWire`) trims on quadrics" (details + design in the milestone note above). Quadric surfaces now take an optional line/arc trim wire in their `(phi, h)`/`(phi, theta)` domain (kernel `BoundedSurface.h`, public `Add*Surface` overloads, sidecar reader `collectQuadricTrim`, Python `_quadric_line_wire` + the stricter `_quadric_trim_fills_uv_box` scalar-path gate). Navigation stays exact; wire-trim capacity is numeric/inexact (flagged) and `Safety` a conservative lower bound. Full `ninja` build + `ctest -R BVHSurfaceSolid` pass (23 cases); pythonOCC smoke confirms scalar-path regression and a notched-cylinder line wire block round-tripping through `LoadSurfaceSolid`. Discovered a **pre-existing** planar line+arc join-tolerance issue in the sidecar reader (`kJoinTolerance` `1e-9` too strict vs `extract_planar_face`'s ~`1e-6` arc-endpoint precision) that blocks whole box-cut solids containing D-shaped caps — left for a focused planar fix. Env note: pythonOCC also needs `LD_LIBRARY_PATH+=/data/swenzel/sw/slc9_x86-64/OCCT/v7.9.3-local1/lib` (for `libTKFeat.so.7.9`, pulled in by the new `Geom2dAdaptor` import) on top of the usual `PYTHONPATH` fix. `g4Config.C` and generated `scripts/geometry/STEP_examples/` artifacts remain intentionally out of the commit.
+- 2026-07-24: Completed the **B-spline trim curves on analytic surfaces** milestone (full details in the milestone note above). Kernel adds a `Curve2D::BSpline` kind (de Boor eval, GL-per-span exact area, polyline-based winding/distance with a lazily-cached flattened polyline that is essential for `CloseShape`/capacity performance), public `PlanarBoundaryCurve::makeBSpline`, sidecar `curveType=2`, and the affine-pole-transform quadric extractor `_quadric_trim_wire` (which also subsumes the old arc-on-quadric ellipse gap). Also folded in the long-standing planar line+arc join fix: reader `kJoinTolerance` and a new kernel `kWireJoinTolerance` are both `1e-5` (the kernel `CurveWire` `1e-9` closure was the actual gate, not just the reader). `ctest -R BVHSurfaceSolid` green (26 cases). End-to-end: `ST1A38495_01`/`ST1A38526_01` (previously bspline-trim-blocked) convert under `--exact-surfaces auto` and match `O2Tessellated` `Contains` with **0 mismatches / 20k points** (BVH==loop too), capacity within 0.17-0.24% of the mesh volume; **ALICE3 coverage 3/55 -> 7/55**. `IsClosed()` may warn on the shared-3D-bspline-edge sampling mismatch (documented caveat; navigation exact). Remaining ceiling: bspline *surfaces* (largest effort, next-to-last milestone) and torus. `g4Config.C` and generated `scripts/geometry/STEP_examples/` artifacts remain intentionally out of the commit.

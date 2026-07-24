@@ -54,6 +54,14 @@ inline constexpr double kAreaTolerance = 1.e-18;         ///< degenerate (zero) 
 inline constexpr double kRayTolerance = 1.e-9;           ///< minimum positive ray parameter t
 inline constexpr double kIntersectionTolerance = 1.e-7;  ///< clustering of near-equal intersections
 inline constexpr double kClosureQuantum = 1.e-7;         ///< vertex quantization for closure matching
+/// Tolerance for accepting a wire loop as closed (consecutive edge/curve endpoints meeting). It is
+/// deliberately looser than kTolerance: a wire is imported from a CAD extractor that samples/
+/// projects each boundary curve's endpoints independently (e.g. a straight line vertex vs. the end
+/// pole of a neighbouring B-spline/arc on a quadric), so the shared vertex can differ by the
+/// extractor's ~1e-6 precision even though the loop is closed. The residual gap is negligible for
+/// winding/area/navigation, which use kTolerance for on-boundary classification.
+inline constexpr double kWireJoinTolerance = 1.e-5;
+inline constexpr double kWireJoinToleranceSq = kWireJoinTolerance * kWireJoinTolerance;
 /// Expansion of the per-surface BVH leaf AABBs (in double, before the outward float rounding).
 /// It must dominate every length tolerance used by navigation queries (kTolerance boundary
 /// classification, kIntersectionTolerance clustering) so a point or ray hit within tolerance of
@@ -584,9 +592,44 @@ inline bool angleInSweepRange(double angle, double start, double sweep, double t
   return delta <= sweep + tolerance || delta >= kTwoPi - tolerance;
 }
 
+/// Compute the \a n-point Gauss-Legendre nodes \a nodes and weights \a weights on [-1, 1].
+/// Used to integrate the exact signed area of polynomial (non-rational) B-spline spans and,
+/// with a higher order, the numeric area of rational spans. Nodes are found by Newton iteration
+/// on the Legendre polynomial P_n, which is robust for the small n used here.
+inline void gaussLegendre(int n, std::vector<double>& nodes, std::vector<double>& weights)
+{
+  nodes.assign(std::max(n, 1), 0.);
+  weights.assign(std::max(n, 1), 0.);
+  if (n < 1) {
+    return;
+  }
+  for (int i = 0; i < n; ++i) {
+    double root = std::cos(kPi * (i + 0.75) / (n + 0.5)); // asymptotic initial guess
+    double derivative = 1.;
+    for (int iteration = 0; iteration < 100; ++iteration) {
+      double previous = 1.;
+      double current = root;
+      for (int degreeIndex = 2; degreeIndex <= n; ++degreeIndex) {
+        const double next = ((2 * degreeIndex - 1) * root * current - (degreeIndex - 1) * previous) / degreeIndex;
+        previous = current;
+        current = next;
+      }
+      derivative = n * (root * current - previous) / (root * root - 1.);
+      const double delta = current / derivative;
+      root -= delta;
+      if (std::abs(delta) < 1.e-15) {
+        break;
+      }
+    }
+    nodes[i] = root;
+    weights[i] = 2. / ((1. - root * root) * derivative * derivative);
+  }
+}
+
 /// Kind of a 2D trimmed boundary curve.
-enum class CurveKind { Line, ///< straight line segment
-                       Arc   ///< circular arc
+enum class CurveKind { Line,   ///< straight line segment
+                       Arc,    ///< circular arc
+                       BSpline ///< clamped (rational) B-spline curve
 };
 
 /// One trimmed boundary curve segment in a surface's parametric (u, v) domain.
@@ -610,6 +653,23 @@ struct Curve2D {
   double radius = 0.;     ///< arc: circle radius
   double startAngle = 0.; ///< arc: start angle [rad]
   double endAngle = 0.;   ///< arc: end angle [rad] (sweep = endAngle - startAngle)
+
+  /// \name B-spline data (kind == BSpline)
+  /// A clamped, possibly rational B-spline curve in the (u, v) parameter domain. \a poles are
+  /// the control points, \a weights the per-pole weights (empty ⇒ all one ⇒ non-rational) and
+  /// \a knots the clamped flat knot vector of length poles.size() + degree + 1. A Bézier curve
+  /// is the single-span special case. The curve parameter used elsewhere in Curve2D runs on
+  /// [0, 1] across the whole knot domain [knots[degree], knots[nPoles]]. @{
+  int degree = 0;
+  std::vector<Vec2> poles;
+  std::vector<double> weights;
+  std::vector<double> knots;
+  /// Lazily-filled flattened polyline of the B-spline (on-curve points, both ends included), so
+  /// the per-point winding/distance queries used by point-in-wire classification and the numeric
+  /// capacity integration do not re-run the adaptive de Boor sampling on every call. Cleared when
+  /// the curve is reversed; safe to copy (the geometry it caches is unchanged by a copy).
+  mutable std::vector<Vec2> bsplineCache;
+  /// @}
 
   static Curve2D makeLine(const Vec2& start, const Vec2& end)
   {
@@ -637,18 +697,233 @@ struct Curve2D {
     return makeArc(arcCenter, arcRadius, 0., clockwise ? -kTwoPi : kTwoPi);
   }
 
+  /// Clamped (rational) B-spline curve of degree \a splineDegree. \a splineWeights may be empty
+  /// for a non-rational curve; \a splineKnots must be the clamped flat knot vector.
+  static Curve2D makeBSpline(int splineDegree, std::vector<Vec2> splinePoles,
+                             std::vector<double> splineWeights, std::vector<double> splineKnots)
+  {
+    Curve2D curve;
+    curve.kind = CurveKind::BSpline;
+    curve.degree = splineDegree;
+    curve.poles = std::move(splinePoles);
+    curve.weights = std::move(splineWeights);
+    curve.knots = std::move(splineKnots);
+    return curve;
+  }
+
   bool isArc() const { return kind == CurveKind::Arc; }
+  bool isBSpline() const { return kind == CurveKind::BSpline; }
 
   double sweep() const { return endAngle - startAngle; }
 
-  /// Basic structural validity (finite data, positive radius for arcs).
+  /// \name B-spline evaluation helpers (kind == BSpline)
+  /// @{
+  double bsplineT0() const { return knots[degree]; }
+  double bsplineT1() const { return knots[poles.size()]; }
+
+  /// True if the curve carries non-unit weights (a rational B-spline).
+  bool bsplineRational() const
+  {
+    for (double weight : weights) {
+      if (std::abs(weight - 1.) > kTolerance) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Knot span index of parameter \a knotValue for the clamped knot vector.
+  int bsplineSpan(double knotValue) const
+  {
+    const int lastPole = static_cast<int>(poles.size()) - 1;
+    if (knotValue >= knots[lastPole + 1]) {
+      return lastPole;
+    }
+    if (knotValue <= knots[degree]) {
+      return degree;
+    }
+    int low = degree;
+    int high = lastPole + 1;
+    int mid = (low + high) / 2;
+    while (knotValue < knots[mid] || knotValue >= knots[mid + 1]) {
+      if (knotValue < knots[mid]) {
+        high = mid;
+      } else {
+        low = mid;
+      }
+      mid = (low + high) / 2;
+    }
+    return mid;
+  }
+
+  /// Non-zero degree-p basis functions \a basis and their first derivatives \a basisDeriv at
+  /// \a knotValue in the given \a span (Piegl & Tiller, "The NURBS Book", DersBasisFuns, first
+  /// derivative only).
+  void bsplineBasis(int span, double knotValue, std::vector<double>& basis,
+                    std::vector<double>& basisDeriv) const
+  {
+    const int p = degree;
+    std::vector<std::vector<double>> ndu(p + 1, std::vector<double>(p + 1, 0.));
+    std::vector<double> left(p + 1, 0.);
+    std::vector<double> right(p + 1, 0.);
+    ndu[0][0] = 1.;
+    for (int j = 1; j <= p; ++j) {
+      left[j] = knotValue - knots[span + 1 - j];
+      right[j] = knots[span + j] - knotValue;
+      double saved = 0.;
+      for (int r = 0; r < j; ++r) {
+        ndu[j][r] = right[r + 1] + left[j - r];
+        const double temp = ndu[r][j - 1] / ndu[j][r];
+        ndu[r][j] = saved + right[r + 1] * temp;
+        saved = left[j - r] * temp;
+      }
+      ndu[j][j] = saved;
+    }
+    basis.assign(p + 1, 0.);
+    basisDeriv.assign(p + 1, 0.);
+    for (int j = 0; j <= p; ++j) {
+      basis[j] = ndu[j][p];
+    }
+    // first derivative (specialization of DersBasisFuns for the k = 1 term)
+    for (int r = 0; r <= p; ++r) {
+      double d = 0.;
+      const int pk = p - 1;
+      if (r >= 1) {
+        d += (1. / ndu[pk + 1][r - 1]) * ndu[r - 1][pk];
+      }
+      if (r <= pk) {
+        d += (-1. / ndu[pk + 1][r]) * ndu[r][pk];
+      }
+      basisDeriv[r] = d * p;
+    }
+  }
+
+  /// Evaluate the (rational) B-spline point \a pointOut and its knot-parameter derivative
+  /// \a derivativeOut at knot parameter \a knotValue.
+  void bsplineEval(double knotValue, Vec2& pointOut, Vec2& derivativeOut) const
+  {
+    const int p = degree;
+    const int span = bsplineSpan(knotValue);
+    std::vector<double> basis;
+    std::vector<double> basisDeriv;
+    bsplineBasis(span, knotValue, basis, basisDeriv);
+    Vec2 weightedSum{0., 0.};
+    Vec2 weightedDeriv{0., 0.};
+    double weightTotal = 0.;
+    double weightDeriv = 0.;
+    for (int j = 0; j <= p; ++j) {
+      const int idx = span - p + j;
+      const double weight = weights.empty() ? 1. : weights[idx];
+      weightedSum.uCoord += basis[j] * weight * poles[idx].uCoord;
+      weightedSum.vCoord += basis[j] * weight * poles[idx].vCoord;
+      weightTotal += basis[j] * weight;
+      weightedDeriv.uCoord += basisDeriv[j] * weight * poles[idx].uCoord;
+      weightedDeriv.vCoord += basisDeriv[j] * weight * poles[idx].vCoord;
+      weightDeriv += basisDeriv[j] * weight;
+    }
+    const double invWeight = (std::abs(weightTotal) > kTolerance) ? 1. / weightTotal : 0.;
+    pointOut = {weightedSum.uCoord * invWeight, weightedSum.vCoord * invWeight};
+    derivativeOut = {(weightedDeriv.uCoord * weightTotal - weightedSum.uCoord * weightDeriv) * invWeight * invWeight,
+                     (weightedDeriv.vCoord * weightTotal - weightedSum.vCoord * weightDeriv) * invWeight * invWeight};
+  }
+
+  /// B-spline point at curve parameter \a parameter in [0, 1].
+  Vec2 bsplinePointAt(double parameter) const
+  {
+    const double knotValue = bsplineT0() + parameter * (bsplineT1() - bsplineT0());
+    Vec2 point;
+    Vec2 derivative;
+    bsplineEval(knotValue, point, derivative);
+    return point;
+  }
+
+  /// Adaptively sample the B-spline into an ordered on-curve polyline (including both ends),
+  /// subdividing the knot domain until each chord deviates from the curve by less than
+  /// sqrt(\a flatnessSq) (or the chord itself is already below the flatness scale, or the depth
+  /// cap is reached). Shared by winding, distance, area-independent visualization and mesh. The
+  /// bounded depth keeps the sample count small even for a near-degenerate or high-curvature
+  /// span; the residual chord error stays well within the navigation length tolerances.
+  void bsplineSampleInto(std::vector<Vec2>& samples, double flatnessSq = 1.e-10, int maxDepth = 16) const
+  {
+    const double t0 = bsplineT0();
+    const double t1 = bsplineT1();
+    Vec2 startPointValue;
+    Vec2 endPointValue;
+    Vec2 unusedDerivative;
+    bsplineEval(t0, startPointValue, unusedDerivative);
+    bsplineEval(t1, endPointValue, unusedDerivative);
+    samples.push_back(startPointValue);
+    bsplineSampleRecursive(t0, t1, startPointValue, endPointValue, flatnessSq, maxDepth, samples);
+  }
+
+  void bsplineSampleRecursive(double t0, double t1, const Vec2& p0, const Vec2& p1, double flatnessSq,
+                              int depth, std::vector<Vec2>& samples) const
+  {
+    const double tMid = 0.5 * (t0 + t1);
+    Vec2 midPoint;
+    Vec2 unusedDerivative;
+    bsplineEval(tMid, midPoint, unusedDerivative);
+    // stop when flat enough, when the chord is already shorter than the flatness scale (so no
+    // finer detail is resolvable), or at the depth cap
+    if (depth <= 0 || pointSegmentDistanceSq(midPoint, p0, p1) <= flatnessSq ||
+        surface::distanceSq(p0, p1) <= flatnessSq) {
+      samples.push_back(p1);
+      return;
+    }
+    bsplineSampleRecursive(t0, tMid, p0, midPoint, flatnessSq, depth - 1, samples);
+    bsplineSampleRecursive(tMid, t1, midPoint, p1, flatnessSq, depth - 1, samples);
+  }
+
+  /// The cached flattened polyline (see \a bsplineCache), computed once on first use. All the
+  /// per-point B-spline queries go through this so a caller that hits the same curve many times
+  /// (numeric capacity integration, dense point-in-wire tests) pays the de Boor sampling only once.
+  const std::vector<Vec2>& bsplineSamples() const
+  {
+    if (bsplineCache.empty()) {
+      bsplineSampleInto(bsplineCache);
+    }
+    return bsplineCache;
+  }
+  /// @}
+
+  /// Basic structural validity (finite data, positive radius for arcs, well-formed clamped knot
+  /// vector for B-splines).
   bool valid() const
   {
     if (kind == CurveKind::Line) {
       return finite(lineStart) && finite(lineEnd);
     }
-    return finite(center) && std::isfinite(radius) && radius > kTolerance && std::isfinite(startAngle) &&
-           std::isfinite(endAngle);
+    if (kind == CurveKind::Arc) {
+      return finite(center) && std::isfinite(radius) && radius > kTolerance && std::isfinite(startAngle) &&
+             std::isfinite(endAngle);
+    }
+    // B-spline
+    const int nPoles = static_cast<int>(poles.size());
+    if (degree < 1 || nPoles < degree + 1) {
+      return false;
+    }
+    if (static_cast<int>(knots.size()) != nPoles + degree + 1) {
+      return false;
+    }
+    if (!weights.empty() && static_cast<int>(weights.size()) != nPoles) {
+      return false;
+    }
+    for (const auto& pole : poles) {
+      if (!finite(pole)) {
+        return false;
+      }
+    }
+    for (double weight : weights) {
+      if (!std::isfinite(weight) || weight <= kTolerance) {
+        return false;
+      }
+    }
+    for (size_t index = 1; index < knots.size(); ++index) {
+      if (!std::isfinite(knots[index]) || knots[index] < knots[index - 1] - kTolerance) {
+        return false;
+      }
+    }
+    return bsplineT1() - bsplineT0() > kTolerance;
   }
 
   Vec2 pointAtAngle(double angle) const
@@ -663,11 +938,32 @@ struct Curve2D {
       return {lineStart.uCoord + parameter * (lineEnd.uCoord - lineStart.uCoord),
               lineStart.vCoord + parameter * (lineEnd.vCoord - lineStart.vCoord)};
     }
+    if (kind == CurveKind::BSpline) {
+      return bsplinePointAt(parameter);
+    }
     return pointAtAngle(startAngle + parameter * sweep());
   }
 
-  Vec2 startPoint() const { return kind == CurveKind::Line ? lineStart : pointAtAngle(startAngle); }
-  Vec2 endPoint() const { return kind == CurveKind::Line ? lineEnd : pointAtAngle(endAngle); }
+  Vec2 startPoint() const
+  {
+    if (kind == CurveKind::Line) {
+      return lineStart;
+    }
+    if (kind == CurveKind::BSpline) {
+      return poles.front(); // clamped knot vector: first pole is the start point
+    }
+    return pointAtAngle(startAngle);
+  }
+  Vec2 endPoint() const
+  {
+    if (kind == CurveKind::Line) {
+      return lineEnd;
+    }
+    if (kind == CurveKind::BSpline) {
+      return poles.back(); // clamped knot vector: last pole is the end point
+    }
+    return pointAtAngle(endAngle);
+  }
 
   /// Unit tangent at parameter \a parameter, pointing in the direction of increasing parameter.
   Vec2 tangentAt(double parameter) const
@@ -679,6 +975,18 @@ struct Curve2D {
         return {0., 0.};
       }
       return {delta.uCoord / length, delta.vCoord / length};
+    }
+    if (kind == CurveKind::BSpline) {
+      // dC/dt scaled by the positive constant dt/ds, so the normalized direction is unchanged
+      const double knotValue = bsplineT0() + parameter * (bsplineT1() - bsplineT0());
+      Vec2 point;
+      Vec2 derivative;
+      bsplineEval(knotValue, point, derivative);
+      const double length = std::sqrt(derivative.uCoord * derivative.uCoord + derivative.vCoord * derivative.vCoord);
+      if (length <= kTolerance) {
+        return {0., 0.};
+      }
+      return {derivative.uCoord / length, derivative.vCoord / length};
     }
     const double angle = startAngle + parameter * sweep();
     const double direction = sweep() >= 0. ? 1. : -1.;
@@ -719,6 +1027,14 @@ struct Curve2D {
       upper.uCoord = std::max(upper.uCoord, point.uCoord);
       upper.vCoord = std::max(upper.vCoord, point.vCoord);
     };
+    if (kind == CurveKind::BSpline) {
+      // the control-point convex hull contains the curve, so its box is a conservative (exact
+      // upper bound) parametric AABB — consistent with the BVH's conservative-box philosophy
+      for (const auto& pole : poles) {
+        include(pole);
+      }
+      return;
+    }
     include(startPoint());
     include(endPoint());
     if (kind == CurveKind::Arc) {
@@ -735,6 +1051,44 @@ struct Curve2D {
   /// Closest point on the curve to \a point, returning the clamped parameter in \a parameter.
   Vec2 closestPoint(const Vec2& point, double& parameter) const
   {
+    if (kind == CurveKind::BSpline) {
+      // Distance to the cached flattened polyline: the nearest projection onto a chord. The
+      // polyline is flat to the sampling tolerance, so this is accurate to ~that tolerance, which
+      // is what classify's boundary band and the (deliberately non-exact) B-spline Safety need,
+      // and it costs no de Boor evaluation per call (critical for dense capacity integration).
+      const auto& polyline = bsplineSamples();
+      if (polyline.size() < 2) {
+        parameter = 0.;
+        return startPoint();
+      }
+      const int segments = static_cast<int>(polyline.size()) - 1;
+      double bestDistanceSq = std::numeric_limits<double>::infinity();
+      Vec2 bestPoint = polyline.front();
+      double bestParameter = 0.;
+      for (int index = 0; index < segments; ++index) {
+        const Vec2 segmentStart = polyline[index];
+        const Vec2 segmentVector = polyline[index + 1] - segmentStart;
+        const double segmentLengthSq =
+          segmentVector.uCoord * segmentVector.uCoord + segmentVector.vCoord * segmentVector.vCoord;
+        double projection = 0.;
+        if (segmentLengthSq > kToleranceSq) {
+          projection = ((point.uCoord - segmentStart.uCoord) * segmentVector.uCoord +
+                        (point.vCoord - segmentStart.vCoord) * segmentVector.vCoord) /
+                       segmentLengthSq;
+          projection = std::max(0., std::min(1., projection));
+        }
+        const Vec2 candidate{segmentStart.uCoord + projection * segmentVector.uCoord,
+                             segmentStart.vCoord + projection * segmentVector.vCoord};
+        const double candidateDistanceSq = surface::distanceSq(point, candidate);
+        if (candidateDistanceSq < bestDistanceSq) {
+          bestDistanceSq = candidateDistanceSq;
+          bestPoint = candidate;
+          bestParameter = (index + projection) / segments;
+        }
+      }
+      parameter = bestParameter;
+      return bestPoint;
+    }
     if (kind == CurveKind::Line) {
       const Vec2 segment{lineEnd.uCoord - lineStart.uCoord, lineEnd.vCoord - lineStart.vCoord};
       const double lengthSq = segment.uCoord * segment.uCoord + segment.vCoord * segment.vCoord;
@@ -784,6 +1138,37 @@ struct Curve2D {
     if (kind == CurveKind::Line) {
       return 0.5 * (lineStart.uCoord * lineEnd.vCoord - lineEnd.uCoord * lineStart.vCoord);
     }
+    if (kind == CurveKind::BSpline) {
+      // (1/2) integral of (u dv - v du) = (1/2) integral of (u v' - v u') dt, evaluated per knot
+      // span by Gauss-Legendre. For a non-rational span the integrand is a degree 2p-1 polynomial,
+      // exactly integrated with p+1 nodes; a rational span is only approximated (higher order), so
+      // a bspline-trimmed face reports capacityIsExact() == false.
+      const int p = degree;
+      const int order = bsplineRational() ? std::max(2 * p + 2, 8) : (p + 1);
+      std::vector<double> nodes;
+      std::vector<double> nodeWeights;
+      gaussLegendre(order, nodes, nodeWeights);
+      double area = 0.;
+      const int lastSpan = static_cast<int>(poles.size()) - 1;
+      for (int spanIndex = p; spanIndex <= lastSpan; ++spanIndex) {
+        const double spanLow = knots[spanIndex];
+        const double spanHigh = knots[spanIndex + 1];
+        const double halfSpan = 0.5 * (spanHigh - spanLow);
+        if (halfSpan <= kTolerance) {
+          continue;
+        }
+        const double spanMid = 0.5 * (spanLow + spanHigh);
+        for (int nodeIndex = 0; nodeIndex < order; ++nodeIndex) {
+          const double knotValue = spanMid + halfSpan * nodes[nodeIndex];
+          Vec2 point;
+          Vec2 derivative;
+          bsplineEval(knotValue, point, derivative);
+          area += 0.5 * (point.uCoord * derivative.vCoord - point.vCoord * derivative.uCoord) *
+                  nodeWeights[nodeIndex] * halfSpan;
+        }
+      }
+      return area;
+    }
     return 0.5 * (radius * center.uCoord * (std::sin(endAngle) - std::sin(startAngle)) -
                   radius * center.vCoord * (std::cos(endAngle) - std::cos(startAngle)) +
                   radius * radius * (endAngle - startAngle));
@@ -823,6 +1208,38 @@ struct Curve2D {
                                                           (canonicalEnd.uCoord - canonicalStart.uCoord) /
                                                           (canonicalEnd.vCoord - canonicalStart.vCoord);
       return (point.uCoord < intersectU) ? 1 : 0;
+    }
+
+    if (kind == CurveKind::BSpline) {
+      // Adaptively flatten the curve into an on-curve polyline, then apply the same half-open
+      // segment-crossing rule as for lines. The canonical shared endpoints replace the first and
+      // last polyline vertices so seams between curves stay consistent. Flattening below the chord
+      // tolerance means each segment is v-monotonic to that tolerance, so a true tangency (both
+      // endpoints on the same side) contributes an even count and a transversal crossing an odd
+      // one, exactly as the arc's v-monotonic split does.
+      const auto& polyline = bsplineSamples();
+      if (polyline.size() < 2) {
+        return 0;
+      }
+      int crossings = 0;
+      for (size_t index = 0; index + 1 < polyline.size(); ++index) {
+        // substitute the caller's canonical shared endpoints at the two ends without mutating the
+        // cached polyline, so loop seams stay consistent across curves
+        const Vec2 first = (index == 0) ? canonicalStart : polyline[index];
+        const Vec2 second = (index + 2 == polyline.size()) ? canonicalEnd : polyline[index + 1];
+        const bool firstAbove = first.vCoord > point.vCoord;
+        const bool secondAbove = second.vCoord > point.vCoord;
+        if (firstAbove == secondAbove) {
+          continue;
+        }
+        const double intersectU =
+          first.uCoord + (point.vCoord - first.vCoord) * (second.uCoord - first.uCoord) /
+                           (second.vCoord - first.vCoord);
+        if (point.uCoord < intersectU) {
+          ++crossings;
+        }
+      }
+      return crossings;
     }
 
     // Split the arc into v-monotonic sub-arcs at its top/bottom extreme angles (cos(theta) = 0,
@@ -869,6 +1286,30 @@ struct Curve2D {
     }
     return crossings;
   }
+
+  /// Reverse the curve's direction in place (start <-> end), keeping the same geometric image.
+  void reverseInPlace()
+  {
+    if (kind == CurveKind::Line) {
+      std::swap(lineStart, lineEnd);
+    } else if (kind == CurveKind::Arc) {
+      std::swap(startAngle, endAngle);
+    } else {
+      // B-spline: reverse the poles/weights and complement the knot vector about its span so the
+      // parametrization runs the other way (knots stay non-decreasing and clamped).
+      std::reverse(poles.begin(), poles.end());
+      if (!weights.empty()) {
+        std::reverse(weights.begin(), weights.end());
+      }
+      const double knotSum = knots.front() + knots.back();
+      std::vector<double> reversedKnots(knots.size());
+      for (size_t index = 0; index < knots.size(); ++index) {
+        reversedKnots[index] = knotSum - knots[knots.size() - 1 - index];
+      }
+      knots = std::move(reversedKnots);
+      bsplineCache.clear(); // geometry order changed; recompute lazily
+    }
+  }
 };
 
 /// One closed, oriented boundary loop built from Curve2D segments (lines and/or arcs).
@@ -898,7 +1339,7 @@ struct CurveWire {
       }
       const Vec2 currentEnd = curves[index].endPoint();
       const Vec2 nextStart = curves[(index + 1) % curves.size()].startPoint();
-      if (surface::distanceSq(currentEnd, nextStart) > kToleranceSq) {
+      if (surface::distanceSq(currentEnd, nextStart) > kWireJoinToleranceSq) {
         status = WireStatus::Open;
         return false;
       }
@@ -925,12 +1366,20 @@ struct CurveWire {
   {
     std::reverse(curves.begin(), curves.end());
     for (auto& curve : curves) {
-      if (curve.kind == CurveKind::Line) {
-        std::swap(curve.lineStart, curve.lineEnd);
-      } else {
-        std::swap(curve.startAngle, curve.endAngle);
+      curve.reverseInPlace();
+    }
+  }
+
+  /// True if any curve of the loop is a B-spline (whose trimmed-face capacity is only numerically
+  /// integrated, so the owning surface must report capacityIsExact() == false).
+  bool hasBSpline() const
+  {
+    for (const auto& curve : curves) {
+      if (curve.kind == CurveKind::BSpline) {
+        return true;
       }
     }
+    return false;
   }
 
   /// Exact signed area enclosed by the loop (positive when counter-clockwise).
@@ -981,6 +1430,14 @@ struct CurveWire {
     for (const auto& curve : curves) {
       if (curve.kind == CurveKind::Line) {
         samples.push_back(curve.startPoint());
+      } else if (curve.kind == CurveKind::BSpline) {
+        // adaptively flatten and append every sample except the closing one (the next curve's
+        // start reproduces it)
+        std::vector<Vec2> curveSamples;
+        curve.bsplineSampleInto(curveSamples);
+        for (size_t index = 0; index + 1 < curveSamples.size(); ++index) {
+          samples.push_back(curveSamples[index]);
+        }
       } else {
         // Scale the chord count by the arc's sweep so a shared rim with a quadric wall (which
         // uses lround(kArcSamples * sweep / 2pi) segments) samples the identical vertices and
@@ -1054,7 +1511,7 @@ inline bool curveTrimContains(const CurveWire& outerWire, const std::vector<Curv
 /// the untrimmed rectangle path keeps its exact closed form.
 template <typename Integrand>
 double integrateOverCurveTrim(const CurveWire& outerWire, const std::vector<CurveWire>& innerWires,
-                              const Integrand& integrand, int samplesPerAxis = 256)
+                              const Integrand& integrand, int samplesPerAxis = 128)
 {
   Vec2 lower{std::numeric_limits<double>::infinity(), std::numeric_limits<double>::infinity()};
   Vec2 upper{-std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity()};
@@ -1127,6 +1584,15 @@ inline std::vector<Vec2> sampleCurveWireByU(const CurveWire& wire, int segmentsP
 {
   std::vector<Vec2> samples;
   for (const auto& curve : wire.curves) {
+    if (curve.kind == CurveKind::BSpline) {
+      // adaptively flatten in the parameter domain; append every sample except the closing one
+      std::vector<Vec2> curveSamples;
+      curve.bsplineSampleInto(curveSamples);
+      for (size_t index = 0; index + 1 < curveSamples.size(); ++index) {
+        samples.push_back(curveSamples[index]);
+      }
+      continue;
+    }
     Vec2 lower{std::numeric_limits<double>::infinity(), std::numeric_limits<double>::infinity()};
     Vec2 upper{-std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity()};
     curve.extendBounds(lower, upper);
@@ -1558,6 +2024,13 @@ class CurvedPlanarBoundedSurface final : public BoundedSurface
       mReoriented = mReoriented || (innerStatus == WireStatus::Reversed);
       mInnerWires.emplace_back(std::move(innerWire));
     }
+
+    // A B-spline boundary makes the area (hence the capacity contribution) a numeric quadrature,
+    // so flag the capacity as inexact (matching the wire-trimmed-quadric policy).
+    mCapacityExact = !mOuterWire.hasBSpline();
+    for (const auto& innerWire : mInnerWires) {
+      mCapacityExact = mCapacityExact && !innerWire.hasBSpline();
+    }
     return true;
   }
 
@@ -1688,7 +2161,7 @@ class CurvedPlanarBoundedSurface final : public BoundedSurface
 
   double capacityContribution() const override { return dot(mOrigin, mNormal) * area() / 3.; }
 
-  bool capacityIsExact() const override { return true; }
+  bool capacityIsExact() const override { return mCapacityExact; }
 
   void appendDisplayMesh(std::vector<Vec3>& vertices, std::vector<std::array<int, 3>>& triangles) const override
   {
@@ -1733,6 +2206,7 @@ class CurvedPlanarBoundedSurface final : public BoundedSurface
   Vec3 mAxisV;
   Vec3 mNormal;
   bool mReoriented = false;
+  bool mCapacityExact = true;
   CurveWire mOuterWire;
   std::vector<CurveWire> mInnerWires;
 };
