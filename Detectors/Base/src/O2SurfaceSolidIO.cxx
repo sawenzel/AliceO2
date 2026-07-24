@@ -134,6 +134,39 @@ bool wireToCurves(const std::string& file, size_t surfaceIndex, const SidecarWir
   return true;
 }
 
+/// Collect a quadric surface's trim wire block into one outer loop plus inner (hole) loops of
+/// PlanarBoundaryCurve segments, expressed in the surface's parametric (u, v) domain
+/// (u = phi[rad]; v = height[cm] for cylinder/cone, v = theta[rad] for sphere).
+bool collectQuadricTrim(const std::string& file, size_t surfaceIndex, const std::vector<SidecarWire>& wires,
+                        std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>& outer,
+                        std::vector<std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>>& inners)
+{
+  bool haveOuter = false;
+  bool anyArc = false; // quadric domains accept both line and arc trim edges
+  for (const auto& wire : wires) {
+    std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve> curves;
+    if (!wireToCurves(file, surfaceIndex, wire, curves, anyArc)) {
+      return false;
+    }
+    if (wire.role == 0) {
+      if (haveOuter) {
+        ::Error("LoadSurfaceSolid", "%s: quadric surface %zu has more than one outer trim wire", file.c_str(),
+                surfaceIndex);
+        return false;
+      }
+      outer = std::move(curves);
+      haveOuter = true;
+    } else {
+      inners.push_back(std::move(curves));
+    }
+  }
+  if (!haveOuter) {
+    ::Error("LoadSurfaceSolid", "%s: quadric surface %zu trim block has no outer wire", file.c_str(), surfaceIndex);
+    return false;
+  }
+  return true;
+}
+
 } // namespace
 
 bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
@@ -258,8 +291,18 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
                   nParams);
           return false;
         }
-        added = solid.AddCylindricalSurface(point3(p, 0), point3(p, 3), point3(p, 6), p[9], p[10], p[11], p[12], p[13],
-                                            innerWall);
+        if (wires.empty()) {
+          added = solid.AddCylindricalSurface(point3(p, 0), point3(p, 3), point3(p, 6), p[9], p[10], p[11], p[12],
+                                              p[13], innerWall);
+        } else {
+          std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve> outer;
+          std::vector<std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>> inners;
+          if (!collectQuadricTrim(file, s, wires, outer, inners)) {
+            return false;
+          }
+          added = solid.AddCylindricalSurface(point3(p, 0), point3(p, 3), point3(p, 6), p[9], p[10], p[11], p[12],
+                                              p[13], innerWall, outer, inners);
+        }
         break;
       }
       case kCone: {
@@ -267,8 +310,18 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
           ::Error("LoadSurfaceSolid", "%s: cone surface %zu has %u parameters, expected 15", file.c_str(), s, nParams);
           return false;
         }
-        added = solid.AddConicalSurface(point3(p, 0), point3(p, 3), point3(p, 6), p[9], p[10], p[11], p[12], p[13],
-                                        p[14], innerWall);
+        if (wires.empty()) {
+          added = solid.AddConicalSurface(point3(p, 0), point3(p, 3), point3(p, 6), p[9], p[10], p[11], p[12], p[13],
+                                          p[14], innerWall);
+        } else {
+          std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve> outer;
+          std::vector<std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>> inners;
+          if (!collectQuadricTrim(file, s, wires, outer, inners)) {
+            return false;
+          }
+          added = solid.AddConicalSurface(point3(p, 0), point3(p, 3), point3(p, 6), p[9], p[10], p[11], p[12], p[13],
+                                          p[14], innerWall, outer, inners);
+        }
         break;
       }
       case kSphere: {
@@ -277,8 +330,18 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
                   nParams);
           return false;
         }
-        added = solid.AddSphericalSurface(point3(p, 0), point3(p, 3), point3(p, 6), p[9], p[10], p[11], p[12], p[13],
-                                          innerWall);
+        if (wires.empty()) {
+          added = solid.AddSphericalSurface(point3(p, 0), point3(p, 3), point3(p, 6), p[9], p[10], p[11], p[12],
+                                            p[13], innerWall);
+        } else {
+          std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve> outer;
+          std::vector<std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>> inners;
+          if (!collectQuadricTrim(file, s, wires, outer, inners)) {
+            return false;
+          }
+          added = solid.AddSphericalSurface(point3(p, 0), point3(p, 3), point3(p, 6), p[9], p[10], p[11], p[12],
+                                            p[13], innerWall, outer, inners);
+        }
         break;
       }
       default:

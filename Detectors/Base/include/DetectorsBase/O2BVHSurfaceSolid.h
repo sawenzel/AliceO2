@@ -81,6 +81,15 @@ class O2BVHSurfaceSolid : public TGeoBBox
                              double radius, double heightMin, double heightMax, double phiStart = 0.,
                              double phiSweep = 6.283185307179586, bool innerWall = false);
 
+  /// Wire-trimmed cylindrical surface: as AddCylindricalSurface, but the domain is the general
+  /// line/arc trim \a outerTrim (plus optional \a innerTrims holes) in the periodic parametric
+  /// (phi[rad], h[cm]) domain instead of the scalar phi/height rectangle. The scalar arguments
+  /// still pin the frame/radius and a nominal window; the wire is authoritative for containment.
+  bool AddCylindricalSurface(const Point3D& centerPoint, const Point3D& axis, const Point3D& referenceAxisU,
+                             double radius, double heightMin, double heightMax, double phiStart, double phiSweep,
+                             bool innerWall, const std::vector<PlanarBoundaryCurve>& outerTrim,
+                             const std::vector<std::vector<PlanarBoundaryCurve>>& innerTrims = {});
+
   /// Add a spherical surface of given \a radius around \a center, trimmed to a polar range
   /// (theta from the +polarAxis pole) and a phi sweep from \a referenceAxisU. The default
   /// arguments give a full, self-closing sphere.
@@ -88,12 +97,29 @@ class O2BVHSurfaceSolid : public TGeoBBox
                            double radius, double thetaMin = 0., double thetaMax = 3.141592653589793,
                            double phiStart = 0., double phiSweep = 6.283185307179586, bool innerWall = false);
 
+  /// Wire-trimmed spherical surface: as AddSphericalSurface, but the domain is the general
+  /// line/arc trim \a outerTrim (plus optional \a innerTrims holes) in the parametric
+  /// (phi[rad], theta[rad]) domain instead of the scalar theta/phi rectangle.
+  bool AddSphericalSurface(const Point3D& center, const Point3D& polarAxis, const Point3D& referenceAxisU,
+                           double radius, double thetaMin, double thetaMax, double phiStart, double phiSweep,
+                           bool innerWall, const std::vector<PlanarBoundaryCurve>& outerTrim,
+                           const std::vector<std::vector<PlanarBoundaryCurve>>& innerTrims = {});
+
   /// Add a conical lateral surface whose radius runs linearly from \a radiusAtMin at
   /// \a heightMin to \a radiusAtMax at \a heightMax along \a axis; one radius may be zero (apex
   /// cone). Frame and innerWall conventions as for AddCylindricalSurface.
   bool AddConicalSurface(const Point3D& centerPoint, const Point3D& axis, const Point3D& referenceAxisU,
                          double radiusAtMin, double radiusAtMax, double heightMin, double heightMax,
                          double phiStart = 0., double phiSweep = 6.283185307179586, bool innerWall = false);
+
+  /// Wire-trimmed conical surface: as AddConicalSurface, but the domain is the general line/arc
+  /// trim \a outerTrim (plus optional \a innerTrims holes) in the periodic parametric
+  /// (phi[rad], h[cm]) domain instead of the scalar phi/height rectangle. The scalar radii pin
+  /// the linear radius law r(h); the wire is authoritative for containment.
+  bool AddConicalSurface(const Point3D& centerPoint, const Point3D& axis, const Point3D& referenceAxisU,
+                         double radiusAtMin, double radiusAtMax, double heightMin, double heightMax, double phiStart,
+                         double phiSweep, bool innerWall, const std::vector<PlanarBoundaryCurve>& outerTrim,
+                         const std::vector<std::vector<PlanarBoundaryCurve>>& innerTrims = {});
 
   /// Finalize the shape: compute the bounding box, the display mesh, the closure/orientation
   /// diagnostics (when \a check is set) and build the BVH acceleration structure over the

@@ -335,6 +335,41 @@ bool O2BVHSurfaceSolid::AddCylindricalSurface(const Point3D& centerPoint, const 
   return true;
 }
 
+bool O2BVHSurfaceSolid::AddCylindricalSurface(const Point3D& centerPoint, const Point3D& axis,
+                                              const Point3D& referenceAxisU, double radius, double heightMin,
+                                              double heightMax, double phiStart, double phiSweep, bool innerWall,
+                                              const std::vector<PlanarBoundaryCurve>& outerTrim,
+                                              const std::vector<std::vector<PlanarBoundaryCurve>>& innerTrims)
+{
+  if (fImpl == nullptr) {
+    fImpl = new Impl;
+  }
+  if (fImpl->defined) {
+    Error("AddCylindricalSurface", "Shape %s already fully defined. Not adding", GetName());
+    return false;
+  }
+
+  const std::vector<Curve2D> outerCurves = makeCurveWire(outerTrim);
+  std::vector<std::vector<Curve2D>> innerCurves;
+  innerCurves.reserve(innerTrims.size());
+  for (const auto& innerTrim : innerTrims) {
+    innerCurves.push_back(makeCurveWire(innerTrim));
+  }
+
+  auto surface = std::make_unique<CylindricalBoundedSurface>();
+  std::string errorMessage;
+  if (!surface->initialize(makeVec3(centerPoint), makeVec3(axis), makeVec3(referenceAxisU), radius, heightMin,
+                           heightMax, phiStart, phiSweep, innerWall, outerCurves, innerCurves, errorMessage)) {
+    Error("AddCylindricalSurface", "%s", errorMessage.c_str());
+    return false;
+  }
+
+  fImpl->surfaces.emplace_back(std::move(surface));
+  fImpl->displayVertices.clear();
+  fImpl->displayTriangles.clear();
+  return true;
+}
+
 bool O2BVHSurfaceSolid::AddSphericalSurface(const Point3D& center, const Point3D& polarAxis,
                                             const Point3D& referenceAxisU, double radius, double thetaMin,
                                             double thetaMax, double phiStart, double phiSweep, bool innerWall)
@@ -351,6 +386,41 @@ bool O2BVHSurfaceSolid::AddSphericalSurface(const Point3D& center, const Point3D
   std::string errorMessage;
   if (!surface->initialize(makeVec3(center), makeVec3(polarAxis), makeVec3(referenceAxisU), radius, thetaMin,
                            thetaMax, phiStart, phiSweep, innerWall, errorMessage)) {
+    Error("AddSphericalSurface", "%s", errorMessage.c_str());
+    return false;
+  }
+
+  fImpl->surfaces.emplace_back(std::move(surface));
+  fImpl->displayVertices.clear();
+  fImpl->displayTriangles.clear();
+  return true;
+}
+
+bool O2BVHSurfaceSolid::AddSphericalSurface(const Point3D& center, const Point3D& polarAxis,
+                                            const Point3D& referenceAxisU, double radius, double thetaMin,
+                                            double thetaMax, double phiStart, double phiSweep, bool innerWall,
+                                            const std::vector<PlanarBoundaryCurve>& outerTrim,
+                                            const std::vector<std::vector<PlanarBoundaryCurve>>& innerTrims)
+{
+  if (fImpl == nullptr) {
+    fImpl = new Impl;
+  }
+  if (fImpl->defined) {
+    Error("AddSphericalSurface", "Shape %s already fully defined. Not adding", GetName());
+    return false;
+  }
+
+  const std::vector<Curve2D> outerCurves = makeCurveWire(outerTrim);
+  std::vector<std::vector<Curve2D>> innerCurves;
+  innerCurves.reserve(innerTrims.size());
+  for (const auto& innerTrim : innerTrims) {
+    innerCurves.push_back(makeCurveWire(innerTrim));
+  }
+
+  auto surface = std::make_unique<SphericalBoundedSurface>();
+  std::string errorMessage;
+  if (!surface->initialize(makeVec3(center), makeVec3(polarAxis), makeVec3(referenceAxisU), radius, thetaMin,
+                           thetaMax, phiStart, phiSweep, innerWall, outerCurves, innerCurves, errorMessage)) {
     Error("AddSphericalSurface", "%s", errorMessage.c_str());
     return false;
   }
@@ -378,6 +448,42 @@ bool O2BVHSurfaceSolid::AddConicalSurface(const Point3D& centerPoint, const Poin
   std::string errorMessage;
   if (!surface->initialize(makeVec3(centerPoint), makeVec3(axis), makeVec3(referenceAxisU), radiusAtMin,
                            radiusAtMax, heightMin, heightMax, phiStart, phiSweep, innerWall, errorMessage)) {
+    Error("AddConicalSurface", "%s", errorMessage.c_str());
+    return false;
+  }
+
+  fImpl->surfaces.emplace_back(std::move(surface));
+  fImpl->displayVertices.clear();
+  fImpl->displayTriangles.clear();
+  return true;
+}
+
+bool O2BVHSurfaceSolid::AddConicalSurface(const Point3D& centerPoint, const Point3D& axis,
+                                          const Point3D& referenceAxisU, double radiusAtMin, double radiusAtMax,
+                                          double heightMin, double heightMax, double phiStart, double phiSweep,
+                                          bool innerWall, const std::vector<PlanarBoundaryCurve>& outerTrim,
+                                          const std::vector<std::vector<PlanarBoundaryCurve>>& innerTrims)
+{
+  if (fImpl == nullptr) {
+    fImpl = new Impl;
+  }
+  if (fImpl->defined) {
+    Error("AddConicalSurface", "Shape %s already fully defined. Not adding", GetName());
+    return false;
+  }
+
+  const std::vector<Curve2D> outerCurves = makeCurveWire(outerTrim);
+  std::vector<std::vector<Curve2D>> innerCurves;
+  innerCurves.reserve(innerTrims.size());
+  for (const auto& innerTrim : innerTrims) {
+    innerCurves.push_back(makeCurveWire(innerTrim));
+  }
+
+  auto surface = std::make_unique<ConicalBoundedSurface>();
+  std::string errorMessage;
+  if (!surface->initialize(makeVec3(centerPoint), makeVec3(axis), makeVec3(referenceAxisU), radiusAtMin,
+                           radiusAtMax, heightMin, heightMax, phiStart, phiSweep, innerWall, outerCurves,
+                           innerCurves, errorMessage)) {
     Error("AddConicalSurface", "%s", errorMessage.c_str());
     return false;
   }
