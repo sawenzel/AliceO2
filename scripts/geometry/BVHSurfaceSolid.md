@@ -587,7 +587,7 @@ only for visualization and fallback paths.
 
 	**This supersedes** the 2026-07-24 note's "IsClosed() may warn on the shared-3D-bspline-edge sampling mismatch (documented caveat; navigation exact)". Navigation is **not** exact when this happens, and the framing there (a B-spline sampling artifact) understates it: the defect is the lost topology, and B-splines only make it visible because theirs are the pcurves we flatten.
 
-	**Work items, in the order they should be attacked.**
+	**Work items, in the order they should be attacked.** Planned in detail, with acceptance criteria, ordering and environment notes, in [`ExactTrimTopology.md`](ExactTrimTopology.md) — start there.
 	1. **Preserve shared edges (converter).** Key trim curves by their `TopoDS_Edge` identity (`TopExp::MapShapesAndAncestors` gives edge -> faces) and hand both adjacent patches the *same* trim curve. Consistency is what parity needs — the curve does not have to lie exactly on either surface, both sides merely have to agree on where the boundary is. This is the fix that addresses the actual cause; everything else is mitigation.
 	2. **Analytic point-in-trim, no polyline (kernel).** Replace the flattened-polyline winding test on B-spline wires with an exact 2D ray/curve crossing count: convert each span to Bézier form and root-find (Bézier clipping), which is exact to machine precision rather than sampled. Removes the last sampling step from containment, and removes the cost that dominates these parts.
 	3. **Canonical recognition of trim *curves* (converter, cheapest).** Most of these seams are exactly circles or straight lines that the CAD kernel happened to write as B-splines. Recognising them (the "cheaper half" of the canonical-recognition milestone, still not started) makes both sides of a seam agree *analytically* and skips 1 and 2 entirely for the common case. Highest value per unit effort, but it does not cover genuinely free-form seams, so it does not replace 1.
@@ -966,7 +966,8 @@ matching `kWireJoinTolerance = 1e-5` (both looser than the `1e-9` boundary toler
   flip `Contains` to "inside" **1.71 cm from the nearest patch** (confirmed: `Contains_Loop` agrees, so not
   the BVH; and the wrong region is a narrow tube aligned with the parity test direction, i.e. the gap's
   shadow, exactly as predicted). This supersedes the 2026-07-24 "navigation exact" caveat. Four ordered
-  work items are recorded there, headed by preserving shared edges in the converter.
+  work items are recorded there and planned in detail in the new
+  [`ExactTrimTopology.md`](ExactTrimTopology.md), headed by preserving shared edges in the converter.
   Two further findings were recorded as open items rather than fixed: `Safety` is the most expensive kernel
   (10132 ns/call, 4.74x the mesh) purely because it still has no BVH — the `Safety` milestone below is
   now the highest-value optimization — and `Contains` disagrees with `Contains_Loop` on 301/142500 points,
