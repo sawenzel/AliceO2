@@ -48,10 +48,25 @@ bound.
 Note: OCCT's own BRepLib_CanonicalRecognition (7.7+) is not exposed in the pythonOCC v7.9.3 build
 used here (ImportError from OCC.Core.BRepLib), which is why this is a standalone numeric recognizer.
 
+Trim curves
+-----------
+`--trim-curves` asks the same question one dimension down, about the *boundary* curves, and
+additionally measures the shared-edge defect written up in ExactTrimTopology.md: how far apart the
+two faces of one `TopoDS_Edge` place their common boundary, given that each carries its own
+independently fitted pcurve.
+
+Measured on 2026-07-26 (faces the exact converter can represent; "real geometry" is the
+machine-precision classification of curves the file stores as B-splines):
+  - Bagger.step     : 48 B-spline pcurves -> 6 exactly lines, 0 circles, 42 free-form.
+                      705 shared edges, max pcurve disagreement 1.3e-5 model units (mean 7.3e-8).
+  - as1-oc-214.stp  : 210 B-spline pcurves -> 70 lines, 70 circles, 70 free-form.
+                      354 shared edges, max pcurve disagreement 2.9e-5 (mean 5.1e-6).
+
 Usage
 -----
     python3 analyze_surface_geometry.py model.step [more.step ...]
     python3 analyze_surface_geometry.py --per-solid model.step      # coverage forecast
+    python3 analyze_surface_geometry.py --trim-curves model.step    # trim-curve + shared-edge report
     python3 analyze_surface_geometry.py --json out.json model.step
 
 Author:
@@ -68,14 +83,19 @@ from collections import Counter
 import numpy as np
 
 from OCC.Core.STEPControl import STEPControl_Reader
-from OCC.Core.TopExp import TopExp_Explorer
-from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_SOLID
+from OCC.Core.TopExp import TopExp_Explorer, topexp
+from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_SOLID, TopAbs_EDGE
 from OCC.Core.TopoDS import topods
-from OCC.Core.BRepAdaptor import BRepAdaptor_Surface
+from OCC.Core.TopTools import TopTools_IndexedDataMapOfShapeListOfShape
+from OCC.Core.BRep import BRep_Tool
+from OCC.Core.BRepAdaptor import BRepAdaptor_Surface, BRepAdaptor_Curve
+from OCC.Core.Geom2dAdaptor import Geom2dAdaptor_Curve
 from OCC.Core.GeomAbs import (
     GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone, GeomAbs_Sphere, GeomAbs_Torus,
     GeomAbs_BSplineSurface, GeomAbs_BezierSurface,
     GeomAbs_SurfaceOfRevolution, GeomAbs_SurfaceOfExtrusion,
+    GeomAbs_Line, GeomAbs_Circle, GeomAbs_Ellipse, GeomAbs_Hyperbola, GeomAbs_Parabola,
+    GeomAbs_BSplineCurve, GeomAbs_BezierCurve, GeomAbs_OtherCurve,
 )
 from OCC.Core.gp import gp_Pnt, gp_Vec
 
@@ -88,6 +108,17 @@ STORED_TYPE_NAMES = {
     GeomAbs_BSplineSurface: "bspline", GeomAbs_BezierSurface: "bezier",
     GeomAbs_SurfaceOfRevolution: "revolution", GeomAbs_SurfaceOfExtrusion: "extrusion",
 }
+
+CURVE_TYPE_NAMES = {
+    GeomAbs_Line: "line", GeomAbs_Circle: "circle", GeomAbs_Ellipse: "ellipse",
+    GeomAbs_Hyperbola: "hyperbola", GeomAbs_Parabola: "parabola",
+    GeomAbs_BSplineCurve: "bspline", GeomAbs_BezierCurve: "bezier",
+    GeomAbs_OtherCurve: "other",
+}
+
+# Curve types the converter's trim path already stores analytically (line/arc Curve2D kinds);
+# everything else becomes a flattened B-spline.
+CANONICAL_CURVE_TYPES = (GeomAbs_Line, GeomAbs_Circle)
 
 # Relative residual below which a model is accepted as EXACT (machine precision).
 TOL_EXACT = 1e-9
@@ -185,6 +216,243 @@ def classify_surface(P, N):
             best = ("cone", res)
 
     return best
+
+
+# ---------------------------------------------------------------------------------------------
+# Trim curves
+#
+# The surface half of this tool asks "is a stored NURBS *surface* really a quadric". This half
+# asks the same question one dimension down, about the *trim* curves, and it exists because of the
+# defect written up in ExactTrimTopology.md: the converter stores every curved trim edge as a
+# B-spline and the kernel then flattens it to a polyline to answer point-in-trim. When a trim edge
+# is really a circle or a straight line, storing it as such is exact recognition (same curve,
+# lighter representation) and makes both adjacent faces agree analytically -- so the number below
+# sizes items 2 and 3 of that plan before either is written.
+#
+# Two classifications per edge, and they answer different questions:
+#   - the *pcurve* in the face's own (u, v): what this face could store analytically today;
+#   - the *3D curve*: what a shared-edge representation (item 1) could hand to both faces.
+# ---------------------------------------------------------------------------------------------
+
+def sample_curve(evaluate, first, last, n=25):
+    """Sample `evaluate(t)` (returning a coordinate tuple) uniformly over [first, last]."""
+    if not (math.isfinite(first) and math.isfinite(last)) or last <= first:
+        return None
+    try:
+        return np.array([evaluate(float(t)) for t in np.linspace(first, last, n)])
+    except Exception:
+        return None
+
+
+def classify_curve(S):
+    """Return (model_name, relative_residual) for a sampled curve in 2D or 3D.
+
+    Model selection in increasing parameter count, as for surfaces: line < circle < freeform.
+    The residual is relative to the sample bounding-box diagonal, so "exact" means the stored
+    representation *is* that curve rather than merely close to it -- a curve that is almost a
+    circle must stay free-form for exactly the reason the surface half states: silently changing
+    geometry is worse than a slow trim.
+    """
+    scale = float(np.linalg.norm(S.max(axis=0) - S.min(axis=0)))
+    if scale < 1e-12:
+        return "degenerate", 0.0
+
+    # --- line: every sample on the chord through the endpoints
+    direction = S[-1] - S[0]
+    length = float(np.linalg.norm(direction))
+    if length > 1e-12:
+        unit = direction / length
+        offsets = S - S[0]
+        perpendicular = offsets - np.outer(offsets @ unit, unit)
+        residual = float(np.linalg.norm(perpendicular, axis=1).max() / scale)
+        if residual < TOL_EXACT:
+            return "line", residual
+        best = ("freeform", residual if residual < np.inf else np.inf)
+    else:
+        best = ("freeform", float(np.inf))
+
+    # --- circle: planar (3D only) and at constant distance from a centre in that plane.
+    # Solving |P - C|^2 = R^2 as the linear system 2 P.C + (R^2 - |C|^2) = |P|^2 keeps this a
+    # single least-squares solve with no initial guess, in the plane of the samples.
+    centred = S - S.mean(axis=0)
+    if S.shape[1] == 3:
+        _, singular, Vt = np.linalg.svd(centred, full_matrices=False)
+        if singular[2] > TOL_EXACT * scale:
+            return best                              # not planar: cannot be a circle
+        basis = Vt[:2]
+        flat = centred @ basis.T
+    else:
+        basis, flat = None, centred
+    M = np.column_stack([2.0 * flat, np.ones(len(flat))])
+    solution, *_ = np.linalg.lstsq(M, np.einsum('ij,ij->i', flat, flat), rcond=None)
+    centre2d = solution[:-1]
+    r2 = solution[-1] + float(centre2d @ centre2d)
+    if r2 > 0:
+        radius = math.sqrt(r2)
+        residual = float(np.abs(np.linalg.norm(flat - centre2d, axis=1) - radius).max() / scale)
+        if residual < best[1]:
+            best = ("circle", residual)
+    return best
+
+
+def _pcurve_samples(edge, face):
+    curve2d, first, last = BRep_Tool.CurveOnSurface(edge, face)
+    if curve2d is None:
+        return None, None
+    stored = None
+    try:
+        stored = Geom2dAdaptor_Curve(curve2d).GetType()
+    except Exception:
+        pass
+    def evaluate(t):
+        p = curve2d.Value(t)
+        return (p.X(), p.Y())
+    return stored, sample_curve(evaluate, first, last)
+
+
+def _pcurve_polyline_3d(edge, face, n=48):
+    """The edge as *this face* sees it: its pcurve pushed through this face's own surface.
+
+    This is the geometry the converter actually writes today, so the distance between the two
+    polylines of one shared edge is precisely the seam gap ExactTrimTopology.md is about.
+    """
+    curve2d, first, last = BRep_Tool.CurveOnSurface(edge, face)
+    if curve2d is None or not (math.isfinite(first) and math.isfinite(last)) or last <= first:
+        return None
+    surface = BRep_Tool.Surface(face)
+    if surface is None:
+        return None
+    try:
+        points = []
+        for t in np.linspace(first, last, n):
+            uv = curve2d.Value(float(t))
+            p = surface.Value(uv.X(), uv.Y())
+            points.append((p.X(), p.Y(), p.Z()))
+        return np.array(points)
+    except Exception:
+        return None
+
+
+def _max_point_to_polyline(points, polyline):
+    """One-sided max distance from `points` to the segments of `polyline`."""
+    starts, ends = polyline[:-1], polyline[1:]
+    segments = ends - starts
+    lengths2 = np.einsum('ij,ij->i', segments, segments)
+    lengths2 = np.where(lengths2 > 1e-30, lengths2, 1.0)
+    worst = 0.0
+    for point in points:
+        offsets = point - starts
+        t = np.clip(np.einsum('ij,ij->i', offsets, segments) / lengths2, 0.0, 1.0)
+        closest = starts + t[:, None] * segments
+        worst = max(worst, float(np.linalg.norm(point - closest, axis=1).min()))
+    return worst
+
+
+def analyze_trim_curves(shape, convertible_surfaces_only=True):
+    """Classify every trim edge of every face, and measure the shared-edge pcurve disagreement.
+
+    With `convertible_surfaces_only` (the default) only faces whose *surface* the exact converter
+    can represent are counted -- a trim curve on a face that falls back to the mesh anyway is not
+    a trim the kernel will ever evaluate, so counting it would inflate the payoff.
+    """
+    pcurve_stored, pcurve_real = Counter(), Counter()
+    curve3d_stored, curve3d_real = Counter(), Counter()
+    residuals = []
+
+    faces = [f for f in faces_of(shape)]
+    keep = []
+    for face in faces:
+        if not convertible_surfaces_only:
+            keep.append(face)
+            continue
+        adaptor = BRepAdaptor_Surface(face)
+        if adaptor.GetType() in ANALYTIC_TYPES:
+            keep.append(face)
+            continue
+        P, N = sample_surface(adaptor)               # recognized-as-quadric faces convert too
+        if P is not None:
+            kind, res = classify_surface(P, N)
+            if res < TOL_EXACT and kind in ("plane", "cylinder", "cone", "sphere"):
+                keep.append(face)
+
+    for face in keep:
+        explorer = TopExp_Explorer(face, TopAbs_EDGE)
+        while explorer.More():
+            edge = topods.Edge(explorer.Current())
+            explorer.Next()
+            if BRep_Tool.Degenerated(edge):
+                continue
+
+            stored2d, samples2d = _pcurve_samples(edge, face)
+            name2d = CURVE_TYPE_NAMES.get(stored2d, "none" if stored2d is None else f"enum{stored2d}")
+            pcurve_stored[name2d] += 1
+            if stored2d in CANONICAL_CURVE_TYPES:
+                pcurve_real[name2d] += 1            # already stored analytically
+            elif samples2d is None:
+                pcurve_real["unsampleable"] += 1
+            else:
+                kind, residual = classify_curve(samples2d)
+                pcurve_real[kind if residual < TOL_EXACT else "freeform"] += 1
+                residuals.append(residual)
+
+            try:
+                stored3d = BRepAdaptor_Curve(edge).GetType()
+            except Exception:
+                stored3d = None
+            name3d = CURVE_TYPE_NAMES.get(stored3d, "none" if stored3d is None else f"enum{stored3d}")
+            curve3d_stored[name3d] += 1
+            if stored3d in CANONICAL_CURVE_TYPES:
+                curve3d_real[name3d] += 1
+            else:
+                curve3d, first, last = BRep_Tool.Curve(edge)
+                samples3d = None
+                if curve3d is not None:
+                    def evaluate(t, c=curve3d):
+                        p = c.Value(t)
+                        return (p.X(), p.Y(), p.Z())
+                    samples3d = sample_curve(evaluate, first, last)
+                if samples3d is None:
+                    curve3d_real["unsampleable"] += 1
+                else:
+                    kind, residual = classify_curve(samples3d)
+                    curve3d_real[kind if residual < TOL_EXACT else "freeform"] += 1
+
+    # Shared-edge disagreement: for every edge carried by two of the kept faces, how far apart are
+    # the two faces' own images of it? This is the sliver gap, measured in model length units.
+    edge_to_faces = TopTools_IndexedDataMapOfShapeListOfShape()
+    topexp.MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, edge_to_faces)
+    kept_hashes = {hash(f) for f in keep}
+    shared, disagreements = 0, []
+    for index in range(1, edge_to_faces.Size() + 1):
+        edge = topods.Edge(edge_to_faces.FindKey(index))
+        if BRep_Tool.Degenerated(edge):
+            continue
+        adjacent = [topods.Face(f) for f in edge_to_faces.FindFromIndex(index)]
+        adjacent = [f for f in adjacent if hash(f) in kept_hashes]
+        if len(adjacent) != 2:
+            continue
+        shared += 1
+        first_polyline = _pcurve_polyline_3d(edge, adjacent[0])
+        second_polyline = _pcurve_polyline_3d(edge, adjacent[1])
+        if first_polyline is None or second_polyline is None:
+            continue
+        gap = max(_max_point_to_polyline(first_polyline, second_polyline),
+                  _max_point_to_polyline(second_polyline, first_polyline))
+        disagreements.append(gap)
+
+    disagreements_array = np.array(disagreements) if disagreements else np.zeros(0)
+    return {
+        "n_faces_considered": len(keep),
+        "pcurve_stored_types": dict(pcurve_stored),
+        "pcurve_real_geometry": dict(pcurve_real),
+        "curve3d_stored_types": dict(curve3d_stored),
+        "curve3d_real_geometry": dict(curve3d_real),
+        "n_shared_edges": shared,
+        "shared_edge_gap_max": float(disagreements_array.max()) if len(disagreements_array) else 0.0,
+        "shared_edge_gap_mean": float(disagreements_array.mean()) if len(disagreements_array) else 0.0,
+        "shared_edge_gap_over_1e-6": int((disagreements_array > 1e-6).sum()),
+        "shared_edge_gap_over_1e-4": int((disagreements_array > 1e-4).sum()),
+    }
 
 
 def load_shape(path):
@@ -286,6 +554,13 @@ def main():
     ap.add_argument("--per-solid", action="store_true",
                     help="Also report, per solid, how many would become fully analytic with "
                          "recognition applied (the exact-conversion coverage forecast)")
+    ap.add_argument("--trim-curves", action="store_true",
+                    help="Also classify the *trim curves* by their real geometry (how many "
+                         "B-spline trim edges are exactly circles or lines) and measure how far "
+                         "apart the two faces of a shared edge place their common boundary")
+    ap.add_argument("--all-faces", action="store_true",
+                    help="With --trim-curves, count trim edges of every face rather than only of "
+                         "faces whose surface the exact converter can represent")
     ap.add_argument("--json", default=None, metavar="PATH", help="Write the results as JSON")
     args = ap.parse_args()
 
@@ -311,6 +586,20 @@ def main():
                   f"{solid['already_analytic'] + solid['rescued_by_recognition']}/{total}")
             print(f"    still genuinely freeform: {solid['still_freeform']}/{total}")
             print(f"    surface kinds recovered:  {solid['recovered_surface_kinds']}")
+        if args.trim_curves:
+            trim = analyze_trim_curves(shape, convertible_surfaces_only=not args.all_faces)
+            result["trim_curves"] = trim
+            scope = "all faces" if args.all_faces else "convertible faces only"
+            print(f"  trim curves ({scope}, {trim['n_faces_considered']} faces):")
+            print(f"    pcurve stored types:      {trim['pcurve_stored_types']}")
+            print(f"    pcurve real geometry:     {trim['pcurve_real_geometry']}")
+            print(f"    3D curve stored types:    {trim['curve3d_stored_types']}")
+            print(f"    3D curve real geometry:   {trim['curve3d_real_geometry']}")
+            print(f"  shared edges: {trim['n_shared_edges']}"
+                  f"  max pcurve disagreement {trim['shared_edge_gap_max']:.3e}"
+                  f"  mean {trim['shared_edge_gap_mean']:.3e}  (model units)")
+            print(f"    edges disagreeing by >1e-6: {trim['shared_edge_gap_over_1e-6']}"
+                  f"  >1e-4: {trim['shared_edge_gap_over_1e-4']}")
         print()
         out[path] = result
 

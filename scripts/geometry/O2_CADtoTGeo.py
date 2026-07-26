@@ -881,6 +881,92 @@ def _bspline_flat_params(first: float, last: float, reversed_edge: bool, pole_xf
     return params
 
 
+# Relative residual below which a sampled trim curve is accepted as EXACTLY a line or a circle.
+# Deliberately at machine precision and relative to the curve's own extent, mirroring the
+# discipline of the surface-side canonical recognition: a curve that is merely *almost* a circle
+# must stay a B-spline, because silently replacing geometry is worse than a slow trim.
+_CANONICAL_CURVE_TOL = 1.e-9
+
+
+def _recognize_canonical_curve(samples, poles=None):
+    """Recognize a sampled 2D trim curve as an exact line or circle in its output domain.
+
+    CAD kernels routinely write an exact straight line or an exact circle as a B-spline; that is
+    the same curve in a heavier representation, so recognizing it is exact recognition and not
+    fitting. The payoff is double (see scripts/geometry/ExactTrimTopology.md, item 3): both faces
+    meeting along such a seam derive it analytically and therefore agree by construction, and the
+    kernel's point-in-trim test drops to its cheap line/arc path instead of flattening a B-spline
+    to a polyline.
+
+    `samples` are points already mapped into the *output* (u, v) / (phi, v) domain, in edge
+    direction. `poles`, when given, are the B-spline control points in the same domain: collinear
+    poles *prove* the curve is a straight segment (it lies in their convex hull), which is a
+    stronger statement than agreeing with a line at the sample points.
+
+    Returns ("line", [u0, v0, u1, v1]), ("arc", [cu, cv, r, a0, sweep]) or (None, None).
+    """
+    points = np.asarray(samples, dtype=float)
+    if len(points) < 3:
+        return None, None
+    extent = float(np.linalg.norm(points.max(axis=0) - points.min(axis=0)))
+    if extent < _EXTRACT_TOL:
+        return None, None
+
+    # --- straight line
+    chord = points[-1] - points[0]
+    chord_length = float(np.linalg.norm(chord))
+    if chord_length > _EXTRACT_TOL:
+        unit = chord / chord_length
+        def off_axis(candidates):
+            rel = candidates - points[0]
+            return float(np.abs(rel[:, 0] * unit[1] - rel[:, 1] * unit[0]).max() / extent)
+        straight = off_axis(points) < _CANONICAL_CURVE_TOL
+        if straight and poles is not None and len(poles) >= 2:
+            straight = off_axis(np.asarray(poles, dtype=float)) < _CANONICAL_CURVE_TOL
+        if straight:
+            # reject a curve that doubles back along its own chord: geometrically it is not the
+            # segment from the first point to the last one, however collinear the samples are
+            along = (points - points[0]) @ unit
+            if np.all(np.diff(along) >= -_CANONICAL_CURVE_TOL * extent):
+                return "line", [float(points[0][0]), float(points[0][1]),
+                                float(points[-1][0]), float(points[-1][1])]
+
+    # --- circle: |P - C|^2 = R^2 linearized as 2 P.C + (R^2 - |C|^2) = |P|^2, one least-squares
+    # solve with no initial guess. A closed loop (zero chord) lands here as well as an open arc.
+    matrix = np.column_stack([2.0 * points, np.ones(len(points))])
+    solution, *_ = np.linalg.lstsq(matrix, np.einsum('ij,ij->i', points, points), rcond=None)
+    centre = solution[:2]
+    radius_sq = solution[2] + float(centre @ centre)
+    if radius_sq <= 0.0:
+        return None, None
+    radius = math.sqrt(radius_sq)
+    if float(np.abs(np.linalg.norm(points - centre, axis=1) - radius).max() / extent) >= _CANONICAL_CURVE_TOL:
+        return None, None
+    # sweep by accumulating signed angle steps, so a full turn and the traversal sense survive
+    angles = np.arctan2(points[:, 1] - centre[1], points[:, 0] - centre[0])
+    steps = np.diff(angles)
+    steps = (steps + math.pi) % (2.0 * math.pi) - math.pi
+    sweep = float(steps.sum())
+    if abs(sweep) < _EXTRACT_TOL:
+        return None, None
+    return "arc", [float(centre[0]), float(centre[1]), radius, float(angles[0]), sweep]
+
+
+def _sample_curve_in_domain(curve, first, last, reversed_edge, point_map, n=64):
+    """Sample an OCC curve over [first, last] and map each point into the output domain, ordered
+    along the edge. `point_map(p)` takes the curve's own point type to an output (u, v)."""
+    lo, hi = (first, last) if first <= last else (last, first)
+    if not (math.isfinite(lo) and math.isfinite(hi)) or hi - lo <= 0.0:
+        return None
+    try:
+        samples = [point_map(curve.Value(float(t))) for t in np.linspace(lo, hi, n)]
+    except Exception:
+        return None
+    if reversed_edge:
+        samples.reverse()
+    return samples
+
+
 def _planar_bspline_edge_params(edge, project) -> Optional[List[float]]:
     """Sidecar B-spline record for a planar face's B-spline / Bezier boundary edge.
 
@@ -899,6 +985,26 @@ def _planar_bspline_edge_params(edge, project) -> Optional[List[float]]:
         return _bspline_flat_params(first, last, reversed_edge, project, to_bspline)
     except Exception:
         return None
+
+
+def _planar_canonical_edge(edge, project, params):
+    """Recognize a planar face's B-spline boundary edge as an exact line or arc in the plane frame.
+
+    `params` is the already-extracted flat B-spline record, whose poles are reused as the convex
+    hull evidence for straightness. Returns ("line"|"arc", canonical_params) or (None, None)."""
+    try:
+        curve3d, first, last = BRep_Tool.Curve(edge)
+        if curve3d is None:
+            return None, None
+        reversed_edge = edge.Orientation() == TopAbs_REVERSED
+        samples = _sample_curve_in_domain(curve3d, first, last, reversed_edge, project)
+        if not samples:
+            return None, None
+        n_poles = int(params[1])
+        poles = [(params[2 + 2 * i], params[3 + 2 * i]) for i in range(n_poles)]
+        return _recognize_canonical_curve(samples, poles)
+    except Exception:
+        return None, None
 
 
 def extract_planar_face(face, scale_to_cm: float, frame_override=None) -> Tuple[Optional[dict], Optional[str]]:
@@ -942,29 +1048,46 @@ def extract_planar_face(face, scale_to_cm: float, frame_override=None) -> Tuple[
             classified.append((edge, curve, gt, project(BRep_Tool.Pnt(start_vertex))))
 
         n = len(classified)
-        n_curved = sum(1 for _, _, gt, _ in classified
-                       if gt in (GeomAbs_Circle, GeomAbs_BSplineCurve, GeomAbs_BezierCurve))
-        if n_curved == 0 and n < 3:
-            return None, "planar polygon wire has fewer than 3 edges"
         if n == 0:
             return None, "planar face has an empty wire"
 
-        seg_edges = []
-        for i, (edge, curve, gt, start_uv) in enumerate(classified):
+        # Canonical-form pre-pass, as in _quadric_trim_wire. The plane projection is an isometry,
+        # so unlike the quadric domains a circle written as a B-spline stays a circle here and
+        # recovers the cheap exact arc path. Resolved before the polygon check below, so a wire
+        # whose B-splines all turn out to be straight is validated as the polygon it now is.
+        resolved = []  # per edge: ("line", None) | ("arc", params) | ("bspline", params)
+        for edge, curve, gt, _start_uv in classified:
             if gt == GeomAbs_Line:
-                u0, v0 = start_uv
-                u1, v1 = classified[(i + 1) % n][3]
-                seg_edges.append({"curve": "line", "params": [u0, v0, u1, v1]})
+                resolved.append(("line", None))
             elif gt == GeomAbs_Circle:
                 params, reason = _arc_edge_params(edge, curve, project, s)
                 if params is None:
                     return None, reason
-                seg_edges.append({"curve": "arc", "params": params})
+                resolved.append(("arc", params))
             else:  # B-spline / Bezier: project the 3D poles into the plane frame
                 params = _planar_bspline_edge_params(edge, project)
                 if params is None:
                     return None, "planar B-spline boundary edge extraction failed"
-                seg_edges.append({"curve": "bspline", "params": params})
+                canonical_kind, canonical = _planar_canonical_edge(edge, project, params)
+                if canonical_kind == "line":
+                    resolved.append(("line", None))
+                elif canonical_kind == "arc":
+                    resolved.append(("arc", canonical))
+                else:
+                    resolved.append(("bspline", params))
+
+        n_curved = sum(1 for kind, _ in resolved if kind != "line")
+        if n_curved == 0 and n < 3:
+            return None, "planar polygon wire has fewer than 3 edges"
+
+        seg_edges = []
+        for i, (kind, params) in enumerate(resolved):
+            if kind == "line":
+                u0, v0 = classified[i][3]
+                u1, v1 = classified[(i + 1) % n][3]
+                seg_edges.append({"curve": "line", "params": [u0, v0, u1, v1]})
+            else:
+                seg_edges.append({"curve": kind, "params": params})
         wires_out.append({"role": "outer" if is_outer else "inner", "edges": seg_edges})
 
     if not wires_out:
@@ -1027,7 +1150,24 @@ def _quadric_trim_wire(face, map_uv) -> Tuple[Optional[List[dict]], Optional[str
                                               lambda p: map_uv(p.X(), p.Y()), to_bspline)
                 if params is None:
                     return None, "quadric B-spline pcurve extraction failed"
-                parsed.append({"kind": "bspline", "params": params, "start": (params[2], params[3])})
+                # Canonical-form pre-pass: a pcurve stored as a B-spline is very often exactly a
+                # straight line in the output (phi, v) domain -- the seam of a periodic surface and
+                # every iso-parametric trim edge are, and `map_uv` is affine so straightness carries
+                # over. Storing it as a line is exact, and it is what makes both faces of that seam
+                # agree analytically instead of each flattening its own polyline.
+                samples = _sample_curve_in_domain(curve2d, first, last, reversed_edge,
+                                                  lambda p: map_uv(p.X(), p.Y()))
+                n_poles = int(params[1])
+                poles = [(params[2 + 2 * i], params[3 + 2 * i]) for i in range(n_poles)]
+                kind, canonical = _recognize_canonical_curve(samples, poles) if samples else (None, None)
+                if kind == "line":
+                    parsed.append({"kind": "line", "start": (canonical[0], canonical[1])})
+                elif kind == "arc":
+                    parsed.append({"kind": "arc", "params": canonical,
+                                   "start": (canonical[0] + canonical[2] * math.cos(canonical[3]),
+                                             canonical[1] + canonical[2] * math.sin(canonical[3]))})
+                else:
+                    parsed.append({"kind": "bspline", "params": params, "start": (params[2], params[3])})
             else:
                 name = _CURVE_TYPE_NAMES.get(ctype, "unknown")
                 return None, f"quadric boundary pcurve is a {name} curve (unsupported)"
@@ -1042,6 +1182,8 @@ def _quadric_trim_wire(face, map_uv) -> Tuple[Optional[List[dict]], Optional[str
                 u0, v0 = p["start"]
                 u1, v1 = parsed[(i + 1) % n]["start"]
                 seg_edges.append({"curve": "line", "params": [u0, v0, u1, v1]})
+            elif p["kind"] == "arc":
+                seg_edges.append({"curve": "arc", "params": p["params"]})
             else:
                 seg_edges.append({"curve": "bspline", "params": p["params"]})
         wires_out.append({"role": "outer" if is_outer else "inner", "edges": seg_edges})
