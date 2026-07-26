@@ -501,6 +501,69 @@ bool O2BVHSurfaceSolid::AddConicalSurface(const Point3D& centerPoint, const Poin
   return true;
 }
 
+bool O2BVHSurfaceSolid::AddToroidalSurface(const Point3D& centerPoint, const Point3D& axis,
+                                           const Point3D& referenceAxisU, double majorRadius, double minorRadius,
+                                           double phiStart, double phiSweep, double tubeStart, double tubeSweep,
+                                           bool innerWall)
+{
+  if (fImpl == nullptr) {
+    fImpl = new Impl;
+  }
+  if (fImpl->defined) {
+    Error("AddToroidalSurface", "Shape %s already fully defined. Not adding", GetName());
+    return false;
+  }
+
+  auto surface = std::make_unique<TorusBoundedSurface>();
+  std::string errorMessage;
+  if (!surface->initialize(makeVec3(centerPoint), makeVec3(axis), makeVec3(referenceAxisU), majorRadius, minorRadius,
+                           phiStart, phiSweep, tubeStart, tubeSweep, innerWall, errorMessage)) {
+    Error("AddToroidalSurface", "%s", errorMessage.c_str());
+    return false;
+  }
+
+  fImpl->surfaces.emplace_back(std::move(surface));
+  fImpl->displayVertices.clear();
+  fImpl->displayTriangles.clear();
+  return true;
+}
+
+bool O2BVHSurfaceSolid::AddToroidalSurface(const Point3D& centerPoint, const Point3D& axis,
+                                           const Point3D& referenceAxisU, double majorRadius, double minorRadius,
+                                           double phiStart, double phiSweep, double tubeStart, double tubeSweep,
+                                           bool innerWall, const std::vector<PlanarBoundaryCurve>& outerTrim,
+                                           const std::vector<std::vector<PlanarBoundaryCurve>>& innerTrims)
+{
+  if (fImpl == nullptr) {
+    fImpl = new Impl;
+  }
+  if (fImpl->defined) {
+    Error("AddToroidalSurface", "Shape %s already fully defined. Not adding", GetName());
+    return false;
+  }
+
+  const std::vector<Curve2D> outerCurves = makeCurveWire(outerTrim);
+  std::vector<std::vector<Curve2D>> innerCurves;
+  innerCurves.reserve(innerTrims.size());
+  for (const auto& innerTrim : innerTrims) {
+    innerCurves.push_back(makeCurveWire(innerTrim));
+  }
+
+  auto surface = std::make_unique<TorusBoundedSurface>();
+  std::string errorMessage;
+  if (!surface->initialize(makeVec3(centerPoint), makeVec3(axis), makeVec3(referenceAxisU), majorRadius, minorRadius,
+                           phiStart, phiSweep, tubeStart, tubeSweep, innerWall, outerCurves, innerCurves,
+                           errorMessage)) {
+    Error("AddToroidalSurface", "%s", errorMessage.c_str());
+    return false;
+  }
+
+  fImpl->surfaces.emplace_back(std::move(surface));
+  fImpl->displayVertices.clear();
+  fImpl->displayTriangles.clear();
+  return true;
+}
+
 void O2BVHSurfaceSolid::CloseShape(bool check)
 {
   if (fImpl == nullptr) {

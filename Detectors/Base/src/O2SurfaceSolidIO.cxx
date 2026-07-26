@@ -43,6 +43,7 @@ enum SurfaceType : uint32_t {
   kCylinder = 2,
   kCone = 3,
   kSphere = 4,
+  kTorus = 5,
 };
 
 enum CurveType : uint32_t {
@@ -401,6 +402,26 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
           }
           added = solid.AddSphericalSurface(point3(p, 0), point3(p, 3), point3(p, 6), p[9], p[10], p[11], p[12],
                                             p[13], innerWall, outer, inners);
+        }
+        break;
+      }
+      case kTorus: {
+        if (nParams != 15) {
+          ::Error("LoadSurfaceSolid", "%s: torus surface %zu has %u parameters, expected 15", file.c_str(), s,
+                  nParams);
+          return false;
+        }
+        if (wires.empty()) {
+          added = solid.AddToroidalSurface(point3(p, 0), point3(p, 3), point3(p, 6), p[9], p[10], p[11], p[12], p[13],
+                                           p[14], innerWall);
+        } else {
+          std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve> outer;
+          std::vector<std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>> inners;
+          if (!collectQuadricTrim(file, s, wires, outer, inners)) {
+            return false;
+          }
+          added = solid.AddToroidalSurface(point3(p, 0), point3(p, 3), point3(p, 6), p[9], p[10], p[11], p[12], p[13],
+                                           p[14], innerWall, outer, inners);
         }
         break;
       }

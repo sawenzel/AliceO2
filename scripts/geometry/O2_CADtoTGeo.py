@@ -413,9 +413,10 @@ _CURVE_TYPE_NAMES = {
 
 # Current C++ support matrix (keep in sync with O2BVHSurfaceSolid):
 #  - planar faces: general line/arc/B-spline boundary wires
-#  - cylinder/cone/sphere: parametric-rectangle trims, or a general line/arc/B-spline trim in the
-#    (phi, height/theta) domain (holes allowed); the trim must not wrap more than a full turn in phi
-_SUPPORTED_SURFACE_TYPES = {"plane", "cylinder", "cone", "sphere"}
+#  - cylinder/cone/sphere/torus: parametric-rectangle trims, or a general line/arc/B-spline trim in
+#    the (phi, height/theta) or (phiRing, phiTube) domain (holes allowed); the trim must not wrap
+#    more than a full turn in phi (for the torus, also not in the tube angle)
+_SUPPORTED_SURFACE_TYPES = {"plane", "cylinder", "cone", "sphere", "torus"}
 _SUPPORTED_PLANAR_CURVES = {"line", "circle", "bspline", "bezier"}
 # Boundary curves whose 2D pcurve the quadric extractor can turn into an exact (phi, v) trim edge:
 # a straight line stays a line; circle/ellipse/bezier/B-spline pcurves are converted to a B-spline
@@ -475,6 +476,7 @@ def _surface_params(adaptor: BRepAdaptor_Surface, surf_type: str, scale_to_cm: f
             return {
                 "center_cm": _xyz(ax3.Location(), s),
                 "axis": _xyz(ax3.Direction()),
+                "ref_axis_u": _xyz(ax3.XDirection()),
                 "major_radius_cm": tor.MajorRadius() * s,
                 "minor_radius_cm": tor.MinorRadius() * s,
             }
@@ -655,7 +657,7 @@ def build_surface_report(step_path: str, scale_to_cm: float) -> dict:
 
 SURFACE_SIDECAR_MAGIC = b"O2SS"
 SURFACE_SIDECAR_VERSION = 1
-SURFACE_TYPE_ENUM = {"plane": 1, "cylinder": 2, "cone": 3, "sphere": 4}
+SURFACE_TYPE_ENUM = {"plane": 1, "cylinder": 2, "cone": 3, "sphere": 4, "torus": 5}
 CURVE_TYPE_ENUM = {"line": 0, "arc": 1, "bspline": 2}
 SURFACE_FLAG_INNER_WALL = 1 << 0
 
@@ -663,10 +665,11 @@ SURFACE_FLAG_INNER_WALL = 1 << 0
 def write_surfaces_bin(path: _Path, surfaces: List[dict]):
     """
     Writes the surface sidecar. `surfaces` is a list of records:
-      {"type": "plane"|"cylinder"|"cone"|"sphere",
+      {"type": "plane"|"cylinder"|"cone"|"sphere"|"torus",
        "inner_wall": bool,              # quadrics only, default False
        "params": [float, ...],          # fixed per-type layout, see BVHSurfaceSolid.md
-       "wires": [                       # planes only; quadrics carry their trim in params
+       "wires": [                       # planes always; quadrics/torus when the trim is not the
+                                        # plain parametric rectangle (else carried in params)
           {"role": "outer"|"inner",     # general line/arc loops (polygon, disk, rounded rect)
            "edges": [{"curve": "line"|"arc", "params": [float, ...]}, ...]},
        ]}
@@ -706,14 +709,15 @@ def write_surfaces_bin(path: _Path, surfaces: List[dict]):
 #
 # Milestone status (scripts/geometry/BVHSurfaceSolid.md): planar faces carry general line/arc/
 # B-spline boundary wires (polygon, disk/annulus, rounded rectangle, slot, spline-bounded plate,
-# ...) and the three quadrics (cylinder, cone, sphere) are extracted here. A quadric face with a
-# single iso-parametric wire stays on the scalar parametric-rectangle path (byte-identical); any
-# other supported trim (a hole/window, or a non-iso line/arc/B-spline boundary) is emitted as a
-# general trim wire in the surface's (phi, height/theta) domain. Curved pcurves (circle/ellipse/
-# Bezier/B-spline) are converted to a B-spline whose poles are pushed through the *affine* (u, v)
-# -> (phi, height/theta) map, which is exact (a B-spline is closed under affine maps; an
-# anisotropic map merely turns a circle into an exactly-represented ellipse). Torus/free-form
-# surfaces and B-spline/other *surface* types still force the tessellated fallback.
+# ...) and the three quadrics (cylinder, cone, sphere) plus the torus are extracted here. A
+# quadric/torus face with a single iso-parametric wire stays on the scalar parametric-rectangle
+# path (byte-identical); any other supported trim (a hole/window, or a non-iso line/arc/B-spline
+# boundary) is emitted as a general trim wire in the surface's (phi, height/theta) or
+# (phiRing, phiTube) domain. Curved pcurves (circle/ellipse/Bezier/B-spline) are converted to a
+# B-spline whose poles are pushed through the *affine* (u, v) -> (phi, height/theta) map, which is
+# exact (a B-spline is closed under affine maps; an anisotropic map merely turns a circle into an
+# exactly-represented ellipse). Free-form B-spline/other *surface* types still force the
+# tessellated fallback.
 
 _EXTRACT_TOL = 1.e-7
 
@@ -1160,13 +1164,61 @@ def extract_spherical_face(face, scale_to_cm: float) -> Tuple[Optional[dict], Op
     return record, None
 
 
+def extract_toroidal_face(face, scale_to_cm: float) -> Tuple[Optional[dict], Optional[str]]:
+    """Toroidal face trimmed to a parametric rectangle -> a 'torus' surface record.
+
+    OCC parametrizes the torus as U = phiRing (around the main axis) and V = phiTube (around the
+    tube, measured from the outer equator towards the +axis pole), both in [0, 2pi] and with the
+    same standard formula the C++ TorusBoundedSurface uses, so U maps to the ring phi (mirrored
+    for a left-handed ax3, as for the other quadrics) and V maps directly to the tube phi. A
+    single iso-parametric wire (incl. the full-torus seam rectangle) stays on the scalar path;
+    any other supported trim becomes a general trim wire in the (phiRing[rad], phiTube[rad])
+    domain."""
+    adaptor = BRepAdaptor_Surface(face)
+    if adaptor.GetType() != GeomAbs_Torus:
+        return None, "not a torus"
+    umin, umax, vmin, vmax = breptools.UVBounds(face)
+    tor = adaptor.Torus()
+    ax3 = tor.Position()
+    s = scale_to_cm
+    major_radius = tor.MajorRadius() * s
+    minor_radius = tor.MinorRadius() * s
+    if minor_radius <= _EXTRACT_TOL or major_radius <= _EXTRACT_TOL:
+        return None, "toroidal face has degenerate radii"
+    center = _xyz(ax3.Location(), s)
+    axis = _xyz(ax3.Direction())
+    ref_u = _xyz(ax3.XDirection())
+    phi_start, phi_sweep = _quadric_phi_range(ax3, umin, umax)
+    two_pi = 2.0 * math.pi
+    tube_sweep = vmax - vmin
+    if tube_sweep <= 0.0:
+        tube_sweep += two_pi
+    tube_sweep = min(tube_sweep, two_pi)
+    tube_start = vmin
+    inner_wall = face.Orientation() == TopAbs_REVERSED
+    params = (list(center) + list(axis) + list(ref_u) +
+              [major_radius, minor_radius, phi_start, phi_sweep, tube_start, tube_sweep])
+    record = {"type": "torus", "inner_wall": inner_wall, "params": params}
+    if _quadric_trim_fills_uv_box(face, (umin, umax, vmin, vmax)):
+        return record, None  # trim is exactly the parametric rectangle: the scalar params suffice
+    # affine (u, v) -> (phiRing[rad], phiTube[rad]); OCC V is the tube angle, unchanged by the frame
+    phi_of_u = (lambda u: u) if ax3.Direct() else (lambda u: -u)
+    wires, reason = _quadric_trim_wire(face, lambda u, v: (phi_of_u(u), v))
+    if wires is None:
+        return None, reason
+    record["wires"] = wires
+    return record, None
+
+
 # Face extractors dispatched by analytic surface type. Planar faces cover both straight-edged
-# polygons and circular disks/annuli; the quadrics carry their trim in the surface parameters.
+# polygons and circular disks/annuli; the quadrics and torus carry their trim in the surface
+# parameters (or a general wire block for non-rectangular trims).
 _FACE_EXTRACTORS = {
     "plane": extract_planar_face,
     "cylinder": extract_cylindrical_face,
     "cone": extract_conical_face,
     "sphere": extract_spherical_face,
+    "torus": extract_toroidal_face,
 }
 
 

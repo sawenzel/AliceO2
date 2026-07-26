@@ -147,6 +147,29 @@ class O2BVHSurfaceSolid : public TGeoBBox
                          double phiSweep, bool innerWall, const std::vector<PlanarBoundaryCurve>& outerTrim,
                          const std::vector<std::vector<PlanarBoundaryCurve>>& innerTrims = {});
 
+  /// Add a toroidal surface of major radius \a majorRadius (axis to tube centre) and minor
+  /// (tube) radius \a minorRadius about \a centerPoint / \a axis. \a referenceAxisU fixes the
+  /// phiRing = 0 direction (projected perpendicular to the axis). The patch is trimmed to a
+  /// parametric rectangle in the two periodic angles: phiRing (around the axis) from
+  /// \a phiStart over \a phiSweep and phiTube (around the tube, measured from the outer equator
+  /// towards the +axis pole) from \a tubeStart over \a tubeSweep. The default arguments give a
+  /// full, self-closing torus. With \a innerWall set the outward normal points towards the tube
+  /// spine (e.g. the inner tube of a toroidal shell).
+  bool AddToroidalSurface(const Point3D& centerPoint, const Point3D& axis, const Point3D& referenceAxisU,
+                          double majorRadius, double minorRadius, double phiStart = 0.,
+                          double phiSweep = 6.283185307179586, double tubeStart = 0.,
+                          double tubeSweep = 6.283185307179586, bool innerWall = false);
+
+  /// Wire-trimmed toroidal surface: as AddToroidalSurface, but the domain is the general
+  /// line/arc/bspline trim \a outerTrim (plus optional \a innerTrims holes) in the periodic
+  /// parametric (phiRing[rad], phiTube[rad]) domain instead of the scalar phiRing/phiTube
+  /// rectangle. The scalar arguments still pin the frame/radii and a nominal window; the wire is
+  /// authoritative for containment. The trim must not wrap more than a full turn in either angle.
+  bool AddToroidalSurface(const Point3D& centerPoint, const Point3D& axis, const Point3D& referenceAxisU,
+                          double majorRadius, double minorRadius, double phiStart, double phiSweep, double tubeStart,
+                          double tubeSweep, bool innerWall, const std::vector<PlanarBoundaryCurve>& outerTrim,
+                          const std::vector<std::vector<PlanarBoundaryCurve>>& innerTrims = {});
+
   /// Finalize the shape: compute the bounding box, the display mesh, the closure/orientation
   /// diagnostics (when \a check is set) and build the BVH acceleration structure over the
   /// bounded-surface AABBs used by the navigation queries.
