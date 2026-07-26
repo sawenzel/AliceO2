@@ -2373,6 +2373,20 @@ void appendBSplineEdgePlaneRecord(std::vector<char>& bytes, const FaceFrame& fra
 
 // A rational quadratic B-spline (NURBS) quarter circle from angle a0 to a0 + pi/2, in the (u, v)
 // domain, centred at (cu, cv) with radius r. Four of these form an exact circle.
+/// A full circle as ONE closed rational B-spline (the standard 9-pole degree-2 NURBS circle),
+/// i.e. a wire whose single edge starts and ends at the same point. This is the shape a CAD
+/// kernel writes for a tube-tube intersection curve, and it is structurally different from the
+/// same circle spelled as four separate quarter arcs.
+surf::Curve2D fullCircleBSpline(double cu, double cv, double r)
+{
+  const double w = std::sqrt(0.5);
+  const std::vector<surf::Vec2> poles{{cu + r, cv},     {cu + r, cv + r}, {cu, cv + r},
+                                      {cu - r, cv + r}, {cu - r, cv},     {cu - r, cv - r},
+                                      {cu, cv - r},     {cu + r, cv - r}, {cu + r, cv}};
+  return surf::Curve2D::makeBSpline(2, poles, {1., w, 1., w, 1., w, 1., w, 1.},
+                                    {0., 0., 0., 1., 1., 2., 2., 3., 3., 4., 4., 4.});
+}
+
 surf::Curve2D quarterCircleBSpline(double cu, double cv, double r, double a0)
 {
   const double a1 = a0 + surf::kHalfPi;
@@ -2472,4 +2486,106 @@ BOOST_AUTO_TEST_CASE(BSplineWindowInCylinderWall)
   hits.clear();
   bsplineDisk.appendIntersections({0., 0., 0.}, {std::cos(0.), std::sin(0.), 0.}, 0., 1.e30, hits);
   BOOST_CHECK(hits.empty());
+}
+
+// A B-spline wire used as an *inner hole*, and in particular one spelled as a single CLOSED
+// B-spline edge. This is what a tube-tube intersection produces and what the converter emits
+// constantly: where a boom tube is planted on a fat tube, the fat tube's wall keeps a
+// full-rectangle outer wire and carries the intersection curve as one closed B-spline hole.
+//
+// It regresses a bug that silently deleted such a wire outright. bsplineSampleRecursive used to
+// end the recursion when the chord p0->p1 was shorter than the flatness scale; a closed curve has
+// p0 == p1 exactly, so a full circle flattened to two coincident points and every polyline-based
+// query (winding, closest point, boundary band, display mesh) saw an empty curve. The wire still
+// validated and still reported the correct enclosed area, because signedAreaContribution
+// integrates the curve by Gauss-Legendre rather than from the polyline -- which is exactly why
+// this survived: every check that could have caught it used the analytic path.
+//
+// Impact: on Bagger/BoomCylinderOuter_0_1_1_9 a point 0.026 cm inside such a hole was reported as
+// lying on the face, and a whole face whose outer wire was one closed B-spline did not exist at
+// all. `WireTrimmedQuadricKernels` covers a *line* hole and `BSplineWindowInCylinderWall` covers a
+// B-spline outer wire built from four *open* quarter arcs, so neither could see it.
+// See scripts/geometry/ExactTrimTopology.md.
+BOOST_AUTO_TEST_CASE(BSplineHoleInCylinderWall)
+{
+  using surf::Curve2D;
+  using surf::Vec3;
+  std::string error;
+
+  const auto onCylinder = [](double phi, double height) {
+    return Vec3{2. * std::cos(phi), 2. * std::sin(phi), height};
+  };
+
+  // full-sweep outer wire (what the converter writes for an untrimmed cylinder wall) ...
+  const std::vector<Curve2D> outer{Curve2D::makeLine({0., -3.}, {surf::kTwoPi, -3.}),
+                                   Curve2D::makeLine({surf::kTwoPi, -3.}, {surf::kTwoPi, 3.}),
+                                   Curve2D::makeLine({surf::kTwoPi, 3.}, {0., 3.}),
+                                   Curve2D::makeLine({0., 3.}, {0., -3.})};
+  // ... with a circular hole punched in it, expressed once as four NURBS quarter arcs and once as
+  // the equivalent exact arc. The arc form is the oracle: it is the already-trusted path.
+  const double centrePhi = surf::kPi;
+  const double trimRadius = 0.5;
+  const std::vector<Curve2D> bsplineHole{quarterCircleBSpline(centrePhi, 0., trimRadius, 0.),
+                                         quarterCircleBSpline(centrePhi, 0., trimRadius, surf::kHalfPi),
+                                         quarterCircleBSpline(centrePhi, 0., trimRadius, surf::kPi),
+                                         quarterCircleBSpline(centrePhi, 0., trimRadius, 3. * surf::kHalfPi)};
+
+  surf::CylindricalBoundedSurface bsplineHoled;
+  BOOST_REQUIRE(bsplineHoled.initialize({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, 2., -3., 3., 0., surf::kTwoPi, false,
+                                        outer, {bsplineHole}, error));
+  surf::CylindricalBoundedSurface arcHoled;
+  BOOST_REQUIRE(arcHoled.initialize({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, 2., -3., 3., 0., surf::kTwoPi, false,
+                                    outer, {{Curve2D::makeCircle({centrePhi, 0.}, trimRadius)}}, error));
+
+  // the defining property of a hole: its interior is NOT part of the face
+  BOOST_CHECK(!arcHoled.containsPointOnSurface(onCylinder(centrePhi, 0.)));     // oracle
+  BOOST_CHECK(!bsplineHoled.containsPointOnSurface(onCylinder(centrePhi, 0.))); // the case under test
+  // and material well away from the hole still is
+  BOOST_CHECK(bsplineHoled.containsPointOnSurface(onCylinder(0.5, 0.)));
+  BOOST_CHECK(bsplineHoled.containsPointOnSurface(onCylinder(centrePhi, 2.5)));
+
+  // the two spellings of the same hole must classify identically away from the boundary band
+  int compared = 0;
+  for (int phiStep = -12; phiStep <= 12; ++phiStep) {
+    const double phi = centrePhi + 0.09 * phiStep;
+    for (int hStep = -12; hStep <= 12; ++hStep) {
+      const double height = 0.09 * hStep;
+      if (std::abs(std::hypot(phi - centrePhi, height) - trimRadius) < 5.e-3) {
+        continue;
+      }
+      const Vec3 point = onCylinder(phi, height);
+      BOOST_CHECK_EQUAL(bsplineHoled.containsPointOnSurface(point), arcHoled.containsPointOnSurface(point));
+      ++compared;
+    }
+  }
+  BOOST_CHECK_GT(compared, 100);
+
+  // a radial ray aimed through the hole must not register a wall hit; one aimed at material must
+  std::vector<surf::RayHit> hits;
+  bsplineHoled.appendIntersections({0., 0., 0.}, {std::cos(centrePhi), std::sin(centrePhi), 0.}, 0., 1.e30, hits);
+  BOOST_CHECK(hits.empty());
+  hits.clear();
+  bsplineHoled.appendIntersections({0., 0., 0.}, {std::cos(0.5), std::sin(0.5), 0.}, 0., 1.e30, hits);
+  BOOST_CHECK_EQUAL(hits.size(), 1u);
+
+  // The same hole as ONE closed B-spline edge rather than four arc segments. This is what the
+  // converter actually emits for a tube-tube seam (`_quadric_trim_wire` writes one B-spline per
+  // BREP edge, and the intersection curve is a single closed edge).
+  surf::CylindricalBoundedSurface singleEdgeHoled;
+  BOOST_REQUIRE(singleEdgeHoled.initialize({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, 2., -3., 3., 0., surf::kTwoPi,
+                                           false, outer, {{fullCircleBSpline(centrePhi, 0., trimRadius)}}, error));
+  BOOST_CHECK(!singleEdgeHoled.containsPointOnSurface(onCylinder(centrePhi, 0.)));
+  BOOST_CHECK(singleEdgeHoled.containsPointOnSurface(onCylinder(0.5, 0.)));
+  BOOST_CHECK(singleEdgeHoled.containsPointOnSurface(onCylinder(centrePhi, 2.5)));
+  for (int phiStep = -12; phiStep <= 12; ++phiStep) {
+    const double phi = centrePhi + 0.09 * phiStep;
+    for (int hStep = -12; hStep <= 12; ++hStep) {
+      const double height = 0.09 * hStep;
+      if (std::abs(std::hypot(phi - centrePhi, height) - trimRadius) < 5.e-3) {
+        continue;
+      }
+      const Vec3 point = onCylinder(phi, height);
+      BOOST_CHECK_EQUAL(singleEdgeHoled.containsPointOnSurface(point), arcHoled.containsPointOnSurface(point));
+    }
+  }
 }
