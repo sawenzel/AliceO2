@@ -968,10 +968,16 @@ struct Curve2D {
     Vec2 midPoint;
     Vec2 unusedDerivative;
     bsplineEval(tMid, midPoint, unusedDerivative);
-    // stop when flat enough, when the chord is already shorter than the flatness scale (so no
-    // finer detail is resolvable), or at the depth cap
-    if (depth <= 0 || pointSegmentDistanceSq(midPoint, p0, p1) <= flatnessSq ||
-        surface::distanceSq(p0, p1) <= flatnessSq) {
+    // Stop when flat enough or at the depth cap. A short chord alone must NOT end the recursion:
+    // a *closed* curve has p0 == p1 exactly, so its chord is zero however much curve lies between
+    // them -- a full circle written as one periodic B-spline (which is what a CAD kernel emits for
+    // a tube-tube intersection) would otherwise flatten to two coincident points and vanish. When
+    // the chord is degenerate the only meaningful flatness test is whether the midpoint sits on it
+    // too; pointSegmentDistanceSq would compare against a zero-length segment.
+    const double flatness = (surface::distanceSq(p0, p1) <= flatnessSq)
+                              ? surface::distanceSq(midPoint, p0)
+                              : pointSegmentDistanceSq(midPoint, p0, p1);
+    if (depth <= 0 || flatness <= flatnessSq) {
       samples.push_back(p1);
       return;
     }
