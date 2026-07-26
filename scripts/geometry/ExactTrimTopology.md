@@ -7,12 +7,22 @@ B-spline seams. The finding, its evidence and the milestone entry live in
 [`SolidNavigationHarness.md`](SolidNavigationHarness.md). **Read the finding there first** — this
 document assumes it.
 
-Status: **item 4 done, item 3 done, items 1 and 2 open (2026-07-26).** The work done also changed
-what is known about the cause, so the sections below have been revised in place; see
-[What the 2026-07-26 pass established](#what-the-2026-07-26-pass-established) for the summary and
-for the two claims in the original plan that measurement did not support.
+Status: **superseded in its diagnosis (2026-07-26).** Items 4 and 3 are done. Items 1 and 2 are
+**not recommended**: the defect that motivated this whole document turned out to be a kernel bug —
+a closed B-spline trim curve flattened to nothing — not the lost shared-edge topology this plan
+assumes. Fixing it cut the reproducer's `contains` error by two thirds and every Bagger cylinder's
+`distin` error to zero, with no converter change at all. Read
+[What the 2026-07-26 pass established](#what-the-2026-07-26-pass-established) and
+[Status after the fix](#status-after-the-fix) before acting on anything below them.
 
 ## The one-paragraph version
+
+> **This paragraph is wrong and is kept only because the rest of the document argues from it.** It
+> is a plausible causal story that was never tested before two of the four items were built. The
+> measured cause is a kernel bug — a closed B-spline trim curve flattened to two coincident points
+> and vanished — and the shared-edge disagreement it blames was measured at `1.3e-5` model units,
+> three orders of magnitude too small to produce the observed error. See
+> [What the 2026-07-26 pass established](#what-the-2026-07-26-pass-established).
 
 In a BREP, watertightness is a *topological* guarantee: two adjacent faces reference the same
 `TopoDS_Edge`, so there is exactly one 3D curve between them. Each face *also* stores a **pcurve**,
@@ -68,33 +78,74 @@ is the result an exact recognition must produce: it changes the representation, 
    below the observed error. Item 2 is still right for *cost* and for removing the last sampling
    step, but it will not on its own close the gap.
 
-**What actually goes wrong, from the crossing list.** Enumerating the parity ray's crossings at a
-wrong point (via `DistFromOutside_Loop` / `DistFromInside_Loop`, which are "nearest entering" and
-"nearest exiting" independently of containment) shows the failure is not a *missing* crossing but a
-**doubled** one: two consecutive `ENTER`s, or two consecutive `EXIT`s, about 0.04 cm apart. On
-`BoomCylinderOuter` the ray enters the boom tube's outer wall (`R = 1`) and then crosses the fat
-tube's outer wall (`R = 1.5`) again at a point that ought to lie *inside* that face's hole. The
-hole boundary of one face and the outer boundary of the other are independent fits of the same 3D
-intersection curve, and because the two cylinders meet **near-tangentially** there, a `1e-5`
-parametric disagreement is amplified into a `4e-2` cm discrepancy in 3D. Parity then counts one
-crossing too many and flips. This is the same defect the plan describes, but the amplification —
-not the raw fitting tolerance — is what sets its size, and it is why "make the tolerance smaller"
-is not a fix.
+**What actually went wrong: a kernel bug, not lost topology.** *(Corrected 2026-07-26; an earlier
+version of this section blamed near-tangency amplification. That was inferred, not measured, and it
+is wrong — the two cylinders meet at 59-60 degrees, a healthy transversal crossing.)*
 
-**Consequence for item 1, which is now the only fix left for this class.** The exact intersection
-curve of two quadrics is a degree-4 algebraic curve, and it is representable exactly in *neither*
-face's parametric domain with the current `Curve2D` vocabulary (line / arc / B-spline). So the
-first of item 1's two candidate representations — "shared 3D curve, mapped per face analytically" —
-is exact only when that image happens to be canonical, which is exactly the case item 3 already
-covers. The version that is both achievable and sufficient is the one this plan's own ground rule
-points at: **consistency, not exactness**. Derive *both* faces' trims from one shared sample set of
-the single `TopoDS_Edge` 3D curve, so the two boundaries coincide exactly at the shared vertices
-and the residual sliver is a bounded chord error that shrinks with the sample count, instead of an
-uncontrolled fitting difference amplified by tangency. That also makes `CloseShape`'s half-edge
-check match by construction, which is the stated acceptance criterion. Note while implementing it
-that the closure check re-chords a cylinder's parametric edges by phi-span at `kArcSamples` per
-turn, so the shared samples must be dense enough (phi-span below `2*pi/24`) not to be subdivided
-again on one side only.
+Enumerating the parity ray's crossings at a wrong point (via `DistFromOutside_Loop` /
+`DistFromInside_Loop`, which are "nearest entering" and "nearest exiting" independently of
+containment) shows the failure is not a *missing* crossing but a **doubled** one: two consecutive
+`ENTER`s about 0.04 cm apart. Locating both in their faces' domains:
+
+- crossing 1 lies exactly on the boom tube's outer wall (`R = 1`);
+- crossing 2 lies exactly on the fat tube's outer wall (`R = 1.5`) at `r = 0.9745` from the boom
+  axis — i.e. **0.026 cm inside the boom footprint**, squarely inside that face's hole, which must
+  therefore exclude it.
+
+Reconstructing the hole curve directly from the sidecar (de Boor, 179 poles, rational) and running
+an independent winding test confirms the curve is closed to `5.3e-12`, has exactly the intended
+extent, and *does* contain the point. **The converter data was correct and the kernel disagreed
+with it** — three orders of magnitude beyond any shared-edge disagreement (measured max `1.3e-5`).
+
+The bug: `bsplineSampleRecursive` ended its recursion when the chord `p0 -> p1` fell below the
+flatness scale. A **closed** curve has `p0 == p1` exactly, so a full circle flattened to two
+coincident points and every polyline-based query saw an empty curve. It survived because
+`signedAreaContribution` integrates by Gauss-Legendre rather than from the polyline, so the wire
+still validated and still reported the right area — every check that could have caught it used the
+analytic path. Fixed, with `BSplineHoleInCylinderWall` as the regression test.
+
+**Consequence for this whole plan.** Its premise — "the converter discards shared-edge identity,
+therefore adjacent patches disagree" — did not describe the reproducer. Items 1 and 2 address a
+problem that was not the one causing the observed error. See
+[Status after the fix](#status-after-the-fix) for what remains.
+
+For the record, if item 1 is ever revisited: the exact intersection curve of two quadrics is a
+degree-4 algebraic curve and is representable exactly in *neither* face's parametric domain with
+the current `Curve2D` vocabulary, so item 1's headline representation ("shared 3D curve, mapped per
+face analytically") is exact only where that image is already canonical — which is what item 3
+covers. The achievable version is this plan's own ground rule, consistency rather than exactness:
+derive both faces' trims from one shared sample set of the single `TopoDS_Edge` 3D curve. Note that
+the closure check re-chords a cylinder's parametric edges by phi-span at `kArcSamples` per turn, so
+shared samples must span less than `2*pi/24` in phi or one side subdivides again.
+
+## Status after the fix
+
+Three-model DB, `unexplained` counts before -> after the closed-B-spline fix:
+
+| | `contains` | `distout` | `distin` |
+| --- | --- | --- | --- |
+| DB total | 4588 -> 4430 | 254 -> 251 | 218 -> **114** |
+| excluding the non-manifold `oTOF` part | 525 -> **367** | | |
+| `BoomCylinderOuter` (the reproducer) | 51 -> **16** | 0 | 30 -> **0** |
+| `BucketCylinderInner` | 84 -> **13** | 0 | 9 -> **0** |
+| `StickCylinderOuter` | 53 -> **17** | 0 | 28 -> **0** |
+| `BucketCylinderOuter` | 29 -> **5** | 0 | 0 |
+
+Every Bagger cylinder part's `distin` count goes to zero, and two parts whose `Contains` disagreed
+with `Contains_Loop` now agree on all 7500 points. ALICE3 is unchanged in every column — no
+regression, and its trims arrive through the recognised-NURBS path as multiple *open* edges rather
+than one closed one, so it never hit this.
+
+The closure diagnostic also became honest: `BoomCylinderInner`, `BucketCylinderInner` and
+`StickCylinderInner` used to report 0 boundary edges and "navigable", but only because a whole
+face's wire had vanished. The DB-wide navigable count drops 8/19 -> 5/19 as a result. That is the
+diagnostic working.
+
+**What is left, and it is no longer this document's four items.** `contains` still has 367
+unexplained points outside the non-manifold part, and no part is a closed manifold yet. Before
+resuming any converter work, find out what the *remaining* disagreements are: the one clean lesson
+of this pass is that a plausible causal story written into a plan is not evidence, and two of the
+four items were executed before anyone checked whether the premise held. Diagnose first.
 
 ## Ground rules
 
@@ -324,12 +375,16 @@ against the mesh with `BVH == _Loop` intact; duplicated faces show up as `BVH !=
 2. ~~Item 3's *measurement*~~ — **done 2026-07-26**; it sized items 1-3 and ruled item 3 out as a
    fix for the reproducer.
 3. ~~Item 3's converter change~~ — **done 2026-07-26**, semantics-preserving as required.
-4. Item 1 (shared edges) — now the only remaining fix for this defect class; `BoomCylinderOuter`
-   closure goes to 0 boundary edges. Take the "consistency, not exactness" route described in
-   [What the 2026-07-26 pass established](#what-the-2026-07-26-pass-established): one shared sample
-   set per `TopoDS_Edge`, both faces built from it.
-5. Item 2 (Bézier point-in-trim) — the last sampling step and the per-query cost. Re-priced: it is
-   a *performance* item plus a small accuracy item, not the fix for the reproducer.
+4. **Item 1 (shared edges) — do not start.** The premise it rests on was not what caused the
+   observed error. If the remaining 367 `contains` disagreements are ever traced back to genuine
+   shared-edge disagreement, revisit it then, with that evidence in hand.
+5. **Item 2 (Bézier point-in-trim) — not the fix either.** The flattening is adaptive to `1e-5`;
+   what was broken was that a closed curve was not flattened *at all*. It remains a legitimate
+   *performance* item and would remove the last sampling step, but rank it against the `Safety`
+   BVH milestone rather than treating it as a correctness fix.
+6. **Diagnose the residual first.** 367 `contains` points outside the non-manifold part, and no
+   part closing yet. Enumerate the crossing list at a failing point, as was done here — it took one
+   throwaway probe to move from a wrong three-item theory to a one-line fix.
 
 Checkpoints are the natural build-and-test gates: after each, `ctest -R BVHSurfaceSolid` green and a
 harness run over the three-model DB with `--loop-crosscheck`, recording the `unexplained` totals in
