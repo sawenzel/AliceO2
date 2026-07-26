@@ -283,7 +283,7 @@ The script transports a few box-generator events and prints the hit counts for t
 external-detector branches.
 ## Analysis tools for exact-surface conversion
 
-Two helper tools support the exact `O2BVHSurfaceSolid` conversion path
+Three helper tools support the exact `O2BVHSurfaceSolid` conversion path
 (`--exact-surfaces auto`, see `BVHSurfaceSolid.md`).
 
 ### `analyze_surface_geometry.py` — what the geometry *really* is
@@ -309,14 +309,35 @@ Residual thresholds are relative and deliberately tight: an "almost cylinder" th
 free-form stays free-form, so the classification can never silently change geometry. There is no
 torus test yet, so analytic counts are lower bounds.
 
-### `checkSurfaceSidecars.C` — do the emitted sidecars actually load?
+### `checkSurfaceSidecars.macro` — do the emitted sidecars actually load?
 
 Successful extraction does not imply a loadable sidecar. This macro loads every
 `surfaces_*.bin` in a directory via `LoadSurfaceSolid`, calls `CloseShape()`, and reports surface
 count, closure, orientation consistency and capacity:
 
 ```bash
-root -l -b -q 'checkSurfaceSidecars.C("/path/to/conversion/output")'
+root -l -b -q 'checkSurfaceSidecars.macro("/path/to/conversion/output")'
 ```
 
 Run it after a conversion sweep to get the honest "extracted vs. usable" number.
+
+### `makeTestPartDB.py` — a part database to benchmark navigation on
+
+Builds a directory of CAD parts held in **both** representations — the exact surface sidecar
+(`surfaces_*.bin`) and the tessellated mesh (`facets_*.bin`) of the *same* solid — and indexes the
+paired ones into a `manifest.json`:
+
+```bash
+python3 makeTestPartDB.py --output <db>                    # the three-model default set
+python3 makeTestPartDB.py --models ALICE3_CAD_pure.step --output <db>
+```
+
+That pairing is the precondition for `o2-bench-detectorsbase-solid-harness`, which validates and
+times `O2BVHSurfaceSolid` against `O2Tessellated` part by part:
+
+```bash
+o2-bench-detectorsbase-solid-harness --db <db> --loop-crosscheck --pruning-ab --json report.json
+```
+
+Both are documented in full — options, ground rules for reading the output, the `perf record` entry
+point, and the measured results — in [`SolidNavigationHarness.md`](SolidNavigationHarness.md).

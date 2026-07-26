@@ -18,6 +18,7 @@
 
 #include "DetectorsBase/O2SurfaceSolidIO.h"
 #include "DetectorsBase/O2BVHSurfaceSolid.h"
+#include "DetectorsBase/O2Tessellated.h"
 
 #include <TError.h>
 
@@ -434,6 +435,48 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
       ::Error("LoadSurfaceSolid", "%s: surface %zu was rejected by O2BVHSurfaceSolid", file.c_str(), s);
       return false;
     }
+  }
+
+  return true;
+}
+
+bool LoadFacetSolid(const std::string& file, O2Tessellated& solid)
+{
+  std::ifstream in(file, std::ios::binary);
+  if (!in) {
+    ::Error("LoadFacetSolid", "Cannot open facet sidecar file %s", file.c_str());
+    return false;
+  }
+
+  uint32_t nTriangles = 0;
+  if (!readU32(in, nTriangles)) {
+    ::Error("LoadFacetSolid", "%s: truncated header", file.c_str());
+    return false;
+  }
+
+  float v[9];
+  uint32_t nDegenerate = 0;
+  for (uint32_t i = 0; i < nTriangles; ++i) {
+    in.read(reinterpret_cast<char*>(v), sizeof(v));
+    if (!in) {
+      ::Error("LoadFacetSolid", "%s: truncated facet record %u of %u", file.c_str(), i, nTriangles);
+      return false;
+    }
+    const O2Tessellated::Vertex_t p0(v[0], v[1], v[2]);
+    const O2Tessellated::Vertex_t p1(v[3], v[4], v[5]);
+    const O2Tessellated::Vertex_t p2(v[6], v[7], v[8]);
+    if (!solid.AddFacet(p0, p1, p2)) {
+      // AddFacet rejects a facet whose vertices collapse (TGeoFacet::CompactFacet leaves < 3).
+      // That is a mesh-quality property of the input, not an I/O or format error, and real CAD
+      // tessellations do contain a few slivers: discarding a whole 200k-triangle reference mesh
+      // over one of them would be the wrong trade. Count and carry on -- only an unreadable or
+      // truncated file is fatal, as the header contract says.
+      ++nDegenerate;
+      continue;
+    }
+  }
+  if (nDegenerate > 0) {
+    ::Warning("LoadFacetSolid", "%s: skipped %u degenerate facet(s) of %u", file.c_str(), nDegenerate, nTriangles);
   }
 
   return true;
