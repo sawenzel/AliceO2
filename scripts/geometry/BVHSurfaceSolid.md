@@ -593,7 +593,7 @@ only for visualization and fallback paths.
 	3. **Canonical recognition of trim *curves* (converter, cheapest).** ✅ **Done 2026-07-26.** `_recognize_canonical_curve` in `O2_CADtoTGeo.py`, driven from both `_quadric_trim_wire` and `extract_planar_face`; straightness proved from control-polygon collinearity (convex hull), circles at `1e-9` relative. Stored B-spline trim edges **88 → 50** (three-model) and **15034 → 4528** on ALICE3, whose sidecars shrink 6.09 MB → 3.65 MB; **every `unexplained` count bit-identical** on both DBs, which is what an exact recognition must do. **It does not fix the reproducer**: the four curves it recognised there are `BoomCylinderOuter`'s periodic cylinder seams, not the two cylinder-cylinder intersection curves that cause the defect.
 	4. **Fail loudly (kernel).** ✅ **Done 2026-07-26.** `O2BVHSurfaceSolid::NavigationReliability` + `IsNavigable()` + boundary/non-manifold/reversed edge counts; the three `CloseShape` closure defects are now `Error`s whose text states the consequence; the harness prints the state per part, carries it in `--json`, and lists every unnavigable part at the end of a run. Test `NavigationReliabilityIsQueryable`. Three-model DB: 11 reliable, 6 open-surface-set, 2 non-manifold.
 
-	**Sharpened root cause (2026-07-26), from enumerating the parity ray's crossings at a wrong point.** The failure is a **doubled** crossing, not a missing one: two consecutive `ENTER`s (or `EXIT`s) ~0.04 cm apart. The ray enters the boom tube's `R = 1` wall and then crosses the fat tube's `R = 1.5` wall again at a point that should lie inside that face's hole. The two faces hold independent fits of the same 3D intersection curve, and because the cylinders meet **near-tangentially** there, a ~`1e-5` parametric disagreement is amplified to ~`4e-2` cm in 3D — so the size of the error is set by the tangency, not by the fitting tolerance, and tightening tolerances cannot fix it. Measured pcurve disagreement over shared edges: max `1.3e-5` model units on `Bagger.step`, `2.9e-5` on `as1-oc-214.stp`. Also note the exact intersection curve of two quadrics is degree 4 and is representable exactly in *neither* face's `(phi, h)` domain by the current `Curve2D` vocabulary, so item 1 must take the "consistency, not exactness" route (one shared sample set per `TopoDS_Edge`, both faces built from it) rather than a shared analytic curve.
+	**ROOT CAUSE FOUND 2026-07-26: this was a kernel bug, not lost topology — items 1 and 2 are not the fix and should not be started.** Enumerating the parity ray's crossings at a wrong point shows a **doubled** crossing, not a missing one: two consecutive `ENTER`s ~0.04 cm apart, the second lying `0.026 cm` inside the other face's hole, which must therefore exclude it. Reconstructing that hole curve from the sidecar independently (de Boor, 179 poles) shows it is closed to `5.3e-12`, has the intended extent, and *does* contain the point — **the converter data was right and the kernel disagreed with it**. `bsplineSampleRecursive` ended its recursion whenever the chord `p0 -> p1` fell below the flatness scale; a **closed** curve has `p0 == p1` exactly, so a full circle flattened to two coincident points and every polyline-based query (winding, closest point, boundary band, display mesh, closure check) saw an empty curve. It hid because `signedAreaContribution` integrates by Gauss-Legendre, so the wire still validated and still reported the correct area. Fixed; regression test `BSplineHoleInCylinderWall`. Result on the three-model DB: `contains` unexplained 4588 → 4430 (525 → **367** excluding the unchanged non-manifold `oTOF` part), `distin` 218 → **114**, the reproducer 51 → **16**, and every Bagger cylinder's `distin` → **0**; two parts whose `Contains` disagreed with `Contains_Loop` now agree everywhere; ALICE3 unchanged (no regression). *An earlier version of this note blamed near-tangency amplification — that was inferred rather than measured and is wrong: the two cylinders meet at 59-60°.*
 
 - [ ] **Patch *cost*, not patch *count*, is what makes small parts slow.** Same part, measured 2026-07-26: 8 analytic patches against 2244 triangles, yet `Contains` is 1.25x slower than the mesh (3102 vs 2490 ns) and `DistFromInside` 1.58x. The BVH cannot help — with 8 patches it is only 1.18-1.20x over `_Loop`. The cost is per-patch: each query solves the quadric and then runs a winding test against a flattened B-spline polyline. Items 2 and 3 above are the lever, not the acceleration structure.
 	- Counterpoint worth keeping: on this same part `Safety` is **1.9x faster** than the tessellated solid (4557 vs 8705 ns), because 8 patch-distance evaluations beat a priority-queue walk over 2244 triangles. The "Safety is the worst kernel" finding from the DB-wide medians is driven by parts with many patches; on low-patch parts the exact representation already wins.
@@ -1028,3 +1028,31 @@ matching `kWireJoinTolerance = 1e-5` (both looser than the `1e-9` boundary toler
 	  does not finish in an hour on those; vectorise `_max_point_to_polyline` first if that number is
 	  wanted). `g4Config.C` and generated `scripts/geometry/STEP_examples/`/`facets_*`/`surfaces_*`
 	  artifacts remain intentionally out of the commit.
+- 2026-07-26: **Root cause of the "B-spline seam gaps" defect found and fixed — it was a one-line kernel
+  bug, and `ExactTrimTopology.md`'s premise was a red herring.** `bsplineSampleRecursive` stopped
+  subdividing whenever the chord `p0 -> p1` fell below the flatness scale. A **closed** B-spline has
+  `p0 == p1` exactly, so a full circle — which is what a CAD kernel writes for a tube-tube intersection
+  curve — flattened to two coincident points and disappeared from every polyline-based query: winding
+  classification, closest point, boundary band, display mesh and the closure half-edge check. It hid for
+  three sessions because `signedAreaContribution` integrates the curve by Gauss-Legendre rather than from
+  the polyline, so the wire still validated and still reported its correct enclosed area; every check that
+  could have caught it used the analytic path. The existing tests covered a *line* hole and a B-spline
+  outer wire built from four *open* quarter arcs, so neither could see it.
+	- **Measured effect** (three-model DB, `unexplained`): `contains` 4588 → 4430, and 525 → **367**
+	  excluding the unchanged non-manifold `oTOF` part; `distin` 218 → **114**; the reproducer
+	  `BoomCylinderOuter` 51 → **16** with its `distin` 30 → **0**. Every Bagger cylinder part's `distin`
+	  goes to zero. Two parts whose `Contains` disagreed with `Contains_Loop` (`BucketCylinderInner`,
+	  `BucketCylinderOuter`) now agree on all 7500 points. ALICE3 is unchanged in every column — its trims
+	  arrive through the recognised-NURBS path as multiple *open* edges, so it never hit this.
+	- **The closure diagnostic became honest.** `BoomCylinderInner`, `BucketCylinderInner` and
+	  `StickCylinderInner` used to report 0 boundary edges and "navigable" — only because a whole face's
+	  wire had vanished. DB-wide navigable drops 8/19 → 5/19. That is item 4 working, not a regression.
+	- **Process lesson worth keeping.** Two of `ExactTrimTopology.md`'s four items were built before anyone
+	  tested its central causal claim, which measurement then contradicted twice: the shared-edge pcurve
+	  disagreement is `1.3e-5` model units (three orders too small), and the "near-tangency amplification"
+	  offered as the explanation was inferred, not measured, and is wrong (the surfaces meet at 59-60°).
+	  One throwaway probe enumerating the crossing list moved this from a three-item converter refactor to
+	  a one-line fix. Diagnose before planning.
+	- **Still open:** 367 `contains` disagreements outside the non-manifold part, and no part closing yet.
+	  Diagnose those the same way before resuming any converter work. Items 1 and 2 of
+	  `ExactTrimTopology.md` are marked "do not start" pending such evidence.
