@@ -687,15 +687,37 @@ void O2BVHSurfaceSolid::CloseShape(bool check)
   }
 
   fImpl->closure = validateClosure(fImpl->surfaces);
+  fImpl->defined = true;
+
   if (check && !fImpl->surfaces.empty()) {
     const auto& closure = fImpl->closure;
-    if (!closure.closed) {
-      Warning("CloseShape", "Shape %s is not a closed manifold: %d boundary edge(s), %d non-manifold edge(s)",
-              GetName(), closure.boundaryEdges, closure.nonManifoldEdges);
+    // State the *consequence*, not only the counts. A warning that reads as a quality metric gets
+    // read as one: this defect went unnoticed for two sessions because "699 boundary edge(s)"
+    // looked like a cosmetic mesh remark while the solid was answering Contains wrongly by
+    // centimetres. See scripts/geometry/ExactTrimTopology.md.
+    if (closure.boundaryEdges > 0) {
+      Error("CloseShape",
+            "Shape %s is NOT a closed surface: %d boundary edge(s) belong to only one face, i.e. the surface set "
+            "has gaps. NAVIGATION IS UNRELIABLE: parity containment is undefined in the shadow of every gap, so "
+            "Contains()/DistFrom*() can be wrong arbitrarily far from any surface, not just near the gap. Check "
+            "IsNavigable()/GetNavigationReliability() before trusting any answer from this shape.",
+            GetName(), closure.boundaryEdges);
+    }
+    if (closure.nonManifoldEdges > 0) {
+      Error("CloseShape",
+            "Shape %s is NOT a 2-manifold: %d edge(s) are shared by more than two faces (coincident or duplicated "
+            "faces). NAVIGATION IS UNRELIABLE: parity containment depends on the order in which coincident hits "
+            "are clustered, so Contains() is not even self-consistent between traversal orders. Check "
+            "IsNavigable()/GetNavigationReliability() before trusting any answer from this shape.",
+            GetName(), closure.nonManifoldEdges);
     }
     if (!closure.orientationConsistent) {
-      Warning("CloseShape", "Shape %s has %d inconsistently oriented (reversed) boundary edge(s)", GetName(),
-              closure.reversedEdges);
+      Error("CloseShape",
+            "Shape %s has %d inconsistently oriented (reversed) boundary edge(s): adjacent faces disagree about "
+            "which side is out. NAVIGATION IS UNRELIABLE: the entering/exiting sign of a crossing is taken from the "
+            "surface normal, so distance queries can return the wrong side. Check IsNavigable()/"
+            "GetNavigationReliability() before trusting any answer from this shape.",
+            GetName(), closure.reversedEdges);
     }
     if (closure.closed && closure.signedVolume < 0.) {
       Warning("CloseShape",
@@ -703,8 +725,6 @@ void O2BVHSurfaceSolid::CloseShape(bool check)
               GetName(), closure.signedVolume);
     }
   }
-
-  fImpl->defined = true;
 }
 
 int O2BVHSurfaceSolid::GetNsurfaces() const
@@ -753,6 +773,62 @@ bool O2BVHSurfaceSolid::IsClosed() const
 bool O2BVHSurfaceSolid::IsOrientationConsistent() const
 {
   return fImpl != nullptr && fImpl->defined && fImpl->closure.orientationConsistent;
+}
+
+O2BVHSurfaceSolid::NavigationReliability O2BVHSurfaceSolid::GetNavigationReliability() const
+{
+  if (fImpl == nullptr || !fImpl->defined) {
+    return NavigationReliability::Undetermined;
+  }
+  // worst defect wins; the enum is ordered by severity
+  const auto& closure = fImpl->closure;
+  if (closure.nonManifoldEdges > 0) {
+    return NavigationReliability::NonManifold;
+  }
+  if (closure.boundaryEdges > 0) {
+    return NavigationReliability::OpenSurfaceSet;
+  }
+  if (closure.reversedEdges > 0) {
+    return NavigationReliability::ReversedFaces;
+  }
+  return NavigationReliability::Reliable;
+}
+
+bool O2BVHSurfaceSolid::IsNavigable() const
+{
+  return GetNavigationReliability() == NavigationReliability::Reliable;
+}
+
+const char* O2BVHSurfaceSolid::GetNavigationReliabilityName(NavigationReliability reliability)
+{
+  switch (reliability) {
+    case NavigationReliability::Undetermined:
+      return "undetermined";
+    case NavigationReliability::Reliable:
+      return "reliable";
+    case NavigationReliability::ReversedFaces:
+      return "reversed-faces";
+    case NavigationReliability::OpenSurfaceSet:
+      return "open-surface-set";
+    case NavigationReliability::NonManifold:
+      return "non-manifold";
+  }
+  return "unknown";
+}
+
+int O2BVHSurfaceSolid::GetBoundaryEdgeCount() const
+{
+  return fImpl == nullptr ? 0 : fImpl->closure.boundaryEdges;
+}
+
+int O2BVHSurfaceSolid::GetNonManifoldEdgeCount() const
+{
+  return fImpl == nullptr ? 0 : fImpl->closure.nonManifoldEdges;
+}
+
+int O2BVHSurfaceSolid::GetReversedEdgeCount() const
+{
+  return fImpl == nullptr ? 0 : fImpl->closure.reversedEdges;
 }
 
 void O2BVHSurfaceSolid::ComputeBBox()
@@ -813,6 +889,13 @@ TBuffer3D* O2BVHSurfaceSolid::MakeBuffer3D() const
 void O2BVHSurfaceSolid::Print(Option_t*) const
 {
   std::cout << "=== BVH surface solid " << GetName() << " having " << GetNsurfaces() << " bounded surfaces\n";
+  const auto reliability = GetNavigationReliability();
+  std::cout << "    navigation: " << GetNavigationReliabilityName(reliability);
+  if (reliability != NavigationReliability::Reliable && reliability != NavigationReliability::Undetermined) {
+    std::cout << " (UNRELIABLE; boundary=" << GetBoundaryEdgeCount() << " non-manifold=" << GetNonManifoldEdgeCount()
+              << " reversed=" << GetReversedEdgeCount() << ")";
+  }
+  std::cout << "\n";
 }
 
 void O2BVHSurfaceSolid::SetPoints(double* points) const

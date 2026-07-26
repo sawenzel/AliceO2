@@ -270,6 +270,7 @@ int main(int argc, char** argv)
   }
 
   json jsonReport = json::array();
+  std::vector<std::string> unreliableParts;
 
   for (const auto& part : parts) {
     std::printf("=== %s (%s) ===\n", part.id.c_str(), part.model.c_str());
@@ -305,6 +306,20 @@ int main(int argc, char** argv)
     std::printf("  surfaces=%d triangles=%d  closeShape: surface=%.4fs mesh=%.4fs\n", surf.GetNsurfaces(),
                mesh.GetNfacets(), surfCloseSeconds, meshCloseSeconds);
 
+    // Label every measurement with whether its subject is a closed manifold at all. Without this
+    // line an "unexplained" mismatch count below is unattributable: on an open surface set the
+    // exact solid's own answers are undefined in the shadow of each gap, so the number says
+    // nothing about mesh chording (see scripts/geometry/ExactTrimTopology.md, item 4).
+    const auto reliability = surf.GetNavigationReliability();
+    const char* reliabilityName = O2BVHSurfaceSolid::GetNavigationReliabilityName(reliability);
+    const bool navigable = surf.IsNavigable();
+    std::printf("  navigation: %s%s  (boundary=%d non-manifold=%d reversed=%d)\n", reliabilityName,
+               navigable ? "" : "  *** UNRELIABLE: results below are not a measurement of accuracy ***",
+               surf.GetBoundaryEdgeCount(), surf.GetNonManifoldEdgeCount(), surf.GetReversedEdgeCount());
+    if (!navigable) {
+      unreliableParts.push_back(part.id + " (" + reliabilityName + ")");
+    }
+
     SampleConfig cfg;
     cfg.nBulk = opt.points;
     cfg.nBoundary = opt.points;
@@ -334,6 +349,11 @@ int main(int argc, char** argv)
     partJson["closeShapeSecondsMesh"] = meshCloseSeconds;
     partJson["bvhRayCandidatesSampled"] = candidatesSampled;
     partJson["bvhRayCandidatesProbeRays"] = nProbe;
+    partJson["navigation"] = {{"reliability", reliabilityName},
+                              {"navigable", navigable},
+                              {"boundaryEdges", surf.GetBoundaryEdgeCount()},
+                              {"nonManifoldEdges", surf.GetNonManifoldEdgeCount()},
+                              {"reversedEdges", surf.GetReversedEdgeCount()}};
 
     std::vector<Point3D> allPoints = samples.bulkPoints;
     allPoints.insert(allPoints.end(), samples.boundaryPoints.begin(), samples.boundaryPoints.end());
@@ -496,6 +516,21 @@ int main(int argc, char** argv)
     }
 
     jsonReport.push_back(std::move(partJson));
+  }
+
+  // Repeated at the end because per-part lines scroll away in a 19-part run, and because the whole
+  // point of item 4 is that no future reader can attribute an "unexplained" column to mesh
+  // chording without first seeing whether the subject was a closed manifold at all.
+  if (!unreliableParts.empty()) {
+    std::printf("\n*** %zu of %zu part(s) are NOT navigable; their accuracy columns above measure an\n"
+               "*** undefined answer, not the exact solid's error. See scripts/geometry/ExactTrimTopology.md.\n",
+               unreliableParts.size(), parts.size());
+    for (const auto& id : unreliableParts) {
+      std::printf("***   %s\n", id.c_str());
+    }
+  } else {
+    std::printf("\nAll %zu part(s) closed consistently oriented manifolds: navigation results are meaningful.\n",
+               parts.size());
   }
 
   if (!opt.jsonOut.empty()) {

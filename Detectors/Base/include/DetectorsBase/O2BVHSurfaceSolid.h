@@ -209,6 +209,42 @@ class O2BVHSurfaceSolid : public TGeoBBox
   /// detects e.g. reversed faces (inconsistent outward normals).
   bool IsOrientationConsistent() const;
 
+  /// How far the navigation queries can be trusted on this solid, as determined by CloseShape's
+  /// half-edge closure check. Parity-based containment answers a *topological* question ("does a
+  /// ray from this point cross the boundary an odd number of times"), so it is only defined on a
+  /// closed, consistently oriented 2-manifold. On anything else the answers are not merely
+  /// imprecise near the defect: a single sliver gap flips Contains over the gap's whole shadow
+  /// along the parity test direction, which can be centimetres of wrong answers far from any
+  /// surface (see scripts/geometry/ExactTrimTopology.md). Callers that care about correctness
+  /// must check this; the solid still answers queries either way (see CloseShape).
+  ///
+  /// The values are ordered by increasing severity, so `reliability > Reliable` is "do not trust
+  /// this" and the worst defect present is the one reported.
+  enum class NavigationReliability {
+    Undetermined = 0,       ///< CloseShape() has not run yet: no diagnostics exist
+    Reliable,               ///< closed, consistently oriented 2-manifold: parity is well defined
+    ReversedFaces,          ///< closed, but some shared edge is traversed the same way by both
+                            ///< faces: at least one face's outward normal points inward
+    OpenSurfaceSet,         ///< boundary edges (missing faces / trim gaps): parity is undefined in
+                            ///< the shadow of every gap along the parity test direction
+    NonManifold             ///< edges shared by more than two faces (coincident/duplicated faces):
+                            ///< parity depends on the order hits are clustered in
+  };
+
+  /// The reliability state derived from the last CloseShape(); Undetermined before it has run.
+  NavigationReliability GetNavigationReliability() const;
+  /// Shorthand for GetNavigationReliability() == NavigationReliability::Reliable. False means the
+  /// navigation answers of this solid are not to be trusted anywhere, not just near the defect.
+  bool IsNavigable() const;
+  /// Short stable identifier of a reliability state ("reliable", "open-surface-set", ...), for
+  /// logs and machine-readable reports.
+  static const char* GetNavigationReliabilityName(NavigationReliability reliability);
+
+  /// Closure-check counts behind GetNavigationReliability(); all zero on a navigable solid.
+  int GetBoundaryEdgeCount() const;
+  int GetNonManifoldEdgeCount() const;
+  int GetReversedEdgeCount() const;
+
   void ComputeBBox() override;
 
   int DistancetoPrimitive(int, int) override { return 99999; }

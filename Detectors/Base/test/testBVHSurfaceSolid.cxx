@@ -548,6 +548,72 @@ BOOST_AUTO_TEST_CASE(SolidClosureDetectsMissingAndReversedFaces)
   BOOST_CHECK(!reversed.IsOrientationConsistent());
 }
 
+// The queryable navigation-reliability state (scripts/geometry/ExactTrimTopology.md, item 4).
+// A caller must be able to ask "can I trust this solid's navigation answers" and get a single
+// answer, rather than having to notice a printed warning; the state must also survive being
+// closed with check==false, since diagnostics and reporting are separate concerns.
+BOOST_AUTO_TEST_CASE(NavigationReliabilityIsQueryable)
+{
+  using Reliability = SurfaceSolid::NavigationReliability;
+  constexpr double halfX = 1.;
+  constexpr double halfY = 1.5;
+  constexpr double halfZ = 2.;
+
+  // before CloseShape there are no diagnostics at all
+  SurfaceSolid fresh("freshBox");
+  for (int faceIndex = 0; faceIndex < 6; ++faceIndex) {
+    BOOST_REQUIRE(addBoxFace(fresh, faceIndex, halfX, halfY, halfZ));
+  }
+  BOOST_CHECK(fresh.GetNavigationReliability() == Reliability::Undetermined);
+  BOOST_CHECK(!fresh.IsNavigable());
+
+  fresh.CloseShape(false);
+  BOOST_CHECK(fresh.GetNavigationReliability() == Reliability::Reliable);
+  BOOST_CHECK(fresh.IsNavigable());
+  BOOST_CHECK_EQUAL(fresh.GetBoundaryEdgeCount(), 0);
+  BOOST_CHECK_EQUAL(fresh.GetNonManifoldEdgeCount(), 0);
+  BOOST_CHECK_EQUAL(fresh.GetReversedEdgeCount(), 0);
+
+  // a missing face leaves boundary edges: the gap case that motivates the whole state
+  SurfaceSolid missing("missingFaceBoxState");
+  for (int faceIndex = 1; faceIndex < 6; ++faceIndex) {
+    BOOST_REQUIRE(addBoxFace(missing, faceIndex, halfX, halfY, halfZ));
+  }
+  missing.CloseShape(false);
+  BOOST_CHECK(missing.GetNavigationReliability() == Reliability::OpenSurfaceSet);
+  BOOST_CHECK(!missing.IsNavigable());
+  BOOST_CHECK(missing.GetBoundaryEdgeCount() > 0);
+
+  // a reversed face is closed but inconsistently oriented
+  SurfaceSolid reversed("reversedFaceBoxState");
+  BOOST_REQUIRE(addBoxFace(reversed, 0, halfX, halfY, halfZ, true));
+  for (int faceIndex = 1; faceIndex < 6; ++faceIndex) {
+    BOOST_REQUIRE(addBoxFace(reversed, faceIndex, halfX, halfY, halfZ));
+  }
+  reversed.CloseShape(false);
+  BOOST_CHECK(reversed.GetNavigationReliability() == Reliability::ReversedFaces);
+  BOOST_CHECK(!reversed.IsNavigable());
+  BOOST_CHECK(reversed.GetReversedEdgeCount() > 0);
+
+  // duplicated faces: every edge is now shared by four faces. Non-manifold outranks the boundary
+  // and orientation cases because parity is not even order-independent on such input.
+  SurfaceSolid duplicated("duplicatedFaceBox");
+  for (int pass = 0; pass < 2; ++pass) {
+    for (int faceIndex = 0; faceIndex < 6; ++faceIndex) {
+      BOOST_REQUIRE(addBoxFace(duplicated, faceIndex, halfX, halfY, halfZ));
+    }
+  }
+  duplicated.CloseShape(false);
+  BOOST_CHECK(duplicated.GetNavigationReliability() == Reliability::NonManifold);
+  BOOST_CHECK(!duplicated.IsNavigable());
+  BOOST_CHECK(duplicated.GetNonManifoldEdgeCount() > 0);
+
+  BOOST_CHECK_EQUAL(std::string(SurfaceSolid::GetNavigationReliabilityName(Reliability::Reliable)), "reliable");
+  BOOST_CHECK_EQUAL(std::string(SurfaceSolid::GetNavigationReliabilityName(Reliability::OpenSurfaceSet)),
+                    "open-surface-set");
+  BOOST_CHECK_EQUAL(std::string(SurfaceSolid::GetNavigationReliabilityName(Reliability::NonManifold)), "non-manifold");
+}
+
 BOOST_AUTO_TEST_CASE(NumericalConventions)
 {
   using surf::WireRole;
