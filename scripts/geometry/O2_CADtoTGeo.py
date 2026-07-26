@@ -52,6 +52,8 @@ from dataclasses import dataclass
 from pathlib import Path as _Path
 from typing import Dict, List, Optional, Pattern, Tuple
 
+import numpy as np
+
 from OCC.Core.Bnd import Bnd_Box
 from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
 from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Common
@@ -87,7 +89,7 @@ from OCC.Core.IFSelect import IFSelect_RetDone
 
 from OCC.Core.TDF import TDF_Label, TDF_LabelSequence, TDF_Tool
 from OCC.Core.TCollection import TCollection_AsciiString
-from OCC.Core.gp import gp_Pnt, gp_Trsf
+from OCC.Core.gp import gp_Pnt, gp_Vec, gp_Trsf
 
 # volume properties for density calcs (may not be present in older pythonOCC builds)
 try:
@@ -509,8 +511,16 @@ def _edge_pcurve_is_iso(edge, face, uv_bounds) -> bool:
     return (max(us) - min(us) <= tol_u) or (max(vs) - min(vs) <= tol_v)
 
 
-def classify_face(face, scale_to_cm: float) -> dict:
-    """Classifies a single TopoDS face: analytic type, parameters, wires and edges."""
+def classify_face(face, scale_to_cm: float, recognize_surfaces: bool = True) -> dict:
+    """Classifies a single TopoDS face: analytic type, parameters, wires and edges.
+
+    `recognize_surfaces`: for a face whose stored type has no direct extractor, also try the
+    canonical-form recognizer (differential normal-field, machine-precision only) and, on success,
+    record `recognized_type`/`recognized_residual` - the stored surface type is a statement about
+    the exporter, not the geometry (see "Canonical-form recognition" below and BVHSurfaceSolid.md).
+    This is a *surface*-only claim: it does not verify the boundary wires are extractable, so it is
+    an optimistic upper bound on eligibility, same caveat as the existing `trim_kind` field.
+    """
     adaptor = BRepAdaptor_Surface(face)
     surf_type = _SURFACE_TYPE_NAMES.get(adaptor.GetType(), "unknown")
 
@@ -526,6 +536,12 @@ def classify_face(face, scale_to_cm: float) -> dict:
         "params": _surface_params(adaptor, surf_type, scale_to_cm),
         "wires": [],
     }
+
+    if recognize_surfaces and surf_type not in _SUPPORTED_SURFACE_TYPES and not any(math.isnan(x) for x in uv_bounds):
+        rec = _recognize_analytic_surface(adaptor, uv_bounds)
+        if rec is not None:
+            record["recognized_type"] = rec["kind"]
+            record["recognized_residual"] = rec["residual"]
 
     try:
         outer_wire = breptools.OuterWire(face)
@@ -574,6 +590,10 @@ def face_supported(record: dict) -> Tuple[bool, Optional[str]]:
     """Evaluates one classify_face record against the current C++ support matrix."""
     surf_type = record["type"]
     if surf_type not in _SUPPORTED_SURFACE_TYPES:
+        recognized = record.get("recognized_type")
+        if recognized is not None:
+            record["trim_kind"] = "recognized"
+            return True, None
         return False, f"unsupported surface type '{surf_type}'"
 
     curve_types = set()
@@ -599,18 +619,25 @@ def face_supported(record: dict) -> Tuple[bool, Optional[str]]:
     return True, None
 
 
-def build_surface_report(step_path: str, scale_to_cm: float) -> dict:
-    """Builds the JSON-serializable exact-conversion eligibility report over def_shapes."""
+def build_surface_report(step_path: str, scale_to_cm: float, recognize_surfaces: bool = True) -> dict:
+    """Builds the JSON-serializable exact-conversion eligibility report over def_shapes.
+
+    `recognize_surfaces`: also runs the canonical-form recognition pre-pass on every face whose
+    stored type has no direct extractor, and tallies a `recognized_surface_counts` /
+    `recognized_stored_type_counts` breakdown in the summary (surface-only, see `classify_face`).
+    """
     volumes = {}
     n_eligible = 0
     face_type_counts: Dict[str, int] = {}
     curve_type_counts: Dict[str, int] = {}
     fallback_reasons: Dict[str, int] = {}
+    recognized_surface_counts: Dict[str, int] = {}
+    recognized_stored_type_counts: Dict[str, int] = {}
 
     for lid, shape in def_shapes.items():
         faces = []
         for face in TopologyExplorer(shape).faces():
-            rec = classify_face(face, scale_to_cm)
+            rec = classify_face(face, scale_to_cm, recognize_surfaces=recognize_surfaces)
             ok, reason = face_supported(rec)
             rec["supported"] = ok
             if reason:
@@ -622,6 +649,10 @@ def build_surface_report(step_path: str, scale_to_cm: float) -> dict:
             for w in rec["wires"]:
                 for ctype, n in w["curve_types"].items():
                     curve_type_counts[ctype] = curve_type_counts.get(ctype, 0) + n
+            recognized_kind = rec.get("recognized_type")
+            if recognized_kind is not None:
+                recognized_surface_counts[recognized_kind] = recognized_surface_counts.get(recognized_kind, 0) + 1
+                recognized_stored_type_counts[rec["type"]] = recognized_stored_type_counts.get(rec["type"], 0) + 1
 
         eligible = bool(faces) and all(f["supported"] for f in faces)
         if eligible:
@@ -643,6 +674,8 @@ def build_surface_report(step_path: str, scale_to_cm: float) -> dict:
             "face_type_counts": face_type_counts,
             "curve_type_counts": curve_type_counts,
             "fallback_reasons": fallback_reasons,
+            "recognized_surface_counts": recognized_surface_counts,
+            "recognized_stored_type_counts": recognized_stored_type_counts,
         },
         "volumes": volumes,
     }
@@ -868,19 +901,27 @@ def _planar_bspline_edge_params(edge, project) -> Optional[List[float]]:
         return None
 
 
-def extract_planar_face(face, scale_to_cm: float) -> Tuple[Optional[dict], Optional[str]]:
+def extract_planar_face(face, scale_to_cm: float, frame_override=None) -> Tuple[Optional[dict], Optional[str]]:
     """Convert a planar TopoDS face into a sidecar 'plane' surface record with general
     line/arc/B-spline boundary wires (polygon, disk/annulus, rounded rectangle, slot, ...).
 
     Each wire is walked in connected order; straight edges become 'line' segments and circular
     edges become 'arc' segments in the plane's local (u, v) frame. Boundary edges that are
     neither straight lines nor circular arcs (ellipses, splines, ...) force a fallback.
-    """
-    adaptor = BRepAdaptor_Surface(face)
-    if adaptor.GetType() != GeomAbs_Plane:
-        return None, f"not a plane ({_SURFACE_TYPE_NAMES.get(adaptor.GetType(), 'unknown')})"
 
-    origin_cm, axis_u, axis_v = _planar_frame(face, scale_to_cm)
+    `frame_override`, when given, is an (origin_cm, axis_u, axis_v) triple that replaces the
+    face's own OCC plane frame (used by the canonical-recognition pre-pass to extract a face
+    whose *stored* surface type is not `GeomAbs_Plane` but was recognized as flat): all boundary
+    edges are still read from the face's actual 3D curves, so this only bypasses the
+    `adaptor.GetType() != GeomAbs_Plane` guard and the OCC-derived frame.
+    """
+    if frame_override is not None:
+        origin_cm, axis_u, axis_v = frame_override
+    else:
+        adaptor = BRepAdaptor_Surface(face)
+        if adaptor.GetType() != GeomAbs_Plane:
+            return None, f"not a plane ({_SURFACE_TYPE_NAMES.get(adaptor.GetType(), 'unknown')})"
+        origin_cm, axis_u, axis_v = _planar_frame(face, scale_to_cm)
     s = scale_to_cm
     project = _planar_projector(origin_cm, axis_u, axis_v, s)
 
@@ -1210,6 +1251,385 @@ def extract_toroidal_face(face, scale_to_cm: float) -> Tuple[Optional[dict], Opt
     return record, None
 
 
+# -------------------------------
+# Canonical-form recognition: recover the exact analytic model behind a stored NURBS
+# -------------------------------
+# The stored STEP surface type describes the exporter, not the geometry: CAD kernels routinely
+# write an exact cylinder/cone/sphere/plane as a *rational* B-spline/Bezier patch (exact, not an
+# approximation - a rational quadratic/cubic reproduces conics exactly). This is a numeric,
+# differential-geometry recognizer (normal-field based, no initial guess/iteration needed) ported
+# from the validated standalone prototype `analyze_surface_geometry.py` (see that file and
+# BVHSurfaceSolid.md, milestone "Canonical-form recognition"). It is model *selection*, not
+# fitting: only a fit at machine precision is accepted, so an "almost cylinder" that is really
+# free-form stays free-form. Used as a pre-pass fallback in `extract_surfaces_for_shape` for faces
+# whose stored surface type has no direct extractor (bspline/bezier/revolution/extrusion/...).
+
+_RECOGNIZE_TOL_EXACT = 1.e-9
+
+
+def _sample_surface_for_recognition(adaptor, umin: float, umax: float, vmin: float, vmax: float, n: int = 9):
+    """Sample an (n x n) grid over the face's actual trimmed (u, v) box (from `breptools.UVBounds`,
+    not the underlying surface's full natural domain). Returns (points, unit normals) in *native*
+    (unscaled) CAD length units, or (None, None) if unsampleable."""
+    if not all(math.isfinite(x) for x in (umin, umax, vmin, vmax)):
+        return None, None
+    points, normals = [], []
+    for i in range(n):
+        u = umin + (umax - umin) * i / (n - 1.0)
+        for j in range(n):
+            v = vmin + (vmax - vmin) * j / (n - 1.0)
+            p, du, dv = gp_Pnt(), gp_Vec(), gp_Vec()
+            try:
+                adaptor.D1(u, v, p, du, dv)
+            except Exception:
+                return None, None
+            nrm = _v_cross([du.X(), du.Y(), du.Z()], [dv.X(), dv.Y(), dv.Z()])
+            length = math.sqrt(_v_dot(nrm, nrm))
+            if length < 1e-14:  # parametric degeneracy (pole/seam): skip this sample
+                continue
+            points.append([p.X(), p.Y(), p.Z()])
+            normals.append([c / length for c in nrm])
+    if len(points) < 3 * n:
+        return None, None
+    return np.array(points), np.array(normals)
+
+
+def _recognize_analytic_surface(adaptor, uv_bounds) -> Optional[dict]:
+    """Model-selection recognizer: plane (3 params) < sphere (4) < cylinder (5) < cone (6) <
+    free-form, trying each candidate and keeping the smallest relative residual. Accepts only a
+    machine-precision fit (< `_RECOGNIZE_TOL_EXACT`); returns None otherwise (freeform / degenerate
+    / unsampleable). All lengths in the returned frame are in *native* (unscaled) CAD units - the
+    caller applies `scale_to_cm`.
+    """
+    umin, umax, vmin, vmax = uv_bounds
+    P, N = _sample_surface_for_recognition(adaptor, umin, umax, vmin, vmax)
+    if P is None:
+        return None
+    scale = float(np.linalg.norm(P.max(axis=0) - P.min(axis=0)))
+    if scale < 1e-12:
+        return None
+
+    # --- plane (3): all unit normals parallel
+    dev = float(np.abs(np.abs(N @ N[0]) - 1.0).max())
+    if dev < 1e-12:
+        normal = N[0] / np.linalg.norm(N[0])
+        return {"kind": "plane", "residual": dev, "normal": normal, "point": P[0], "P": P}
+
+    best = ("freeform", float("inf"), {})
+
+    # --- sphere (4): normal lines concurrent, P_i = C + r*N_i
+    A = np.zeros((3 * len(P), 4))
+    b = np.zeros(3 * len(P))
+    for i in range(len(P)):
+        A[3 * i:3 * i + 3, 0:3] = np.eye(3)
+        A[3 * i:3 * i + 3, 3] = N[i]
+        b[3 * i:3 * i + 3] = P[i]
+    sol, *_ = np.linalg.lstsq(A, b, rcond=None)
+    centre, radius = sol[:3], abs(sol[3])
+    res = float(np.abs(np.linalg.norm(P - centre, axis=1) - radius).max() / scale)
+    if res < best[1]:
+        best = ("sphere", res, {"centre": centre, "radius": radius})
+
+    # --- cylinder (5): normals coplanar; axis = smallest right singular vector of the normal field
+    _, _, Vt = np.linalg.svd(N, full_matrices=False)
+    axis = Vt[-1]
+    if np.abs(N @ axis).max() < 1e-9:
+        e1 = Vt[0]
+        e2 = np.cross(axis, e1)
+        x, y = P @ e1, P @ e2
+        M = np.column_stack([x, y, np.ones_like(x)])
+        D, E, F = np.linalg.lstsq(M, -(x ** 2 + y ** 2), rcond=None)[0]
+        cx, cy = -D / 2, -E / 2
+        r2 = cx * cx + cy * cy - F
+        if r2 > 0:
+            R = math.sqrt(r2)
+            res = float(np.abs(np.hypot(x - cx, y - cy) - R).max() / scale)
+            if res < best[1]:
+                origin = cx * e1 + cy * e2  # a point on the axis (axial component is free)
+                best = ("cylinder", res, {"axis": axis, "refu": e1, "origin": origin, "radius": R})
+
+    # --- cone (6): N_i . (P_i - A) = 0 is linear in the apex A
+    apex, *_ = np.linalg.lstsq(N, np.einsum('ij,ij->i', N, P), rcond=None)
+    d = P - apex
+    dn = np.linalg.norm(d, axis=1)
+    ok = dn > 1e-12
+    if ok.sum() > 10:
+        u = d[ok] / dn[ok, None]
+        res = float(np.abs(np.einsum('ij,ij->i', u, N[ok])).max())
+        mean_dir = u.mean(axis=0)
+        _, _, Vt2 = np.linalg.svd(u - mean_dir, full_matrices=False)
+        ax2 = np.cross(Vt2[0], Vt2[1])
+        n2 = np.linalg.norm(ax2)
+        if n2 > 1e-12:  # constant half-angle about the ruling axis
+            ax2 = ax2 / n2
+            if np.dot(mean_dir, ax2) < 0.0:
+                ax2 = -ax2
+            res = max(res, float(np.abs(u @ ax2).std()))
+            if res < best[1]:
+                ref = u[0] - np.dot(u[0], ax2) * ax2
+                refn = np.linalg.norm(ref)
+                if refn > 1e-9:
+                    half_angle = float(np.arccos(np.clip(np.abs(u @ ax2), -1.0, 1.0)).mean())
+                    best = ("cone", res, {"axis": ax2, "apex": apex, "refu": ref / refn, "half_angle": half_angle})
+
+    kind, res, extra = best
+    if res >= _RECOGNIZE_TOL_EXACT:
+        return None
+    out = {"kind": kind, "residual": res, "P": P}
+    out.update(extra)
+    return out
+
+
+def _arbitrary_orthonormal_frame(axis):
+    """One arbitrary orthonormal in-plane vector for an axis with no natural reference direction
+    (a full/partial sphere has no preferred polar reference)."""
+    axis = np.asarray(axis, dtype=float)
+    axis = axis / np.linalg.norm(axis)
+    seed = np.array([1.0, 0.0, 0.0]) if abs(axis[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+    e1 = seed - np.dot(seed, axis) * axis
+    return e1 / np.linalg.norm(e1)
+
+
+def _recognized_quadric_wire_block(face, project):
+    """Build general line-only trim wires in the recognized (phi, other) domain by sampling each
+    3D boundary edge directly (any curve type: line/circle/bspline...) and phi-unwrapping
+    *continuously* across all samples of the whole wire loop, in wire-traversal order. Sampling
+    works from the edge's own 3D curve, so this does not depend on the *stored* surface's own
+    (u, v) parametrization being aligned with the recognized frame at all (unlike the existing
+    `_edge_pcurve_is_iso`, which only tests alignment with the stored parametrization).
+
+    Continuous per-sample unwrapping (rather than a coarser vertex-to-vertex or grid unwrap) is
+    required for correctness: a single rim/cap edge on a patch whose angular sweep approaches pi
+    connects two vertices whose raw delta-phi sits right at the +/-pi unwrap branch cut, which is
+    fragile; densely sampling *along* that edge keeps every consecutive step small.
+
+    An accepted edge is exactly a straight segment in (phi, other) - a constant-`other` edge is a
+    rim/cap, a constant-`phi` edge is a generator/meridian - so no bspline pole-transform is needed
+    (unlike `_quadric_trim_wire`, which reparametrizes curved *stored* pcurves under an affine map;
+    here the reparametrization target is always a line by construction once an edge passes the iso
+    test). A genuinely non-iso boundary edge (a slanted/curved cut in the recognized frame) is
+    rejected - out of scope for this pass.
+
+    A *degenerate* edge (a cone apex or sphere pole: a single point, no 3D curve, `other ~= 0` for
+    a cone apex) is common on real CAD (countersinks, chamfers) and is handled specially: `phi` is
+    numerically indeterminate there (atan2 of a near-zero radial vector), so rather than sample it,
+    the point's phi is taken as the *incoming* wire phi (the last unwrapped sample before it) -
+    correctly modelling the point as the transition between the two adjacent generator/meridian
+    edges' phi values, with no spurious jump.
+
+    Returns (wires, (phiStart, phiSweep, otherLo, otherHi), None) on success, or
+    (None, None, reason) on failure. The window is the outer wire's own sample extent - a
+    conservative bound by construction, mirroring the scalar-parameter "conservative window" role
+    documented in the sidecar format for a wire-trimmed quadric.
+    """
+    wires_edges = list(_face_wire_edges(face))
+    if not wires_edges:
+        return None, None, "recognized quadric face has no wires"
+
+    n_samples = 9
+    per_wire = []  # (is_outer, [ [ (phi_raw, other), ... ] or None (degenerate) per edge ], [ other_at_degenerate_vertex or None ])
+    all_other = []
+    for _wire, is_outer, edges in wires_edges:
+        if len(edges) < 3:
+            return None, None, "recognized quadric trim wire has fewer than 3 edges"
+        edge_samples = []
+        degenerate_other = []
+        for edge, start_vertex in edges:
+            if BRep_Tool.Degenerated(edge):
+                _phi, other = project(BRep_Tool.Pnt(start_vertex))
+                edge_samples.append(None)
+                degenerate_other.append(other)
+                all_other.append(other)
+                continue
+            degenerate_other.append(None)
+            try:
+                curve3d, first, last = BRep_Tool.Curve(edge)
+            except Exception:
+                curve3d = None
+            if curve3d is None:
+                return None, None, "recognized quadric boundary edge has no 3D curve"
+            reversed_edge = edge.Orientation() == TopAbs_REVERSED
+            samples = []
+            for k in range(n_samples):
+                tau = k / (n_samples - 1.0)
+                t = (1.0 - tau) if reversed_edge else tau
+                phi, other = project(curve3d.Value(first + t * (last - first)))
+                samples.append((phi, other))
+                all_other.append(other)
+            edge_samples.append(samples)
+        per_wire.append((is_outer, edge_samples, degenerate_other))
+    tol_other = 1e-6 * max(1.0, max(all_other) - min(all_other))
+    tol_phi = 1e-7
+
+    wires_out: List[dict] = []
+    outer_window = None
+    for is_outer, edge_samples, degenerate_other in per_wire:
+        n = len(edge_samples)
+        unwrapped_edges = []
+        prev_phi = None
+        for samples, deg_other in zip(edge_samples, degenerate_other):
+            if samples is None:
+                # degenerate point: carry the running phi through unchanged (see docstring)
+                if prev_phi is None:
+                    prev_phi = 0.0
+                unwrapped_edges.append([prev_phi] * n_samples)
+                continue
+            u_edge = []
+            for phi_raw, _other in samples:
+                if prev_phi is None:
+                    phi_u = phi_raw
+                else:
+                    d = phi_raw - prev_phi
+                    d -= 2.0 * math.pi * math.floor((d + math.pi) / (2.0 * math.pi))
+                    phi_u = prev_phi + d
+                u_edge.append(phi_u)
+                prev_phi = phi_u
+            unwrapped_edges.append(u_edge)
+
+        starts = []
+        all_phi_u, all_other_w = [], []
+        for i, samples in enumerate(edge_samples):
+            phis_u = unwrapped_edges[i]
+            if samples is None:
+                others = [degenerate_other[i]] * n_samples
+            else:
+                others = [o for _p, o in samples]
+            all_phi_u.extend(phis_u)
+            all_other_w.extend(others)
+            is_iso_other = (max(others) - min(others)) <= tol_other
+            is_iso_phi = (max(phis_u) - min(phis_u)) <= tol_phi
+            if not (is_iso_other or is_iso_phi):
+                return None, None, "recognized quadric boundary edge is not axis-aligned in (phi, h/theta)"
+            starts.append((phis_u[0], others[0]))
+        if is_outer:
+            outer_window = (min(all_phi_u), max(all_phi_u) - min(all_phi_u), min(all_other_w), max(all_other_w))
+
+        seg_edges = []
+        for i in range(n):
+            u0, v0 = starts[i]
+            u1, v1 = starts[(i + 1) % n]
+            seg_edges.append({"curve": "line", "params": [u0, v0, u1, v1]})
+        wires_out.append({"role": "outer" if is_outer else "inner", "edges": seg_edges})
+
+    n_outer = sum(1 for w in wires_out if w["role"] == "outer")
+    if n_outer != 1:
+        return None, None, f"recognized quadric face has {n_outer} outer trim wires (expected exactly 1)"
+    return wires_out, outer_window, None
+
+
+def recognize_and_extract_face(face, scale_to_cm: float) -> Tuple[Optional[dict], Optional[str]]:
+    """Canonical-form recognition pre-pass: for a face whose *stored* surface has no direct
+    extractor, try to recognize the exact plane/sphere/cylinder/cone hiding behind it and extract
+    the same sidecar record a natively-analytic face of that kind would produce. Returns
+    (None, None) when the face is genuinely not recognizable (freeform / unsampleable) - the
+    caller should keep its original stored-type fallback reason in that case, not this one's.
+    """
+    adaptor = BRepAdaptor_Surface(face)
+    try:
+        uv_bounds = breptools.UVBounds(face)
+    except Exception:
+        return None, None
+    rec = _recognize_analytic_surface(adaptor, uv_bounds)
+    if rec is None:
+        return None, None
+    kind = rec["kind"]
+    s = scale_to_cm
+    inner_wall = face.Orientation() == TopAbs_REVERSED  # same convention as the native extractors:
+    # the recognized surface's canonical normal is always "away from the axis/center", exactly
+    # like OCC's own canonical quadric normal, regardless of the recognized frame's axis/refu sign.
+
+    if kind == "plane":
+        normal = rec["normal"]
+        e1 = _arbitrary_orthonormal_frame(normal)
+        outward_sign = -1.0 if inner_wall else 1.0
+        e2 = np.cross(normal, e1) * outward_sign  # axisU x axisV must equal the outward normal
+        origin_cm = (rec["point"] * s).tolist()
+        record, reason = extract_planar_face(face, s, frame_override=(origin_cm, e1.tolist(), e2.tolist()))
+        if record is None:
+            return None, f"recognized as plane but {reason}"
+        record["recognized"] = {"kind": "plane", "residual": rec["residual"]}
+        return record, None
+
+    if kind == "cylinder":
+        axis = rec["axis"] / np.linalg.norm(rec["axis"])
+        refu = rec["refu"] - np.dot(rec["refu"], axis) * axis
+        refu = refu / np.linalg.norm(refu)
+        e2 = np.cross(axis, refu)
+        origin_native = rec["origin"]
+
+        def project(pnt):
+            rel = np.array([pnt.X(), pnt.Y(), pnt.Z()]) - origin_native
+            phi = math.atan2(np.dot(rel, e2), np.dot(rel, refu))
+            return phi, float(np.dot(rel, axis)) * s
+
+        wires, window, reason = _recognized_quadric_wire_block(face, project)
+        if wires is None:
+            return None, f"recognized as cylinder but {reason}"
+        phi_start, phi_sweep, h_lo, h_hi = window
+        if phi_sweep <= 0.0 or phi_sweep > 2.0 * math.pi + 1e-9:
+            return None, "recognized cylinder trim wraps more than a full turn in phi"
+        params = ((origin_native * s).tolist() + axis.tolist() + refu.tolist() +
+                  [rec["radius"] * s, h_lo, h_hi, phi_start, phi_sweep])
+        record = {"type": "cylinder", "inner_wall": inner_wall, "params": params, "wires": wires,
+                  "recognized": {"kind": "cylinder", "residual": rec["residual"]}}
+        return record, None
+
+    if kind == "cone":
+        axis = rec["axis"] / np.linalg.norm(rec["axis"])
+        refu = rec["refu"] - np.dot(rec["refu"], axis) * axis
+        refu = refu / np.linalg.norm(refu)
+        e2 = np.cross(axis, refu)
+        apex_native = rec["apex"]
+        tan_half = math.tan(rec["half_angle"])
+
+        def project(pnt):
+            rel = np.array([pnt.X(), pnt.Y(), pnt.Z()]) - apex_native
+            phi = math.atan2(np.dot(rel, e2), np.dot(rel, refu))
+            return phi, float(np.dot(rel, axis)) * s
+
+        wires, window, reason = _recognized_quadric_wire_block(face, project)
+        if wires is None:
+            return None, f"recognized as cone but {reason}"
+        phi_start, phi_sweep, h_lo, h_hi = window
+        if phi_sweep <= 0.0 or phi_sweep > 2.0 * math.pi + 1e-9:
+            return None, "recognized cone trim wraps more than a full turn in phi"
+        h_lo = max(0.0, h_lo)
+        h_hi = max(h_lo, h_hi)
+        params = ((apex_native * s).tolist() + axis.tolist() + refu.tolist() +
+                  [h_lo * tan_half, h_hi * tan_half, h_lo, h_hi, phi_start, phi_sweep])
+        record = {"type": "cone", "inner_wall": inner_wall, "params": params, "wires": wires,
+                  "recognized": {"kind": "cone", "residual": rec["residual"]}}
+        return record, None
+
+    if kind == "sphere":
+        centre_native = rec["centre"]
+        # A sphere has no natural polar axis; any orthonormal frame is a valid (self-consistent)
+        # (phi, theta) parametrization for this face.
+        polar_axis = np.array([0.0, 0.0, 1.0])
+        refu = _arbitrary_orthonormal_frame(polar_axis)
+        e2 = np.cross(polar_axis, refu)
+
+        def project(pnt):
+            rel = (np.array([pnt.X(), pnt.Y(), pnt.Z()]) - centre_native) / rec["radius"]
+            theta = math.acos(max(-1.0, min(1.0, float(np.dot(rel, polar_axis)))))
+            phi = math.atan2(float(np.dot(rel, e2)), float(np.dot(rel, refu)))
+            return phi, theta
+
+        wires, window, reason = _recognized_quadric_wire_block(face, project)
+        if wires is None:
+            return None, f"recognized as sphere but {reason}"
+        phi_start, phi_sweep, theta_lo, theta_hi = window
+        if phi_sweep <= 0.0 or phi_sweep > 2.0 * math.pi + 1e-9:
+            return None, "recognized sphere trim wraps more than a full turn in phi"
+        params = ((centre_native * s).tolist() + polar_axis.tolist() + refu.tolist() +
+                  [rec["radius"] * s, theta_lo, theta_hi, phi_start, phi_sweep])
+        record = {"type": "sphere", "inner_wall": inner_wall, "params": params, "wires": wires,
+                  "recognized": {"kind": "sphere", "residual": rec["residual"]}}
+        return record, None
+
+    return None, None
+
+
 # Face extractors dispatched by analytic surface type. Planar faces cover both straight-edged
 # polygons and circular disks/annuli; the quadrics and torus carry their trim in the surface
 # parameters (or a general wire block for non-rectangular trims).
@@ -1222,12 +1642,18 @@ _FACE_EXTRACTORS = {
 }
 
 
-def extract_surfaces_for_shape(shape, scale_to_cm: float) -> Tuple[Optional[List[dict]], List[str]]:
+def extract_surfaces_for_shape(shape, scale_to_cm: float,
+                               recognize_surfaces: bool = True) -> Tuple[Optional[List[dict]], List[str]]:
     """Attempt to extract every face of a leaf solid into exact sidecar surface records.
 
     Returns (surfaces, []) when all faces are supported, or (None, reasons) listing why the
     solid cannot be represented exactly (one reason per unsupported face). A shape with no
     faces is treated as unsupported.
+
+    `recognize_surfaces`: when a face's *stored* surface type has no direct extractor (typically
+    bspline/bezier/revolution/extrusion), try the canonical-form recognition pre-pass
+    (`recognize_and_extract_face`) before giving up on it - see "Canonical-form recognition"
+    above and BVHSurfaceSolid.md.
     """
     surfaces: List[dict] = []
     reasons: List[str] = []
@@ -1238,9 +1664,15 @@ def extract_surfaces_for_shape(shape, scale_to_cm: float) -> Tuple[Optional[List
         surf_type = _SURFACE_TYPE_NAMES.get(adaptor.GetType(), "unknown")
         extractor = _FACE_EXTRACTORS.get(surf_type)
         if extractor is None:
-            reasons.append(f"{surf_type} face extraction not implemented yet")
-            continue
-        record, reason = extractor(face, scale_to_cm)
+            record, reason = None, f"{surf_type} face extraction not implemented yet"
+        else:
+            record, reason = extractor(face, scale_to_cm)
+        if record is None and recognize_surfaces:
+            rec_record, rec_reason = recognize_and_extract_face(face, scale_to_cm)
+            if rec_record is not None:
+                record, reason = rec_record, None
+            elif rec_reason is not None:
+                reason = f"{reason}; recognition attempted: {rec_reason}"
         if record is None:
             reasons.append(reason or f"{surf_type} face not supported")
         else:
@@ -2343,6 +2775,7 @@ def emit_root_macro(
     surface_report: Optional[str] = None,
     surface_files: Optional[Dict[str, str]] = None,
     exact_surfaces: str = "off",
+    recognize_surfaces: str = "exact",
 ):
     # surface_files: def_lid -> absolute path of an exact-surface sidecar (surfaces_*.bin).
     # Volumes listed here are emitted as O2BVHSurfaceSolid via emit_surface_solid_cpp;
@@ -2382,9 +2815,14 @@ def emit_root_macro(
     out_folder = out_folder.expanduser().resolve()
     out_folder.mkdir(parents=True, exist_ok=True)
 
+    recognize_mode = (recognize_surfaces or "exact").lower()
+    if recognize_mode not in ("exact", "off"):
+        raise ValueError(f"recognize_surfaces must be exact|off, got {recognize_surfaces!r}")
+    recognize_flag = recognize_mode == "exact"
+
     # --- optional exact-surface eligibility report (does not modify the emitted geometry) ---
     if surface_report:
-        report = build_surface_report(step_path, scale_to_cm)
+        report = build_surface_report(step_path, scale_to_cm, recognize_surfaces=recognize_flag)
         report_path = _Path(surface_report).expanduser().resolve()
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(json.dumps(report, indent=1))
@@ -2392,6 +2830,9 @@ def emit_root_macro(
         print(f"Surface report: {summ['n_eligible']}/{summ['n_volumes']} logical volumes eligible "
               f"for exact O2BVHSurfaceSolid conversion")
         print(f"  face types: {summ['face_type_counts']}")
+        if summ["recognized_surface_counts"]:
+            print(f"  recognized (stored type is not the geometry): {summ['recognized_surface_counts']}"
+                  f" recovered from stored {summ['recognized_stored_type_counts']}")
         if summ["fallback_reasons"]:
             top = sorted(summ["fallback_reasons"].items(), key=lambda kv: -kv[1])[:5]
             for reason, count in top:
@@ -2410,7 +2851,7 @@ def emit_root_macro(
         surface_files = {}
         failures: Dict[str, List[str]] = {}  # def_lid -> unsupported-face reasons
         for lid, shape in def_shapes.items():
-            surfaces, reasons = extract_surfaces_for_shape(shape, scale_to_cm)
+            surfaces, reasons = extract_surfaces_for_shape(shape, scale_to_cm, recognize_surfaces=recognize_flag)
             if surfaces is None:
                 failures[lid] = reasons
                 continue
@@ -2643,6 +3084,7 @@ def main():
     ap.add_argument("--name-filter-case-sensitive", action="store_true", help="Make --include-name/--exclude-name matching case-sensitive (default: case-insensitive)")
     ap.add_argument("--surface-report", default=None, metavar="PATH", help="Write a JSON report classifying each face by analytic surface type and each logical volume by exact O2BVHSurfaceSolid conversion eligibility. Does not change the generated geometry output.")
     ap.add_argument("--exact-surfaces", default="off", choices=["off", "auto", "required"], help="Emit exact O2BVHSurfaceSolid shapes instead of TGeoTessellated where possible. 'off' (default): tessellated only. 'auto': exact for each leaf solid whose faces all extract exactly, tessellated fallback otherwise. 'required': fail with a report if any leaf solid cannot be represented exactly. Writes a surfaces_*.bin sidecar per exact volume.")
+    ap.add_argument("--recognize-surfaces", default="exact", choices=["exact", "off"], help="Canonical-form recognition pre-pass: recover an exact plane/sphere/cylinder/cone hiding behind a stored bspline/bezier/revolution/extrusion face (the stored STEP surface type describes the exporter, not the geometry). 'exact' (default): only accept a fit at machine precision. 'off': disable, keeping such faces on the tessellated fallback. Applies to both --surface-report and --exact-surfaces auto|required.")
 
     # NEW: BOM / material support
     ap.add_argument("--materials-csv", default=None, help="BOM CSV file providing material + mass per part (optional)")
@@ -2717,6 +3159,7 @@ def main():
         mat_cfg=mat_cfg,
         surface_report=args.surface_report,
         exact_surfaces=args.exact_surfaces,
+        recognize_surfaces=args.recognize_surfaces,
     )
     out_macro.write_text(code)
 
