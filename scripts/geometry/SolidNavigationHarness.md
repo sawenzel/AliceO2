@@ -489,6 +489,56 @@ overall, median 137x per part (range 19x – 1293x). `CloseShape` is where the e
 wins outright at this scale: 0.0024 – 2.70 s for the surface solid against 0.0003 – **40.54 s** for
 the mesh.
 
+### 2026-07-26 (later) — navigation-reliability labelling, and the canonical-trim null result
+
+Two changes landed after the runs above; both are documented in
+[`ExactTrimTopology.md`](ExactTrimTopology.md) (items 4 and 3).
+
+**Every part is now labelled with whether it is navigable at all.** The harness prints a
+`navigation:` line per part, marks a non-navigable one next to its accuracy columns, carries the
+state in `--json` under `navigation` (`reliability`, `navigable`, `boundaryEdges`,
+`nonManifoldEdges`, `reversedEdges`), and repeats the list of unnavigable parts at the end of the
+run. This is what the "Reading the numbers" caveat below used to have to be taken on trust:
+
+| DB | reliable | open-surface-set | non-manifold |
+| --- | --- | --- | --- |
+| three-model (19 parts) | 8 | 9 | 2 |
+| ALICE3 (19 loaded) | 5 | 14 | 0 |
+
+So **11 of 19 three-model parts and 14 of 19 ALICE3 parts are not navigable.** That is the same
+population the "Reading the numbers" caveat below described as "not closed manifolds", now
+measured rather than asserted, and it is the honest denominator for every accuracy row above.
+
+An `unexplained` count on a part that is not `reliable` is not a measurement of the exact solid's
+accuracy — the solid's own answer is undefined in the shadow of each gap — and the output now says
+so where the number is printed.
+
+**Canonical trim-curve recognition changes no answer, by design.** Re-running both DBs against
+sidecars produced by the new converter, with identical seeds and sample counts:
+
+| DB | `contains` unexplained | `distout` | `distin` |
+| --- | --- | --- | --- |
+| three-model | 4588 -> 4588 | 254 -> 254 | 218 -> 218 |
+| ALICE3 | 1 -> 1 | 0 -> 0 | 0 -> 0 |
+
+Bit-identical per part, with `BVH == _Loop` unchanged and no part losing its exact conversion.
+Recognition claims to change the representation and not the geometry, so this null result is the
+acceptance criterion, not a disappointment. What it *did* change is how much B-spline is left for
+the kernel to flatten: stored B-spline trim edges drop 88 -> 50 on the three-model DB and
+**15034 -> 4528 on ALICE3**, whose sidecars shrink from 6.09 MB to 3.65 MB.
+
+One side effect worth knowing: the three ALICE3 parts `ST1829909_002/003/004` moved from
+`non-manifold` to `open-surface-set` (ALICE3 goes from 5/11/3 to 5/14/0 across
+reliable/open/non-manifold). Nothing about their navigation changed — `unexplained` stayed 0 for
+all three — but recognising a trim curve as a line changes how `appendDirectedEdges` chords it, so
+coincidences in the closure half-edge map shift. Both states are unnavigable, so this reorders a
+diagnostic rather than fixing or breaking anything. The three-model DB's labels are unchanged.
+
+**Do not read timings from that comparison.** Those runs shared the machine with a converter run
+and the per-part `ns/call` swings by up to 2x in both directions as a result. The one clean
+measurement taken on an idle machine, on `BoomCylinderOuter`, is `contains` 3090 -> 3000 ns/call:
+a real but small gain, consistent with only 4 of that part's trim curves being recognised.
+
 ### Reading the numbers
 
 Two caveats travel with every row of the three-model table. First, 11 of the 19 parts are reported by `CloseShape` as
