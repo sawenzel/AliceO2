@@ -590,8 +590,10 @@ only for visualization and fallback paths.
 	**Work items, in the order they should be attacked.** Planned in detail, with acceptance criteria, ordering and environment notes, in [`ExactTrimTopology.md`](ExactTrimTopology.md) — start there.
 	1. **Preserve shared edges (converter).** Key trim curves by their `TopoDS_Edge` identity (`TopExp::MapShapesAndAncestors` gives edge -> faces) and hand both adjacent patches the *same* trim curve. Consistency is what parity needs — the curve does not have to lie exactly on either surface, both sides merely have to agree on where the boundary is. This is the fix that addresses the actual cause; everything else is mitigation.
 	2. **Analytic point-in-trim, no polyline (kernel).** Replace the flattened-polyline winding test on B-spline wires with an exact 2D ray/curve crossing count: convert each span to Bézier form and root-find (Bézier clipping), which is exact to machine precision rather than sampled. Removes the last sampling step from containment, and removes the cost that dominates these parts.
-	3. **Canonical recognition of trim *curves* (converter, cheapest).** Most of these seams are exactly circles or straight lines that the CAD kernel happened to write as B-splines. Recognising them (the "cheaper half" of the canonical-recognition milestone, still not started) makes both sides of a seam agree *analytically* and skips 1 and 2 entirely for the common case. Highest value per unit effort, but it does not cover genuinely free-form seams, so it does not replace 1.
-	4. **Fail loudly (kernel).** `CloseShape` already detects this — 699 boundary edges — and only warns; the solid then silently answers navigation queries that are wrong by centimetres. A non-closed solid should be surfaced far more aggressively (at minimum a one-line summary the caller cannot miss, ideally a queryable "navigation is unreliable" state), so this class of defect can never again be found only by someone reading a benchmark's "unexplained" column.
+	3. **Canonical recognition of trim *curves* (converter, cheapest).** ✅ **Done 2026-07-26.** `_recognize_canonical_curve` in `O2_CADtoTGeo.py`, driven from both `_quadric_trim_wire` and `extract_planar_face`; straightness proved from control-polygon collinearity (convex hull), circles at `1e-9` relative. Stored B-spline trim edges **88 → 50** (three-model) and **15034 → 4528** on ALICE3, whose sidecars shrink 6.09 MB → 3.65 MB; **every `unexplained` count bit-identical** on both DBs, which is what an exact recognition must do. **It does not fix the reproducer**: the four curves it recognised there are `BoomCylinderOuter`'s periodic cylinder seams, not the two cylinder-cylinder intersection curves that cause the defect.
+	4. **Fail loudly (kernel).** ✅ **Done 2026-07-26.** `O2BVHSurfaceSolid::NavigationReliability` + `IsNavigable()` + boundary/non-manifold/reversed edge counts; the three `CloseShape` closure defects are now `Error`s whose text states the consequence; the harness prints the state per part, carries it in `--json`, and lists every unnavigable part at the end of a run. Test `NavigationReliabilityIsQueryable`. Three-model DB: 11 reliable, 6 open-surface-set, 2 non-manifold.
+
+	**Sharpened root cause (2026-07-26), from enumerating the parity ray's crossings at a wrong point.** The failure is a **doubled** crossing, not a missing one: two consecutive `ENTER`s (or `EXIT`s) ~0.04 cm apart. The ray enters the boom tube's `R = 1` wall and then crosses the fat tube's `R = 1.5` wall again at a point that should lie inside that face's hole. The two faces hold independent fits of the same 3D intersection curve, and because the cylinders meet **near-tangentially** there, a ~`1e-5` parametric disagreement is amplified to ~`4e-2` cm in 3D — so the size of the error is set by the tangency, not by the fitting tolerance, and tightening tolerances cannot fix it. Measured pcurve disagreement over shared edges: max `1.3e-5` model units on `Bagger.step`, `2.9e-5` on `as1-oc-214.stp`. Also note the exact intersection curve of two quadrics is degree 4 and is representable exactly in *neither* face's `(phi, h)` domain by the current `Curve2D` vocabulary, so item 1 must take the "consistency, not exactness" route (one shared sample set per `TopoDS_Edge`, both faces built from it) rather than a shared analytic curve.
 
 - [ ] **Patch *cost*, not patch *count*, is what makes small parts slow.** Same part, measured 2026-07-26: 8 analytic patches against 2244 triangles, yet `Contains` is 1.25x slower than the mesh (3102 vs 2490 ns) and `DistFromInside` 1.58x. The BVH cannot help — with 8 patches it is only 1.18-1.20x over `_Loop`. The cost is per-patch: each query solves the quadric and then runs a winding test against a flattened B-spline polyline. Items 2 and 3 above are the lever, not the acceleration structure.
 	- Counterpoint worth keeping: on this same part `Safety` is **1.9x faster** than the tessellated solid (4557 vs 8705 ns), because 8 patch-distance evaluations beat a priority-queue walk over 2244 triangles. The "Safety is the worst kernel" finding from the DB-wide medians is driven by parts with many patches; on low-patch parts the exact representation already wins.
@@ -981,3 +983,48 @@ matching `kWireJoinTolerance = 1e-5` (both looser than the `1e-9` boundary toler
   so degenerate facets are now skipped and counted rather than fatal. `g4Config.C` and generated
   `scripts/geometry/STEP_examples/`/`facets_*`/`surfaces_*` artifacts remain intentionally out of the
   commit (all runs this session used a scratch output folder).
+- 2026-07-26: **Exact trim topology, items 4 and 3** (plan and full evidence in
+  [`ExactTrimTopology.md`](ExactTrimTopology.md); milestone checkboxes in the "converter drops BREP edge
+  sharing" open item above). Two of the four work items opened by that finding are done, and the
+  measurements taken along the way revised the finding itself.
+	- **Item 4, fail loudly (kernel + harness).** `O2BVHSurfaceSolid::NavigationReliability`
+	  (`Undetermined`/`Reliable`/`ReversedFaces`/`OpenSurfaceSet`/`NonManifold`, ordered by severity, worst
+	  defect wins) with `IsNavigable()`, `GetNavigationReliabilityName()` and the raw boundary /
+	  non-manifold / reversed edge counts; `CloseShape`'s three closure defects are now `Error`s whose text
+	  states the *consequence* rather than the count; `Print()` shows the state. The harness prints it per
+	  part, marks a non-navigable part next to its accuracy columns, carries it in `--json` under
+	  `navigation`, and repeats the list at the end of a run. Test `NavigationReliabilityIsQueryable`
+	  (36 cases green). The conservative default was kept: an unnavigable solid still answers queries.
+	  Measured: **11 of 19 three-model parts and 14 of 19 ALICE3 parts are not navigable** — that is the
+	  honest denominator behind every accuracy row in `SolidNavigationHarness.md`.
+	- **Item 3, canonical trim curves (converter).** `analyze_surface_geometry.py` gained `--trim-curves`
+	  (classify trim curves by their real geometry; also measures how far apart the two faces of a shared
+	  edge place their common boundary). `_recognize_canonical_curve` in `O2_CADtoTGeo.py` acts on it from
+	  both `_quadric_trim_wire` and `extract_planar_face`. Straightness is decided on the **control
+	  polygon** — collinear poles put the curve inside their convex hull, so it is a proof, not a fit — and
+	  circles at `1e-9` relative; an ellipse and a line bowed by `1e-6` are correctly refused. Result:
+	  B-spline trim edges **88 → 50** (three-model) and **15034 → 4528** (ALICE3, sidecars 6.09 MB →
+	  3.65 MB), with **every `unexplained` count bit-identical** on both DBs and no part losing its exact
+	  conversion. The null result *is* the acceptance criterion: recognition must change representation,
+	  never geometry.
+	- **What the measurements changed.** (a) Item 3 does **not** fix the reproducer — the curves it
+	  recognises on `BoomCylinderOuter` are its four periodic cylinder seams, not the two
+	  cylinder-cylinder intersection curves that cause the defect. (b) The polyline flattening is **not**
+	  the dominant error at these seams (`bsplineSampleInto` is adaptive to `1e-5`, and the two pcurves of
+	  a shared edge were measured to differ by at most `1.3e-5` model units on Bagger), so item 2 is a cost
+	  item plus a small accuracy item, not the fix. (c) Enumerating the parity ray's crossings at a wrong
+	  point shows the failure is a **doubled** crossing, not a missing one — two consecutive `ENTER`s ~0.04
+	  cm apart — because the two cylinders meet **near-tangentially** there and amplify a `1e-5` parametric
+	  disagreement into a `4e-2` cm one. The size of the error is set by the tangency, so tightening
+	  tolerances cannot fix it. (d) The exact intersection curve of two quadrics is degree 4 and is
+	  representable exactly in *neither* face's `(phi, h)` domain with the current `Curve2D` vocabulary, so
+	  item 1 must take the "consistency, not exactness" route (one shared sample set per `TopoDS_Edge`,
+	  both faces built from it); a concrete four-step recipe and three traps are written up in
+	  `ExactTrimTopology.md`.
+	- **Left open deliberately:** items 1 (shared edges — now the only remaining fix for this defect class)
+	  and 2 (Bézier point-in-trim). Item 1 is a converter refactor with real risk of a half-finished
+	  intermediate state, so it was scoped and handed over rather than started. Also not completed: the
+	  `--trim-curves` sweep over `oTOF`/`ALICE3` (the shared-edge polyline comparison is a Python loop and
+	  does not finish in an hour on those; vectorise `_max_point_to_polyline` first if that number is
+	  wanted). `g4Config.C` and generated `scripts/geometry/STEP_examples/`/`facets_*`/`surfaces_*`
+	  artifacts remain intentionally out of the commit.
