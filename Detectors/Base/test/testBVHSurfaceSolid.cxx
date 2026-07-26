@@ -23,6 +23,7 @@
 #include "TGeoCone.h"
 #include "TGeoShape.h"
 #include "TGeoSphere.h"
+#include "TGeoTorus.h"
 #include "TGeoTube.h"
 
 #include <array>
@@ -1082,6 +1083,161 @@ BOOST_AUTO_TEST_CASE(ApexConeClosesWithSingleCap)
   checkClose(solid.Capacity(), surf::kPi * baseRadius * baseRadius * 2. * halfHeight / 3., 1.e-9);
 }
 
+BOOST_AUTO_TEST_CASE(ToroidalSurfaceKernels)
+{
+  // full torus, major radius 3, minor (tube) radius 1, axis z
+  constexpr double majorR = 3.;
+  constexpr double minorR = 1.;
+  surf::TorusBoundedSurface torus;
+  std::string error;
+  BOOST_REQUIRE(torus.initialize({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, majorR, minorR, 0., surf::kTwoPi, 0.,
+                                 surf::kTwoPi, false, error));
+
+  // a ray along +x through the centre crosses the donut four times: at rho = -(R+r), -(R-r),
+  // (R-r), (R+r), i.e. distances 6, 8, 12, 14 from the origin at x = -10
+  std::vector<surf::RayHit> hits;
+  torus.appendIntersections({-10., 0., 0.}, {1., 0., 0.}, 0., 1.e30, hits);
+  BOOST_REQUIRE_EQUAL(hits.size(), 4u);
+  std::sort(hits.begin(), hits.end(),
+            [](const surf::RayHit& a, const surf::RayHit& b) { return a.distance < b.distance; });
+  checkClose(hits[0].distance, 6., 1.e-7);
+  checkClose(hits[1].distance, 8., 1.e-7);
+  checkClose(hits[2].distance, 12., 1.e-7);
+  checkClose(hits[3].distance, 14., 1.e-7);
+  // crossings alternate enter/exit/enter/exit along the ray
+  BOOST_CHECK_LT(hits[0].normal.xCoord, 0.);
+  BOOST_CHECK_GT(hits[1].normal.xCoord, 0.);
+  BOOST_CHECK_LT(hits[2].normal.xCoord, 0.);
+  BOOST_CHECK_GT(hits[3].normal.xCoord, 0.);
+
+  // a z-ray tangent to the outer equator (rho = R + r) touches at a single double root: no hit
+  hits.clear();
+  torus.appendIntersections({majorR + minorR, 0., -10.}, {0., 0., 1.}, 0., 1.e30, hits);
+  BOOST_CHECK(hits.empty());
+
+  // a ray passing above the whole torus (z = 2 r) misses entirely
+  hits.clear();
+  torus.appendIntersections({-10., 0., 2. * minorR}, {1., 0., 0.}, 0., 1.e30, hits);
+  BOOST_CHECK(hits.empty());
+
+  // outward normals: +x at the outer equator, -x (towards the axis) at the inner equator
+  const surf::Vec3 outerNormal = torus.normalAt({majorR + minorR, 0., 0.});
+  checkClose(outerNormal.xCoord, 1.);
+  const surf::Vec3 innerNormal = torus.normalAt({majorR - minorR, 0., 0.});
+  checkClose(innerNormal.xCoord, -1.);
+  // top of the tube: normal points along +z
+  const surf::Vec3 topNormal = torus.normalAt({majorR, 0., minorR});
+  checkClose(topNormal.zCoord, 1.);
+
+  // exact meridian distances: radially outside the outer equator and inside the hole
+  checkClose(torus.distanceSqToPatch({majorR + minorR + 2., 0., 0.}), 4.);
+  checkClose(torus.distanceSqToPatch({0., 0., 0.}), (majorR - minorR) * (majorR - minorR));
+
+  // surface-point classification
+  BOOST_CHECK(torus.containsPointOnSurface({majorR + minorR, 0., 0.}));
+  BOOST_CHECK(torus.containsPointOnSurface({majorR, 0., minorR}));
+  BOOST_CHECK(!torus.containsPointOnSurface({majorR, 0., 0.}));       // tube spine (interior)
+  BOOST_CHECK(!torus.containsPointOnSurface({majorR + 5., 0., 0.}));  // off the surface
+
+  // exact divergence-theorem capacity of a full torus: 2 pi^2 R r^2
+  checkClose(torus.capacityContribution(), 2. * surf::kPi * surf::kPi * majorR * minorR * minorR, 1.e-9);
+  BOOST_CHECK(torus.capacityIsExact());
+
+  // partial tube section (a quarter-tube fillet-like patch, phiTube in [0, pi/2], full ring):
+  // the trim filters intersections and surface points
+  surf::TorusBoundedSurface quarterTube;
+  BOOST_REQUIRE(quarterTube.initialize({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, majorR, minorR, 0., surf::kTwoPi, 0.,
+                                       surf::kHalfPi, false, error));
+  BOOST_CHECK(quarterTube.containsPointOnSurface({majorR + minorR, 0., 0.})); // phiTube = 0 boundary
+  BOOST_CHECK(quarterTube.containsPointOnSurface({majorR, 0., minorR}));      // phiTube = pi/2 boundary
+  BOOST_CHECK(!quarterTube.containsPointOnSurface({majorR, 0., -minorR}));    // phiTube = -pi/2, off patch
+  hits.clear();
+  quarterTube.appendIntersections({majorR, 0., -10.}, {0., 0., 1.}, 0., 1.e30, hits);
+  BOOST_REQUIRE_EQUAL(hits.size(), 1u); // only the top (+z) tube point is on the quarter patch
+  checkClose(hits.front().distance, 10. + minorR, 1.e-7);
+}
+
+BOOST_AUTO_TEST_CASE(FullTorusMatchesTGeoTorus)
+{
+  constexpr double majorR = 3.;
+  constexpr double minorR = 1.;
+
+  SurfaceSolid solid("fullTorus");
+  BOOST_REQUIRE(solid.AddToroidalSurface({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, majorR, minorR));
+  solid.CloseShape();
+
+  // a full torus is self-closing: no boundary edges
+  BOOST_CHECK(solid.IsClosed());
+  BOOST_CHECK(solid.IsOrientationConsistent());
+
+  // TGeoTorus(R, Rmin, Rmax): a solid torus has Rmin = 0, Rmax = tube radius
+  TGeoTorus reference("referenceTorus", majorR, 0., minorR);
+  compareContainsGrid(solid, reference, 4.5, 11);
+
+  // analytic x-axis crossings (see the kernel test): from outside and from inside the material
+  const double outsidePoint[3] = {-10., 0., 0.};
+  const double alongX[3] = {1., 0., 0.};
+  checkClose(solid.DistFromOutside(outsidePoint, alongX, 3), 6., 1.e-7);
+  const double materialPoint[3] = {majorR + minorR - 0.25, 0., 0.}; // inside the tube on the +x side
+  BOOST_CHECK(solid.Contains(materialPoint));
+  checkClose(solid.DistFromInside(materialPoint, alongX, 3), 0.25, 1.e-7);
+
+  // a couple of oblique rays cross-checked against the ROOT torus
+  compareDistance(solid, reference, {-10., 0.3, 0.2}, {1., 0., 0.}, 1.e-6);
+  compareDistance(solid, reference, {0., 0., 5.}, {0., 0., -1.}, 1.e-6); // clean axial miss (through the hole)
+
+  // exact capacity: 2 pi^2 R r^2
+  checkClose(solid.Capacity(), reference.Capacity(), 1.e-7);
+  checkClose(solid.Capacity(), 2. * surf::kPi * surf::kPi * majorR * minorR * minorR, 1.e-9);
+
+  int meshVertices = 0;
+  int meshSegments = 0;
+  int meshPolygons = 0;
+  solid.GetMeshNumbers(meshVertices, meshSegments, meshPolygons);
+  BOOST_CHECK_GT(meshVertices, 0);
+  BOOST_CHECK_GT(meshPolygons, 0);
+}
+
+BOOST_AUTO_TEST_CASE(WireTrimmedTorusMatchesSection)
+{
+  // A partial toroidal patch (ring [0, pi/2], tube [0.2, 2.0] - a non-wrapping fillet-like arc)
+  // built two ways must classify points identically: with the scalar parametric rectangle and
+  // with an equivalent (phiRing, phiTube) line-wire trim. This exercises the wire-trim path
+  // (numeric capacity, conservative Safety) and the periodic-in-both-angles unwrapping.
+  constexpr double majorR = 4.;
+  constexpr double minorR = 1.5;
+  constexpr double tubeLow = 0.2;
+  constexpr double tubeHigh = 2.0;
+  std::string error;
+
+  surf::TorusBoundedSurface scalarSection;
+  BOOST_REQUIRE(scalarSection.initialize({0.2, -0.1, 0.3}, {0., 0., 1.}, {1., 0., 0.}, majorR, minorR, 0.,
+                                         surf::kHalfPi, tubeLow, tubeHigh - tubeLow, false, error));
+
+  surf::TorusBoundedSurface wireSection;
+  const auto wire = paramRectWireCurves(0., surf::kHalfPi, tubeLow, tubeHigh);
+  BOOST_REQUIRE(wireSection.initialize({0.2, -0.1, 0.3}, {0., 0., 1.}, {1., 0., 0.}, majorR, minorR, 0., surf::kHalfPi,
+                                       tubeLow, tubeHigh - tubeLow, false, wire, {}, error));
+  BOOST_CHECK(wireSection.hasWireTrim());
+
+  // classification agrees across a set of on-surface probes at several ring/tube angles
+  for (double ring : {0.1, 0.7, 1.2, 1.7, 2.5}) {
+    for (double tube : {0.3, 0.8, 1.5, 1.9, 2.6}) {
+      const surf::Vec3 probe = scalarSection.pointAt(ring, tube);
+      BOOST_TEST_CONTEXT("ring = " << ring << " tube = " << tube)
+      {
+        BOOST_CHECK_EQUAL(scalarSection.containsPointOnSurface(probe), wireSection.containsPointOnSurface(probe));
+      }
+    }
+  }
+
+  // wire-trim capacity is numeric (flagged inexact) but must approximate the exact scalar value
+  BOOST_CHECK(scalarSection.capacityIsExact());
+  BOOST_CHECK(!wireSection.capacityIsExact());
+  BOOST_CHECK_SMALL(wireSection.capacityContribution() - scalarSection.capacityContribution(),
+                    1.e-2 * std::abs(scalarSection.capacityContribution()));
+}
+
 BOOST_AUTO_TEST_CASE(BVHConstructionAndTraversal)
 {
   constexpr double halfX = 1.;
@@ -1635,6 +1791,35 @@ BOOST_AUTO_TEST_CASE(WireTrimmedSidecarRoundTrip)
   compareDistance(solid, reference, {5., 0.5, 1.}, {-1., 0., 0.});
   compareDistance(solid, reference, {0., 0., 0.}, unitDirection(1., 1., 1.));
   checkClose(solid.Capacity(), reference.Capacity(), 1.e-6);
+}
+
+BOOST_AUTO_TEST_CASE(TorusSidecarRoundTrip)
+{
+  // a full-torus record (surfaceType 5, 15 params, empty wire block) must load through the
+  // scalar AddToroidalSurface path and navigate like TGeoTorus
+  constexpr double majorR = 3.;
+  constexpr double minorR = 1.;
+
+  std::vector<char> bytes;
+  appendSidecarHeader(bytes, 1);
+  appendU32(bytes, 5);  // surfaceType torus
+  appendU32(bytes, 0);  // flags (outer wall)
+  appendU32(bytes, 15); // nParams
+  appendDoubles(bytes, {0., 0., 0., 0., 0., 1., 1., 0., 0., majorR, minorR, 0., 2. * surf::kPi, 0., 2. * surf::kPi});
+  appendU32(bytes, 0); // nWires (full torus: scalar path)
+  const auto path = writeSidecarFile("o2_sidecar_roundtrip_torus.bin", bytes);
+
+  SurfaceSolid solid("sidecarTorus");
+  BOOST_REQUIRE(o2::base::LoadSurfaceSolid(path.string(), solid));
+  std::filesystem::remove(path);
+  BOOST_CHECK_EQUAL(solid.GetNsurfaces(), 1);
+  solid.CloseShape();
+  BOOST_CHECK(solid.IsClosed());
+  BOOST_CHECK(solid.IsOrientationConsistent());
+
+  TGeoTorus reference("sidecarTorusRef", majorR, 0., minorR);
+  compareContainsGrid(solid, reference, 4.5, 9);
+  checkClose(solid.Capacity(), reference.Capacity(), 1.e-7);
 }
 
 namespace

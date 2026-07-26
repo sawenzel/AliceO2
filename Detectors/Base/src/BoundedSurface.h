@@ -626,6 +626,111 @@ inline void gaussLegendre(int n, std::vector<double>& nodes, std::vector<double>
   }
 }
 
+/// Append the real roots of the depressed cubic w^3 + P w + Q = 0. Uses Cardano's formula when
+/// there is a single real root and the trigonometric (casus irreducibilis) form when there are
+/// three, both numerically stable for the small, well-scaled resolvent cubics of the quartic
+/// solver below.
+inline void solveDepressedCubic(double coeffP, double coeffQ, std::vector<double>& roots)
+{
+  if (std::abs(coeffP) <= kTolerance && std::abs(coeffQ) <= kTolerance) {
+    roots.push_back(0.);
+    return;
+  }
+  const double discriminant = coeffQ * coeffQ / 4. + coeffP * coeffP * coeffP / 27.;
+  if (discriminant > 0.) {
+    const double sqrtDiscriminant = std::sqrt(discriminant);
+    roots.push_back(std::cbrt(-0.5 * coeffQ + sqrtDiscriminant) + std::cbrt(-0.5 * coeffQ - sqrtDiscriminant));
+    return;
+  }
+  // three real roots: coeffP < 0 here, so the trigonometric form is well defined
+  const double magnitude = 2. * std::sqrt(-coeffP / 3.);
+  const double cosineArgument = std::max(-1., std::min(1., 3. * coeffQ / (coeffP * magnitude)));
+  const double baseAngle = std::acos(cosineArgument);
+  for (int branch = 0; branch < 3; ++branch) {
+    roots.push_back(magnitude * std::cos((baseAngle - kTwoPi * branch) / 3.));
+  }
+}
+
+/// Real roots of a4 x^4 + a3 x^3 + a2 x^2 + a1 x + a0 = 0 (requires a4 != 0), via Ferrari's
+/// method with a resolvent cubic, followed by a couple of Newton polishing steps against the
+/// original quartic. A tangential (double) root is deliberately returned as a near-equal pair so
+/// that crossing-parity callers can cluster and drop it (the same convention the quadric surfaces
+/// use with sameIntersection); a genuinely complex pair simply contributes no real root. Used by
+/// the toroidal surface, whose ray intersection is a quartic.
+inline std::vector<double> solveQuarticReal(double a4, double a3, double a2, double a1, double a0)
+{
+  std::vector<double> roots;
+  if (std::abs(a4) <= kTolerance) {
+    return roots; // not a genuine quartic; the torus caller guarantees a4 = |dir|^4 > 0
+  }
+  // monic x^4 + b x^3 + c x^2 + d x + e
+  const double coeffB = a3 / a4, coeffC = a2 / a4, coeffD = a1 / a4, coeffE = a0 / a4;
+  // depress with x = y - b/4: y^4 + p y^2 + q y + r
+  const double termP = coeffC - 3. * coeffB * coeffB / 8.;
+  const double termQ = coeffD - coeffB * coeffC / 2. + coeffB * coeffB * coeffB / 8.;
+  const double termR =
+    coeffE - coeffB * coeffD / 4. + coeffB * coeffB * coeffC / 16. - 3. * coeffB * coeffB * coeffB * coeffB / 256.;
+  const double shift = -coeffB / 4.;
+
+  auto addQuadraticRoots = [&](double quadB, double quadC) {
+    const double discriminant = quadB * quadB - 4. * quadC;
+    if (discriminant < 0.) {
+      return; // complex pair
+    }
+    const double sqrtDiscriminant = std::sqrt(discriminant);
+    roots.push_back(shift + 0.5 * (-quadB - sqrtDiscriminant));
+    roots.push_back(shift + 0.5 * (-quadB + sqrtDiscriminant));
+  };
+
+  if (std::abs(termQ) <= kTolerance) {
+    // biquadratic y^4 + p y^2 + r = 0
+    const double discriminant = termP * termP - 4. * termR;
+    if (discriminant >= 0.) {
+      const double sqrtDiscriminant = std::sqrt(discriminant);
+      for (const double ySquared : {0.5 * (-termP + sqrtDiscriminant), 0.5 * (-termP - sqrtDiscriminant)}) {
+        if (ySquared >= 0.) {
+          const double y = std::sqrt(ySquared);
+          roots.push_back(shift + y);
+          roots.push_back(shift - y);
+        }
+      }
+    }
+  } else {
+    // resolvent cubic m^3 + p m^2 + (p^2/4 - r) m - q^2/8 = 0; its largest real root is > 0
+    const double cubicA2 = termP;
+    const double cubicA1 = termP * termP / 4. - termR;
+    const double cubicA0 = -termQ * termQ / 8.;
+    const double cubicP = cubicA1 - cubicA2 * cubicA2 / 3.;
+    const double cubicQ = 2. * cubicA2 * cubicA2 * cubicA2 / 27. - cubicA2 * cubicA1 / 3. + cubicA0;
+    std::vector<double> cubicRoots;
+    solveDepressedCubic(cubicP, cubicQ, cubicRoots);
+    double resolvent = 0.;
+    for (const double cubicRoot : cubicRoots) {
+      resolvent = std::max(resolvent, cubicRoot - cubicA2 / 3.);
+    }
+    if (resolvent > kTolerance) {
+      const double sqrtTwoResolvent = std::sqrt(2. * resolvent);
+      const double linearTerm = sqrtTwoResolvent * termQ / (4. * resolvent);
+      addQuadraticRoots(-sqrtTwoResolvent, termP / 2. + resolvent + linearTerm);
+      addQuadraticRoots(sqrtTwoResolvent, termP / 2. + resolvent - linearTerm);
+    }
+  }
+
+  // Newton polishing against the monic quartic tightens Ferrari's roots (and pulls a near-double
+  // pair together so the parity clustering recognises it as a tangency)
+  auto quartic = [&](double x) { return (((x + coeffB) * x + coeffC) * x + coeffD) * x + coeffE; };
+  auto quarticDerivative = [&](double x) { return ((4. * x + 3. * coeffB) * x + 2. * coeffC) * x + coeffD; };
+  for (double& root : roots) {
+    for (int iteration = 0; iteration < 2; ++iteration) {
+      const double derivative = quarticDerivative(root);
+      if (std::abs(derivative) > kTolerance) {
+        root -= quartic(root) / derivative;
+      }
+    }
+  }
+  return roots;
+}
+
 /// Kind of a 2D trimmed boundary curve.
 enum class CurveKind { Line,   ///< straight line segment
                        Arc,    ///< circular arc
@@ -3234,6 +3339,413 @@ class ConicalBoundedSurface final : public BoundedSurface
   double mHeightMax = 0.;
   double mPhiStart = 0.;
   double mPhiSweep = kTwoPi;
+  double mNormalSign = 1.;
+  bool mHasWireTrim = false;
+  CurveWire mTrimOuter;
+  std::vector<CurveWire> mTrimInner;
+};
+
+/// A bounded toroidal surface: a torus of major radius R (axis to tube centre) and minor
+/// (tube) radius r about a centre and axis, trimmed to a parametric rectangle in the two
+/// periodic angles (phiRing around the main axis x phiTube around the tube). A full torus
+/// (both sweeps 2pi) is self-closing and has no boundary edges. An innerWall surface (e.g. the
+/// inner tube of a toroidal shell) has its outward-of-solid normal pointing towards the tube
+/// spine. The ray/torus intersection is a quartic (solveQuarticReal); the (rho, z) meridian
+/// distance to the tube circle gives the exact Safety for the full torus and a conservative
+/// lower bound for a trimmed patch, matching the sphere policy.
+///
+/// Parametrisation (local frame U, V, W = axis): a surface point at (phiRing u, phiTube v) is
+///   X(u, v) = centre + (U cos u + V sin u) (R + r cos v) + W (r sin v).
+/// The map is orientation-consistent with the outward normal (X_u x X_v = r (R + r cos v) n), so
+/// the directed-edge sign is +mNormalSign, as for the cylinder and cone.
+class TorusBoundedSurface final : public BoundedSurface
+{
+ public:
+  bool initialize(const Vec3& centerPoint, const Vec3& axis, const Vec3& referenceAxisU, double majorRadius,
+                  double minorRadius, double phiStart, double phiSweep, double tubeStart, double tubeSweep,
+                  bool innerWall, std::string& errorMessage)
+  {
+    if (!finite(centerPoint) || !finite(axis) || !finite(referenceAxisU) || !std::isfinite(majorRadius) ||
+        !std::isfinite(minorRadius) || !std::isfinite(phiStart) || !std::isfinite(phiSweep) ||
+        !std::isfinite(tubeStart) || !std::isfinite(tubeSweep)) {
+      errorMessage = "toroidal surface parameter is non-finite";
+      return false;
+    }
+    if (majorRadius <= kTolerance || minorRadius <= kTolerance) {
+      errorMessage = "toroidal surface needs positive major and minor radii";
+      return false;
+    }
+    if (phiSweep <= kTolerance || phiSweep > kTwoPi + kTolerance) {
+      errorMessage = "toroidal surface needs a ring sweep in (0, 2pi]";
+      return false;
+    }
+    if (tubeSweep <= kTolerance || tubeSweep > kTwoPi + kTolerance) {
+      errorMessage = "toroidal surface needs a tube sweep in (0, 2pi]";
+      return false;
+    }
+    if (!CylindricalBoundedSurface::makeFrame(axis, referenceAxisU, mAxisU, mAxisV, mAxisW, errorMessage)) {
+      return false;
+    }
+
+    mCenter = centerPoint;
+    mMajorRadius = majorRadius;
+    mMinorRadius = minorRadius;
+    mPhiStart = phiStart;
+    mPhiSweep = std::min(phiSweep, kTwoPi);
+    mTubeStart = tubeStart;
+    mTubeSweep = std::min(tubeSweep, kTwoPi);
+    mNormalSign = innerWall ? -1. : 1.;
+    return true;
+  }
+
+  /// Wire-trimmed overload: the scalar arguments define the torus surface (frame, radii) and a
+  /// nominal window; the outer/inner Curve2D loops in the periodic (phiRing[rad], phiTube[rad])
+  /// domain are authoritative for containment. The conservative window is tightened to the outer
+  /// loop's parametric bounds (u = phiRing, v = phiTube). As for the other quadrics the trim must
+  /// be a non-wrapping loop within one turn in u (and, for the torus, in v); a trim that wraps in
+  /// the tube angle is out of scope and stays on the tessellated fallback.
+  bool initialize(const Vec3& centerPoint, const Vec3& axis, const Vec3& referenceAxisU, double majorRadius,
+                  double minorRadius, double phiStart, double phiSweep, double tubeStart, double tubeSweep,
+                  bool innerWall, const std::vector<Curve2D>& outerTrim,
+                  const std::vector<std::vector<Curve2D>>& innerTrims, std::string& errorMessage)
+  {
+    if (!initialize(centerPoint, axis, referenceAxisU, majorRadius, minorRadius, phiStart, phiSweep, tubeStart,
+                    tubeSweep, innerWall, errorMessage)) {
+      return false;
+    }
+    Vec2 lower, upper;
+    if (!buildCurveTrim(outerTrim, innerTrims, mTrimOuter, mTrimInner, lower, upper, errorMessage)) {
+      return false;
+    }
+    if (upper.vCoord - lower.vCoord > kTwoPi + kTolerance) {
+      errorMessage = "toroidal trim wire spans more than a full turn in the tube angle";
+      return false;
+    }
+    mPhiStart = lower.uCoord;
+    mPhiSweep = std::min(kTwoPi, upper.uCoord - lower.uCoord);
+    mTubeStart = lower.vCoord;
+    mTubeSweep = std::min(kTwoPi, upper.vCoord - lower.vCoord);
+    mHasWireTrim = true;
+    return true;
+  }
+
+  bool hasWireTrim() const { return mHasWireTrim; }
+
+  /// True if the (phiRing, phiTube) point lies in the trim wire. Both angles are periodic for a
+  /// torus, so each is unwrapped into its wire window (unlike the cylinder/cone/sphere, whose
+  /// second parameter - height or theta - is not periodic). A trim that wraps across a full turn
+  /// in either angle is rejected at construction, so the window is unambiguous here.
+  bool pointInTrim(double phiRing, double phiTube) const
+  {
+    const double uCoord = unwrapAngleInto(phiRing, mPhiStart, mPhiStart + mPhiSweep);
+    const double vCoord = unwrapAngleInto(phiTube, mTubeStart, mTubeStart + mTubeSweep);
+    return curveTrimContains(mTrimOuter, mTrimInner, {uCoord, vCoord});
+  }
+
+  bool fullRingSweep() const { return mPhiSweep >= kTwoPi - kTolerance; }
+  bool fullTubeSweep() const { return mTubeSweep >= kTwoPi - kTolerance; }
+
+  Vec3 toLocal(const Vec3& point) const
+  {
+    const Vec3 relativePoint = point - mCenter;
+    return {dot(relativePoint, mAxisU), dot(relativePoint, mAxisV), dot(relativePoint, mAxisW)};
+  }
+
+  bool ringInSweep(double phiRing) const
+  {
+    return angleInSweepRange(phiRing, mPhiStart, mPhiSweep, angularTolerance(mMajorRadius));
+  }
+
+  bool tubeInSweep(double phiTube) const
+  {
+    return angleInSweepRange(phiTube, mTubeStart, mTubeSweep, angularTolerance(mMinorRadius));
+  }
+
+  Vec3 pointAt(double phiRing, double phiTube) const
+  {
+    const double ringRadius = mMajorRadius + mMinorRadius * std::cos(phiTube);
+    return mCenter + (mAxisU * std::cos(phiRing) + mAxisV * std::sin(phiRing)) * ringRadius +
+           mAxisW * (mMinorRadius * std::sin(phiTube));
+  }
+
+  /// Unit outward normal (pointing away from the tube spine) from a local surface point.
+  Vec3 localNormal(const Vec3& localPoint) const
+  {
+    const double rho = std::hypot(localPoint.xCoord, localPoint.yCoord);
+    if (rho <= kTolerance) {
+      return mAxisW * (localPoint.zCoord >= 0. ? mNormalSign : -mNormalSign);
+    }
+    const double radialFactor = (rho - mMajorRadius) / rho;
+    Vec3 normal{radialFactor * localPoint.xCoord, radialFactor * localPoint.yCoord, localPoint.zCoord};
+    const double length = norm(normal);
+    if (length <= kTolerance) {
+      return mAxisU * mNormalSign;
+    }
+    return (mAxisU * normal.xCoord + mAxisV * normal.yCoord + mAxisW * normal.zCoord) * (mNormalSign / length);
+  }
+
+  bool containsPointOnSurface(const Vec3& point) const override
+  {
+    const Vec3 localPoint = toLocal(point);
+    const double rho = std::hypot(localPoint.xCoord, localPoint.yCoord);
+    const double meridianDistance = std::hypot(rho - mMajorRadius, localPoint.zCoord) - mMinorRadius;
+    if (std::abs(meridianDistance) > kTolerance) {
+      return false;
+    }
+    const double phiTube = std::atan2(localPoint.zCoord, rho - mMajorRadius);
+    if (rho <= kTolerance) {
+      return false; // on the axis phiRing is undefined (only reachable on a horn/spindle torus)
+    }
+    const double phiRing = std::atan2(localPoint.yCoord, localPoint.xCoord);
+    if (mHasWireTrim) {
+      return pointInTrim(phiRing, phiTube);
+    }
+    return ringInSweep(phiRing) && tubeInSweep(phiTube);
+  }
+
+  void appendIntersections(const Vec3& rayOrigin, const Vec3& rayDirection, double minDistance,
+                           double maxDistance, std::vector<RayHit>& hits) const override
+  {
+    const Vec3 localOrigin = toLocal(rayOrigin);
+    const Vec3 localDirection{dot(rayDirection, mAxisU), dot(rayDirection, mAxisV), dot(rayDirection, mAxisW)};
+
+    // Torus implicit form (local): (|X|^2 + R^2 - r^2)^2 = 4 R^2 (x^2 + y^2). Substituting the ray
+    // X = O + t D gives a quartic in t whose leading coefficient is |D|^4 > 0.
+    const double dirDotDir = normSq(localDirection);
+    if (dirDotDir <= kToleranceSq) {
+      return; // degenerate direction
+    }
+    const double originDotDir = dot(localOrigin, localDirection);
+    const double originDotOrigin = normSq(localOrigin);
+    const double constantK = mMajorRadius * mMajorRadius - mMinorRadius * mMinorRadius;
+    const double transverseE = localDirection.xCoord * localDirection.xCoord +
+                               localDirection.yCoord * localDirection.yCoord;
+    const double transverseF = localOrigin.xCoord * localDirection.xCoord +
+                               localOrigin.yCoord * localDirection.yCoord;
+    const double transverseG = localOrigin.xCoord * localOrigin.xCoord +
+                               localOrigin.yCoord * localOrigin.yCoord;
+    const double fourRSquared = 4. * mMajorRadius * mMajorRadius;
+
+    const double coeff4 = dirDotDir * dirDotDir;
+    const double coeff3 = 4. * dirDotDir * originDotDir;
+    const double coeff2 =
+      4. * originDotDir * originDotDir + 2. * dirDotDir * (originDotOrigin + constantK) - fourRSquared * transverseE;
+    const double coeff1 = 4. * originDotDir * (originDotOrigin + constantK) - 2. * fourRSquared * transverseF;
+    const double coeff0 = (originDotOrigin + constantK) * (originDotOrigin + constantK) - fourRSquared * transverseG;
+
+    std::vector<double> candidates = solveQuarticReal(coeff4, coeff3, coeff2, coeff1, coeff0);
+    if (candidates.empty()) {
+      return;
+    }
+    std::sort(candidates.begin(), candidates.end());
+
+    // Cluster near-equal roots: an even-sized cluster is a tangential (double) root that must not
+    // be reported so crossing parity stays consistent; an odd-sized cluster is a genuine
+    // transversal crossing reported once at its mean (the same policy the quadrics apply to their
+    // pair of roots via sameIntersection).
+    size_t rootIndex = 0;
+    while (rootIndex < candidates.size()) {
+      size_t clusterEnd = rootIndex + 1;
+      double clusterSum = candidates[rootIndex];
+      while (clusterEnd < candidates.size() && sameIntersection(candidates[clusterEnd], candidates[clusterEnd - 1])) {
+        clusterSum += candidates[clusterEnd];
+        ++clusterEnd;
+      }
+      const size_t clusterSize = clusterEnd - rootIndex;
+      rootIndex = clusterEnd;
+      if ((clusterSize & 1u) == 0u) {
+        continue; // tangential graze
+      }
+      const double candidate = clusterSum / static_cast<double>(clusterSize);
+      if (candidate < minDistance || candidate > maxDistance) {
+        continue;
+      }
+      const Vec3 localHit = toLocal(rayOrigin + rayDirection * candidate);
+      const double rho = std::hypot(localHit.xCoord, localHit.yCoord);
+      if (rho <= kTolerance) {
+        continue;
+      }
+      const double phiTube = std::atan2(localHit.zCoord, rho - mMajorRadius);
+      const double phiRing = std::atan2(localHit.yCoord, localHit.xCoord);
+      if (mHasWireTrim) {
+        if (!pointInTrim(phiRing, phiTube)) {
+          continue;
+        }
+      } else if (!ringInSweep(phiRing) || !tubeInSweep(phiTube)) {
+        continue;
+      }
+      hits.push_back({candidate, localNormal(localHit)});
+    }
+  }
+
+  /// Distance to the patch: the (rho, z) meridian half-plane through the point contains the tube
+  /// circle nearest to it, so |hypot(rho - R, z) - r| is the exact distance to the full torus.
+  /// For a trimmed patch it is a conservative lower bound (the patch is a subset of the full
+  /// torus, so the true distance is at least this), which keeps Safety safe.
+  double distanceSqToPatch(const Vec3& point) const override
+  {
+    const Vec3 localPoint = toLocal(point);
+    const double rho = std::hypot(localPoint.xCoord, localPoint.yCoord);
+    const double meridianDistance = std::hypot(rho - mMajorRadius, localPoint.zCoord) - mMinorRadius;
+    return meridianDistance * meridianDistance;
+  }
+
+  Vec3 normalAt(const Vec3& point) const override { return localNormal(toLocal(point)); }
+
+  /// Exact divergence-theorem contribution (1/3) integral X . n |X_u x X_v| over the
+  /// (phiRing, phiTube) rectangle, with |X_u x X_v| = r (R + r cos v); for a wire trim the same
+  /// integrand is integrated numerically.
+  double capacityContribution() const override
+  {
+    if (mHasWireTrim) {
+      return integrateOverCurveTrim(mTrimOuter, mTrimInner, [this](double phiRing, double phiTube) {
+        const Vec3 surfacePoint = pointAt(phiRing, phiTube);
+        const double jacobian = mMinorRadius * (mMajorRadius + mMinorRadius * std::cos(phiTube));
+        return dot(surfacePoint, normalAt(surfacePoint)) * jacobian / 3.;
+      });
+    }
+    // Closed form over u in [u0, u1] (ring) and v in [v0, v1] (tube). See BVHSurfaceSolid.md.
+    const double majorR = mMajorRadius;
+    const double minorR = mMinorRadius;
+    const double u0 = mPhiStart, u1 = mPhiStart + mPhiSweep;
+    const double v0 = mTubeStart, v1 = mTubeStart + mTubeSweep;
+    const double centerU = dot(mCenter, mAxisU);
+    const double centerV = dot(mCenter, mAxisV);
+    const double centerW = dot(mCenter, mAxisW);
+    const double deltaU = u1 - u0;
+    const double deltaV = v1 - v0;
+    const double sinIntegralU = std::sin(u1) - std::sin(u0);       // integral cos u du
+    const double cosIntegralU = std::cos(u0) - std::cos(u1);       // integral sin u du
+    const double sinIntegralV = std::sin(v1) - std::sin(v0);       // integral cos v dv
+    const double sinFromCosV = std::cos(v0) - std::cos(v1);        // integral sin v dv
+    const double cosSquaredV = 0.5 * deltaV + 0.25 * (std::sin(2. * v1) - std::sin(2. * v0)); // integral cos^2 v dv
+    const double sinCosV = 0.25 * (std::cos(2. * v0) - std::cos(2. * v1));                    // integral sin v cos v dv
+
+    // centre-independent part, integrated over v then multiplied by the ring span
+    const double centerlessV =
+      minorR * ((majorR * majorR + minorR * minorR) * sinIntegralV + majorR * minorR * deltaV +
+                majorR * minorR * cosSquaredV);
+    // W component of the centre offset
+    const double centerWpart = minorR * (majorR * sinFromCosV + minorR * sinCosV);
+    // U/V components of the centre offset (ring-angle dependent)
+    const double centerUVpart =
+      (centerU * sinIntegralU + centerV * cosIntegralU) * minorR * (majorR * sinIntegralV + minorR * cosSquaredV);
+
+    const double total = deltaU * centerlessV + deltaU * centerW * centerWpart + centerUVpart;
+    return mNormalSign * total / 3.;
+  }
+
+  bool capacityIsExact() const override { return !mHasWireTrim; }
+
+  void conservativeBounds(Vec3& lower, Vec3& upper) const override
+  {
+    // conservative: the AABB of the full torus (partial sweeps get a larger box)
+    const double outerRadius = mMajorRadius + mMinorRadius;
+    for (int dimension = 0; dimension < 3; ++dimension) {
+      const double radialExtent = outerRadius * std::hypot(component(mAxisU, dimension), component(mAxisV, dimension)) +
+                                  mMinorRadius * std::abs(component(mAxisW, dimension));
+      const double centerValue = component(mCenter, dimension);
+      if (dimension == 0) {
+        lower.xCoord = std::min(lower.xCoord, centerValue - radialExtent);
+        upper.xCoord = std::max(upper.xCoord, centerValue + radialExtent);
+      } else if (dimension == 1) {
+        lower.yCoord = std::min(lower.yCoord, centerValue - radialExtent);
+        upper.yCoord = std::max(upper.yCoord, centerValue + radialExtent);
+      } else {
+        lower.zCoord = std::min(lower.zCoord, centerValue - radialExtent);
+        upper.zCoord = std::max(upper.zCoord, centerValue + radialExtent);
+      }
+    }
+  }
+
+  int ringSegments() const
+  {
+    return std::max(1, static_cast<int>(std::lround(kArcSamples * mPhiSweep / kTwoPi)));
+  }
+
+  int tubeSegments() const
+  {
+    return std::max(1, static_cast<int>(std::lround(kArcSamples * mTubeSweep / kTwoPi)));
+  }
+
+  void appendDisplayMesh(std::vector<Vec3>& vertices, std::vector<std::array<int, 3>>& triangles) const override
+  {
+    if (mHasWireTrim) {
+      appendCurveTrimMesh(mTrimOuter, [this](double phiRing, double phiTube) { return pointAt(phiRing, phiTube); },
+                          vertices, triangles);
+      return;
+    }
+    const int ringSteps = ringSegments();
+    const int tubeSteps = tubeSegments();
+    const int firstVertexIndex = static_cast<int>(vertices.size());
+    for (int ringStep = 0; ringStep <= ringSteps; ++ringStep) {
+      const double phiRing = mPhiStart + mPhiSweep * ringStep / ringSteps;
+      for (int tubeStep = 0; tubeStep <= tubeSteps; ++tubeStep) {
+        vertices.push_back(pointAt(phiRing, mTubeStart + mTubeSweep * tubeStep / tubeSteps));
+      }
+    }
+    const int rowLength = tubeSteps + 1;
+    for (int ringStep = 0; ringStep < ringSteps; ++ringStep) {
+      for (int tubeStep = 0; tubeStep < tubeSteps; ++tubeStep) {
+        const int base = firstVertexIndex + ringStep * rowLength + tubeStep;
+        triangles.push_back({base, base + rowLength, base + rowLength + 1});
+        triangles.push_back({base, base + rowLength + 1, base + 1});
+      }
+    }
+  }
+
+  void appendDirectedEdges(std::vector<std::pair<Vec3, Vec3>>& edges) const override
+  {
+    if (mHasWireTrim) {
+      // the (phiRing, phiTube) -> 3D map is orientation-consistent with the outward normal, so
+      // the sign is just mNormalSign (as for the cylinder and cone)
+      appendCurveTrimEdges(mTrimOuter, mTrimInner,
+                           [this](double phiRing, double phiTube) { return pointAt(phiRing, phiTube); }, mNormalSign,
+                           edges);
+      return;
+    }
+    // boundary of the (phiRing, phiTube) rectangle traversed counter-clockwise as seen along the
+    // outward normal; a full sweep in either angle has no seam there, so it is skipped
+    auto emitEdge = [&](const Vec3& edgeStart, const Vec3& edgeEnd) {
+      if (mNormalSign > 0.) {
+        edges.emplace_back(edgeStart, edgeEnd);
+      } else {
+        edges.emplace_back(edgeEnd, edgeStart);
+      }
+    };
+    const int ringSteps = ringSegments();
+    const int tubeSteps = tubeSegments();
+    const double endRing = mPhiStart + mPhiSweep;
+    const double endTube = mTubeStart + mTubeSweep;
+    if (!fullTubeSweep()) {
+      for (int step = 0; step < ringSteps; ++step) {
+        const double phiRing = mPhiStart + mPhiSweep * step / ringSteps;
+        const double nextRing = mPhiStart + mPhiSweep * (step + 1) / ringSteps;
+        emitEdge(pointAt(phiRing, mTubeStart), pointAt(nextRing, mTubeStart)); // +phiRing at tubeStart
+        emitEdge(pointAt(nextRing, endTube), pointAt(phiRing, endTube));       // -phiRing at tubeEnd
+      }
+    }
+    if (!fullRingSweep()) {
+      for (int step = 0; step < tubeSteps; ++step) {
+        const double phiTube = mTubeStart + mTubeSweep * step / tubeSteps;
+        const double nextTube = mTubeStart + mTubeSweep * (step + 1) / tubeSteps;
+        emitEdge(pointAt(endRing, phiTube), pointAt(endRing, nextTube));       // +phiTube at ringEnd
+        emitEdge(pointAt(mPhiStart, nextTube), pointAt(mPhiStart, phiTube));   // -phiTube at ringStart
+      }
+    }
+  }
+
+ private:
+  Vec3 mCenter;
+  Vec3 mAxisU;
+  Vec3 mAxisV;
+  Vec3 mAxisW;
+  double mMajorRadius = 0.;
+  double mMinorRadius = 0.;
+  double mPhiStart = 0.;
+  double mPhiSweep = kTwoPi;
+  double mTubeStart = 0.;
+  double mTubeSweep = kTwoPi;
   double mNormalSign = 1.;
   bool mHasWireTrim = false;
   CurveWire mTrimOuter;
