@@ -192,6 +192,178 @@ void compareDistance(const SurfaceSolid& solid, const TGeoShape& reference, cons
   }
 }
 
+/// @name Closed fixtures for the navigation sweeps
+///
+/// The distance tests exercise the same solids from several directions rather than one shape per
+/// case, so the fixtures are built once here. Each is closed and therefore BVH-backed. The solid
+/// is neither copyable nor movable, hence the unique_ptr.
+/// @{
+
+std::unique_ptr<SurfaceSolid> makeBoxSolid(const char* name, double halfX, double halfY, double halfZ)
+{
+  auto solid = std::make_unique<SurfaceSolid>(name);
+  addBoxSurfaces(*solid, halfX, halfY, halfZ);
+  solid->CloseShape();
+  return solid;
+}
+
+// innerRadius > 0 gives a hollow tube (an inner wall plus annular caps).
+std::unique_ptr<SurfaceSolid> makeTubeSolid(const char* name, double innerRadius, double outerRadius,
+                                            double halfHeight)
+{
+  auto solid = std::make_unique<SurfaceSolid>(name);
+  BOOST_REQUIRE(solid->AddCylindricalSurface({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, outerRadius, -halfHeight,
+                                             halfHeight));
+  if (innerRadius > 0.) {
+    BOOST_REQUIRE(solid->AddCylindricalSurface({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, innerRadius, -halfHeight,
+                                               halfHeight, 0., surf::kTwoPi, true));
+  }
+  BOOST_REQUIRE(addDiskSurface(*solid, {0., 0., halfHeight}, {1., 0., 0.}, {0., 1., 0.}, outerRadius, innerRadius));
+  BOOST_REQUIRE(addDiskSurface(*solid, {0., 0., -halfHeight}, {1., 0., 0.}, {0., -1., 0.}, outerRadius, innerRadius));
+  solid->CloseShape();
+  return solid;
+}
+
+std::unique_ptr<SurfaceSolid> makeConeSolid(const char* name, double radiusAtBottom, double radiusAtTop,
+                                            double halfHeight)
+{
+  auto solid = std::make_unique<SurfaceSolid>(name);
+  BOOST_REQUIRE(solid->AddConicalSurface({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, radiusAtBottom, radiusAtTop,
+                                         -halfHeight, halfHeight));
+  BOOST_REQUIRE(addDiskSurface(*solid, {0., 0., halfHeight}, {1., 0., 0.}, {0., 1., 0.}, radiusAtTop));
+  BOOST_REQUIRE(addDiskSurface(*solid, {0., 0., -halfHeight}, {1., 0., 0.}, {0., -1., 0.}, radiusAtBottom));
+  solid->CloseShape();
+  return solid;
+}
+
+std::unique_ptr<SurfaceSolid> makeSphereSolid(const char* name, double radius)
+{
+  auto solid = std::make_unique<SurfaceSolid>(name);
+  BOOST_REQUIRE(solid->AddSphericalSurface({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, radius));
+  solid->CloseShape();
+  return solid;
+}
+
+std::unique_ptr<SurfaceSolid> makeTorusSolid(const char* name, double majorRadius, double minorRadius)
+{
+  auto solid = std::make_unique<SurfaceSolid>(name);
+  BOOST_REQUIRE(solid->AddToroidalSurface({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, majorRadius, minorRadius));
+  solid->CloseShape();
+  return solid;
+}
+
+// Cylinder barrel closed by two hemispherical endcaps; a mixed-quadric solid with no ROOT
+// primitive equivalent, so the loop oracle is the only reference it has.
+std::unique_ptr<SurfaceSolid> makeCapsuleSolid(const char* name, double radius, double halfHeight)
+{
+  auto solid = std::make_unique<SurfaceSolid>(name);
+  BOOST_REQUIRE(solid->AddCylindricalSurface({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, radius, -halfHeight,
+                                             halfHeight));
+  BOOST_REQUIRE(solid->AddSphericalSurface({0., 0., halfHeight}, {0., 0., 1.}, {1., 0., 0.}, radius, 0.,
+                                           surf::kPi / 2.));
+  BOOST_REQUIRE(solid->AddSphericalSurface({0., 0., -halfHeight}, {0., 0., -1.}, {1., 0., 0.}, radius, 0.,
+                                           surf::kPi / 2.));
+  solid->CloseShape();
+  return solid;
+}
+
+/// @}
+
+// Directions probed by the navigation sweeps: the three axes both ways, face and body diagonals,
+// and a few skew directions that align with no symmetry of any fixture.
+const std::vector<std::array<double, 3>>& probeDirections()
+{
+  static const std::vector<std::array<double, 3>> directions{
+    {1., 0., 0.},   {-1., 0., 0.},   {0., 1., 0.},    {0., -1., 0.},  {0., 0., 1.},
+    {0., 0., -1.},  unitDirection(1., 1., 0.),        unitDirection(1., 0., 1.),
+    unitDirection(0., 1., 1.),       unitDirection(1., 1., 1.),       unitDirection(-1., 1., -1.),
+    unitDirection(0.37, -0.82, 0.44), unitDirection(-0.91, 0.13, 0.39), unitDirection(0.21, 0.55, -0.81)};
+  return directions;
+}
+
+// A deterministic point grid over the cube of half-side "extent". The fractional offsets are the
+// same irrational-looking shifts the Contains sweeps use, which keeps samples off exact symmetry
+// planes and shape boundaries.
+std::vector<std::array<double, 3>> probeGrid(double extent, int samples)
+{
+  std::vector<std::array<double, 3>> points;
+  points.reserve(static_cast<size_t>(samples) * samples * samples);
+  for (int stepX = 0; stepX < samples; ++stepX) {
+    for (int stepY = 0; stepY < samples; ++stepY) {
+      for (int stepZ = 0; stepZ < samples; ++stepZ) {
+        points.push_back({-extent + 2. * extent * (stepX + 0.517) / samples,
+                          -extent + 2. * extent * (stepY + 0.263) / samples,
+                          -extent + 2. * extent * (stepZ + 0.741) / samples});
+      }
+    }
+  }
+  return points;
+}
+
+/// The BVH distance queries must return *exactly* what the all-surfaces loop returns. Both run
+/// the same analytic kernels on the same patches and take a minimum over the same hit set; they
+/// differ only in the order surfaces are visited and in which of them the BVH lets them skip. So
+/// any difference at all -- not merely one above a tolerance -- is a traversal or pruning bug,
+/// and exact comparison is the sharpest available oracle. Independent of any mesh reference.
+///
+/// Ray tmax tightening is an optimization and nothing else, so both settings are checked and must
+/// agree with the same loop value.
+void checkDistanceAgainstLoop(const SurfaceSolid& solid, const std::array<double, 3>& point,
+                              const std::array<double, 3>& direction, double stepmax = TGeoShape::Big())
+{
+  const double loopOutside = solid.DistFromOutside_Loop(point.data(), direction.data(), stepmax);
+  const double loopInside = solid.DistFromInside_Loop(point.data(), direction.data(), stepmax);
+  for (const bool pruning : {true, false}) {
+    SurfaceSolid::SetRayTMaxPruning(pruning);
+    BOOST_TEST_CONTEXT("point = (" << point[0] << ", " << point[1] << ", " << point[2] << ") direction = ("
+                                   << direction[0] << ", " << direction[1] << ", " << direction[2]
+                                   << ") stepmax = " << stepmax << " pruning = " << pruning)
+    {
+      BOOST_CHECK_EQUAL(solid.DistFromOutside(point.data(), direction.data(), 3, stepmax), loopOutside);
+      BOOST_CHECK_EQUAL(solid.DistFromInside(point.data(), direction.data(), 3, stepmax), loopInside);
+    }
+  }
+  SurfaceSolid::SetRayTMaxPruning(true);
+}
+
+// Sweep every grid point against every probe direction, cross-checking BVH against the loop.
+void sweepDistanceAgainstLoop(const SurfaceSolid& solid, double extent, int samples)
+{
+  for (const auto& point : probeGrid(extent, samples)) {
+    for (const auto& direction : probeDirections()) {
+      checkDistanceAgainstLoop(solid, point, direction);
+    }
+  }
+}
+
+// Sweep both distance functions against a reference ROOT primitive, using each point in the role
+// (inside/outside) the reference itself assigns it. Points closer than "skin" to the reference
+// boundary are skipped: there the two shapes may legitimately disagree on which side the point is
+// on, and the resulting distances are then answers to different questions.
+void sweepDistanceAgainstReference(const SurfaceSolid& solid, const TGeoShape& reference, double extent, int samples,
+                                   double tolerance = 1.e-9, double skin = 1.e-6)
+{
+  for (const auto& point : probeGrid(extent, samples)) {
+    const bool inside = reference.Contains(point.data());
+    if (reference.Safety(point.data(), inside) < skin) {
+      continue;
+    }
+    for (const auto& direction : probeDirections()) {
+      BOOST_TEST_CONTEXT("point = (" << point[0] << ", " << point[1] << ", " << point[2] << ") direction = ("
+                                     << direction[0] << ", " << direction[1] << ", " << direction[2] << ")")
+      {
+        if (inside) {
+          checkClose(solid.DistFromInside(point.data(), direction.data(), 3),
+                     reference.DistFromInside(point.data(), direction.data(), 3), tolerance);
+        } else {
+          checkClose(solid.DistFromOutside(point.data(), direction.data(), 3),
+                     reference.DistFromOutside(point.data(), direction.data(), 3), tolerance);
+        }
+      }
+    }
+  }
+}
+
 } // namespace
 
 BOOST_AUTO_TEST_CASE(PlanarBoxNavigationMatchesTGeoBBox)
@@ -1386,6 +1558,284 @@ BOOST_AUTO_TEST_CASE(ContainsBoundaryPointsAndCapsule)
   // exact capacity: cylinder plus a full sphere from the two hemispheres
   checkClose(capsule.Capacity(),
              surf::kPi * radius * radius * 2. * halfHeight + 4. * surf::kPi * radius * radius * radius / 3., 1.e-9);
+}
+
+BOOST_AUTO_TEST_CASE(DistanceBVHMatchesLoopOnAllFixtures)
+{
+  // The BVH distance queries against their all-surfaces oracle, over every fixture family and a
+  // dense point x direction sweep. This is the correctness guard that does not depend on any
+  // reference shape: it isolates traversal and pruning from the analytic kernels, which the
+  // per-shape cases above already validate against ROOT.
+  const std::array<std::pair<std::unique_ptr<SurfaceSolid>, double>, 7> fixtures{{
+    {makeBoxSolid("loopBox", 1., 2., 3.), 4.},
+    {makeTubeSolid("loopTube", 0., 2., 3.), 4.},
+    {makeTubeSolid("loopHollowTube", 1., 2., 3.), 4.},
+    {makeConeSolid("loopCone", 2., 1., 3.), 4.},
+    {makeSphereSolid("loopSphere", 2.5), 3.5},
+    {makeTorusSolid("loopTorus", 3., 1.), 4.5},
+    {makeCapsuleSolid("loopCapsule", 1., 1.5), 3.},
+  }};
+
+  for (const auto& [solid, extent] : fixtures) {
+    BOOST_TEST_CONTEXT("fixture = " << solid->GetName())
+    {
+      BOOST_REQUIRE(solid->HasBVH());
+      sweepDistanceAgainstLoop(*solid, extent, 5);
+    }
+  }
+}
+
+BOOST_AUTO_TEST_CASE(DistanceSweepsMatchRootPrimitives)
+{
+  // Systematic point x direction sweeps against the ROOT primitives, for both the entering and
+  // the exiting query. The per-shape cases above check a handful of hand-picked rays; this walks
+  // a grid, so it also covers rays that miss, that graze, and that cross a hole.
+  constexpr int samples = 5;
+
+  const auto box = makeBoxSolid("sweepBox", 1., 2., 3.);
+  TGeoBBox boxReference("sweepBoxReference", 1., 2., 3.);
+  sweepDistanceAgainstReference(*box, boxReference, 4., samples);
+
+  const auto tube = makeTubeSolid("sweepTube", 0., 2., 3.);
+  TGeoTube tubeReference("sweepTubeReference", 0., 2., 3.);
+  sweepDistanceAgainstReference(*tube, tubeReference, 4., samples);
+
+  const auto hollowTube = makeTubeSolid("sweepHollowTube", 1., 2., 3.);
+  TGeoTube hollowTubeReference("sweepHollowTubeReference", 1., 2., 3.);
+  sweepDistanceAgainstReference(*hollowTube, hollowTubeReference, 4., samples);
+
+  const auto cone = makeConeSolid("sweepCone", 2., 1., 3.);
+  TGeoCone coneReference("sweepConeReference", 3., 0., 2., 0., 1.);
+  sweepDistanceAgainstReference(*cone, coneReference, 4., samples);
+
+  const auto sphere = makeSphereSolid("sweepSphere", 2.5);
+  TGeoSphere sphereReference("sweepSphereReference", 0., 2.5);
+  sweepDistanceAgainstReference(*sphere, sphereReference, 3.5, samples);
+
+  // the torus kernel solves a quartic, so it carries more rounding than the quadric shapes
+  const auto torus = makeTorusSolid("sweepTorus", 3., 1.);
+  TGeoTorus torusReference("sweepTorusReference", 3., 0., 1.);
+  sweepDistanceAgainstReference(*torus, torusReference, 4.5, samples, 1.e-6);
+}
+
+BOOST_AUTO_TEST_CASE(DistanceHardCases)
+{
+  constexpr double halfX = 1.;
+  constexpr double halfY = 2.;
+  constexpr double halfZ = 3.;
+  const auto box = makeBoxSolid("hardCaseBox", halfX, halfY, halfZ);
+  TGeoBBox reference("hardCaseBoxReference", halfX, halfY, halfZ);
+
+  // --- rays through a shared edge and a shared vertex -----------------------------------------
+  // Both are seen by more than one patch, so the same crossing is reported several times. Taking
+  // the minimum over entering hits is insensitive to that, but the BVH and the loop must still
+  // see the same set, which is what the loop cross-check asserts.
+  const std::array<std::array<double, 3>, 4> throughFeature{{
+    {-5., halfY, 0.},        // straight at the x = -1 / y = +2 edge
+    {-5., halfY, halfZ},     // straight at the (-1, +2, +3) vertex
+    {0., 0., 0.},            // from the centre out through the +y/+z edge
+    {-5., -5., -5.},         // body diagonal through the (-1,-2,-3) vertex
+  }};
+  const std::array<std::array<double, 3>, 4> throughFeatureDirection{{
+    {1., 0., 0.},
+    {1., 0., 0.},
+    unitDirection(0., 1., 1.5),
+    unitDirection(1., 2., 3.),
+  }};
+  for (size_t index = 0; index < throughFeature.size(); ++index) {
+    checkDistanceAgainstLoop(*box, throughFeature[index], throughFeatureDirection[index]);
+  }
+
+  // --- grazing / tangent rays ------------------------------------------------------------------
+  // A ray in the plane of a face never enters: every hit it can report is tangential, and a
+  // tangential hit is not a crossing. Both queries must agree with the loop and find nothing.
+  const std::array<std::array<double, 3>, 3> grazing{{
+    {-5., halfY, 0.},   // in the plane of the y = +2 face
+    {halfX, -5., 0.},   // in the plane of the x = +1 face
+    {0., 0., halfZ},    // in the plane of the z = +3 face
+  }};
+  const std::array<std::array<double, 3>, 3> grazingDirection{{
+    {1., 0., 0.},
+    {0., 1., 0.},
+    unitDirection(1., 1., 0.),
+  }};
+  for (size_t index = 0; index < grazing.size(); ++index) {
+    checkDistanceAgainstLoop(*box, grazing[index], grazingDirection[index]);
+  }
+  // a cylinder tangent ray: the double root must not be reported as two crossings
+  const auto tube = makeTubeSolid("hardCaseTube", 0., 2., 3.);
+  checkDistanceAgainstLoop(*tube, {-5., 2., 0.}, {1., 0., 0.});
+  checkDistanceAgainstLoop(*tube, {-5., 2. - 1.e-7, 0.}, {1., 0., 0.}); // just inside tangency
+  checkDistanceAgainstLoop(*tube, {-5., 2. + 1.e-7, 0.}, {1., 0., 0.}); // just outside tangency
+
+  // --- rays starting exactly on a surface -------------------------------------------------------
+  // The on-surface convention (a crossing at t = 0 is below kRayTolerance and is not reported) is
+  // inherited from the analytic kernels; what matters here is that the BVH reproduces it exactly.
+  const std::array<std::array<double, 3>, 4> onSurface{{
+    {halfX, 0., 0.},         // on a face
+    {-halfX, 0.5, -1.},      // on the opposite face
+    {halfX, halfY, 0.},      // on an edge
+    {halfX, halfY, halfZ},   // on a vertex
+  }};
+  for (const auto& point : onSurface) {
+    for (const auto& direction : probeDirections()) {
+      checkDistanceAgainstLoop(*box, point, direction);
+    }
+  }
+  // just off the surface the answers must be the ordinary ones: entering after ~1e-6 from
+  // outside, exiting after the full traversal from inside
+  const std::array<double, 3> justOutside{halfX + 1.e-6, 0., 0.};
+  const std::array<double, 3> justInside{halfX - 1.e-6, 0., 0.};
+  const std::array<double, 3> inward{-1., 0., 0.};
+  checkClose(box->DistFromOutside(justOutside.data(), inward.data(), 3), 1.e-6, 1.e-12);
+  checkClose(box->DistFromInside(justInside.data(), inward.data(), 3), 2. * halfX - 1.e-6, 1.e-12);
+  checkClose(box->DistFromOutside(justOutside.data(), inward.data(), 3),
+             reference.DistFromOutside(justOutside.data(), inward.data(), 3), 1.e-12);
+
+  // --- stepmax ----------------------------------------------------------------------------------
+  const std::array<double, 3> farOutside{-5., 0., 0.};
+  const std::array<double, 3> alongX{1., 0., 0.};
+  const double entryDistance = box->DistFromOutside(farOutside.data(), alongX.data(), 3);
+  checkClose(entryDistance, 4.);
+  // a hit beyond stepmax must not be reported ...
+  BOOST_CHECK_EQUAL(box->DistFromOutside(farOutside.data(), alongX.data(), 3, entryDistance * 0.5),
+                    TGeoShape::Big());
+  // ... including when it lies only just beyond, and the cheap bounding-box reject must agree
+  BOOST_CHECK_EQUAL(box->DistFromOutside(farOutside.data(), alongX.data(), 3, entryDistance - 1.e-3),
+                    TGeoShape::Big());
+  // ... while a stepmax past the hit changes nothing
+  checkClose(box->DistFromOutside(farOutside.data(), alongX.data(), 3, entryDistance + 1.e-3), entryDistance);
+  checkClose(box->DistFromOutside(farOutside.data(), alongX.data(), 3, 100.), entryDistance);
+  // the same for the exiting query
+  const std::array<double, 3> center{0., 0., 0.};
+  const double exitDistance = box->DistFromInside(center.data(), alongX.data(), 3);
+  checkClose(exitDistance, halfX);
+  BOOST_CHECK_EQUAL(box->DistFromInside(center.data(), alongX.data(), 3, exitDistance * 0.5), TGeoShape::Big());
+  checkClose(box->DistFromInside(center.data(), alongX.data(), 3, exitDistance * 2.), exitDistance);
+  // and the loop must honour stepmax identically, at and around the hit
+  for (const double stepmax : {entryDistance * 0.5, entryDistance - 1.e-9, entryDistance, entryDistance + 1.e-9,
+                               entryDistance * 2.}) {
+    checkDistanceAgainstLoop(*box, farOutside, alongX, stepmax);
+    checkDistanceAgainstLoop(*box, center, alongX, stepmax);
+  }
+
+  // --- a ray that cannot reach the solid at all --------------------------------------------------
+  const std::array<double, 3> wayOff{-1000., 0., 0.};
+  BOOST_CHECK_EQUAL(box->DistFromOutside(wayOff.data(), alongX.data(), 3, 10.), TGeoShape::Big());
+  checkClose(box->DistFromOutside(wayOff.data(), alongX.data(), 3), 999.);
+}
+
+BOOST_AUTO_TEST_CASE(RayTMaxPruningIsOptimizationOnly)
+{
+  // A row of well-separated boxes: a ray along the row enters the first one, after which every
+  // node behind it is beyond the tightened bound and must not be visited. Turning the tightening
+  // off must cost candidates without changing a single answer.
+  constexpr int boxCount = 8;
+  constexpr double half = 0.5;
+  constexpr double spacing = 4.;
+
+  SurfaceSolid row("prunedRow");
+  for (int boxIndex = 0; boxIndex < boxCount; ++boxIndex) {
+    addBoxSurfaces(row, half, half, half, {boxIndex * spacing, 0., 0.});
+  }
+  row.CloseShape();
+  BOOST_REQUIRE(row.HasBVH());
+  BOOST_CHECK(row.IsClosed());
+  BOOST_CHECK_EQUAL(row.GetNsurfaces(), 6 * boxCount);
+
+  const std::array<double, 3> beforeRow{-5., 0., 0.};
+  const std::array<double, 3> alongRow{1., 0., 0.};
+
+  BOOST_CHECK(SurfaceSolid::GetRayTMaxPruning()); // on by default
+
+  SurfaceSolid::ResetRayCandidateCounter();
+  const double prunedDistance = row.DistFromOutside(beforeRow.data(), alongRow.data(), 3);
+  const long long prunedCandidates = SurfaceSolid::GetRayCandidateCount();
+
+  SurfaceSolid::SetRayTMaxPruning(false);
+  SurfaceSolid::ResetRayCandidateCounter();
+  const double unprunedDistance = row.DistFromOutside(beforeRow.data(), alongRow.data(), 3);
+  const long long unprunedCandidates = SurfaceSolid::GetRayCandidateCount();
+  SurfaceSolid::SetRayTMaxPruning(true);
+
+  // same answer, and it is the entry face of the first box
+  BOOST_CHECK_EQUAL(prunedDistance, unprunedDistance);
+  checkClose(prunedDistance, 5. - half);
+  // ... reached after strictly less work
+  BOOST_CHECK_GT(prunedCandidates, 0);
+  BOOST_CHECK_LT(prunedCandidates, unprunedCandidates);
+
+  // the answers stay identical over a full sweep, which is the property that lets the benchmark
+  // treat the switch as a pure cost knob
+  sweepDistanceAgainstLoop(row, 1.2 * boxCount * spacing / 2., 4);
+
+  // the counter is not touched by the _Loop variants, which visit everything by construction
+  SurfaceSolid::ResetRayCandidateCounter();
+  row.DistFromOutside_Loop(beforeRow.data(), alongRow.data());
+  BOOST_CHECK_EQUAL(SurfaceSolid::GetRayCandidateCount(), 0);
+}
+
+BOOST_AUTO_TEST_CASE(RayTMaxPruningKeepsNearTies)
+{
+  // Two entering candidates a controlled hair apart, one of them behind a very loose bounding
+  // box: the geometry in which a mis-set tmax would do its damage.
+  //
+  // Why this shape of test. A node is culled when the ray *enters its box* beyond tmax, and a box
+  // is always entered no later than the patch inside it is hit. A candidate nearer than the
+  // current best therefore has a box entered earlier than the current best's hit, and survives
+  // any bound at or above that hit -- which is why the implementation's bound (the best hit,
+  // rounded up, plus the box inflation) can be argued safe rather than merely measured safe. The
+  // narrow window that is left needs a loose box visited first and a tight one entered between
+  // the loose patch's box and its hit, so that is what this fixture builds.
+  //
+  // Fixture: a sphere hit by a near-limb ray far behind where its bounding box starts, plus a
+  // small flat patch just in front of that hit, swept over several decades of separation. It is
+  // deliberately not a closed manifold (the patch clips into the sphere) and is closed with the
+  // diagnostics off: it exists to place the two candidates, not to model a solid. That is
+  // legitimate because the oracle is DistFromOutside_Loop, which minimises over the same hits.
+  //
+  // Scope, honestly: mutation-testing this suite showed that a bound scaled by 0.5 is caught
+  // loudly by the sweeps above, while one scaled by 0.999 is caught by neither them nor this
+  // case -- with so few primitives, both leaves are box-tested in the same inner-node visit,
+  // before any leaf callback has run and tightened anything. So this pins the near-tie geometry
+  // and the pruning-on == pruning-off == loop identity; the guarantee against a subtly tight
+  // bound rests on the argument above, not on this test.
+  constexpr double radius = 2.;
+  constexpr double rayOffsetY = 1.9; // near the limb: box entered at x = -2, surface at x = -0.62
+  const double sphereHitX = -std::sqrt(radius * radius - rayOffsetY * rayOffsetY);
+  const std::array<double, 3> rayOrigin{-10., rayOffsetY, 0.};
+  const std::array<double, 3> alongX{1., 0., 0.};
+  const double sphereDistance = sphereHitX - rayOrigin[0];
+
+  // relative offsets spanning several decades below the sphere hit, so any tmax that is too
+  // tight by anything in that range is caught by at least one of them regardless of how the
+  // builder happens to lay out the tree
+  for (const double relativeOffset : {1.e-5, 3.e-5, 1.e-4, 3.e-4, 1.e-3, 3.e-3, 1.e-2}) {
+    const double patchX = sphereHitX - relativeOffset * sphereDistance;
+    BOOST_TEST_CONTEXT("relativeOffset = " << relativeOffset << " patchX = " << patchX)
+    {
+      SurfaceSolid solid("nearTie");
+      BOOST_REQUIRE(solid.AddSphericalSurface({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, radius));
+      // axisU x axisV = z x y = -x: the patch faces the incoming ray, so crossing it enters
+      BOOST_REQUIRE(solid.AddPlanarSurface({patchX, rayOffsetY - 0.1, -0.1}, {0., 0., 1.}, {0., 1., 0.},
+                                           rectangleWire(0.2, 0.2)));
+      solid.CloseShape(false);
+      BOOST_REQUIRE(solid.HasBVH());
+
+      // the flat patch is the nearer entering crossing, by construction
+      const double expected = patchX - rayOrigin[0];
+      for (const bool pruning : {true, false}) {
+        SurfaceSolid::SetRayTMaxPruning(pruning);
+        BOOST_TEST_CONTEXT("pruning = " << pruning)
+        {
+          const double distance = solid.DistFromOutside(rayOrigin.data(), alongX.data(), 3);
+          checkClose(distance, expected, 1.e-9);
+          BOOST_CHECK_EQUAL(distance, solid.DistFromOutside_Loop(rayOrigin.data(), alongX.data()));
+        }
+      }
+      SurfaceSolid::SetRayTMaxPruning(true);
+    }
+  }
 }
 
 BOOST_AUTO_TEST_CASE(CurvedPlanarStadiumPrism)

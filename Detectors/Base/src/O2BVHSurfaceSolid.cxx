@@ -62,6 +62,37 @@ Vec3 makeVec3(const Double_t* point)
 // avoids evident symmetries (same as O2Tessellated), normalized so hit distances are lengths.
 const Vec3 kContainsTestDirection = normalized({1., 1.41421356237, 1.73205080757});
 
+// Ray tmax tightening in the BVH distance queries; see O2BVHSurfaceSolid::SetRayTMaxPruning.
+bool gRayTMaxPruning = true;
+// Per-thread diagnostic counter of leaf surface patches visited by the BVH distance queries.
+thread_local long long gRayCandidateCount = 0;
+
+/// Convert a double ray bound to the float the BVH traversal compares against, rounding *up* so
+/// the float bound can never be smaller than the double one. Traversal in float must never
+/// discard a node that the exact bound would have kept, otherwise a nearer hit is lost. Mirrors
+/// the truncate_roundup lambda in O2Tessellated's distance queries.
+inline BVHScalar truncateRoundUp(double bound)
+{
+  const double clamped = std::min(bound, static_cast<double>(std::numeric_limits<BVHScalar>::max()));
+  const double biased = clamped + std::numeric_limits<BVHScalar>::epsilon() * std::abs(clamped);
+  return static_cast<BVHScalar>(biased);
+}
+
+/// Whether \a hit is an entering (\a wantEntering) or an exiting crossing for a ray travelling
+/// along \a rayDirection. The outward normal opposes the direction when entering. Grazes within
+/// kTolerance of tangency are neither and are discarded: the surface is not actually crossed
+/// there, and counting one would report a spurious boundary to the navigator.
+template <bool wantEntering>
+inline bool isWantedCrossing(const RayHit& hit, const Vec3& rayDirection)
+{
+  const double alignment = dot(hit.normal, rayDirection);
+  if constexpr (wantEntering) {
+    return alignment < -kTolerance;
+  } else {
+    return alignment > kTolerance;
+  }
+}
+
 // Ray-parity evaluation of a full intersection list (sorts hits in place). Near-equal
 // intersections are clustered (shared edges/vertices seen by several surfaces). A cluster whose
 // hits all enter or all exit is one genuine crossing; a mixed cluster means the ray grazes an
@@ -162,6 +193,78 @@ struct O2BVHSurfaceSolid::Impl {
                                                 }
                                                 return false; // keep traversing
                                               });
+  }
+
+  /// Distance to the nearest entering (\a wantEntering) or exiting crossing of the ray with the
+  /// solid, bounded by \a stepmax; TGeoShape::Big() when there is none within that bound.
+  ///
+  /// The traversal bound shrinks to the best crossing found so far (unless pruning is switched
+  /// off for benchmarking), which genuinely prunes: bvh2's node test re-reads ray.tmax on every
+  /// node, so tightening it from inside the leaf callback takes effect immediately. It is safe
+  /// because every hit lies inside its own leaf box, so a nearer hit's box is always entered at
+  /// a ray parameter below the current best -- and the new bound is rounded up by
+  /// kBVHBoxTolerance plus a float ulp so neither the double->float conversion nor the float
+  /// box arithmetic can round it below a surviving candidate.
+  ///
+  /// The per-surface hit buffer is a function-local thread_local: template instantiation gives
+  /// the entering and the exiting query a buffer each, so neither can be re-entered through the
+  /// other's, and the capacity is paid once per thread rather than once per call.
+  template <bool wantEntering>
+  double nearestCrossing(const Vec3& rayOrigin, const Vec3& rayDirection, double stepmax) const
+  {
+    static thread_local std::vector<RayHit> surfaceHits;
+
+    double bestDistance = TGeoShape::Big();
+    BVHRay ray(BVHVec3(rayOrigin.xCoord, rayOrigin.yCoord, rayOrigin.zCoord),
+               BVHVec3(rayDirection.xCoord, rayDirection.yCoord, rayDirection.zCoord), 0.f,
+               truncateRoundUp(stepmax));
+    static constexpr bool useRobustTraversal = true;
+    const bool pruning = gRayTMaxPruning;
+
+    bvh::v2::GrowingStack<BVH::Index> stack;
+    // ray is captured by reference on purpose: bvh2 takes it as const Ray&, but the object
+    // itself is ours and mutable, and the traversal reads tmax afresh at every node test.
+    bvh->intersect<false, useRobustTraversal>(
+      ray, bvh->get_root().index, stack, [&](size_t beginPrimitive, size_t endPrimitive) {
+        for (size_t primitive = beginPrimitive; primitive < endPrimitive; ++primitive) {
+          const BoundedSurface& surface = *surfaces[bvh->prim_ids[primitive]];
+          ++gRayCandidateCount;
+          surfaceHits.clear();
+          surface.appendIntersections(rayOrigin, rayDirection, kRayTolerance, std::min(stepmax, bestDistance),
+                                      surfaceHits);
+          for (const auto& hit : surfaceHits) {
+            if (isWantedCrossing<wantEntering>(hit, rayDirection) && hit.distance < bestDistance) {
+              bestDistance = hit.distance;
+            }
+          }
+        }
+        if (pruning && bestDistance < stepmax) {
+          ray.tmax = std::min(ray.tmax, truncateRoundUp(bestDistance + kBVHBoxTolerance));
+        }
+        return false; // keep traversing; the shrunk tmax does the pruning
+      });
+    return bestDistance;
+  }
+
+  /// Same query without the BVH: visit every surface. Oracle and baseline for nearestCrossing.
+  template <bool wantEntering>
+  double nearestCrossingLoop(const Vec3& rayOrigin, const Vec3& rayDirection, double stepmax) const
+  {
+    static thread_local std::vector<RayHit> surfaceHits;
+
+    double bestDistance = TGeoShape::Big();
+    for (const auto& surface : surfaces) {
+      surfaceHits.clear();
+      // the shrinking upper bound prunes surfaces that cannot beat the current best hit
+      surface->appendIntersections(rayOrigin, rayDirection, kRayTolerance, std::min(stepmax, bestDistance),
+                                   surfaceHits);
+      for (const auto& hit : surfaceHits) {
+        if (isWantedCrossing<wantEntering>(hit, rayDirection) && hit.distance < bestDistance) {
+          bestDistance = hit.distance;
+        }
+      }
+    }
+    return bestDistance;
   }
 
   /// Visit every surface whose BVH leaf box contains the point; stops early (returning true)
@@ -816,12 +919,14 @@ bool O2BVHSurfaceSolid::Contains(const Double_t* point) const
     return true;
   }
 
-  std::vector<RayHit> hits;
-  hits.reserve(8);
+  // reused across calls so containment allocates nothing on the hot path; the capacity is paid
+  // once per thread. Distinct from the distance queries' buffers, which are their own.
+  static thread_local std::vector<RayHit> containsHits;
+  containsHits.clear();
   fImpl->visitRayCandidates(testPoint, kContainsTestDirection, [&](const BoundedSurface& surface) {
-    surface.appendIntersections(testPoint, kContainsTestDirection, kRayTolerance, TGeoShape::Big(), hits);
+    surface.appendIntersections(testPoint, kContainsTestDirection, kRayTolerance, TGeoShape::Big(), containsHits);
   });
-  return oddCrossingParity(hits, kContainsTestDirection);
+  return oddCrossingParity(containsHits, kContainsTestDirection);
 }
 
 bool O2BVHSurfaceSolid::Contains_Loop(const Double_t* point) const
@@ -837,12 +942,12 @@ bool O2BVHSurfaceSolid::Contains_Loop(const Double_t* point) const
     }
   }
 
-  std::vector<RayHit> hits;
-  hits.reserve(2 * fImpl->surfaces.size());
+  static thread_local std::vector<RayHit> containsLoopHits;
+  containsLoopHits.clear();
   for (const auto& surface : fImpl->surfaces) {
-    surface->appendIntersections(testPoint, kContainsTestDirection, kRayTolerance, TGeoShape::Big(), hits);
+    surface->appendIntersections(testPoint, kContainsTestDirection, kRayTolerance, TGeoShape::Big(), containsLoopHits);
   }
-  return oddCrossingParity(hits, kContainsTestDirection);
+  return oddCrossingParity(containsLoopHits, kContainsTestDirection);
 }
 
 Double_t O2BVHSurfaceSolid::DistFromOutside(const Double_t* point, const Double_t* dir, Int_t, Double_t stepmax,
@@ -851,27 +956,28 @@ Double_t O2BVHSurfaceSolid::DistFromOutside(const Double_t* point, const Double_
   if (safe != nullptr) {
     *safe = Safety(point, kFALSE);
   }
-  if (fImpl == nullptr) {
+  if (fImpl == nullptr || fImpl->surfaces.empty()) {
     return TGeoShape::Big();
   }
+  if (fImpl->bvh == nullptr) {
+    // before CloseShape there is no acceleration structure yet; stay usable via the plain loop
+    return DistFromOutside_Loop(point, dir, stepmax);
+  }
 
-  const Vec3 rayOrigin = makeVec3(point);
-  const Vec3 rayDirection = makeVec3(dir);
-  double bestDistance = TGeoShape::Big();
-  std::vector<RayHit> hits;
-  for (const auto& surface : fImpl->surfaces) {
-    hits.clear();
-    // the shrinking upper bound prunes surfaces that cannot beat the current best hit
-    surface->appendIntersections(rayOrigin, rayDirection, kRayTolerance, std::min(stepmax, bestDistance), hits);
-    for (const auto& hit : hits) {
-      // entering: the outward normal opposes the ray direction
-      if (dot(hit.normal, rayDirection) >= -kTolerance) {
-        continue;
-      }
-      bestDistance = std::min(bestDistance, hit.distance);
+  // Cheap reject before touching the BVH: along any single axis the gap between the point and
+  // the bounding box is a lower bound on the distance to the solid, so a gap beyond stepmax
+  // means no reachable crossing. The bounding box is the shape's own, hence the tolerance slack.
+  const Double_t halfLengths[3] = {fDX, fDY, fDZ};
+  for (int dimension = 0; dimension < 3; ++dimension) {
+    const Double_t lower = fOrigin[dimension] - halfLengths[dimension];
+    const Double_t upper = fOrigin[dimension] + halfLengths[dimension];
+    if (lower - point[dimension] > stepmax + kBVHBoxTolerance ||
+        point[dimension] - upper > stepmax + kBVHBoxTolerance) {
+      return TGeoShape::Big();
     }
   }
-  return bestDistance;
+
+  return fImpl->nearestCrossing<true>(makeVec3(point), makeVec3(dir), stepmax);
 }
 
 Double_t O2BVHSurfaceSolid::DistFromInside(const Double_t* point, const Double_t* dir, Int_t, Double_t stepmax,
@@ -880,27 +986,50 @@ Double_t O2BVHSurfaceSolid::DistFromInside(const Double_t* point, const Double_t
   if (safe != nullptr) {
     *safe = Safety(point, kTRUE);
   }
-  if (fImpl == nullptr) {
+  if (fImpl == nullptr || fImpl->surfaces.empty()) {
     return TGeoShape::Big();
   }
-
-  const Vec3 rayOrigin = makeVec3(point);
-  const Vec3 rayDirection = makeVec3(dir);
-  double bestDistance = TGeoShape::Big();
-  std::vector<RayHit> hits;
-  for (const auto& surface : fImpl->surfaces) {
-    hits.clear();
-    // the shrinking upper bound prunes surfaces that cannot beat the current best hit
-    surface->appendIntersections(rayOrigin, rayDirection, kRayTolerance, std::min(stepmax, bestDistance), hits);
-    for (const auto& hit : hits) {
-      // exiting: the outward normal is aligned with the ray direction
-      if (dot(hit.normal, rayDirection) <= kTolerance) {
-        continue;
-      }
-      bestDistance = std::min(bestDistance, hit.distance);
-    }
+  if (fImpl->bvh == nullptr) {
+    return DistFromInside_Loop(point, dir, stepmax);
   }
-  return bestDistance;
+  // no bounding-box reject here: the point is inside by contract, so the box is always reachable
+  return fImpl->nearestCrossing<false>(makeVec3(point), makeVec3(dir), stepmax);
+}
+
+Double_t O2BVHSurfaceSolid::DistFromOutside_Loop(const Double_t* point, const Double_t* dir, Double_t stepmax) const
+{
+  if (fImpl == nullptr || fImpl->surfaces.empty()) {
+    return TGeoShape::Big();
+  }
+  return fImpl->nearestCrossingLoop<true>(makeVec3(point), makeVec3(dir), stepmax);
+}
+
+Double_t O2BVHSurfaceSolid::DistFromInside_Loop(const Double_t* point, const Double_t* dir, Double_t stepmax) const
+{
+  if (fImpl == nullptr || fImpl->surfaces.empty()) {
+    return TGeoShape::Big();
+  }
+  return fImpl->nearestCrossingLoop<false>(makeVec3(point), makeVec3(dir), stepmax);
+}
+
+void O2BVHSurfaceSolid::SetRayTMaxPruning(bool enable)
+{
+  gRayTMaxPruning = enable;
+}
+
+bool O2BVHSurfaceSolid::GetRayTMaxPruning()
+{
+  return gRayTMaxPruning;
+}
+
+void O2BVHSurfaceSolid::ResetRayCandidateCounter()
+{
+  gRayCandidateCount = 0;
+}
+
+long long O2BVHSurfaceSolid::GetRayCandidateCount()
+{
+  return gRayCandidateCount;
 }
 
 Double_t O2BVHSurfaceSolid::Safety(const Double_t* point, Bool_t) const

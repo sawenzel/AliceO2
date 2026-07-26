@@ -32,6 +32,7 @@ o2_add_library(DetectorsBase
                        src/O2Tessellated.cxx
                        src/O2BVHSurfaceSolid.cxx
                        src/O2SurfaceSolidIO.cxx
+                       src/O2SolidHarness.cxx
                        src/TGeoGeometryUtils.cxx
                        src/CADGeometryUtils.cxx
                PUBLIC_LINK_LIBRARIES FairRoot::Base
@@ -79,6 +80,13 @@ o2_add_test(
   COMPONENT_NAME DetectorsBase
   PUBLIC_LINK_LIBRARIES O2::DetectorsBase ROOT::Geom
   LABELS detectorsbase)
+
+o2_add_executable(
+  solid-harness
+  COMPONENT_NAME DetectorsBase
+  SOURCES test/runSolidHarness.cxx
+  IS_BENCHMARK
+  PUBLIC_LINK_LIBRARIES O2::DetectorsBase ROOT::Geom nlohmann_json::nlohmann_json)
 
 if(BUILD_SIMULATION)
   if (NOT APPLE)
