@@ -534,6 +534,27 @@ all three — but recognising a trim curve as a line changes how `appendDirected
 coincidences in the closure half-edge map shift. Both states are unnavigable, so this reorders a
 diagnostic rather than fixing or breaking anything. The three-model DB's labels are unchanged.
 
+### 2026-07-26 (later still) — the closed-B-spline kernel fix
+
+A closed B-spline trim curve was flattening to two coincident points and vanishing (details in
+[`ExactTrimTopology.md`](ExactTrimTopology.md)). Same DBs, same seeds, before -> after:
+
+| DB | `contains` unexplained | `distout` | `distin` |
+| --- | --- | --- | --- |
+| three-model | 4588 -> 4430 | 254 -> 251 | 218 -> **114** |
+| three-model, excluding the non-manifold `oTOF` part | 525 -> **367** | | |
+| ALICE3 | 1 -> 1 | 0 -> 0 | 0 -> 0 |
+
+Every Bagger cylinder part's `distin` count goes to zero, and `BucketCylinderInner` /
+`BucketCylinderOuter` — which previously disagreed between `Contains` and `Contains_Loop` — now
+agree on all 7500 points, removing two of the three non-`oTOF` entries from that open item.
+
+**Read the navigable count carefully afterwards.** It drops 8/19 -> 5/19 on the three-model DB.
+That is not a regression: `BoomCylinderInner`, `BucketCylinderInner` and `StickCylinderInner` were
+reporting 0 boundary edges only because a whole face's wire had vanished, so they were never
+closed. Their labels are now correct. This is the clearest example so far of why the item-4 state
+and the accuracy columns have to be read together.
+
 **Do not read timings from that comparison.** Those runs shared the machine with a converter run
 and the per-part `ns/call` swings by up to 2x in both directions as a result. The one clean
 measurement taken on an idle machine, on `BoomCylinderOuter`, is `contains` 3090 -> 3000 ns/call:
