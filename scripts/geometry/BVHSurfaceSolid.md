@@ -308,7 +308,7 @@ only for visualization and fallback paths.
 	  2026-07-26 handoff note). All 8 newly-converting volumes contain torus faces, including the predicted
 	  near-miss `ST2487455_002` (exactly the forecast 1 cyl + 2 cone + 2 plane + 1 torus).
 
-- [ ] **Canonical-form recognition: recover the exact analytic model behind a stored NURBS** (highest value on the board — measured +14/55 on ALICE3 and +5/5 on as1; do before the general NURBS milestone).
+- [x] **Canonical-form recognition: recover the exact analytic model behind a stored NURBS** (highest value on the board — measured +14/55 on ALICE3 and +5/5 on as1; do before the general NURBS milestone).
 	- **Premise, established by measurement 2026-07-26 (see the handoff note): the surface type stored in a
 	  STEP file is a statement about the exporter, not about the geometry.** CAD kernels routinely write an
 	  exact cylinder, cone, sphere or circle as a *rational* B-spline/Bezier patch — that representation is
@@ -359,6 +359,101 @@ only for visualization and fallback paths.
 	  `Contains` (**not** ROOT `TGeoTessellated`) to the mesh-precision band; a unit fixture asserts that a
 	  deliberately free-form patch is **rejected** (guarding the exactness contract, which matters more than the
 	  positive cases); `ninja` + `ctest -R BVHSurfaceSolid` green.
+	- Done 2026-07-26 (surface recognition pre-pass; curve recognition deferred — see gaps below).
+	  Implemented entirely in `O2_CADtoTGeo.py` (no C++/kernel/sidecar/reader change — verified, not
+	  assumed, exactly as scoped): `_recognize_analytic_surface` is the plane/sphere/cylinder/cone
+	  differential-normal-field recognizer (ported from the validated `analyze_surface_geometry.py`
+	  prototype, same `1e-9` relative-residual machine-precision gate, no torus test — matching the
+	  documented lower bound). `recognize_and_extract_face` is the pre-pass: for a face whose *stored*
+	  type has no direct extractor (bspline/bezier/revolution/extrusion), it recognizes the frame and
+	  re-derives the trim **from the 3D boundary edges directly** (not the stored pcurves) via
+	  `_recognized_quadric_wire_block` — sample each edge's own 3D curve, project through the recognized
+	  frame's closed-form inverse (`point -> (phi, h)` for cylinder/cone, `(phi, theta)` for sphere), and
+	  accept only edges that come out *exactly* axis-aligned (constant-`h`/`theta` = a rim/cap, or
+	  constant-`phi` = a generator/meridian) in that domain. Every accepted edge is then a straight line
+	  segment in `(phi, h)` by construction, so **the affine-pole-transform machinery in
+	  `_quadric_trim_wire` turned out not to be reusable and was not needed**: that machinery reparametrizes
+	  a *curved* pcurve under an affine map, but the map from a recognized bspline surface's own `(u, v)` to
+	  `(phi, h)` is only ever *separable*, not affine (verified numerically — e.g. a NURBS circular arc's
+	  parameter maps to `phi` via a Möbius-type nonlinear function, not a linear one) — the milestone's
+	  suggestion to reuse it was checked and found not to hold; sampling in the recognized domain directly
+	  sidesteps the question entirely and is simpler. A recognized plane reuses `extract_planar_face`
+	  unchanged via a new `frame_override` parameter, since that function already builds its wires from 3D
+	  edges (not pcurves), so no separate machinery was needed there at all.
+	  Continuous per-sample phi-unwrapping (not a coarser vertex-to-vertex or grid unwrap) was required
+	  for correctness: a first version unwrapped only at wire vertices and produced a **17*pi** unwrap
+	  error on one as1 face, because a rim edge's own sweep can approach pi and a non-uniform rational
+	  parametrization can place two *adjacent* vertices' raw delta-phi right at the +/-pi branch cut;
+	  densely sampling *along* each edge keeps every consecutive step small and fixed it (also replaced a
+	  separate coarse-grid "conservative window" computation with the wire's own dense-sample extent, more
+	  robust and simpler). A cone/sphere apex or pole (a degenerate edge: single point, no 3D curve, common
+	  on real CAD - countersinks, chamfers) is handled by carrying the running unwrapped phi through
+	  unchanged at that point (phi is numerically indeterminate there - atan2 of a near-zero radial vector -
+	  but the point trivially satisfies "iso" in both directions), rather than hard-rejecting the face.
+	  Report: `classify_face`/`face_supported`/`build_surface_report` gained `recognize_surfaces` (default
+	  on) and record `recognized_type`/`recognized_residual` per face plus a
+	  `recognized_surface_counts`/`recognized_stored_type_counts` summary breakdown; new CLI flag
+	  `--recognize-surfaces exact|off` (default `exact`) threads through both the report and
+	  `--exact-surfaces auto|required`.
+	  **Measured** (env: `ALIBUILD_WORK_DIR=/data/swenzel/sw`, usual pythonOCC `PYTHONPATH`/OCCT
+	  `LD_LIBRARY_PATH` fixes; `python3 O2_CADtoTGeo.py <file> --exact-surfaces auto --mesh
+	  --surface-report <path>`):
+	  - `as1-oc-214.stp`: **0/5 -> 5/5**, exactly as forecast. All 28 bspline faces recognized as exact
+	    cylinders. `Contains` vs `O2Tessellated`: 0/20000 mismatches on 4/5 volumes, 2/20000 (boundary-band,
+	    max safety 9e-5) on the 5th; BVH == `Contains_Loop` everywhere.
+	  - `ALICE3_CAD_pure.step`: **15/55 -> 20/55 extracted, 19/55 usable** — short of the 29/55 forecast.
+	    1180 of the 8664 non-analytic faces recognized (786 cylinder, 358 cone, 36 sphere; the forecast's
+	    2889 was measured on deduplicated `TopoDS` solids at a coarser residual gate and, per its own
+	    documented caveat, was *"a forecast to be confirmed by an actual run"* — this is that run, and the
+	    honest number is lower). The gap is almost entirely **non-iso trims**: a recognized face whose
+	    boundary is not exactly a rim/generator in the recognized `(phi, h)` domain is rejected by design
+	    (`373` -> `278+58+36+1 = 373` faces fall on this reason after the apex fix below) — out of scope for
+	    this pass per the milestone's own stated boundary ("a genuinely slanted/curved cut... stays on the
+	    tessellated fallback"). Fixed one sub-case discovered during measurement: cone-apex degenerate
+	    edges were initially hard-rejected (99 faces); after the fix they no longer hard-fail, but in this
+	    dataset **all 99 turned out to have a second, independent non-iso edge** elsewhere on the same face,
+	    so net ALICE3 coverage was unchanged by that fix (20/55 before and after) — kept anyway since it is
+	    correct and unit-relevant for CAD that does not also have this second issue (verified no regression
+	    on as1 or the other three sweep files).
+	  - `Bagger.step`/`oTOF System V3-R92cm.step`: unchanged (12/13, 2/3) — confirmed no regression; neither
+	    file's fallback faces are recognizable quadrics-in-disguise (Bagger's gap is ellipse *trim curves* on
+	    an already-recognized-correctly plane, ellipse remains a separate open milestone below).
+	  - Sidecar load-check (`checkSurfaceSidecars.C`) on the final ALICE3 output: 19/20 load (the 20th,
+	    `ST1829909_01`, is the **pre-existing, unrelated** `kJoinTolerance` gap documented in the 2026-07-26
+	    handoff note above — not touched by this session). 1/19 loaded volumes
+	    (`ST0923290_013`, 9 recognized inner-wall cylinder holes) has `IsOrientationConsistent() == false`
+	    (8 reversed boundary edges) — root-caused, not chased further, see gap below. All others closed or
+	    warn only in the already-documented shared-3D-edge chord-sampling sense.
+	  - `Contains` cross-validated (accelerated `O2Tessellated`, not ROOT `TGeoTessellated`) on all 5 newly
+	    recognized ALICE3 volumes: 0/10000 mismatches on 4/5; the flagged `ST0923290_013` gave 3/200000
+	    mismatches at a higher sample count, each within `5.6e-4` cm of the exact boundary via `Safety` —
+	    the mesh-precision band, not a correctness break. `ninja` build (`DetectorsBase` target name changed
+	    upstream; used `ctest -R BVHSurfaceSolid` directly) + focused ctest green (30 cases, unaffected as
+	    expected — this session made no C++ changes).
+	  **New gap discovered (root-caused, deliberately not fixed this session):**
+	  `IsOrientationConsistent()` can be false for a recognized face even though `Contains` stays exact.
+	  Root cause: a *stored* quadric's wire-traversal order (from OCC's `BRepTools_WireExplorer`) has a
+	  reliable external handedness hint — `ax3.Direct()` — that the existing `_quadric_trim_wire` mirrors
+	  `phi = -u` against when needed. A *recognized* face has no such hint: the underlying bspline surface's
+	  own `(u, v)` handedness is unrelated to the recognized `(phi, h)` frame, and OCC's wire order is
+	  relative to the *stored* surface, not the recognized one. Verified this is **not** an axis-sign
+	  ambiguity in the recognizer (the radial-outward direction `rel - (rel . axis) * axis` is provably
+	  axis-sign-invariant; measured `dot(radial, N)` is a *consistent* `-1.0` across all 9 affected faces,
+	  matching their uniform `inner_wall = True`, i.e. individually correct) — it is a **per-face wire
+	  winding-sense** question, independent of any per-face frame choice, that would need cross-face
+	  consistency propagation across the whole solid to fix in general. Deferred: `Contains`/`Safety`/
+	  `DistFrom*` do not depend on cross-face winding (each surface's own ray-parity test is independent of
+	  its neighbors), only the closure *diagnostic* is affected — same acceptance already established for
+	  the pre-existing "`IsClosed()` may warn on shared bspline edges" caveat.
+	  **Remaining scope for a follow-up session:**
+	  (1) non-iso trims on a recognized quadric (373 ALICE3 faces) — would need either a numeric
+	  re-fit of the boundary curve in `(phi, h)` (e.g. a Bezier-clipping-style projection) or accepting a
+	  bspline-in-`(phi,h)` via a *non-affine* numeric fit, both a materially bigger step than this pass;
+	  (2) curve recognition (bspline trim edges that are exactly a line/circle/ellipse) — not started, the
+	  milestone's "cheaper half"; (3) torus recognition — explicitly deferred by the milestone itself;
+	  (4) the cross-face wire-winding consistency gap above. `g4Config.C` and generated
+	  `scripts/geometry/STEP_examples/`/`facets_*`/`surfaces_*` artifacts remain intentionally out of the
+	  commit (all measurement runs in this session used a scratch output folder, not the repo).
 
 - [ ] **Ellipse (and remaining conic) trim curves on planar faces** (small, Python-only — cheapest open item).
 	- Motivation: found by the 2026-07-26 `Bagger.step` sweep (see the handoff note). That model is 12/13
@@ -765,3 +860,37 @@ matching `kWireJoinTolerance = 1e-5` (both looser than the `1e-9` boundary toler
 		- Caveat on the numbers: the classifier tests plane/sphere/cylinder/cone only — **no torus** — so 5775 "free-form" ALICE3 faces is an *upper* bound and 29/55 a *lower* bound. Also, per-face recognition was measured on `TopoDS` solids deduplicated by `TShape`; the exact converter works on XCAF logical volumes, so treat 29/55 as a forecast to be confirmed by an actual `--exact-surfaces auto` run.
 		- Dead end worth not repeating: **OCCT's own `BRepLib_CanonicalRecognition` (7.7+) is NOT exposed in this pythonOCC build** (`ImportError` from `OCC.Core.BRepLib` in pythonOCC v7.9.3-local1). The recognizer has to be our own numeric one.
 	- **Closure diagnostics (observed, not chased).** All 14 loaded solids are `IsOrientationConsistent() == true`; `IsClosed()` warns on 6. Three Bagger volumes (`Boom/Stick/BucketCylinderOuter`) carry bspline trims → the documented shared-3D-bspline-edge chord-sampling caveat. **Two cases are not explained by that caveat and are new**: (a) Bagger `BucketLink1` warns with 96 boundary edges but has *no* bspline (pure line+circle), while `BucketLink2` *does* have bsplines and does *not* warn; (b) both oTOF volumes warn with **0 boundary edges but 32 / 9 non-manifold edges** — a flavour not seen on ALICE3 (edges shared by >2 faces, typical of coincident faces or T-junctions in an all-planar tiled model). Neither blocks loading and neither touches navigation, but both should be understood before `IsClosed()` is trusted as a health signal on such models.
+- 2026-07-26: **Implemented the canonical-form recognition pre-pass** (full details, measured numbers and
+  the new gap in the milestone note above — this entry is the short version). First: reproduced all four
+  2026-07-26 baselines fresh (`as1` 0/5, `Bagger` 12/13, `oTOF` 2/3, `ALICE3` 15/55) with the committed
+  `--exact-surfaces auto --mesh --surface-report` sweep, confirming nothing had drifted; every sidecar
+  load-checked via `checkSurfaceSidecars.C` matched the prior session's counts exactly. Then implemented
+  the recognizer in `O2_CADtoTGeo.py` only (`_recognize_analytic_surface`, `recognize_and_extract_face`,
+  `_recognized_quadric_wire_block`; `extract_planar_face` gained a `frame_override` param; no C++ change,
+  verified rather than assumed) and wired it into `extract_surfaces_for_shape`/`classify_face`/
+  `build_surface_report` behind a new `--recognize-surfaces exact|off` flag (default on).
+  **Key design finding, worth not re-deriving**: the milestone suggested reusing `_quadric_trim_wire`'s
+  affine-pole-transform machinery for the reparametrization; checked and found it does **not** apply — the
+  map from a recognized bspline surface's stored `(u, v)` to the recognized `(phi, h)` is only *separable*
+  (each recognized coordinate a monotonic function of one stored parameter), not affine (a NURBS circular
+  arc's own parameter maps to `phi` via a Möbius-type nonlinear function). The wire is instead rebuilt by
+  sampling each 3D boundary edge directly and testing "is it exactly iso in the recognized domain", not by
+  transforming the stored pcurve at all — simpler, and correct without needing the affine assumption.
+  **Measured**: `as1-oc-214.stp` **0/5 -> 5/5**, exactly the forecast (`Contains` vs `O2Tessellated`: 0 or
+  near-0 mismatches over 20k points/volume). `ALICE3_CAD_pure.step` **15/55 -> 20/55 extracted, 19/55
+  usable** — short of the 29/55 forecast (that number was explicitly flagged in its own note as *"a
+  forecast to be confirmed by an actual run"*; this was that run). The gap is almost entirely faces whose
+  boundary is genuinely non-iso in the recognized frame (a real slanted/curved cut, out of scope for this
+  pass by the milestone's own stated boundary), plus one pre-existing, unrelated `kJoinTolerance` rejection
+  (`ST1829909_01`, already documented, not touched). `Bagger`/`oTOF` unchanged (no regression). All newly
+  recognized ALICE3 volumes spot-checked against the accelerated `O2Tessellated`: 0 mismatches on 4/5,
+  boundary-band-only (max `5.6e-4` cm) on the 5th at 200k points. `ctest -R BVHSurfaceSolid` green (30
+  cases, unaffected — Python-only session). **New, deliberately-not-fixed gap found**: one ALICE3 volume's
+  recognized faces load with `IsOrientationConsistent() == false` (cross-face wire-winding disagreement —
+  root-caused to recognized faces lacking the `ax3.Direct()`-style external handedness hint that stored
+  quadrics have; `Contains` is unaffected since it does not depend on cross-face winding). Remaining scope
+  for next session: non-iso trims on a recognized quadric (the majority of the 29 vs 20 gap), curve
+  recognition (bspline trim edges that are exactly line/circle/ellipse — the milestone's own "cheaper
+  half", not started), torus recognition (explicitly deferred by the milestone), and the winding-consistency
+  gap. `g4Config.C` and generated `scripts/geometry/STEP_examples/`/`facets_*`/`surfaces_*` artifacts
+  remain intentionally out of the commit (all runs this session used a scratch output folder).
