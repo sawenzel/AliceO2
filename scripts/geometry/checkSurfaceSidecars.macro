@@ -1,4 +1,4 @@
-/// \file checkSurfaceSidecars.C
+/// \file checkSurfaceSidecars.macro
 /// \brief Load every surfaces_*.bin sidecar in a directory and report its health.
 ///
 /// Companion to `O2_CADtoTGeo.py --exact-surfaces auto`, which writes one
@@ -12,7 +12,7 @@
 /// the closure diagnostics (and emits any CloseShape warnings).
 ///
 /// Usage:
-///   root -l -b -q 'checkSurfaceSidecars.C("/path/to/conversion/output")'
+///   root -l -b -q 'checkSurfaceSidecars.macro("/path/to/conversion/output")'
 ///
 /// IMPORTANT: `alienv O2/latest` resolves libO2DetectorsBase from the *installed* prefix. After an
 /// incremental `ninja` build, point the loader at the build output first, or this silently checks

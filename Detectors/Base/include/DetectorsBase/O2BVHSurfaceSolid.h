@@ -186,6 +186,22 @@ class O2BVHSurfaceSolid : public TGeoBBox
   /// ray traverses (counted with multiplicity per leaf primitive). Returns -1 without a BVH.
   int CountBVHRayCandidates(const Point3D& point, const Point3D& direction) const;
 
+  /// Ray tmax tightening in the BVH-accelerated distance queries: as a hit is found the
+  /// traversal bound shrinks to it, so nodes lying entirely beyond the current best hit are
+  /// never visited. Enabled by default. Switching it off must not change any returned distance;
+  /// the switch exists so a benchmark can price the optimization by running the same rays both
+  /// ways. Process-wide and not thread safe: flip it between measurement passes, never during
+  /// one.
+  static void SetRayTMaxPruning(bool enable);
+  static bool GetRayTMaxPruning();
+
+  /// Per-thread counter of surface patches handed to the BVH leaf callback by DistFromOutside
+  /// and DistFromInside since the last reset. Together with SetRayTMaxPruning this measures how
+  /// much work the pruning actually avoids. Diagnostic only; not incremented by the _Loop
+  /// variants, which visit every surface by construction.
+  static void ResetRayCandidateCounter();
+  static long long GetRayCandidateCount();
+
   /// Whether the closed shape forms a closed 2-manifold (every boundary edge shared by two faces).
   /// Meaningful only after CloseShape(); detects e.g. missing faces.
   bool IsClosed() const;
@@ -216,6 +232,14 @@ class O2BVHSurfaceSolid : public TGeoBBox
   /// Trivial non-BVH Contains looping over all surfaces; kept for debugging and
   /// cross-validation of the BVH-accelerated path (see O2Tessellated::Contains_Loop).
   bool Contains_Loop(const Double_t* point) const;
+  /// Trivial non-BVH DistFromOutside/DistFromInside looping over all surfaces. They are both the
+  /// oracle the BVH paths are cross-validated against (they must agree exactly: same hits, same
+  /// arithmetic, only a different visiting order) and the baseline the BVH speedup is measured
+  /// against. \a stepmax is honoured exactly as by the overrides.
+  Double_t DistFromOutside_Loop(const Double_t* point, const Double_t* dir,
+                                Double_t stepmax = TGeoShape::Big()) const;
+  Double_t DistFromInside_Loop(const Double_t* point, const Double_t* dir,
+                               Double_t stepmax = TGeoShape::Big()) const;
   Double_t Safety(const Double_t* point, Bool_t in = kTRUE) const override;
   void ComputeNormal(const Double_t* point, const Double_t* dir, Double_t* norm) const override;
   Double_t Capacity() const override;

@@ -418,7 +418,7 @@ only for visualization and fallback paths.
 	  - `Bagger.step`/`oTOF System V3-R92cm.step`: unchanged (12/13, 2/3) — confirmed no regression; neither
 	    file's fallback faces are recognizable quadrics-in-disguise (Bagger's gap is ellipse *trim curves* on
 	    an already-recognized-correctly plane, ellipse remains a separate open milestone below).
-	  - Sidecar load-check (`checkSurfaceSidecars.C`) on the final ALICE3 output: 19/20 load (the 20th,
+	  - Sidecar load-check (`checkSurfaceSidecars.macro`) on the final ALICE3 output: 19/20 load (the 20th,
 	    `ST1829909_01`, is the **pre-existing, unrelated** `kJoinTolerance` gap documented in the 2026-07-26
 	    handoff note above — not touched by this session). 1/19 loaded volumes
 	    (`ST0923290_013`, 9 recognized inner-wall cylinder holes) has `IsOrientationConsistent() == false`
@@ -544,14 +544,60 @@ only for visualization and fallback paths.
 	- Acceptance test: box, cylinder, hollow-cylinder, cylinder with added spherical endcaps, and points exactly on faces, edges, and vertices.
 	- Done 2026-07-23: `Contains` now uses the BVH: a point-in-box traversal for the boundary policy (leaf boxes are expanded by `kBVHBoxTolerance` >= `kTolerance`, so a point within tolerance of a patch cannot be pruned) followed by a BVH ray traversal collecting all patch intersections along the skew test direction, evaluated by the existing mixed-cluster parity logic (factored into `oddCrossingParity`). A trivial full-loop `Contains_Loop` (named after `O2Tessellated::Contains_Loop`) is kept for debugging/cross-validation, and `Contains` falls back to it before `CloseShape`. Tests: pre-existing box/cylinder/hollow-cylinder/sphere/cone ROOT comparisons now exercise the BVH path; new `BVHConstructionAndTraversal` (two-disjoint-boxes fixture, BVH vs. loop vs. analytic on a grid) and `ContainsBoundaryPointsAndCapsule` (points exactly on faces/edges/vertices, capsule = cylinder + two spherical endcaps with closure check, grid cross-validation and exact capacity).
 
-- [ ] Implement `DistFromOutside`.
+- [x] Implement `DistFromOutside`.
 	- Traverse the BVH with a ray and ask candidate surfaces for intersections.
+	- Cull BVH nodes further away than the current best intersection
 	- Return the smallest positive entering intersection, respecting `stepmax` and normal orientation.
 	- Acceptance test: compare against `TGeoBBox`/`TGeoTube` for outside points and several directions, including grazing misses.
+	- Done 2026-07-26, planned and measured in [`SolidNavigationHarness.md`](SolidNavigationHarness.md) (Step 5). Shares `Impl::nearestCrossing<wantEntering>` with `DistFromInside`; `bvh->intersect<false, /*robust*/ true>` with a leaf lambda, `ray.tmax` tightened from inside the lambda, cheap bounding-box reject under `stepmax`, `thread_local` scratch. Public `DistFromOutside_Loop` kept as oracle and baseline: **bit-identical on 57000/57000 rays** over the 19-part DB, and 2.03x slower than the BVH path.
 
-- [ ] Implement `DistFromInside`.
+- [x] Implement `DistFromInside`.
 	- Return the smallest positive exiting intersection, respecting normal orientation and avoiding immediate re-hit at `t = 0`.
+	- Cull BVH nodes further away than the current best intersection
 	- Acceptance test: compare against ROOT primitives for central, near-boundary, and oblique rays.
+	- Done 2026-07-26 together with `DistFromOutside` (same template, opposite `dot(normal, dir)` sign). `DistFromInside_Loop` bit-identical on 28500/28500 rays; BVH 1.21x faster than the loop.
+
+
+- [x] Reusable test harness for validation and performance measurement as part of the repo
+    - Starting from a surface and tessellated representation obtained from the same CAD solid, create a (compiled or ROOT macro) harness to create test points and directions which can be used to validate Distance, Contains, Safety values and to obtain CPU performance comparisons between the 2 versions
+	- This harness can be the foundation of further profile guided optimizations when run within perf
+	- We can create a test database from all convertable parts extractable from CAD examples in folder STEP_EXAMPLES... usable on which this harness can run iteratively and repeatedly.
+	- Done 2026-07-26. `DetectorsBase/O2SolidHarness.{h,cxx}` (sampling / validation / timing, typed on `TGeoShape*`), the `o2-bench-detectorsbase-solid-harness` front-end (`Detectors/Base/test/runSolidHarness.cxx`), and `scripts/geometry/makeTestPartDB.py` which builds the part DB from `STEP_examples/`. Full design, usage, `perf` entry point and results: [`SolidNavigationHarness.md`](SolidNavigationHarness.md).
+
+- [ ] Code optimization pass
+    - Not a real milestone, rather something that be revisited many times, but concrete ideas that are **important** to me:
+	    - [x] use the existing BVH traversal functions with lambdas from bvh2 (as in O2Tessellated) instead of writing your own
+		- [x] use BVH pruning via tightening the ray properties (not yet done correctly in O2Tessellated) — done in `O2BVHSurfaceSolid` 2026-07-26 and **measured**: removes 26.6% of the analytic patch tests, but only ~1% wall time on the current DB (`--pruning-ab`; numbers and interpretation in `SolidNavigationHarness.md`). `O2Tessellated` still does not do it.
+		- [x] do not use std::vector allocations inside navigations functions; Reuse existing members (thread-local) or stay with space on the stack — `Contains`, `Contains_Loop` and both distance queries now use `static thread_local` scratch, one buffer per entry point.
+		- [x] try to inline as much as possible
+		- [x] think in fast-math terms: Avoid divisions, square roots, etc.
+	- Kept open deliberately: the measurement identified the next two targets, both bigger than anything above. See "measured optimization targets" below.
+
+- [ ] **Measured optimization targets (2026-07-26).** Both come from the first full harness run; see `SolidNavigationHarness.md` for the numbers behind them.
+	- `Safety` is the most expensive kernel by a wide margin (10132 ns/call median, 4.74x the tessellated solid) because it is still a plain loop over every patch with no BVH. The priority-queue traversal in the `Safety` milestone below is therefore *the* optimization to do next, not a nicety; `bvh::v2::extra::SafetySqToNode` already exists for it.
+	- Per-query cost of the exact solid is ~1.3–2.4x the mesh at the median, dominated by parts with many patches, because every curved patch is one loose conservative AABB. This is the quantified case for the "Subdivision-BVH acceleration for curved surface patches" milestone.
+
+- [ ] **The converter drops BREP edge sharing, and that makes `Contains` genuinely wrong.** Found 2026-07-26 by drilling into the harness's "unexplained" column on `Bagger/BoomCylinderOuter_0_1_1_9`. This is the single most important defect currently known in the exact-surface path; it revises a caveat recorded on 2026-07-24 and it is the reason the two items after it exist.
+
+	**Symptom.** 61 of 10000 sampled points get `Contains = inside` while lying **up to 1.71 cm from the nearest patch** (`Safety` says so). `Contains_Loop` agrees, so it is not the BVH. On a 40^3 grid, 61 of 4453 "inside" answers are >0.5 cm from any patch. `CloseShape` reports 699 boundary edges. The part is not a tube: 8 faces = 5 cylinders + 3 annular planes, four of them carrying general B-spline trim wires.
+
+	**Root cause.** In a BREP the watertightness guarantee is *topological*: two adjacent faces reference the **same** `TopoDS_Edge`, hence the same 3D curve. Each face additionally stores a **pcurve** — that edge's image in *that face's* own (u,v) domain — and the pcurves are independently fitted representations carried with their own tolerance, not derived from one another. `_quadric_trim_wire` extracts `BRep_Tool.CurveOnSurface(edge, face)` (`O2_CADtoTGeo.py:1012`), i.e. the per-face pcurve, and never records which edge it came from. **The shared-edge identity — the thing that made the model watertight in the first place — is discarded at extraction time.** Two independent errors then stack on top of that: the two pcurves of one edge already differ within model tolerance, and the kernel additionally flattens each B-spline pcurve to a polyline *per face* for the winding test. The result is a sliver gap along the seam.
+
+	**Why a sliver gap produces a 1.7 cm error.** Parity containment casts one *fixed* skew ray. Any point whose ray threads the gap loses one crossing and flips to "inside" — so the wrong region is not the size of the gap, it is the gap's **shadow**. Predicted and confirmed experimentally: the wrong region is a narrow tube aligned with the parity test direction, contiguous ~0.5 cm along it and gone within 0.25 cm perpendicular.
+
+	**This supersedes** the 2026-07-24 note's "IsClosed() may warn on the shared-3D-bspline-edge sampling mismatch (documented caveat; navigation exact)". Navigation is **not** exact when this happens, and the framing there (a B-spline sampling artifact) understates it: the defect is the lost topology, and B-splines only make it visible because theirs are the pcurves we flatten.
+
+	**Work items, in the order they should be attacked.**
+	1. **Preserve shared edges (converter).** Key trim curves by their `TopoDS_Edge` identity (`TopExp::MapShapesAndAncestors` gives edge -> faces) and hand both adjacent patches the *same* trim curve. Consistency is what parity needs — the curve does not have to lie exactly on either surface, both sides merely have to agree on where the boundary is. This is the fix that addresses the actual cause; everything else is mitigation.
+	2. **Analytic point-in-trim, no polyline (kernel).** Replace the flattened-polyline winding test on B-spline wires with an exact 2D ray/curve crossing count: convert each span to Bézier form and root-find (Bézier clipping), which is exact to machine precision rather than sampled. Removes the last sampling step from containment, and removes the cost that dominates these parts.
+	3. **Canonical recognition of trim *curves* (converter, cheapest).** Most of these seams are exactly circles or straight lines that the CAD kernel happened to write as B-splines. Recognising them (the "cheaper half" of the canonical-recognition milestone, still not started) makes both sides of a seam agree *analytically* and skips 1 and 2 entirely for the common case. Highest value per unit effort, but it does not cover genuinely free-form seams, so it does not replace 1.
+	4. **Fail loudly (kernel).** `CloseShape` already detects this — 699 boundary edges — and only warns; the solid then silently answers navigation queries that are wrong by centimetres. A non-closed solid should be surfaced far more aggressively (at minimum a one-line summary the caller cannot miss, ideally a queryable "navigation is unreliable" state), so this class of defect can never again be found only by someone reading a benchmark's "unexplained" column.
+
+- [ ] **Patch *cost*, not patch *count*, is what makes small parts slow.** Same part, measured 2026-07-26: 8 analytic patches against 2244 triangles, yet `Contains` is 1.25x slower than the mesh (3102 vs 2490 ns) and `DistFromInside` 1.58x. The BVH cannot help — with 8 patches it is only 1.18-1.20x over `_Loop`. The cost is per-patch: each query solves the quadric and then runs a winding test against a flattened B-spline polyline. Items 2 and 3 above are the lever, not the acceleration structure.
+	- Counterpoint worth keeping: on this same part `Safety` is **1.9x faster** than the tessellated solid (4557 vs 8705 ns), because 8 patch-distance evaluations beat a priority-queue walk over 2244 triangles. The "Safety is the worst kernel" finding from the DB-wide medians is driven by parts with many patches; on low-patch parts the exact representation already wins.
+
+- [ ] **`Contains` disagrees with `Contains_Loop` on non-manifold parts.** 301/142500 points over the 19-part DB, 295 of them in the two `oTOF` parts that `CloseShape` reports as non-manifold (32 and 9 non-manifold edges = coincident/duplicated faces). Parity containment is order-dependent on such input — `oddCrossingParity` clusters near-equal hits and the BVH supplies them in a different order than the loop — so this is the containment algorithm meeting degenerate geometry, not a traversal bug (the distance twins are bit-identical on the same DB). Decide whether to make the clustering order-independent or to reject non-manifold input at `CloseShape`.
+
 
 - [ ] Implement `Safety` using priority-queue BVH traversal.
 	- Start from the `O2Tessellated::SafetyKernel` pattern.
@@ -832,7 +878,7 @@ matching `kWireJoinTolerance = 1e-5` (both looser than the `1e-9` boundary toler
 	  line+arc `kJoinTolerance` reader bug (did not trigger on this dataset because blocking faces are rejected
 	  upstream, but remains a real one-line-ish fix for D-shaped caps).
 - 2026-07-24: Completed "Support general curved (line/arc `CurveWire`) trims on quadrics" (details + design in the milestone note above). Quadric surfaces now take an optional line/arc trim wire in their `(phi, h)`/`(phi, theta)` domain (kernel `BoundedSurface.h`, public `Add*Surface` overloads, sidecar reader `collectQuadricTrim`, Python `_quadric_line_wire` + the stricter `_quadric_trim_fills_uv_box` scalar-path gate). Navigation stays exact; wire-trim capacity is numeric/inexact (flagged) and `Safety` a conservative lower bound. Full `ninja` build + `ctest -R BVHSurfaceSolid` pass (23 cases); pythonOCC smoke confirms scalar-path regression and a notched-cylinder line wire block round-tripping through `LoadSurfaceSolid`. Discovered a **pre-existing** planar line+arc join-tolerance issue in the sidecar reader (`kJoinTolerance` `1e-9` too strict vs `extract_planar_face`'s ~`1e-6` arc-endpoint precision) that blocks whole box-cut solids containing D-shaped caps — left for a focused planar fix. Env note: pythonOCC also needs `LD_LIBRARY_PATH+=/data/swenzel/sw/slc9_x86-64/OCCT/v7.9.3-local1/lib` (for `libTKFeat.so.7.9`, pulled in by the new `Geom2dAdaptor` import) on top of the usual `PYTHONPATH` fix. `g4Config.C` and generated `scripts/geometry/STEP_examples/` artifacts remain intentionally out of the commit.
-- 2026-07-24: Completed the **B-spline trim curves on analytic surfaces** milestone (full details in the milestone note above). Kernel adds a `Curve2D::BSpline` kind (de Boor eval, GL-per-span exact area, polyline-based winding/distance with a lazily-cached flattened polyline that is essential for `CloseShape`/capacity performance), public `PlanarBoundaryCurve::makeBSpline`, sidecar `curveType=2`, and the affine-pole-transform quadric extractor `_quadric_trim_wire` (which also subsumes the old arc-on-quadric ellipse gap). Also folded in the long-standing planar line+arc join fix: reader `kJoinTolerance` and a new kernel `kWireJoinTolerance` are both `1e-5` (the kernel `CurveWire` `1e-9` closure was the actual gate, not just the reader). `ctest -R BVHSurfaceSolid` green (26 cases). End-to-end: `ST1A38495_01`/`ST1A38526_01` (previously bspline-trim-blocked) convert under `--exact-surfaces auto` and match `O2Tessellated` `Contains` with **0 mismatches / 20k points** (BVH==loop too), capacity within 0.17-0.24% of the mesh volume; **ALICE3 coverage 3/55 -> 7/55**. `IsClosed()` may warn on the shared-3D-bspline-edge sampling mismatch (documented caveat; navigation exact). Remaining ceiling: bspline *surfaces* (largest effort, next-to-last milestone) and torus. `g4Config.C` and generated `scripts/geometry/STEP_examples/` artifacts remain intentionally out of the commit.
+- 2026-07-24: Completed the **B-spline trim curves on analytic surfaces** milestone (full details in the milestone note above). Kernel adds a `Curve2D::BSpline` kind (de Boor eval, GL-per-span exact area, polyline-based winding/distance with a lazily-cached flattened polyline that is essential for `CloseShape`/capacity performance), public `PlanarBoundaryCurve::makeBSpline`, sidecar `curveType=2`, and the affine-pole-transform quadric extractor `_quadric_trim_wire` (which also subsumes the old arc-on-quadric ellipse gap). Also folded in the long-standing planar line+arc join fix: reader `kJoinTolerance` and a new kernel `kWireJoinTolerance` are both `1e-5` (the kernel `CurveWire` `1e-9` closure was the actual gate, not just the reader). `ctest -R BVHSurfaceSolid` green (26 cases). End-to-end: `ST1A38495_01`/`ST1A38526_01` (previously bspline-trim-blocked) convert under `--exact-surfaces auto` and match `O2Tessellated` `Contains` with **0 mismatches / 20k points** (BVH==loop too), capacity within 0.17-0.24% of the mesh volume; **ALICE3 coverage 3/55 -> 7/55**. `IsClosed()` may warn on the shared-3D-bspline-edge sampling mismatch (documented caveat; navigation exact). **[Superseded 2026-07-26: this caveat is wrong. On `Bagger/BoomCylinderOuter_0_1_1_9` the same mismatch leaves real sliver gaps that flip `Contains` to "inside" up to 1.71 cm from any patch. See the "B-spline seam gaps" open item in the milestone list above.]** Remaining ceiling: bspline *surfaces* (largest effort, next-to-last milestone) and torus. `g4Config.C` and generated `scripts/geometry/STEP_examples/` artifacts remain intentionally out of the commit.
 - 2026-07-24: Completed the **Bounded torus** milestone (full details + the capacity closed form in the milestone note above). New `TorusBoundedSurface` (kernel `BoundedSurface.h`) with a quartic ray intersection via a shared `solveQuarticReal`/`solveDepressedCubic` (Ferrari + Newton polish; even-sized root clusters dropped as tangencies for parity), exact rectangle capacity + numeric wire-trim capacity, meridian-distance `Safety`, and **both** ring/tube angles unwrapped in `pointInTrim` (the torus is the first surface with two periodic parameters). Public `AddToroidalSurface` (+ wire-trim overload), sidecar `surfaceType=5` (15 params), Python `extract_toroidal_face` (reuses the quadric `_quadric_trim_wire`/`_quadric_trim_fills_uv_box`; the `(u,v)->(phiRing,phiTube)` map is identity/mirror). `ninja` + `ctest -R BVHSurfaceSolid` green (**30 cases**: `ToroidalSurfaceKernels`, `FullTorusMatchesTGeoTorus`, `WireTrimmedTorusMatchesSection`, `TorusSidecarRoundTrip`). End-to-end: a synthetic full-torus STEP converts under `--exact-surfaces required` (1/1 exact) and its Python sidecar loads via `LoadSurfaceSolid` with **0 `Contains` mismatches over 9261 points vs `TGeoTorus`** and exact capacity `2*pi^2*R*r^2`. **Not** re-measured this session: the ALICE3 coverage number after adding torus (the 15 torus-touching volumes, incl. the near-miss `ST2487455_002`, should now improve on 7/55 — a follow-up `--exact-surfaces auto` sweep should confirm and update it). Remaining ceiling: bspline *surfaces* (the last, largest milestone). `g4Config.C` and generated `scripts/geometry/STEP_examples/` artifacts remain intentionally out of the commit.
 - 2026-07-26: **ALICE3 coverage re-measured after the torus milestone — measurement only, no source change** (this file is the only edit). Command: `python3 O2_CADtoTGeo.py STEP_examples/ALICE3_CAD_pure.step --output-folder <tmp> --exact-surfaces auto --mesh --surface-report <tmp>/surface_report.json`; env needs `ALIBUILD_WORK_DIR=/data/swenzel/sw` before `alienv` on top of the usual pythonOCC `PYTHONPATH` / OCCT `LD_LIBRARY_PATH` fixes.
 	- **Coverage 7/55 -> 15/55 (27%).** The eligibility report and the extractor now agree exactly (15 eligible == 15 extracted), closing the long-standing "report is a superset of the extractor" gap.
@@ -864,7 +910,7 @@ matching `kWireJoinTolerance = 1e-5` (both looser than the `1e-9` boundary toler
   the new gap in the milestone note above — this entry is the short version). First: reproduced all four
   2026-07-26 baselines fresh (`as1` 0/5, `Bagger` 12/13, `oTOF` 2/3, `ALICE3` 15/55) with the committed
   `--exact-surfaces auto --mesh --surface-report` sweep, confirming nothing had drifted; every sidecar
-  load-checked via `checkSurfaceSidecars.C` matched the prior session's counts exactly. Then implemented
+  load-checked via `checkSurfaceSidecars.macro` matched the prior session's counts exactly. Then implemented
   the recognizer in `O2_CADtoTGeo.py` only (`_recognize_analytic_surface`, `recognize_and_extract_face`,
   `_recognized_quadric_wire_block`; `extract_planar_face` gained a `frame_override` param; no C++ change,
   verified rather than assumed) and wired it into `extract_surfaces_for_shape`/`classify_face`/
@@ -893,4 +939,44 @@ matching `kWireJoinTolerance = 1e-5` (both looser than the `1e-9` boundary toler
   recognition (bspline trim edges that are exactly line/circle/ellipse — the milestone's own "cheaper
   half", not started), torus recognition (explicitly deferred by the milestone), and the winding-consistency
   gap. `g4Config.C` and generated `scripts/geometry/STEP_examples/`/`facets_*`/`surfaces_*` artifacts
-  remain intentionally out of the commit (all runs this session used a scratch output folder).
+  remain intentionally out of the commit (all runs this session used a scratch output folder).- 2026-07-26: **Completed the navigation-harness / test-part-DB / BVH-distance block** — three milestones
+  above ticked in one pass (`DistFromOutside`, `DistFromInside`, "Reusable test harness"), plus the five
+  concrete wishes of the "Code optimization pass" milestone. Planned, executed and measured against
+  [`SolidNavigationHarness.md`](SolidNavigationHarness.md), which is now the permanent usage documentation
+  for the harness (how to build the part DB, how to run and read the benchmark, how to profile it under
+  `perf`) and carries the full result tables; only the headlines are repeated here.
+  New code: `DetectorsBase/O2SolidHarness.{h,cxx}` (deterministic sampling, validation with mesh-band
+  classification, timing), `o2-bench-detectorsbase-solid-harness` (`Detectors/Base/test/runSolidHarness.cxx`,
+  flags incl. `--loop-crosscheck` and `--pruning-ab`), `LoadFacetSolid` in `O2SurfaceSolidIO`,
+  `scripts/geometry/makeTestPartDB.py`, and in `O2BVHSurfaceSolid` the BVH distance queries
+  (`Impl::nearestCrossing<wantEntering>` — bvh2 lambda traversal, `ray.tmax` tightened from inside the
+  leaf callback, bbox reject under `stepmax`, `thread_local` scratch) with public `DistFromOutside_Loop` /
+  `DistFromInside_Loop` twins and the `SetRayTMaxPruning` / `GetRayCandidateCount` benchmark hooks.
+  Five new test cases; `ctest -R BVHSurfaceSolid` green (**35 cases**, 0.80 s).
+  Headline measurements over the 19-part three-model DB (seed 1, 3000 points / 3000 rays per part):
+  **BVH == `_Loop` bit-identical on 57000/57000 + 28500/28500 distance rays**; ray-`tmax` tightening
+  removes 26.6% of the analytic patch tests for ~1% wall time on parts this small (answers identical
+  57000/57000); the exact solid costs ~1.3–2.4x the tessellated one per query at the median with a wide
+  spread; 1851 analytic patches replace 48703 triangles (26x fewer primitives, median 184x per part).
+  Following up on the harness's "unexplained" column then turned up the most important defect currently
+  known in the exact-surface path, recorded as its own open item: **the converter discards BREP shared-edge
+  identity**, trimming each face by its own pcurve (`_quadric_trim_wire` uses `BRep_Tool.CurveOnSurface`),
+  so the topology that made the CAD model watertight is lost at extraction and adjacent patches disagree
+  about where their common boundary is. On `Bagger/BoomCylinderOuter_0_1_1_9` the resulting sliver gaps
+  flip `Contains` to "inside" **1.71 cm from the nearest patch** (confirmed: `Contains_Loop` agrees, so not
+  the BVH; and the wrong region is a narrow tube aligned with the parity test direction, i.e. the gap's
+  shadow, exactly as predicted). This supersedes the 2026-07-24 "navigation exact" caveat. Four ordered
+  work items are recorded there, headed by preserving shared edges in the converter.
+  Two further findings were recorded as open items rather than fixed: `Safety` is the most expensive kernel
+  (10132 ns/call, 4.74x the mesh) purely because it still has no BVH — the `Safety` milestone below is
+  now the highest-value optimization — and `Contains` disagrees with `Contains_Loop` on 301/142500 points,
+  295 of them in the two non-manifold `oTOF` parts (order-dependent parity clustering on duplicated faces;
+  the distance twins are unaffected). Also recorded: mutation-testing showed the new sweeps catch a 2x
+  over-prune loudly but not a 0.1% one, which is a property of the culling rule (a node is culled on its
+  *box* entry, always <= its patch hit), so the pruning-bound guarantee rests on the argument documented
+  at `nearestCrossing`, not on a test. Step 0 of the plan also cleared a latent `BUILD_TEST_ROOT_MACROS`
+  hard-fail by renaming `checkSurfaceSidecars.C` -> `.macro`, and the first ALICE3 run showed
+  `LoadFacetSolid` was too strict — one degenerate sliver triangle failed a whole 211k-triangle mesh —
+  so degenerate facets are now skipped and counted rather than fatal. `g4Config.C` and generated
+  `scripts/geometry/STEP_examples/`/`facets_*`/`surfaces_*` artifacts remain intentionally out of the
+  commit (all runs this session used a scratch output folder).
