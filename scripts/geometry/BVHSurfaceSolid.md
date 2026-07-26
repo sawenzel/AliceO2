@@ -268,13 +268,44 @@ only for visualization and fallback paths.
 	- Validation: `ST1A38495_01` converts under `--exact-surfaces auto` and matches `O2Tessellated` `Contains`
 	  to the mesh-precision band; `ninja` + `ctest -R BVHSurfaceSolid` green; line/arc output byte-identical.
 
-- [ ] **Bounded torus** (analytic; second-largest single analytic blocker).
+- [x] **Bounded torus** (analytic; second-largest single analytic blocker).
 	- Motivation: 15 ALICE3 volumes touch a torus; near-miss `ST2487455_002` (lid `0:1:1:8`) is a single
 	  torus face away from exact (cyl + 2 cone + 2 plane + 1 torus).
 	- Approach: a `TorusBoundedSurface` with a `(phi_ring, phi_tube)` parametric domain and the same optional
 	  `CurveWire` trim + inner-wall conventions as the quadrics. Ray/torus is a quartic — use a stable quartic
 	  solver (closed-form Ferrari or a numerically-robust companion-matrix root finder); mind grazing/tangent
 	  double roots for `Contains` parity, as already handled for cylinder/cone.
+	- Done 2026-07-24: implemented `TorusBoundedSurface` in `BoundedSurface.h` (major/minor radius, frame,
+	  scalar `phiRing x phiTube` rectangle trim, optional `CurveWire` trim + inner-wall). Kernel: a shared
+	  `solveQuarticReal` (Ferrari via resolvent cubic + Newton polishing; `solveDepressedCubic` helper) —
+	  the ray/torus leading coefficient is `|dir|^4 > 0` so it is always a genuine quartic; real roots are
+	  clustered by `sameIntersection` and **even-sized clusters (tangencies) are dropped** so crossing parity
+	  stays consistent (the torus analogue of the cylinder/cone double-root suppression). Signed radial
+	  (away-from-tube-spine) normal; **exact** divergence-theorem capacity over the rectangle (closed form
+	  below; verified `= 2*pi^2*R*r^2` for the full torus), numeric for a wire trim (`capacityIsExact()==false`).
+	  `distanceSqToPatch` is the exact `(rho, z)` meridian distance to the tube circle for the full torus and a
+	  conservative lower bound for a trimmed patch (keeps `Safety` safe — sphere policy). Full-torus AABB
+	  (conservative for partial sweeps); grid display mesh; directed edges for the closure half-edge check
+	  (self-closing when both sweeps are full). Both ring and tube angles are periodic, so `pointInTrim`
+	  unwraps **both** into their wire windows (unlike the cylinder/cone/sphere, whose second parameter is not
+	  periodic); a trim wrapping more than a full turn in either angle is rejected. Public
+	  `AddToroidalSurface` (+ wire-trim overload) reusing the `PlanarBoundaryCurve` POD; sidecar `surfaceType=5`
+	  (15 params) in `O2SurfaceSolidIO.cxx`; Python `extract_toroidal_face` (OCC `U=phiRing`, `V=phiTube`; the
+	  affine `(u,v)->(phiRing,phiTube)` map is identity/mirror so it reuses `_quadric_trim_wire` and
+	  `_quadric_trim_fills_uv_box`), `"torus"` added to `SURFACE_TYPE_ENUM`/`_SUPPORTED_SURFACE_TYPES`/
+	  `_FACE_EXTRACTORS`. Tests (`testBVHSurfaceSolid.cxx`, now 30 cases): `ToroidalSurfaceKernels`
+	  (4-crossing ray, tangent graze, normals, meridian distance, exact capacity, quarter-tube section),
+	  `FullTorusMatchesTGeoTorus` (closed-solid grid + distances + capacity vs `TGeoTorus`),
+	  `WireTrimmedTorusMatchesSection` (rectangle-vs-wire equivalence, numeric capacity), `TorusSidecarRoundTrip`
+	  (`surfaceType=5` reader vs `TGeoTorus`). `ninja` + `ctest -R BVHSurfaceSolid` green. End-to-end: a
+	  synthetic full-torus STEP converts under `--exact-surfaces required` (1/1 exact) and its Python-written
+	  sidecar loads via `LoadSurfaceSolid` with **0 `Contains` mismatches over 9261 points vs `TGeoTorus`** and
+	  exact capacity. Capacity closed form for the `(phiRing u, phiTube v)` rectangle (centre `C`,
+	  `cu=C.U, cv=C.V, cw=C.W`): `contribution = mNormalSign/3 * [ du*Iv + du*cw*Iw + (cu*Su+cv*Cu)*Iuv ]`
+	  where `Su=sin u1-sin u0`, `Cu=cos u0-cos u1`, `Iv = r*((R^2+r^2)*Sv + R*r*dv + R*r*C2v)`,
+	  `Iw = r*(R*(cos v0-cos v1) + r*(cos2v0-cos2v1)/4)`, `Iuv = r*(R*Sv + r*C2v)`, `Sv=sin v1-sin v0`,
+	  `C2v=dv/2+(sin2v1-sin2v0)/4`. Not yet re-measured: the ALICE3 coverage number (torus now available for
+	  the 15 torus-touching volumes; a follow-up sweep should confirm `ST2487455_002` and update 7/55).
 
 - [ ] **B-spline / NURBS bounded surfaces** (bulk coverage; largest effort — do last).
 	- Motivation: the dominant blocker. On ALICE3, 34/55 volumes are blocked *only* by bspline and 44/55
@@ -369,8 +400,8 @@ header:
   uint32   nSurfaces
   uint32   reserved     = 0
 per surface (nSurfaces times):
-  uint32   surfaceType     1=plane 2=cylinder 3=cone 4=sphere
-  uint32   flags           bit 0: innerWall (quadrics: outward normal towards the axis/center)
+  uint32   surfaceType     1=plane 2=cylinder 3=cone 4=sphere 5=torus
+  uint32   flags           bit 0: innerWall (quadrics/torus: outward normal towards the axis/center/tube spine)
   uint32   nParams
   float64  params[nParams]  fixed per-type layout, see below
   uint32   nWires
@@ -407,12 +438,21 @@ Per-type `params` layouts (matching the `O2BVHSurfaceSolid::Add*Surface` signatu
 - sphere (14): center xyz, polarAxis xyz, referenceAxisU xyz, radius, thetaMin, thetaMax,
   phiStart, phiSweep. Wire block as for the cylinder, in the `(u, v) = (phi[rad], theta[rad])`
   domain.
+- torus (15): centerPoint xyz, axis xyz, referenceAxisU xyz, majorRadius, minorRadius,
+  phiStart, phiSweep, tubeStart, tubeSweep. `majorRadius` is the axis-to-tube-centre radius and
+  `minorRadius` the tube radius. The two periodic angles are the ring angle
+  `phiRing` (around the axis, from `referenceAxisU`) and the tube angle `phiTube` (around the
+  tube, measured from the outer equator towards the +axis pole). An empty wire block means the
+  trim is the scalar parametric rectangle `phiRing x phiTube`; a non-empty wire block carries a
+  general line/arc/bspline trim in the `(u, v) = (phiRing[rad], phiTube[rad])` domain (both
+  periodic). A full torus (both sweeps `2pi`) is self-closing.
 
 The `nParams`/`nCurveParams` counts make every record self-describing, so future minor
 extensions can add trailing parameters or new curve types without breaking version-1
 readers that choose to skip them; incompatible changes bump `version`. A quadric trim wire
-must be a non-wrapping loop within one phi window (`<= 2pi`); the writer emits it only when
-the face is not the plain parametric rectangle. Line edges stay lines; every curved pcurve
+must be a non-wrapping loop within one phi window (`<= 2pi`; for the torus, also within one turn
+in the tube angle); the writer emits it only when the face is not the plain parametric
+rectangle. Line edges stay lines; every curved pcurve
 (circle/ellipse/Bezier/bspline) is converted to a bspline and its poles are pushed through the
 *affine* `(u, v) -> (phi, height/theta)` map (a bspline is closed under affine maps, so this is
 exact - an anisotropic map merely turns a circle into an exactly-represented ellipse-bspline).
@@ -589,3 +629,4 @@ matching `kWireJoinTolerance = 1e-5` (both looser than the `1e-9` boundary toler
 	  upstream, but remains a real one-line-ish fix for D-shaped caps).
 - 2026-07-24: Completed "Support general curved (line/arc `CurveWire`) trims on quadrics" (details + design in the milestone note above). Quadric surfaces now take an optional line/arc trim wire in their `(phi, h)`/`(phi, theta)` domain (kernel `BoundedSurface.h`, public `Add*Surface` overloads, sidecar reader `collectQuadricTrim`, Python `_quadric_line_wire` + the stricter `_quadric_trim_fills_uv_box` scalar-path gate). Navigation stays exact; wire-trim capacity is numeric/inexact (flagged) and `Safety` a conservative lower bound. Full `ninja` build + `ctest -R BVHSurfaceSolid` pass (23 cases); pythonOCC smoke confirms scalar-path regression and a notched-cylinder line wire block round-tripping through `LoadSurfaceSolid`. Discovered a **pre-existing** planar line+arc join-tolerance issue in the sidecar reader (`kJoinTolerance` `1e-9` too strict vs `extract_planar_face`'s ~`1e-6` arc-endpoint precision) that blocks whole box-cut solids containing D-shaped caps — left for a focused planar fix. Env note: pythonOCC also needs `LD_LIBRARY_PATH+=/data/swenzel/sw/slc9_x86-64/OCCT/v7.9.3-local1/lib` (for `libTKFeat.so.7.9`, pulled in by the new `Geom2dAdaptor` import) on top of the usual `PYTHONPATH` fix. `g4Config.C` and generated `scripts/geometry/STEP_examples/` artifacts remain intentionally out of the commit.
 - 2026-07-24: Completed the **B-spline trim curves on analytic surfaces** milestone (full details in the milestone note above). Kernel adds a `Curve2D::BSpline` kind (de Boor eval, GL-per-span exact area, polyline-based winding/distance with a lazily-cached flattened polyline that is essential for `CloseShape`/capacity performance), public `PlanarBoundaryCurve::makeBSpline`, sidecar `curveType=2`, and the affine-pole-transform quadric extractor `_quadric_trim_wire` (which also subsumes the old arc-on-quadric ellipse gap). Also folded in the long-standing planar line+arc join fix: reader `kJoinTolerance` and a new kernel `kWireJoinTolerance` are both `1e-5` (the kernel `CurveWire` `1e-9` closure was the actual gate, not just the reader). `ctest -R BVHSurfaceSolid` green (26 cases). End-to-end: `ST1A38495_01`/`ST1A38526_01` (previously bspline-trim-blocked) convert under `--exact-surfaces auto` and match `O2Tessellated` `Contains` with **0 mismatches / 20k points** (BVH==loop too), capacity within 0.17-0.24% of the mesh volume; **ALICE3 coverage 3/55 -> 7/55**. `IsClosed()` may warn on the shared-3D-bspline-edge sampling mismatch (documented caveat; navigation exact). Remaining ceiling: bspline *surfaces* (largest effort, next-to-last milestone) and torus. `g4Config.C` and generated `scripts/geometry/STEP_examples/` artifacts remain intentionally out of the commit.
+- 2026-07-24: Completed the **Bounded torus** milestone (full details + the capacity closed form in the milestone note above). New `TorusBoundedSurface` (kernel `BoundedSurface.h`) with a quartic ray intersection via a shared `solveQuarticReal`/`solveDepressedCubic` (Ferrari + Newton polish; even-sized root clusters dropped as tangencies for parity), exact rectangle capacity + numeric wire-trim capacity, meridian-distance `Safety`, and **both** ring/tube angles unwrapped in `pointInTrim` (the torus is the first surface with two periodic parameters). Public `AddToroidalSurface` (+ wire-trim overload), sidecar `surfaceType=5` (15 params), Python `extract_toroidal_face` (reuses the quadric `_quadric_trim_wire`/`_quadric_trim_fills_uv_box`; the `(u,v)->(phiRing,phiTube)` map is identity/mirror). `ninja` + `ctest -R BVHSurfaceSolid` green (**30 cases**: `ToroidalSurfaceKernels`, `FullTorusMatchesTGeoTorus`, `WireTrimmedTorusMatchesSection`, `TorusSidecarRoundTrip`). End-to-end: a synthetic full-torus STEP converts under `--exact-surfaces required` (1/1 exact) and its Python sidecar loads via `LoadSurfaceSolid` with **0 `Contains` mismatches over 9261 points vs `TGeoTorus`** and exact capacity `2*pi^2*R*r^2`. **Not** re-measured this session: the ALICE3 coverage number after adding torus (the 15 torus-touching volumes, incl. the near-miss `ST2487455_002`, should now improve on 7/55 — a follow-up `--exact-surfaces auto` sweep should confirm and update it). Remaining ceiling: bspline *surfaces* (the last, largest milestone). `g4Config.C` and generated `scripts/geometry/STEP_examples/` artifacts remain intentionally out of the commit.
