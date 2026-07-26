@@ -281,3 +281,42 @@ cd run/SimExamples/External_Sensitive_Detectors
 
 The script transports a few box-generator events and prints the hit counts for the produced
 external-detector branches.
+## Analysis tools for exact-surface conversion
+
+Two helper tools support the exact `O2BVHSurfaceSolid` conversion path
+(`--exact-surfaces auto`, see `BVHSurfaceSolid.md`).
+
+### `analyze_surface_geometry.py` — what the geometry *really* is
+
+The surface type stored in a STEP file describes the exporter, not the geometry. CAD kernels
+routinely write an exact cylinder, cone or sphere as a *rational* B-spline patch, which is an
+exact representation, not an approximation. Dispatching on the stored type therefore discards
+analytic geometry the converter fully supports.
+
+This tool ignores the stored type and classifies each face from its surface normal field, trying
+candidate models in increasing parameter count (plane < sphere < cylinder < cone < free-form) and
+accepting the first that fits at machine precision:
+
+```bash
+python3 analyze_surface_geometry.py --per-solid model.step
+```
+
+`--per-solid` reports how many solids would become fully analytic if that recognition were applied,
+i.e. the exact-conversion coverage forecast. Measured 2026-07-26: `as1-oc-214.stp` 0/5 -> 5/5 (all
+70 of its "bspline" faces are exact cylinders), `ALICE3_CAD_pure.step` 15/55 -> 29/55.
+
+Residual thresholds are relative and deliberately tight: an "almost cylinder" that is really
+free-form stays free-form, so the classification can never silently change geometry. There is no
+torus test yet, so analytic counts are lower bounds.
+
+### `checkSurfaceSidecars.C` — do the emitted sidecars actually load?
+
+Successful extraction does not imply a loadable sidecar. This macro loads every
+`surfaces_*.bin` in a directory via `LoadSurfaceSolid`, calls `CloseShape()`, and reports surface
+count, closure, orientation consistency and capacity:
+
+```bash
+root -l -b -q 'checkSurfaceSidecars.C("/path/to/conversion/output")'
+```
+
+Run it after a conversion sweep to get the honest "extracted vs. usable" number.

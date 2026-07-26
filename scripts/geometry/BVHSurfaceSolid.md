@@ -304,13 +304,122 @@ only for visualization and fallback paths.
 	  `cu=C.U, cv=C.V, cw=C.W`): `contribution = mNormalSign/3 * [ du*Iv + du*cw*Iw + (cu*Su+cv*Cu)*Iuv ]`
 	  where `Su=sin u1-sin u0`, `Cu=cos u0-cos u1`, `Iv = r*((R^2+r^2)*Sv + R*r*dv + R*r*C2v)`,
 	  `Iw = r*(R*(cos v0-cos v1) + r*(cos2v0-cos2v1)/4)`, `Iuv = r*(R*Sv + r*C2v)`, `Sv=sin v1-sin v0`,
-	  `C2v=dv/2+(sin2v1-sin2v0)/4`. Not yet re-measured: the ALICE3 coverage number (torus now available for
-	  the 15 torus-touching volumes; a follow-up sweep should confirm `ST2487455_002` and update 7/55).
+	  `C2v=dv/2+(sin2v1-sin2v0)/4`. **ALICE3 coverage re-measured 2026-07-26: 7/55 -> 15/55** (see the
+	  2026-07-26 handoff note). All 8 newly-converting volumes contain torus faces, including the predicted
+	  near-miss `ST2487455_002` (exactly the forecast 1 cyl + 2 cone + 2 plane + 1 torus).
+
+- [ ] **Canonical-form recognition: recover the exact analytic model behind a stored NURBS** (highest value on the board — measured +14/55 on ALICE3 and +5/5 on as1; do before the general NURBS milestone).
+	- **Premise, established by measurement 2026-07-26 (see the handoff note): the surface type stored in a
+	  STEP file is a statement about the exporter, not about the geometry.** CAD kernels routinely write an
+	  exact cylinder, cone, sphere or circle as a *rational* B-spline/Bezier patch — that representation is
+	  exact, not an approximation, because a rational quadratic/cubic reproduces conics exactly. The current
+	  extractor dispatches on `BRepAdaptor_Surface::GetType()` and therefore throws away geometry it fully
+	  supports. This is the single biggest source of unnecessary tessellated fallback we have found.
+	- Measured prize (relative residual < 1e-9, i.e. machine precision):
+	  - `as1-oc-214.stp`: **0/5 -> 5/5**; all 70 bspline faces are exact cylinders, zero free-form.
+	  - `ALICE3_CAD_pure.step`: **15/55 -> 29/55**; 2889 of 8664 non-analytic faces are exact quadrics
+	    (1419 cylinder, 1398 cone, 72 sphere). Lower bound — torus recognition is not yet in the classifier.
+	- Design principle (as the request put it: *simplify to the smallest/best-fitting model*): this is **model
+	  selection**, not fitting. Try candidate models in increasing parameter count — plane (3) < sphere (4) <
+	  cylinder (5) < cone (6) < torus (7) < free-form — and accept the **first** whose residual is at machine
+	  precision. Never accept a looser fit silently: an "almost cylinder" that is really free-form must stay
+	  free-form, or the converter would silently change the geometry it was built to represent exactly.
+	- Recommended method — **differential, not algebraic**: classify from the surface normal field, which is
+	  cheap, needs no initial guess, and each test is a small linear solve on a sampled grid (validated in the
+	  session scratchpad prototype `recognize.py`):
+	  - plane: all unit normals parallel.
+	  - sphere: normal lines concurrent — solve `P_i = C + r*N_i` for `(C, r)` in least squares.
+	  - cylinder: normals coplanar; the axis is the smallest right singular vector of the normal matrix;
+	    then project out the axis and fit a circle, requiring constant radius.
+	  - cone: `N_i . (P_i - A) = 0` is **linear in the apex** `A`; solve, then require a constant half-angle
+	    about the mean ruling direction.
+	  - torus: needs a second step (fit the spine circle in the meridian half-plane); add it after the
+	    quadrics, since it only tightens the reported bound.
+	- Do the **same for curves** (the request explicitly says curves too, and it is the cheaper half): a bspline
+	  trim edge that is an exact line/circle/ellipse should be recovered as one. Signature weights
+	  (`1, 1/2, 1` for a 120-degree rational quadratic arc; `1, 1/3, 1/3, 1` for a rational cubic semicircle)
+	  are a useful fast path, but a numeric fit is more general and should be the authority. Note this is
+	  *demotion for exactness/compactness*, not enablement — the bspline `Curve2D` kernel already handles these
+	  correctly, so the win here is smaller (exact capacity, tighter `Safety`, fewer closure warnings) and it
+	  should not block the surface work.
+	- Do **not** use OCCT's `BRepLib_CanonicalRecognition` (7.7+): verified 2026-07-26 that it is not exposed in
+	  this pythonOCC build (`ImportError` from `OCC.Core.BRepLib`). Write our own numeric recognizer in
+	  `O2_CADtoTGeo.py`; it is ~100 lines and we then control the exactness contract.
+	- Placement: a pre-pass in the Python extractor that rewrites a recognized face's *surface* record to the
+	  analytic type, keeping its existing trim wires (the pcurves are in `(u,v)` of the *stored* surface, so the
+	  reparametrization to `(phi, h)`/`(phi, theta)` must be derived from the recognized frame — this is the
+	  real work, and the affine-pole-transform machinery in `_quadric_trim_wire` is the right tool). **No C++
+	  kernel, sidecar-format or reader change should be needed** — the output is an ordinary quadric record.
+	  Verify that before coding rather than assuming it.
+	- Report it: add the recognized-vs-stored breakdown to `--surface-report` so the eligibility report stops
+	  under-reporting, and add a flag (suggested `--recognize-surfaces exact|off`, default `exact`) plus a
+	  per-face residual in the JSON so a reviewer can audit what was reclassified and how well it fit.
+	- Validation: `as1-oc-214.stp` reaches 5/5 and `ALICE3_CAD_pure.step` >= 29/55 under `--exact-surfaces auto`;
+	  each newly-converting volume loads via `LoadSurfaceSolid` and matches the accelerated `O2Tessellated`
+	  `Contains` (**not** ROOT `TGeoTessellated`) to the mesh-precision band; a unit fixture asserts that a
+	  deliberately free-form patch is **rejected** (guarding the exactness contract, which matters more than the
+	  positive cases); `ninja` + `ctest -R BVHSurfaceSolid` green.
+
+- [ ] **Ellipse (and remaining conic) trim curves on planar faces** (small, Python-only — cheapest open item).
+	- Motivation: found by the 2026-07-26 `Bagger.step` sweep (see the handoff note). That model is 12/13
+	  exact; the single fallback volume `Bucket` (97 faces: 69 plane, 22 cylinder, 4 sphere, 2 torus — the
+	  only volume in the file exercising sphere *and* torus) is blocked **solely** by 8 **ellipse** planar
+	  boundary curves. Closing this converts a whole volume and takes that file to 13/13. Elliptical planar
+	  boundaries are common wherever a cylinder is cut obliquely, so this should recur on other real CAD.
+	- Key insight: the work is almost certainly already done, in the wrong branch. On **quadrics** ellipse
+	  pcurves are supported today — `_SUPPORTED_QUADRIC_CURVES` includes `ellipse`, and `_quadric_trim_wire`
+	  converts every curved pcurve (circle/ellipse/Bezier/bspline) to a bspline and pushes the poles through
+	  the affine `(u,v) -> (phi, h/theta)` map. Only the **planar** path lags: `extract_planar_face` rejects
+	  anything outside `(GeomAbs_Line, GeomAbs_Circle, GeomAbs_BSplineCurve, GeomAbs_BezierCurve)`
+	  (`O2_CADtoTGeo.py:898`), and `_SUPPORTED_PLANAR_CURVES = {line, circle, bspline, bezier}` matches it.
+	- Approach: route ellipse edges into the **existing** bspline branch. `_planar_bspline_edge_params`
+	  already calls `geomconvert.CurveToBSplineCurve(Geom_TrimmedCurve(...), Convert_TgtThetaOver2)`, and
+	  that conversion is **exact** for conics (a conic is a rational quadratic NURBS; `Convert_TgtThetaOver2`
+	  is precisely the conic parameterisation), then projects the 3D poles into the plane frame — an affine
+	  map, under which a bspline is closed. So the expected change is only: add `GeomAbs_Ellipse` to the
+	  accepted-type tuple, let it fall through to the `else` bspline branch, and add `"ellipse"` to
+	  `_SUPPORTED_PLANAR_CURVES` so the eligibility report and the extractor stay reconciled.
+	- **No kernel, sidecar-format, or reader change is expected**: the record emitted is an ordinary
+	  `curveType=2` bspline. Verify that expectation before writing code rather than assuming it — if it
+	  holds, this is a ~3-line Python diff.
+	- Consider folding in `GeomAbs_Hyperbola` / `GeomAbs_Parabola` the same way (both are conics that
+	  `CurveToBSplineCurve` handles), but only if a real fixture exercises them — an unbounded-branch conic
+	  trimmed to a finite edge is fine, an untrimmed one is not. Do not add them speculatively.
+	- Caveats inherited from the bspline-trim milestone (state them, do not re-litigate): capacity of an
+	  ellipse-trimmed planar face is numerically integrated (`capacityIsExact() == false`), and `Safety` is a
+	  conservative lower bound. Navigation stays exact — the surface is still an analytic plane and the trim
+	  test is still the exact winding/root-find.
+	- Validation: `Bucket` converts under `--exact-surfaces auto` and the whole of `Bagger.step` reaches
+	  13/13; the sidecar loads via `LoadSurfaceSolid`; `Contains` compared against the accelerated
+	  `O2Tessellated` (**not** ROOT `TGeoTessellated`) over a fixed-seed random set, expecting
+	  boundary-band-only mismatches. Add a synthetic unit fixture (an obliquely cut cylinder, whose cap is an
+	  exact ellipse, or a plate with an elliptical hole) with an analytic reference, and check line/arc/bspline
+	  output stays byte-identical. `ninja` + `ctest -R BVHSurfaceSolid` green.
 
 - [ ] **B-spline / NURBS bounded surfaces** (bulk coverage; largest effort — do last).
-	- Motivation: the dominant blocker. On ALICE3, 34/55 volumes are blocked *only* by bspline and 44/55
-	  touch it; every analytic capability combined tops out at ~11/55. Majority exact coverage of a real
-	  assembly fundamentally requires a genuine bspline surface kernel (surface + trim).
+	- Motivation: the dominant blocker, and after the torus milestone it is very nearly the *only* one.
+	  Re-measured on ALICE3 2026-07-26 (coverage now 15/55): **33 of the 40 remaining fallback volumes are
+	  blocked purely by bspline**, and 36/55 touch it (down from 44/55 before the bspline-trim + torus work,
+	  because those volumes moved into the exact set). The full remaining blocker list is only three entries
+	  wide — bspline (2377 faces), extrusion (73 faces, 4 volumes), revolution (12 faces, 5 volumes) — and a
+	  basis-curve probe on 2026-07-26 showed the last two are **bspline in disguise**: all 14 extrusion faces
+	  of `ST1A38494_01` and both revolution faces of each of `ST2487459_002/003/004` sweep/revolve a *bspline*
+	  basis curve, not a line or circle. So there is no cheap analytic win left to harvest, and **15/55 is the
+	  hard analytic ceiling** — everything above it requires this milestone.
+	- **CORRECTION 2026-07-26: the "15/55 is the hard analytic ceiling" claim above is WRONG, and so is the
+	  reasoning behind it.** It equated *stored surface type* with *geometry*. A measurement that classifies
+	  faces by their actual differential geometry instead (see the canonical-recognition milestone below)
+	  shows **2889 of ALICE3's 8664 non-analytic faces (33%) are exact quadrics at machine precision**
+	  (1419 cylinder, 1398 cone, 72 sphere; relative residual < 1e-9), and that recovering them takes the
+	  assembly to **29/55, not 15/55**. The "bspline basis curve" probe was right about the *storage* and
+	  wrong about the *geometry* — a rational bspline basis curve is routinely an exact circle. This
+	  milestone is still needed, but for **26/55 genuinely free-form volumes**, not 40.
+	- Cheaper reduced-dimension special case worth considering first (covers the 4-5 extrusion/revolution
+	  volumes without a general NURBS intersector): a surface swept along a straight line reduces ray/surface
+	  intersection to a 2D ray/curve problem in the cross-section plane, and a surface of revolution reduces to
+	  a 2D problem in the meridian half-plane. Both reuse the existing 2D bspline `Curve2D` kernel. Low total
+	  value (~4 volumes) but a much smaller step than a general trimmed-NURBS intersector, and a useful
+	  proving ground for the trim/BVH plumbing.
 	- Approach: a `BSplineBoundedSurface` with a genuine **iterative** ray/surface intersection (unlike the
 	  closed-form quadrics). Grounded, well-established methods: Newton from a seed (fast, not globally
 	  robust alone); **Bézier clipping** — Nishita, Sederberg & Kakimoto, *"Ray tracing trimmed rational
@@ -630,3 +739,29 @@ matching `kWireJoinTolerance = 1e-5` (both looser than the `1e-9` boundary toler
 - 2026-07-24: Completed "Support general curved (line/arc `CurveWire`) trims on quadrics" (details + design in the milestone note above). Quadric surfaces now take an optional line/arc trim wire in their `(phi, h)`/`(phi, theta)` domain (kernel `BoundedSurface.h`, public `Add*Surface` overloads, sidecar reader `collectQuadricTrim`, Python `_quadric_line_wire` + the stricter `_quadric_trim_fills_uv_box` scalar-path gate). Navigation stays exact; wire-trim capacity is numeric/inexact (flagged) and `Safety` a conservative lower bound. Full `ninja` build + `ctest -R BVHSurfaceSolid` pass (23 cases); pythonOCC smoke confirms scalar-path regression and a notched-cylinder line wire block round-tripping through `LoadSurfaceSolid`. Discovered a **pre-existing** planar line+arc join-tolerance issue in the sidecar reader (`kJoinTolerance` `1e-9` too strict vs `extract_planar_face`'s ~`1e-6` arc-endpoint precision) that blocks whole box-cut solids containing D-shaped caps — left for a focused planar fix. Env note: pythonOCC also needs `LD_LIBRARY_PATH+=/data/swenzel/sw/slc9_x86-64/OCCT/v7.9.3-local1/lib` (for `libTKFeat.so.7.9`, pulled in by the new `Geom2dAdaptor` import) on top of the usual `PYTHONPATH` fix. `g4Config.C` and generated `scripts/geometry/STEP_examples/` artifacts remain intentionally out of the commit.
 - 2026-07-24: Completed the **B-spline trim curves on analytic surfaces** milestone (full details in the milestone note above). Kernel adds a `Curve2D::BSpline` kind (de Boor eval, GL-per-span exact area, polyline-based winding/distance with a lazily-cached flattened polyline that is essential for `CloseShape`/capacity performance), public `PlanarBoundaryCurve::makeBSpline`, sidecar `curveType=2`, and the affine-pole-transform quadric extractor `_quadric_trim_wire` (which also subsumes the old arc-on-quadric ellipse gap). Also folded in the long-standing planar line+arc join fix: reader `kJoinTolerance` and a new kernel `kWireJoinTolerance` are both `1e-5` (the kernel `CurveWire` `1e-9` closure was the actual gate, not just the reader). `ctest -R BVHSurfaceSolid` green (26 cases). End-to-end: `ST1A38495_01`/`ST1A38526_01` (previously bspline-trim-blocked) convert under `--exact-surfaces auto` and match `O2Tessellated` `Contains` with **0 mismatches / 20k points** (BVH==loop too), capacity within 0.17-0.24% of the mesh volume; **ALICE3 coverage 3/55 -> 7/55**. `IsClosed()` may warn on the shared-3D-bspline-edge sampling mismatch (documented caveat; navigation exact). Remaining ceiling: bspline *surfaces* (largest effort, next-to-last milestone) and torus. `g4Config.C` and generated `scripts/geometry/STEP_examples/` artifacts remain intentionally out of the commit.
 - 2026-07-24: Completed the **Bounded torus** milestone (full details + the capacity closed form in the milestone note above). New `TorusBoundedSurface` (kernel `BoundedSurface.h`) with a quartic ray intersection via a shared `solveQuarticReal`/`solveDepressedCubic` (Ferrari + Newton polish; even-sized root clusters dropped as tangencies for parity), exact rectangle capacity + numeric wire-trim capacity, meridian-distance `Safety`, and **both** ring/tube angles unwrapped in `pointInTrim` (the torus is the first surface with two periodic parameters). Public `AddToroidalSurface` (+ wire-trim overload), sidecar `surfaceType=5` (15 params), Python `extract_toroidal_face` (reuses the quadric `_quadric_trim_wire`/`_quadric_trim_fills_uv_box`; the `(u,v)->(phiRing,phiTube)` map is identity/mirror). `ninja` + `ctest -R BVHSurfaceSolid` green (**30 cases**: `ToroidalSurfaceKernels`, `FullTorusMatchesTGeoTorus`, `WireTrimmedTorusMatchesSection`, `TorusSidecarRoundTrip`). End-to-end: a synthetic full-torus STEP converts under `--exact-surfaces required` (1/1 exact) and its Python sidecar loads via `LoadSurfaceSolid` with **0 `Contains` mismatches over 9261 points vs `TGeoTorus`** and exact capacity `2*pi^2*R*r^2`. **Not** re-measured this session: the ALICE3 coverage number after adding torus (the 15 torus-touching volumes, incl. the near-miss `ST2487455_002`, should now improve on 7/55 — a follow-up `--exact-surfaces auto` sweep should confirm and update it). Remaining ceiling: bspline *surfaces* (the last, largest milestone). `g4Config.C` and generated `scripts/geometry/STEP_examples/` artifacts remain intentionally out of the commit.
+- 2026-07-26: **ALICE3 coverage re-measured after the torus milestone — measurement only, no source change** (this file is the only edit). Command: `python3 O2_CADtoTGeo.py STEP_examples/ALICE3_CAD_pure.step --output-folder <tmp> --exact-surfaces auto --mesh --surface-report <tmp>/surface_report.json`; env needs `ALIBUILD_WORK_DIR=/data/swenzel/sw` before `alienv` on top of the usual pythonOCC `PYTHONPATH` / OCCT `LD_LIBRARY_PATH` fixes.
+	- **Coverage 7/55 -> 15/55 (27%).** The eligibility report and the extractor now agree exactly (15 eligible == 15 extracted), closing the long-standing "report is a superset of the extractor" gap.
+	- The 8 new volumes are exactly the torus-containing ones: `ST1782525_01`, `ST1829909_01/_002/_003/_004`, `ST2487455_002`, `ST2487459_01`, `ST2487462_01`. The predicted near-miss `ST2487455_002` converts with precisely the forecast composition (1 cylinder + 2 cones + 2 planes + 1 torus). The 7 pre-existing volumes (`ST1A38494_002/003/004`, `ST1A38495_01`, `ST1A38526_01`, `ST2487455_01`, `ST2487721_01`) contain no torus at all, so the torus milestone alone accounts for the whole 7 -> 15 jump.
+	- **Validation against the accelerated `O2Tessellated`** (not ROOT `TGeoTessellated`), fixed seed, points in the inflated mesh bbox: **14 of the 15 load and navigate correctly**. `Contains` mismatches run 0-17 per 20k points and *every* mismatching point sits within 1.7e-3 cm of the exact boundary (measured with `Safety`), i.e. purely the chorded-mesh precision band — there the reference is wrong, not the exact solid. The three largest loadable parts (236 / 720 / 965 surfaces) gave **0 mismatches over 5k points each**. `Contains` (BVH) == `Contains_Loop` on every point of every volume, and `IsOrientationConsistent()` is true everywhere. Capacity matches the divergence-theorem mesh volume to 0.001-0.27%, except `ST2487462_01` at 2.2% (bspline-trimmed faces -> numerically integrated capacity, already flagged `capacityIsExact()==false`).
+	- **One real gap found: `ST1829909_01` (1052 surfaces) extracts but does NOT load.** `LoadSurfaceSolid` rejects it with "surface 1006: wire edge 1 end does not join the next edge start". Measured the actual drift over all 15 sidecars (17212 edge joins): only this volume exceeds `kJoinTolerance`/`kWireJoinTolerance = 1e-5`, and only at **6 joins, worst 2.96e-5** (~3x over), all on cylinder wire trims. So the honest number is *15/55 extracted, 14/55 usable*. Worth noting before anyone just loosens the constant again: the tolerance is applied to a **mixed-unit** `(phi[rad], h[cm])` metric, so the same absolute value means a different physical precision depending on the cylinder radius; the principled fix is a radius-aware (arc-length) join metric on quadrics. Deliberately **not** changed in this session — a looser tolerance also accepts genuinely broken wires, so it deserves its own focused decision plus a regression test.
+	- **Remaining blockers re-ranked.** Face counts over the whole assembly: plane 3321, cylinder 2724, bspline 2377, cone 409, torus 350, extrusion 73, revolution 12. Of the 40 fallback volumes, 33 are blocked *purely* by bspline, 3 purely by revolution, 1 purely by extrusion, 3 by a mix. A basis-curve probe (downcast to `Geom_SurfaceOfRevolution` / `Geom_SurfaceOfLinearExtrusion`, then `BasisCurve()`) showed every one of those extrusion/revolution faces sweeps or revolves a **bspline** basis curve — they are not analytic-in-disguise, so there is no cheap +4 to harvest. **15/55 is the hard analytic ceiling**; bspline surfaces are the entire remaining milestone.
+	- `ctest -R BVHSurfaceSolid` re-confirmed green (30 cases) against the installed build. `g4Config.C` and generated `scripts/geometry/STEP_examples/` artifacts remain intentionally out of the commit.
+- 2026-07-26: **Coverage sweep over three non-ALICE CAD models — measurement only, no source change** (this file is the only edit; it adds the "Ellipse trim curves on planar faces" milestone the sweep motivated). Same command and environment as the ALICE3 sweep above, plus a load check of every emitted sidecar through `LoadSurfaceSolid` + `CloseShape` (no navigation comparisons this session).
+
+	| model | volumes exact | sidecars loading | blocker |
+	| --- | --- | --- | --- |
+	| `Bagger.step` (503 KiB, mm, 13 vol / 288 faces) | **12/13 (92%)** | 12/12 | 1 volume, **ellipse** planar trim curves (8 curves on 2 faces) |
+	| `oTOF System V3-R92cm.step` (5.3 MiB, mm, 3 vol / 1607 faces) | **2/3 (67%)** | 2/2 | 1 node with *zero* faces (empty assembly label, not a surface-type gap) |
+	| `as1-oc-214.stp` (424 KiB, mm, 5 vol / 53 faces) | **0/5** | n/a | **bspline surfaces** (28 faces), exclusively |
+
+	- These sit far above the ALICE3 assembly's 15/55 (27%), so **27% is not representative of mechanical CAD in general** — it reflects how ALICE3 was authored. On models that use analytic surfaces the converter is already near-complete.
+	- **Bagger** is the useful one: `plane 172, cylinder 110, sphere 4, torus 2`; curves `line 902, circle 458, bspline 42, ellipse 8`. Fully analytic. Its one fallback (`Bucket`) is blocked *only* by the 8 ellipse curves — see the new milestone. Eligibility report and extractor agree exactly on all three models.
+	- **oTOF** is 100% planar (`plane 1607`, `line 9116`, nothing else). Both real solids convert; `oTOF v2 v1` is 1505 surfaces. "2/3" understates it — every actual solid converts.
+	- **as1** (the classic OCC demo assembly) initially read as the pure counter-example — the converter reports `plane 25, bspline 28` and 0/5, with no cylinder/cone/torus at all. **That reading was wrong, and chasing it produced the most important finding of the session** (see the follow-up note below): every one of those bspline faces is an *exact* cylinder. The lesson is recorded as its own milestone: **the stored STEP surface type is not the geometry.**
+	- **FOLLOW-UP, same day — the stored surface type is not the geometry.** Prompted by disbelief at as1's 0/5 ("this is literally rectangles and rods"), the bspline faces were dumped and measured. Result: **as1 contains no free-form geometry at all.** Every bspline face is `degU=1, degV=3, poles=(2,4)` with weights `1, 1/3, 1/3, 1` over four poles on a rectangle — the textbook *exact* rational cubic Bezier for a **180-degree arc**. Fitting a cylinder to 401 samples of each gives R = 5.000000000 mm with max radial deviation **1.1e-11 mm (relative 2e-12)**, i.e. floating-point noise, not approximation error. Each hole is simply two exact half-cylinder patches. A generic geometry classifier (normal-field based: plane / sphere / cylinder / cone, relative residual < 1e-9) then measured both assemblies:
+		- **as1: all 70 bspline faces are exact cylinders; 5/5 solids would convert. 0/5 -> 5/5.**
+		- **ALICE3: 2889 of 8664 non-analytic faces (33%) are exact quadrics** — 1419 cylinder, 1398 cone, 72 sphere — and per solid, **15/55 already analytic + 14/55 rescued = 29/55**, with 26/55 genuinely free-form. The classifier's "already analytic" count reproduces the converter's measured 15/55 exactly, which cross-validates it.
+		- So the previous session's **"15/55 is the hard analytic ceiling" conclusion is wrong** (corrected in place in the bspline-surface milestone). Its "bspline basis curve" probe was right about the storage and wrong about the geometry: a *rational* bspline basis curve is routinely an exact circle. Recognition is **exact recovery, not tolerance fitting**.
+		- Caveat on the numbers: the classifier tests plane/sphere/cylinder/cone only — **no torus** — so 5775 "free-form" ALICE3 faces is an *upper* bound and 29/55 a *lower* bound. Also, per-face recognition was measured on `TopoDS` solids deduplicated by `TShape`; the exact converter works on XCAF logical volumes, so treat 29/55 as a forecast to be confirmed by an actual `--exact-surfaces auto` run.
+		- Dead end worth not repeating: **OCCT's own `BRepLib_CanonicalRecognition` (7.7+) is NOT exposed in this pythonOCC build** (`ImportError` from `OCC.Core.BRepLib` in pythonOCC v7.9.3-local1). The recognizer has to be our own numeric one.
+	- **Closure diagnostics (observed, not chased).** All 14 loaded solids are `IsOrientationConsistent() == true`; `IsClosed()` warns on 6. Three Bagger volumes (`Boom/Stick/BucketCylinderOuter`) carry bspline trims → the documented shared-3D-bspline-edge chord-sampling caveat. **Two cases are not explained by that caveat and are new**: (a) Bagger `BucketLink1` warns with 96 boundary edges but has *no* bspline (pure line+circle), while `BucketLink2` *does* have bsplines and does *not* warn; (b) both oTOF volumes warn with **0 boundary edges but 32 / 9 non-manifold edges** — a flavour not seen on ALICE3 (edges shared by >2 faces, typical of coincident faces or T-junctions in an all-planar tiled model). Neither blocks loading and neither touches navigation, but both should be understood before `IsClosed()` is trusted as a health signal on such models.
