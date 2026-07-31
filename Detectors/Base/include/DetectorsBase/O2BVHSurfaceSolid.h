@@ -301,7 +301,7 @@ class O2BVHSurfaceSolid : public TGeoBBox
   bool IsOrientationConsistent() const;
 
   /// How far the navigation queries can be trusted on this solid, as determined by CloseShape's
-  /// half-edge closure check. Parity-based containment answers a *topological* question ("does a
+  /// rim closure check. Parity-based containment answers a *topological* question ("does a
   /// ray from this point cross the boundary an odd number of times"), so it is only defined on a
   /// closed, consistently oriented 2-manifold. On anything else the answers are not merely
   /// imprecise near the defect: a single sliver gap flips Contains over the gap's whole shadow
@@ -311,15 +311,24 @@ class O2BVHSurfaceSolid : public TGeoBBox
   ///
   /// The values are ordered by increasing severity, so `reliability > Reliable` is "do not trust
   /// this" and the worst defect present is the one reported.
+  ///
+  /// Each state is decided per *rim* -- one trim loop of one face, matched against the other
+  /// faces as a curve, within GetRimMatchTolerance(). Not per chord: the two faces of a shared
+  /// edge sample it independently, so their vertices genuinely are not the same points, and
+  /// counting per chord is also how a seven-loop solid came to report 1418 boundary edges.
+  /// GetBoundaryEdgeCount() and its siblings still report the old per-chord numbers, but nothing
+  /// here derives from them.
   enum class NavigationReliability {
     Undetermined = 0,       ///< CloseShape() has not run yet: no diagnostics exist
     Reliable,               ///< closed, consistently oriented 2-manifold: parity is well defined
-    ReversedFaces,          ///< closed, but some shared edge is traversed the same way by both
-                            ///< faces: at least one face's outward normal points inward
-    OpenSurfaceSet,         ///< boundary edges (missing faces / trim gaps): parity is undefined in
-                            ///< the shadow of every gap along the parity test direction
-    NonManifold             ///< edges shared by more than two faces (coincident/duplicated faces):
-                            ///< parity depends on the order hits are clustered in
+    ReversedFaces,          ///< closed, but some rim's partner traverses the shared curve the same
+                            ///< way: at least one face's outward normal points inward
+    OpenSurfaceSet,         ///< some rim has no other face within tolerance (missing faces / trim
+                            ///< gaps): parity is undefined in the shadow of every gap along the
+                            ///< parity test direction. GetMaxRimGap() says how wide, in cm
+    NonManifold             ///< some rim has two or more other faces within tolerance (coincident
+                            ///< or duplicated faces): parity depends on the order hits are
+                            ///< clustered in
   };
 
   /// The reliability state derived from the last CloseShape(); Undetermined before it has run.
@@ -331,7 +340,10 @@ class O2BVHSurfaceSolid : public TGeoBBox
   /// logs and machine-readable reports.
   static const char* GetNavigationReliabilityName(NavigationReliability reliability);
 
-  /// Closure-check counts behind GetNavigationReliability(); all zero on a navigable solid.
+  /// Per-chord closure counts. These are a diagnostic only -- GetNavigationReliability() reads
+  /// the rim counts below. They stay because they are still the cheapest way to see *how* two
+  /// faces disagree along a shared edge, but a non-zero count here does not mean the solid is
+  /// open: it usually means the two faces sampled the shared edge at different phases.
   int GetBoundaryEdgeCount() const;
   int GetNonManifoldEdgeCount() const;
   int GetReversedEdgeCount() const;
@@ -343,11 +355,9 @@ class O2BVHSurfaceSolid : public TGeoBBox
   /// They are also counted per chord, which is how a four-face solid reports 1418 boundary edges.
   ///
   /// These accessors measure the same boundary as *curves*, in centimetres, and count it per rim
-  /// (one trim loop of one face). **They do not decide anything yet**: GetNavigationReliability()
-  /// still reads the chord counters. Switching it over changes which solids take Contains()'s
-  /// single-shot parity fast path, whose licence is a direction-independence measurement taken
-  /// while the old check under-reported Reliable, so it may only be done together with re-running
-  /// that measurement. See scripts/geometry/TolerancePolicy.md section 8.
+  /// (one trim loop of one face). **This is what GetNavigationReliability() decides on**, and so
+  /// what puts a solid on Contains()'s single-shot parity fast path. See
+  /// scripts/geometry/TolerancePolicy.md sections 9 and 10 for the measurement that licenses it.
   /// @{
   /// The largest distance in cm from any face's trim boundary to the nearest trim boundary of a
   /// *different* face -- the answer to "how far apart are the faces". Zero when there is nothing

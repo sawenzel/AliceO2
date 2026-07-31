@@ -4729,10 +4729,15 @@ inline ClosureReport validateClosure(const std::vector<std::unique_ptr<BoundedSu
     }
   }
 
-  report.closed = (report.boundaryEdges == 0) && (report.nonManifoldEdges == 0);
-  report.orientationConsistent = (report.reversedEdges == 0);
-
   measureRimClosure(surfaces, modelTolerance > 0. ? modelTolerance : kRimMatchTolerance, report);
+
+  // The verdict is the rim measurement's, not the chord counters'. The counters stay, because
+  // they are still the cheapest way to see *how* two faces disagree, but they answer the wrong
+  // question: whether two faces emitted the same vertices along a shared edge, when each face
+  // samples that edge independently and the vertices genuinely are not the same points. A check
+  // that cannot say "closed" tells you nothing when it says "open".
+  report.closed = (report.boundaryRims == 0) && (report.nonManifoldRims == 0);
+  report.orientationConsistent = (report.reversedRims == 0);
   return report;
 }
 

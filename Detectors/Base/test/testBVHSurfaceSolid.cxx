@@ -3598,10 +3598,11 @@ BOOST_AUTO_TEST_CASE(RimClosureMeasuresTheGapInCentimetres)
   BOOST_CHECK(shiftedBox.GetMaxRimGap() > shiftedBox.GetRimChordResolution());
 }
 
-// The structural failure of the old criterion, pinned: two faces that sample one shared edge at
-// different chord counts emit different vertices, so vertex matching calls a perfectly closed box
-// open -- and open by *chords*, which is how a four-face solid comes to report 1418 boundary
-// edges. Rim matching compares the curves and gets it right.
+// The structural failure the rim criterion exists to fix, pinned: two faces that sample one
+// shared edge at different chord counts emit different vertices, so vertex matching calls a
+// perfectly closed box open -- and open by *chords*, which is how a seven-loop solid came to
+// report 1418 boundary edges. Rim matching compares the curves and gets it right, and it is the
+// rim answer that IsClosed()/IsNavigable() now report.
 BOOST_AUTO_TEST_CASE(RimClosureSurvivesUnequalChordCounts)
 {
   constexpr double halfX = 1.;
@@ -3627,11 +3628,14 @@ BOOST_AUTO_TEST_CASE(RimClosureSurvivesUnequalChordCounts)
                                             {0., 0.5 * extentV}}));
   resampled.CloseShape(false);
 
-  // the half-edge check calls this closed box open, and counts the disagreement in chords
-  BOOST_CHECK(!resampled.IsClosed());
+  // the per-chord counters still see the disagreement -- they compare the vertices the two faces
+  // emitted, and those really are different points. That is the defect, and it is why they no
+  // longer decide anything.
   BOOST_CHECK(resampled.GetBoundaryEdgeCount() > 0);
 
-  // the rim measurement sees one boundary curve per face, all matched, and no gap
+  // the verdict comes from the rims, which see one boundary curve per face, all matched, no gap
+  BOOST_CHECK(resampled.IsClosed());
+  BOOST_CHECK(resampled.IsNavigable());
   BOOST_CHECK_EQUAL(resampled.GetRimCount(), 6);
   BOOST_CHECK_EQUAL(resampled.GetMatchedRimCount(), 6);
   BOOST_CHECK_EQUAL(resampled.GetBoundaryRimCount(), 0);

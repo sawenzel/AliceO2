@@ -1107,29 +1107,31 @@ void O2BVHSurfaceSolid::CloseShape(bool check)
     // read as one: this defect went unnoticed for two sessions because "699 boundary edge(s)"
     // looked like a cosmetic mesh remark while the solid was answering Contains wrongly by
     // centimetres. See scripts/geometry/ExactTrimTopology.md.
-    if (closure.boundaryEdges > 0) {
+    if (closure.boundaryRims > 0) {
       Error("CloseShape",
-            "Shape %s is NOT a closed surface: %d boundary edge(s) belong to only one face, i.e. the surface set "
-            "has gaps. NAVIGATION IS UNRELIABLE: parity containment is undefined in the shadow of every gap, so "
-            "Contains()/DistFrom*() can be wrong arbitrarily far from any surface, not just near the gap. Check "
-            "IsNavigable()/GetNavigationReliability() before trusting any answer from this shape.",
-            GetName(), closure.boundaryEdges);
+            "Shape %s is NOT a closed surface: %d of %d trim loop(s) have no neighbouring face within %g cm, "
+            "leaving %g cm of its %g cm of boundary open, the worst gap being %g cm. NAVIGATION IS UNRELIABLE: "
+            "parity containment is undefined in the shadow of every gap, so Contains()/DistFrom*() can be wrong "
+            "arbitrarily far from any surface, not just near the gap. Check IsNavigable()/"
+            "GetNavigationReliability() before trusting any answer from this shape.",
+            GetName(), closure.boundaryRims, closure.rims, closure.rimEpsilon, closure.unmatchedRimLength,
+            closure.totalRimLength, closure.maxGap);
     }
-    if (closure.nonManifoldEdges > 0) {
+    if (closure.nonManifoldRims > 0) {
       Error("CloseShape",
-            "Shape %s is NOT a 2-manifold: %d edge(s) are shared by more than two faces (coincident or duplicated "
-            "faces). NAVIGATION IS UNRELIABLE: parity containment depends on the order in which coincident hits "
-            "are clustered, so Contains() is not even self-consistent between traversal orders. Check "
-            "IsNavigable()/GetNavigationReliability() before trusting any answer from this shape.",
-            GetName(), closure.nonManifoldEdges);
+            "Shape %s is NOT a 2-manifold: %d of %d trim loop(s) run along two or more other faces at once "
+            "(coincident or duplicated faces). NAVIGATION IS UNRELIABLE: parity containment depends on the order "
+            "in which coincident hits are clustered, so Contains() is not even self-consistent between traversal "
+            "orders. Check IsNavigable()/GetNavigationReliability() before trusting any answer from this shape.",
+            GetName(), closure.nonManifoldRims, closure.rims);
     }
     if (!closure.orientationConsistent) {
       Error("CloseShape",
-            "Shape %s has %d inconsistently oriented (reversed) boundary edge(s): adjacent faces disagree about "
+            "Shape %s has %d inconsistently oriented (reversed) trim loop(s): adjacent faces disagree about "
             "which side is out. NAVIGATION IS UNRELIABLE: the entering/exiting sign of a crossing is taken from the "
             "surface normal, so distance queries can return the wrong side. Check IsNavigable()/"
             "GetNavigationReliability() before trusting any answer from this shape.",
-            GetName(), closure.reversedEdges);
+            GetName(), closure.reversedRims);
     }
     if (closure.closed && closure.signedVolume < 0.) {
       Warning("CloseShape",
@@ -1202,15 +1204,18 @@ O2BVHSurfaceSolid::NavigationReliability O2BVHSurfaceSolid::GetNavigationReliabi
   if (fImpl == nullptr || !fImpl->defined) {
     return NavigationReliability::Undetermined;
   }
-  // worst defect wins; the enum is ordered by severity
+  // worst defect wins; the enum is ordered by severity. The counts are per *rim*: a face's whole
+  // trim loop, matched against the other faces as a curve. The chord counters this used to read
+  // ask whether two faces emitted the same vertices along a shared edge, which they have no
+  // reason to and, on real CAD, do not.
   const auto& closure = fImpl->closure;
-  if (closure.nonManifoldEdges > 0) {
+  if (closure.nonManifoldRims > 0) {
     return NavigationReliability::NonManifold;
   }
-  if (closure.boundaryEdges > 0) {
+  if (closure.boundaryRims > 0) {
     return NavigationReliability::OpenSurfaceSet;
   }
-  if (closure.reversedEdges > 0) {
+  if (closure.reversedRims > 0) {
     return NavigationReliability::ReversedFaces;
   }
   return NavigationReliability::Reliable;
@@ -1531,15 +1536,30 @@ bool O2BVHSurfaceSolid::containsByParity(const Double_t* point, bool useBVH) con
 {
   // On a closed, consistently oriented 2-manifold parity is a topological invariant, so the answer
   // cannot depend on where the ray is aimed and one shot is the whole story. That is not a
-  // convenient assumption but a measured one: over the Phase 0 corpus (10 synthetic fixtures plus
-  // the 12 converted Bagger parts, ~11k points each) every part the closure check calls Reliable
-  // has zero disagreements between shooting directions, and every part that does disagree is one
-  // the closure check already rejects. So the fast path costs nothing where it is valid, and the
-  // vote is paid exactly where the geometry has already admitted it is broken.
+  // convenient assumption but a measured one, and the measurement was re-run when the closure
+  // criterion became rim-based, because a criterion that succeeds more often is a criterion that
+  // moves solids onto this path (TolerancePolicy.md sections 3.4 and 10).
   //
-  // The direction of the closure check's own error keeps this safe: it under-reports Reliable
-  // rather than over-reporting it (CodeReview_Fable.md S8/K9), so a defective solid taking the
-  // one-shot path would need the check to be wrong in the direction it is not wrong in.
+  // Over both corpora -- 9 converted fixtures and 12 Bagger parts, 11k points and 13 spread
+  // directions each -- the 13 Reliable parts disagree between directions at exactly **one** point
+  // in 143000, on cyl_cross_cyl, where 12 of the 13 directions (including this one) agree with
+  // each other and the point sits 0.1 cm from the nearest surface. That is one unlucky ray near
+  // the crossing curve of two cylinders, not the shadow of a gap: a gap shadow costs the point
+  // most of its directions and lies behind the gap. The parts that do disagree between directions
+  // (0.55%-7% of their points) are, as before, exactly the parts the closure check rejects.
+  //
+  // So the fast path costs nothing where it is valid, and the vote is paid exactly where the
+  // geometry has already admitted it is broken.
+  //
+  // A finer, per-*shot* trigger for the re-shoot was built and measured here and is deliberately
+  // not kept: re-shooting whenever a parity cluster held more than one coincident hit -- i.e.
+  // whenever the answer came out of the cancellation rule rather than out of the geometry -- costs
+  // 0.3-2% of Contains on most parts and 16% on box_minus_cyl, and moved not one of the 143000
+  // sweep points, including the single one that disagrees. It fires where the cancellation rule is
+  // already right (grazes at convex and concave edges, rays through a shared edge) and not where
+  // the residual defect is. The instrument TolerancePolicy.md section 2.4 actually asks for is a
+  // different one -- a band around the trim curve in the parametric domain, sized through the
+  // surface metric -- and it is unbuilt; section 10.3 has the measurement that sets its priority.
   const Vec3 testPoint = makeVec3(point);
   if (GetNavigationReliability() == NavigationReliability::Reliable) {
     return fImpl->parityAlong(testPoint, kContainsTestDirection, useBVH);

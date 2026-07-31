@@ -1,10 +1,9 @@
 # Tolerance policy and the closure criterion — plan for Phase 1 item 4
 
-Status: **steps 1-4 and step 5a are done** (2026-07-31/08-01, commits `1bc5c4fbc9`, `9f45887ef7`,
-`cacd64e4a5`, `f612f895a9`, and step 5a). **Step 5b — letting the rim verdict decide navigability —
-is what is left.** See §5 for the state of each step, §8 for the split and §9 for what 5a measured;
-**§9 is the part to read before starting 5b**, because the measurement changed what 5b is likely to
-cost.
+Status: **done** (2026-07-31/08-01, commits `1bc5c4fbc9`, `9f45887ef7`, `cacd64e4a5`,
+`f612f895a9`, `213b8aca8c` and 5b). §5 lists the five steps; **§9 and §10 are the measurements**,
+and they are the part to read — 5a's numbers contradict this document's own prediction by four
+orders of magnitude, and 5b's sweep leaves one offending point that is a live lead for K6.
 
 This is the last outstanding Phase 1 item; Phase 2 should not start before it, because Phase 2's
 whole premise is that "closed" becomes a statement you can act on.
@@ -44,9 +43,12 @@ capacity for wire-trimmed quadrics. Neither blocks the work below.
 
 ## 1. What is actually wrong
 
-> **Historical, as of the state before steps 1-4.** §1.1 and §1.2 are fixed; their file:line
-> references are pre-fix and will not resolve against the current tree. §1.3 is still true and is
-> what step 5 addresses. Kept as written because the diagnosis is the argument for the design.
+> **Historical, as of the state before the five steps.** All three are fixed and their file:line
+> references are pre-fix, so they will not resolve against the current tree. Kept as written
+> because the diagnosis is the argument for the design — but see §9.2 for the one claim in §1.3
+> that the measurement did *not* bear out: on both corpora the two faces of a shared edge do in
+> fact sample it at matching phases, so vertex matching happens to work here. The structural
+> defect is real (a unit test exhibits it); this corpus does not exercise it.
 
 ### 1.1 Distances in mixed units (K3, K12, S10) — fixed in step 2
 
@@ -101,7 +103,7 @@ cache), so the two can disagree about the same point.
 This is the same defect as K3 wearing a different hat, and it needs the same metric: the band has
 to be expressed as a *length* and set from the representation's actual accuracy.
 
-### 1.3 A closure criterion that cannot succeed (K9, S8) — still open, this is step 5
+### 1.3 A closure criterion that cannot succeed (K9, S8) — fixed in step 5
 
 `validateClosure` (`BoundedSurface.h:3919`) quantizes 3D vertices onto a 1e-7 cm lattice
 (`kClosureQuantum`) and matches *chord endpoints* by exact equality of the lattice key. Two
@@ -361,10 +363,12 @@ Each step is a commit, gated before and after.
      `measureRimClosure`, and the numbers on `ClosureReport`, `Print()`, the harness line and
      `--json`. Gate bit-identical on both corpora, which was the required outcome and is a real
      check here. **The measurement is in §9 and it did not come out as this document predicted.**
-   - **[not started] 5b — let it decide.** Switch `NavigationReliability` to the rim verdict, run
-     the §4.2 sweep in the same commit, reconcile `containsByParity`'s gating with it, and add the
-     §2.4/Section 4.4 ambiguity band. Read §9 first: on this corpus the verdict switch is a no-op,
-     which makes 5b much cheaper than §8 feared, and the reason is worth knowing before starting.
+   - **[done] 5b — let it decide.** `NavigationReliability`, `IsClosed()` and
+     `IsOrientationConsistent()` read the rim counts; the §4.2 sweep ran in the same commit and is
+     in §10.1. Gate bit-identical, because the two criteria agree part for part here. The
+     §2.4/Section 4.4 ambiguity band is the one piece **not** delivered: the free form of it was
+     built, measured and dropped (§10.2), and the form §2.4 asks for is deferred behind diagnosing
+     the single offending point of §10.1.
 
 ---
 
@@ -554,5 +558,71 @@ On this corpus it does not bite — the phases coincide, and every closed part m
 4.1e-11 cm — but it is the reason `maxGap` must never be quoted alone, and it is the thing to fix
 (rim sampling driven by a target sagitta in cm, not a fixed count per turn) if a future model
 lands between 1e-8 and 1e-2 cm and needs an answer.
+
+---
+
+## 10. Step 5b executed — the rim verdict decides, and the sweep that licenses it
+
+`IsClosed()`, `IsOrientationConsistent()` and `GetNavigationReliability()` now read the rim counts.
+The chord counters stay as a diagnostic — they are still the cheapest way to see *how* two faces
+disagree along a shared edge — but nothing derives a verdict from them, and the enum documentation
+says what each state now means, per §3.3's second prohibition. `CloseShape`'s error messages report
+the gap in centimetres and the open fraction of the boundary rather than a chord count.
+
+Both gates bit-identical again (fixtures 6/9, Bagger 4/12, `contains` 0 and 2), which §9.2
+predicted: the two criteria agree part for part on both corpora. `ctest` green at 57 cases.
+
+### 10.1 The §4.2 direction-independence sweep
+
+Run over both corpora, before and after the switch, from a standalone probe (§6): 21 parts, 11000
+bbox-spread points each, **13** golden-spiral directions per point, `Contains` against
+`ContainsAlongDirection`.
+
+- **13 parts are `Reliable`; 143000 points; one disagreement.** Identical before and after the
+  switch — the same 13 parts, the same single offending point. That is the measurement §3.4
+  demands, and it says the fast path's licence is untouched, because no solid moved onto it.
+- The parts that disagree between directions are exactly the parts the closure check rejects,
+  at **0.55%-7.0%** of their points. The correlation §3.4 relies on still holds.
+- **The one offender is worth carrying forward.** `cyl_cross_cyl`, point
+  `(0.65334264649649720, 0.88394684996026007, 0.97463122696308724)`, `Contains` = outside, **1 of
+  13** directions disagrees, `Safety` = 0.0992 cm. It is not a gap shadow: a gap costs a point most
+  of its directions and puts it behind the gap, and this point is a millimetre from the nearest
+  surface with 12 of 13 directions — including the fixed one — agreeing. One unlucky ray near the
+  curve where the two cylinders cross. The earlier Phase 1 measurement reported "zero" over a
+  smaller, differently seeded sample; this is a finer sample of the same thing, not a
+  contradiction. **It is a live lead for K6** (cancellation in the naive quadratic formula), and
+  the cheapest known reproducer of whatever it is.
+
+### 10.2 What the ambiguity band was, and why nothing shipped
+
+§2.4 defers "the Section 4.4 ambiguity band" into 5b: a `Reliable` solid should still notice a
+*locally* ambiguous hit, and re-shoot for that point alone. §2.4 also says, in its own words, to
+re-measure and **not to assume it improves anything**. It does not, in the form that was tried.
+
+The form tried is the one the shot can supply for free: re-shoot whenever a parity cluster held
+more than one coincident hit — that is, whenever the answer came out of the coincident-hit
+cancellation rule rather than out of the geometry. It is self-checking in exactly Section 4.4's
+sense, needs no change to any surface class, and the clusters are walked anyway. Measured:
+
+| | box | box_minus_cyl | box_union_box | cyl_cross_cyl | cyl_inter_cyl | cyl_plus_cone | sphere_minus_cyl | torus_union_cyl |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| off, ns/call | 219.8 | 343.8 | 235.5 | 3010.9 | 8564.8 | 202.4 | 179.1 | 524.1 |
+| on, ns/call | 226.9 | 398.1 | 236.2 | 3031.6 | 8673.5 | 202.9 | 180.5 | 525.6 |
+
+0.2-1.3% on seven parts and **+15.8%** on `box_minus_cyl`, and it moved **not one** of the 143000
+sweep points — including the single offender of §10.1, which it was aimed at. That is the whole
+case against it: it fires where the cancellation rule is already right (grazes at convex and
+concave edges, a ray straight through a shared edge — all of which the entering/exiting
+cancellation handles correctly) and stays silent where the residual defect is. It is not kept, and
+`containsByParity` carries the measurement in a comment so nobody rebuilds it.
+
+**The instrument §2.4 actually asks for is a different one and is still unbuilt**: a band around
+the trim curve in the *parametric* domain, sized through the surface's first fundamental form, so
+that a hit landing within the representation's own accuracy of a trim boundary is flagged by the
+patch that produced it. That needs `RayHit` to carry the flag and each of the seven
+`appendIntersections` to set it — the hottest code in the solid. §10.1 sets its priority: the
+measured headroom on the fast path is **one point in 143000**, and that point is a K6 suspect
+rather than a trim-boundary one. Diagnose the offender first; build the band only if the offender
+turns out to be what it is for.
 
 ---

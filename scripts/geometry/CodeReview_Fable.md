@@ -739,7 +739,70 @@ evidence for either of them, and the "distinct defect that no current theory cov
 The two items that replace it are above: gate ray-category soundness, and Green's-theorem capacity
 for wire-trimmed quadrics.
 
-## 14. Environment notes (this machine)
+## 14. Phase 1 item 4 completed (2026-08-01) — the gap is a length now, and it is not what we thought
+
+Step 5 of item 4, in two commits (5a measure, 5b decide), as split by
+[`TolerancePolicy.md`](TolerancePolicy.md) §8. Both gates bit-identical on both commits (fixtures
+6/9, Bagger 4/12, `contains` 0 and 2); `ctest -R BVHSurfaceSolid` green at **57 cases**, from 53.
+Every measurement is in `TolerancePolicy.md` §9 and §10; the headlines and the corrections are
+here. **K9 and S8 are closed, and Phase 1 is finished.**
+
+**The closure check is now a curve comparison and a number in centimetres.** Each face emits its
+boundary as rims — one ordered polyline per trim loop — and each rim chord is matched, at its
+midpoint, against the chords of every other face. `ClosureReport` gains `maxGap`,
+`unmatchedRimLength`, `totalRimLength`, the matching epsilon (the model's own declared tolerance
+from sidecar v2, else a documented constant) and per-rim counts;
+`NavigationReliability`/`IsClosed()` read them, `Print()`, the harness line and `--json` report
+them, and `CloseShape`'s errors quote the gap in cm and the open fraction of the boundary instead
+of a chord count. The per-chord counters remain as a diagnostic and decide nothing.
+
+**Correction to the recorded expectation, by four orders of magnitude.** `TolerancePolicy.md` §3.3
+predicted, from the 2026-07-26 shared-edge pcurve measurement, that the Bagger cyl-cyl parts would
+stay open at ~1.3e-5 cm. Measured: they are open by **0.25 to 0.75 cm**, over 4-15% of their rim
+length. That is a face missing or trimmed to the wrong curve, not two pcurves disagreeing in the
+fifth decimal, and it changes what Phase 2 is for on these parts — they are not nearly closed and
+then spoiled by tolerance. `tube_window`, the motivating case for "the counts are chord-inflated",
+went from **1418 boundary edges** to seven rims of which three are open, 9.94 cm of 53 cm.
+
+**Correction to §1.3 of that document, in the other direction.** It predicted that vertex matching
+fails on real CAD because the two faces of a shared edge sample it at different phases. The
+structural defect is real — a unit test builds a box whose last face is sampled at twice the chord
+count and the old check calls that closed box open — but **no part of either corpus exercises it**:
+every part the old check called closed is rim-matched and vice versa, part for part. So 5b's
+verdict switch is a no-op here, and the gate says so. Take that as "this corpus does not test the
+thing", not as "the thing was not a problem".
+
+**The §4.2 sweep, and a new lead.** 21 parts, 11000 points each, 13 golden-spiral directions,
+before and after the switch: the same 13 `Reliable` parts and **one** disagreement in 143000
+points. The parts that do disagree between directions are exactly the ones the closure check
+rejects, at 0.55%-7.0%. So the licence for `Contains`'s single-shot fast path survives the change
+intact. The one offender — `cyl_cross_cyl`, 1 of 13 directions, `Safety` 0.0992 cm, 12 directions
+including the fixed one agreeing — is **not** a gap shadow (a gap costs a point most of its
+directions and puts it behind the gap). It is one unlucky ray near the curve where two cylinders
+cross, and it is now the cheapest known reproducer for **K6**.
+
+**One thing deliberately not shipped, with the measurement that says so.** §2.4's ambiguity band
+was deferred into 5b. The free form of it — re-shoot whenever a parity cluster held more than one
+coincident hit, i.e. whenever the cancellation rule rather than the geometry decided — was built
+and measured: **0.2-1.3% of `Contains` on seven fixtures, +15.8% on `box_minus_cyl`, and not one
+of the 143000 sweep points moved**, including the offender it was aimed at. It fires where the
+cancellation rule is already right and stays silent where the residual defect is. Dropped, with the
+numbers recorded in `containsByParity` so nobody rebuilds it. The instrument §2.4 actually asks for
+— a band around the trim curve in the parametric domain, sized through the surface metric — is
+unbuilt, and §10.1's headroom of one point in 143000 sets its priority behind diagnosing that
+point.
+
+**Three implementation findings worth carrying.** The plan's "cheap way in" — chain runs of
+consecutively emitted edges — does not work, because the parametric-rectangle quadrics interleave
+their two rims; chaining by matching endpoints does, and still needs no change in any of the seven
+surface classes. A full-turn patch whose `fullSweep()` does not fire emits its seam twice in
+opposite directions, which cancels in the half-edge check and so had never been noticed, but chains
+into a two-point rim straddling the patch and produced a spurious boundary rim on five of nine
+fixtures until reversed duplicates were cancelled first. And the sampling noise floor must be
+estimated from the *turn angle*: the obvious estimator, a vertex's deviation from the chord joining
+its neighbours, calls a box corner 2.4 cm of noise.
+
+## 15. Environment notes (this machine)
 
 - Build tree `/home/swenzel/alisw/sw/BUILD/O2-latest/O2` builds this checkout (source symlink);
   the branch's test target `o2-test-detectorsbase-BVHSurfaceSolid` appears after a CMake re-run.
