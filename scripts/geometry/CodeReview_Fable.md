@@ -623,19 +623,29 @@ verified to fail against the pre-fix code.
 
 ### Still open
 
-- **Phase 1 item 4** (not started), planned in detail in [`TolerancePolicy.md`](TolerancePolicy.md):
-  per-domain metrics (angular <-> length via radius) in kernel
-  *and* IO (K3/S10), sidecar v2 carrying the model tolerance, and a closure criterion matched at
-  the topology level with a quantitative gap metric (K9/S8). K5 (a 1e-9 boundary band tested
-  against a ~1e-5 polyline) belongs with it — it needs the same metric.
+*(Updated later the same day, after Phase 1 item 4 steps 1-4 and the `BucketLink2` diagnosis of
+Section 13. The list below is the state as of then.)*
+
+- **Phase 1 item 4 is four fifths done.** Steps 1-4 are committed (`1bc5c4fbc9`, `9f45887ef7`,
+  `cacd64e4a5`, `f612f895a9`): every surface reports a first fundamental form; the wire join checks
+  in kernel *and* loader judge a gap as a length in cm against one constant, closing **K3, K12 and
+  S10**; sidecar version 2 carries the model's declared tolerance; and the on-boundary band is
+  sized from the representation's real accuracy with winding and distance sharing one polyline,
+  closing **K5**. All four gate bit-identical (fixtures 6/9, Bagger 4/12) — for steps 1 and 3 that
+  is the required outcome, and for steps 2 and 4 it is the expected one, since the measured worst
+  join residual on this corpus is 4.06e-11 cm and a 1e-5-wide boundary shell is not something
+  bbox-spread samples land in. All four are pinned by tests instead, and step 2's were verified to
+  fail against the pre-fix rule.
+- **Step 5 — rim-based closure and `maxGap` (K9/S8) — is not started**, and it is the one with
+  design content. [`TolerancePolicy.md`](TolerancePolicy.md) §8 splits it in two so that building
+  the gap measurement does not, by itself, invalidate the measurement licensing `Contains`'s
+  single-shot fast path. Read that before starting.
 - **K4** (degenerate-chord recursion probes only the parametric midpoint) and **K6** (cancellation
   in the naive quadratic formula; absolute, scale-dependent tolerances in the cone-degeneracy and
-  torus-quartic branches) are untouched.
-- **The best remaining lead is `BucketLink2`.** It is the one part that is **navigable** and still
-  has 24 *missed* crossings in `distout` (plus 48 in `distin` and 6.3% capacity drift). Everything
-  else that fails is explained by the surface set being open. Nothing fixed in Phase 1 moved it,
-  so it is a distinct defect and worth diagnosing the same way item 1 was — with a probe, before
-  any theory.
+  torus-quartic branches) are untouched. `BucketLink2` is no longer evidence for either.
+- **`BucketLink2` is resolved and is no longer a lead** — see Section 13. The two items that
+  replace it are gate ray-category soundness and Green's-theorem capacity for wire-trimmed
+  quadrics.
 - The distance and capacity columns are otherwise untouched by Phase 1 by construction.
 
 ## 13. `BucketLink2` diagnosed (2026-07-31) — the kernel was never wrong here
