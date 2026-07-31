@@ -2032,8 +2032,139 @@ BOOST_AUTO_TEST_CASE(WireTrimmedConeMatchesCone)
   compareDistance(solid, reference, {5., 0., 0.}, {-1., 0., 0.});
   compareDistance(solid, reference, {0., 0., 0.}, {1., 0., 0.});
   compareDistance(solid, reference, {-4., 0.2, -2.}, unitDirection(1., 0.05, 0.3));
-  // varying integrand -> looser quadrature tolerance
-  checkClose(solid.Capacity(), reference.Capacity(), 1.e-3);
+  // The wire-trimmed cone's capacity used to need a 1e-3 allowance for the grid quadrature; the
+  // Green's-theorem contour form is exact on this rectangle-tracing wire, so it can be held to the
+  // same tolerance as any untrimmed patch. A regression to the grid rule fails here.
+  checkClose(solid.Capacity(), reference.Capacity(), 1.e-9);
+}
+
+// Green's theorem for wire-trimmed quadrics (CodeReview_Fable.md, finding H2 in Section 13).
+//
+// A wire-trimmed patch's capacity used to be a 128x128 midpoint rule over a characteristic
+// function. That books every boundary cell whole or not at all, so it converged at O(1/N) and
+// oscillated as the staircase re-phased: on Bagger/BucketLink2, 16.004 / 17.710 / 16.927 / 17.244
+// / 17.032 cm^3 at 128 to 2048 samples per axis, against OpenCascade's 17.079. The gate's 1e-6
+// relative band was unreachable at any practical N, and the whole capacity column of the Bagger
+// gate was that and no geometry defect at all.
+//
+// The integrand does not depend on the second parameter for a cylinder, and depends on the first
+// only through sin/cos/identity for all four quadrics, so an antiderivative in u exists in closed
+// form and the area integral collapses to a contour integral around the trim wire.
+//
+// The sharpest possible check: a wire that traces exactly the parametric rectangle must give the
+// same number as the rectangle's own closed form, which is analytically exact. Anything the
+// contour form got wrong -- a sign, an orientation, a missed seam, a wrong antiderivative --
+// shows up here immediately, and the old quadrature could only ever have agreed to ~1e-2.
+BOOST_AUTO_TEST_CASE(WireTrimCapacityMatchesTheClosedForm)
+{
+  std::string error;
+  // an off-origin centre and a tilted frame, so every term of every antiderivative is exercised
+  // (C.U, C.V and C.W all non-zero) rather than cancelling
+  const surf::Vec3 centre{0.7, -1.3, 0.45};
+  const surf::Vec3 axis = surf::normalized({0.3, 0.4, 1.});
+  const surf::Vec3 reference{1., 0.2, 0.};
+  constexpr double kRelative = 1.e-12;
+
+  const auto compare = [&](const char* what, const surf::BoundedSurface& rectangle,
+                           const surf::BoundedSurface& wired) {
+    BOOST_TEST_CONTEXT(what)
+    {
+      BOOST_CHECK(!wired.capacityIsExact()); // still reported inexact: see the note below
+      const double exact = rectangle.capacityContribution();
+      const double contour = wired.capacityContribution();
+      BOOST_CHECK_GT(std::abs(exact), 1.e-6); // a zero contribution would prove nothing
+      checkClose(contour, exact, kRelative * std::abs(exact));
+    }
+  };
+
+  {
+    surf::CylindricalBoundedSurface rectangle;
+    surf::CylindricalBoundedSurface wired;
+    const double phiLow = 0.3, phiHigh = 2.4, hLow = -0.8, hHigh = 1.9;
+    BOOST_REQUIRE(rectangle.initialize(centre, axis, reference, 1.7, hLow, hHigh, phiLow, phiHigh - phiLow, false,
+                                       error));
+    BOOST_REQUIRE(wired.initialize(centre, axis, reference, 1.7, hLow, hHigh, phiLow, phiHigh - phiLow, false,
+                                   paramRectWireCurves(phiLow, phiHigh, hLow, hHigh), {}, error));
+    compare("cylinder", rectangle, wired);
+  }
+  {
+    surf::ConicalBoundedSurface rectangle;
+    surf::ConicalBoundedSurface wired;
+    const double phiLow = -0.4, phiHigh = 1.9, hLow = 0.2, hHigh = 2.1;
+    BOOST_REQUIRE(rectangle.initialize(centre, axis, reference, 1.1, 2.3, hLow, hHigh, phiLow, phiHigh - phiLow,
+                                       false, error));
+    BOOST_REQUIRE(wired.initialize(centre, axis, reference, 1.1, 2.3, hLow, hHigh, phiLow, phiHigh - phiLow, false,
+                                   paramRectWireCurves(phiLow, phiHigh, hLow, hHigh), {}, error));
+    compare("cone", rectangle, wired);
+  }
+  {
+    surf::SphericalBoundedSurface rectangle;
+    surf::SphericalBoundedSurface wired;
+    const double phiLow = 0.2, phiHigh = 2.7, thetaLow = 0.4, thetaHigh = 2.3;
+    BOOST_REQUIRE(rectangle.initialize(centre, axis, reference, 2.2, thetaLow, thetaHigh, phiLow, phiHigh - phiLow,
+                                       false, error));
+    BOOST_REQUIRE(wired.initialize(centre, axis, reference, 2.2, thetaLow, thetaHigh, phiLow, phiHigh - phiLow, false,
+                                   paramRectWireCurves(phiLow, phiHigh, thetaLow, thetaHigh), {}, error));
+    compare("sphere", rectangle, wired);
+  }
+  {
+    surf::TorusBoundedSurface rectangle;
+    surf::TorusBoundedSurface wired;
+    const double ringLow = 0.1, ringHigh = 2.2, tubeLow = -0.3, tubeHigh = 1.8;
+    BOOST_REQUIRE(rectangle.initialize(centre, axis, reference, 4., 1.4, ringLow, ringHigh - ringLow, tubeLow,
+                                       tubeHigh - tubeLow, false, error));
+    BOOST_REQUIRE(wired.initialize(centre, axis, reference, 4., 1.4, ringLow, ringHigh - ringLow, tubeLow,
+                                   tubeHigh - tubeLow, false,
+                                   paramRectWireCurves(ringLow, ringHigh, tubeLow, tubeHigh), {}, error));
+    compare("torus", rectangle, wired);
+  }
+
+  // A trim the rectangle cannot express, checked against the integrator it replaces. The midpoint
+  // rule is a genuinely independent computation -- it needs nothing of the integrand but its value
+  // -- so agreement is evidence, but only to its own O(1/N) accuracy, which is the whole reason
+  // this change exists. Refining it must walk *towards* the contour answer; that direction is the
+  // real assertion here, not either number.
+  {
+    surf::CylindricalBoundedSurface disk;
+    const double radius = 1.7;
+    const std::vector<surf::Curve2D> trim{surf::Curve2D::makeCircle({1.0, 0.2}, 0.6)};
+    BOOST_REQUIRE(disk.initialize(centre, axis, reference, radius, -2., 2., 0., surf::kTwoPi, false, trim, {},
+                                  error));
+    const double contour = disk.capacityContribution();
+
+    // the same trim, rebuilt here so the grid rule can be run over it directly
+    surf::CurveWire outerWire;
+    std::vector<surf::CurveWire> innerWires;
+    surf::Vec2 lower, upper;
+    BOOST_REQUIRE(surf::buildCurveTrim(trim, {}, outerWire, innerWires, lower, upper, error,
+                                       surf::parametricMetricOf(disk)));
+
+    const auto gridRelativeError = [&](int samples) {
+      const double grid = surf::integrateOverCurveTrim(
+        outerWire, innerWires,
+        [&disk, radius](double phi, double height) {
+          const surf::Vec3 point = disk.pointAt(phi, height);
+          return surf::dot(point, disk.normalAt(point)) * radius / 3.;
+        },
+        samples);
+      return std::abs(grid - contour) / std::abs(contour);
+    };
+    const double at128 = gridRelativeError(128);
+    const double at512 = gridRelativeError(512);
+    const double at2048 = gridRelativeError(2048);
+
+    // The grid rule confirms the contour value to its own accuracy -- an independent computation
+    // agreeing to 3e-5 is what says the antiderivative route is not just self-consistent.
+    BOOST_CHECK_LT(at512, 1.e-4);
+    BOOST_CHECK_LT(at2048, 1.e-4);
+    // But it cannot do better, and that is the point. At the shipped 128 it is off by 2e-3 --
+    // three orders outside the gate's 1e-6 band -- and refining it sixteen-fold does not fix that,
+    // because the error is not monotone: the staircase re-phases and 2048 is *worse* than 512
+    // (2.9e-5 against 2.4e-5 here; on Bagger/BucketLink2 the sequence 128..2048 runs 16.004,
+    // 17.710, 16.927, 17.244, 17.032 around a true 17.079). So no N could have been the fix.
+    BOOST_CHECK_GT(at128, 1.e-3);
+    BOOST_CHECK_GT(at2048, at512);
+  }
 }
 
 BOOST_AUTO_TEST_CASE(WireTrimmedQuadricKernels)
@@ -2095,7 +2226,8 @@ BOOST_AUTO_TEST_CASE(WireTrimmedQuadricKernels)
   BOOST_CHECK(sphereWire.containsPointOnSurface(onSphere(surf::kPi / 3., surf::kPi / 4.)));      // inside the section
   BOOST_CHECK(!sphereWire.containsPointOnSurface(onSphere(surf::kPi / 6., surf::kPi / 4.)));     // theta too small
   BOOST_CHECK(!sphereWire.containsPointOnSurface(onSphere(surf::kPi / 3., 3. * surf::kPi / 4.))); // phi outside
-  checkClose(sphereWire.capacityContribution(), sphereScalar.capacityContribution(), 1.e-3);
+  // same story on the sphere: 1e-3 was the grid rule's allowance, not the geometry's
+  checkClose(sphereWire.capacityContribution(), sphereScalar.capacityContribution(), 1.e-9);
 
   // (4) a trim spanning more than a full turn in phi is rejected
   surf::CylindricalBoundedSurface tooWide;
