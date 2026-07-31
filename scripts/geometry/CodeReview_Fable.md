@@ -638,7 +638,98 @@ verified to fail against the pre-fix code.
   any theory.
 - The distance and capacity columns are otherwise untouched by Phase 1 by construction.
 
-## 13. Environment notes (this machine)
+## 13. `BucketLink2` diagnosed (2026-07-31) — the kernel was never wrong here
+
+The "best remaining lead" of Section 12 is resolved, and it resolves *away* from the kernel. Three
+throwaway probes; no fix was needed in navigation. Two new findings replace it, both precisely
+scoped. Numbers below are from the Phase-1 baseline tree (nothing was changed to obtain them).
+
+`BucketLink2` failed the gate on three counts: 24 *missed* `distout` crossings, 48 `distin`
+disagreements, 6.3% capacity drift. It has **12 planes and 11 cylinders, no cone and no torus**,
+which already rules out two of K6's three branches by construction.
+
+**H1 — the 24 + 48 distance disagreements are an artifact of the gate, not of the solid.**
+Probe 1 asked OpenCascade to classify each of the 20 recorded offender ray origins and to list
+every crossing with its face index. Every single `distout` origin is `IN` and every single `distin`
+origin is `OUT` — that is, the *opposite* of the category the sample generator assigned. Probe 2
+then asked the exact solid and the tessellated solid the same question:
+
+- the exact solid's classification matches OpenCascade on **20 of 20**;
+- the tessellated solid is opposite on **20 of 20**;
+- and where the category is right, the exact solid's distance matches the oracle to every printed
+  digit — e.g. `distin#0` exact `DistFromOutside` = `0.143949` against oracle `0.143949`,
+  `distout#0` exact `DistFromInside` = `0.870144` against oracle `0.870144`, and so for all 20.
+
+The cause is that `sampleSets()` categorises rays with the **mesh**, and this mesh is wrong. A
+`Contains` scan along x at three of the offenders' (y, z) puts the mesh's left plate at
+`x ∈ [-2.10, -1.90]` where the BREP's is `[-1.92, -1.42]`; `O2Tessellated::Check` reports several
+hundred facets with only two neighbours, i.e. the mesh **is not watertight**, so its own parity
+classification is undefined in the shadow of its holes. The gate then asks the candidate for
+`DistFromOutside` from a point that is inside, compares it against an oracle number that is an
+*exit* distance, and books the difference as a missed surface.
+
+This is S9's failure mode one layer earlier: S9 says a wrong candidate answer can be excused by
+the mesh band; this says a *right* candidate answer can be condemned by the mesh classification.
+The fix belongs in the gate: the oracle should report its own containment for each ray origin, and
+the harness should re-label — or at minimum decline to score — a ray whose category the oracle
+contradicts. That rule is sound because it never consults the candidate.
+
+**H2 — the capacity column is entirely a quadrature artifact.** `Contains` is the query the oracle
+already agrees with 5000/5000 on this part, so probe 3 used it as the witness: a 4M-point Monte
+Carlo of the exact solid gives **17.061 ± 0.052 cm³** against OpenCascade's **17.079** (0.35σ),
+while `Capacity()` returns **16.004**. The solid is not missing material; the integrator is wrong.
+
+`integrateOverCurveTrim` (`BoundedSurface.h:1690`) is a midpoint rule over the trim's parametric
+bounding box with a hard in/out test per cell, at a fixed `samplesPerAxis = 128`. Integrating a
+characteristic function that way converges at **O(1/N)**, not O(1/N²), because every boundary cell
+is booked whole or not at all. Making `samplesPerAxis` temporarily tunable shows exactly that,
+oscillating as the staircase re-phases:
+
+| samples/axis | 128 | 256 | 512 | 1024 | 2048 | OCCT |
+| --- | --- | --- | --- | --- | --- | --- |
+| `Capacity()` | 16.004 | 17.710 | 16.927 | 17.244 | 17.032 | 17.079 |
+
+And it accounts for the whole column, across the model:
+
+| part | 128 | 1024 | OCCT |
+| --- | --- | --- | --- |
+| `BasePin` | 31.415927 | 31.415927 | 31.415927 |
+| `Base` | 241.280940 | 241.280940 | 241.280940 |
+| `Boom` | 1204.575249 | 1204.575249 | 1204.575249 |
+| `Stick` | 333.942179 | 333.942179 | 333.942179 |
+| `BoomCylinderInner` | 23.029627 | 22.927630 | 22.989411 |
+| `BoomCylinderOuter` | 48.150825 | 48.243639 | 48.197441 |
+| `BucketCylinderInner` | 9.050783 | 9.042326 | 9.045578 |
+| `BucketCylinderOuter` | 16.338176 | 15.896115 | 16.011732 |
+| `BucketLink1` | 13.065863 | 12.292618 | 12.304424 |
+| `BucketLink2` | 16.003995 | 17.243583 | 17.079260 |
+| `StickCylinderInner` | 23.061991 | 22.926726 | 22.989411 |
+| `StickCylinderOuter` | 48.071733 | 48.243921 | 48.197441 |
+
+The four parts that agree with OpenCascade to all printed digits are exactly the four with **no**
+wire-trimmed quadric — their contribution is the closed form and is identical at both resolutions.
+Every part that deviates has wire-trimmed quadrics and moves toward the oracle under refinement.
+**No geometry defect is involved anywhere in the capacity column.**
+
+The real fix is not a bigger N — at O(1/N) the gate's 1e-6 relative band is unreachable — but
+Green's theorem, which is already the mechanism the planar wires use. For a cylinder the integrand
+`(X·n)·r/3 = (r/3)(C·u cos φ + C·v sin φ + r)` does not depend on `h`, so an antiderivative in φ
+exists in closed form and the area integral collapses to a contour integral around the trim wire,
+evaluated by the same Gauss-Legendre the planar `signedAreaContribution` already runs. That makes
+the wire-trimmed quadric capacity exact for line and arc trims and spectrally accurate for
+B-splines — and it would let `capacityIsExact()` finally mean something. The same reduction exists
+for the cone, sphere and torus.
+
+Until then, note the honest statement: `Capacity()` on a wire-trimmed quadric is a ~1e-2 relative
+number that **does not say so** — `capacityIsExact()` exists but is not exposed through
+`Capacity()`, which Section 6's support matrix already flagged.
+
+**Consequences for the record.** K6 and K4 remain untouched, but `BucketLink2` is no longer
+evidence for either of them, and the "distinct defect that no current theory covers" is retired.
+The two items that replace it are above: gate ray-category soundness, and Green's-theorem capacity
+for wire-trimmed quadrics.
+
+## 14. Environment notes (this machine)
 
 - Build tree `/home/swenzel/alisw/sw/BUILD/O2-latest/O2` builds this checkout (source symlink);
   the branch's test target `o2-test-detectorsbase-BVHSurfaceSolid` appears after a CMake re-run.
