@@ -102,19 +102,116 @@ inline BVHScalar truncateRoundUp(double bound)
   return static_cast<BVHScalar>(biased);
 }
 
-/// Whether \a hit is an entering (\a wantEntering) or an exiting crossing for a ray travelling
-/// along \a rayDirection. The outward normal opposes the direction when entering. Grazes within
-/// kTolerance of tangency are neither and are discarded: the surface is not actually crossed
-/// there, and counting one would report a spurious boundary to the navigator.
-template <bool wantEntering>
-inline bool isWantedCrossing(const RayHit& hit, const Vec3& rayDirection)
+/// Lower bound on the ray parameter for the *distance* queries. Parity starts just past the
+/// origin so it never re-counts the surface the point is sitting on, but a distance query
+/// standing on a face has to be able to see that face's t = 0 crossing: answering "infinitely
+/// far" to a navigator that is on the wall is how it tunnels through the geometry. So hits are
+/// admitted from just *behind* the origin and the answer is clamped to zero, which is the
+/// convention ROOT's own primitives follow. See CodeReview_Fable.md S3.
+constexpr double kDistanceRayTolerance = -kRayTolerance;
+
+/// Which side of the surface a single hit is on, as seen by a ray travelling along
+/// \a rayDirection: the outward normal opposes the direction when entering. Within kTolerance of
+/// tangency it is neither -- the surface is not actually crossed there.
+///
+/// Parity and the distance queries share this, which they did not: parity used a bare sign test
+/// and the distance queries a tolerance band, so the two disagreed about exactly the hits that
+/// are hardest to get right (CodeReview_Fable.md S5).
+enum class CrossingSense { Entering,
+                           Exiting,
+                           Tangential };
+
+/// Half-width of the window sameIntersection() treats as one intersection at ray parameter
+/// \a distance, doubled for headroom. A per-surface search bound raised by this can never cut a
+/// hit that would have clustered with one at \a distance.
+inline double clusterMargin(double distance)
+{
+  return 2. * kIntersectionTolerance * std::max(1., std::abs(distance));
+}
+
+inline CrossingSense crossingSense(const RayHit& hit, const Vec3& rayDirection)
 {
   const double alignment = dot(hit.normal, rayDirection);
-  if constexpr (wantEntering) {
-    return alignment < -kTolerance;
-  } else {
-    return alignment > kTolerance;
+  if (alignment < -kTolerance) {
+    return CrossingSense::Entering;
   }
+  if (alignment > kTolerance) {
+    return CrossingSense::Exiting;
+  }
+  return CrossingSense::Tangential;
+}
+
+/// Sort \a hits and walk their clusters in increasing distance, calling
+/// \a visitor(firstIndex, endIndex, sense) once per cluster; the visitor returns false to stop.
+///
+/// Near-equal hits are clustered because a shared edge or vertex is seen by several surfaces at
+/// the same point. A cluster whose members all enter, or all exit, is one genuine crossing. A
+/// cluster carrying both is a *graze*: the ray touched an edge and came back out on the side it
+/// came from, so it crossed nothing, and the cluster reports Tangential. That distinction is what
+/// keeps a rim graze from counting as a boundary -- and it is why this walk is shared with the
+/// distance queries, which used to classify every hit on its own and so disagreed with parity
+/// about the same ray (CodeReview_Fable.md S4).
+template <typename ClusterVisitor>
+void forEachCrossingCluster(std::vector<RayHit>& hits, const Vec3& rayDirection, ClusterVisitor&& visitor)
+{
+  std::sort(hits.begin(), hits.end(),
+            [](const RayHit& firstHit, const RayHit& secondHit) { return firstHit.distance < secondHit.distance; });
+
+  size_t hitIndex = 0;
+  while (hitIndex < hits.size()) {
+    bool entering = false;
+    bool exiting = false;
+    size_t clusterEnd = hitIndex;
+    while (clusterEnd < hits.size() &&
+           (clusterEnd == hitIndex || sameIntersection(hits[clusterEnd].distance, hits[clusterEnd - 1].distance))) {
+      switch (crossingSense(hits[clusterEnd], rayDirection)) {
+        case CrossingSense::Entering:
+          entering = true;
+          break;
+        case CrossingSense::Exiting:
+          exiting = true;
+          break;
+        case CrossingSense::Tangential:
+          break;
+      }
+      ++clusterEnd;
+    }
+    // both, or neither: nothing was crossed
+    const CrossingSense sense = entering == exiting ? CrossingSense::Tangential
+                                                    : (entering ? CrossingSense::Entering : CrossingSense::Exiting);
+    if (!visitor(hitIndex, clusterEnd, sense)) {
+      return;
+    }
+    hitIndex = clusterEnd;
+  }
+}
+
+/// Distance to the nearest genuine entering (\a wantEntering) or exiting crossing in \a hits, or
+/// Big when there is none. \a grazedFirst reports whether a cancelled (grazing) cluster was passed
+/// on the way, which the BVH query needs to know: it prunes the traversal at the nearest
+/// *candidate* hit, and a candidate that then cancels means the real answer may lie in the part of
+/// the ray that pruning threw away.
+template <bool wantEntering>
+double nearestCrossingInHits(std::vector<RayHit>& hits, const Vec3& rayDirection, bool& grazedFirst)
+{
+  constexpr CrossingSense wanted = wantEntering ? CrossingSense::Entering : CrossingSense::Exiting;
+  double distance = TGeoShape::Big();
+  grazedFirst = false;
+  forEachCrossingCluster(hits, rayDirection, [&](size_t firstIndex, size_t, CrossingSense sense) {
+    if (sense == CrossingSense::Tangential) {
+      grazedFirst = true;
+      return true;
+    }
+    if (sense != wanted) {
+      return true;
+    }
+    // clusters come in increasing distance, so the first match is the answer. Hits are admitted
+    // from just behind the origin (kDistanceRayTolerance), so clamp: a boundary crossing is a
+    // zero step, never a negative one.
+    distance = std::max(0., hits[firstIndex].distance);
+    return false;
+  });
+  return distance;
 }
 
 /// @name Persistent surface records
@@ -277,29 +374,13 @@ bool loadPolygonWires(const BVHSurfaceRecord& record, std::vector<O2BVHSurfaceSo
 // parity.
 bool oddCrossingParity(std::vector<RayHit>& hits, const Vec3& rayDirection)
 {
-  std::sort(hits.begin(), hits.end(),
-            [](const RayHit& firstHit, const RayHit& secondHit) { return firstHit.distance < secondHit.distance; });
-
   int crossings = 0;
-  size_t hitIndex = 0;
-  while (hitIndex < hits.size()) {
-    bool entering = false;
-    bool exiting = false;
-    size_t clusterEnd = hitIndex;
-    while (clusterEnd < hits.size() &&
-           (clusterEnd == hitIndex || sameIntersection(hits[clusterEnd].distance, hits[clusterEnd - 1].distance))) {
-      if (dot(hits[clusterEnd].normal, rayDirection) < 0.) {
-        entering = true;
-      } else {
-        exiting = true;
-      }
-      ++clusterEnd;
-    }
-    if (entering != exiting) {
+  forEachCrossingCluster(hits, rayDirection, [&](size_t, size_t, CrossingSense sense) {
+    if (sense != CrossingSense::Tangential) {
       ++crossings;
     }
-    hitIndex = clusterEnd;
-  }
+    return true;
+  });
   return (crossings & 1) != 0;
 }
 } // namespace
@@ -390,37 +471,63 @@ struct O2BVHSurfaceSolid::Impl {
   double nearestCrossing(const Vec3& rayOrigin, const Vec3& rayDirection, double stepmax) const
   {
     static thread_local std::vector<RayHit> surfaceHits;
+    static thread_local std::vector<RayHit> collectedHits;
+    constexpr CrossingSense wanted = wantEntering ? CrossingSense::Entering : CrossingSense::Exiting;
 
-    double bestDistance = TGeoShape::Big();
-    BVHRay ray(BVHVec3(rayOrigin.xCoord, rayOrigin.yCoord, rayOrigin.zCoord),
-               BVHVec3(rayDirection.xCoord, rayDirection.yCoord, rayDirection.zCoord), 0.f,
-               truncateRoundUp(stepmax));
-    static constexpr bool useRobustTraversal = true;
-    const bool pruning = gRayTMaxPruning;
+    // Deciding whether a hit is a real crossing needs its *neighbours*, since a cluster carrying
+    // both an entering and an exiting hit is a graze and crosses nothing. So every hit is
+    // collected and classified afterwards, not accepted or rejected on its own.
+    //
+    // That interacts with the tmax tightening: the traversal still shrinks to the nearest
+    // candidate crossing, which is what makes the query cheap, but if that candidate then turns
+    // out to be a graze the answer lies somewhere pruning already discarded. Rare enough to
+    // handle by simply redoing the query without pruning, and doing so keeps the optimization an
+    // optimization -- the two passes must return the same number.
+    for (int attempt = 0; attempt < 2; ++attempt) {
+      const bool pruning = gRayTMaxPruning && attempt == 0;
+      collectedHits.clear();
 
-    bvh::v2::GrowingStack<BVH::Index> stack;
-    // ray is captured by reference on purpose: bvh2 takes it as const Ray&, but the object
-    // itself is ours and mutable, and the traversal reads tmax afresh at every node test.
-    bvh->intersect<false, useRobustTraversal>(
-      ray, bvh->get_root().index, stack, [&](size_t beginPrimitive, size_t endPrimitive) {
-        for (size_t primitive = beginPrimitive; primitive < endPrimitive; ++primitive) {
-          const BoundedSurface& surface = *surfaces[bvh->prim_ids[primitive]];
-          ++gRayCandidateCount;
-          surfaceHits.clear();
-          surface.appendIntersections(rayOrigin, rayDirection, kRayTolerance, std::min(stepmax, bestDistance),
-                                      surfaceHits);
-          for (const auto& hit : surfaceHits) {
-            if (isWantedCrossing<wantEntering>(hit, rayDirection) && hit.distance < bestDistance) {
-              bestDistance = hit.distance;
+      double bestCandidate = TGeoShape::Big();
+      BVHRay ray(BVHVec3(rayOrigin.xCoord, rayOrigin.yCoord, rayOrigin.zCoord),
+                 BVHVec3(rayDirection.xCoord, rayDirection.yCoord, rayDirection.zCoord), 0.f,
+                 truncateRoundUp(stepmax));
+      static constexpr bool useRobustTraversal = true;
+
+      bvh::v2::GrowingStack<BVH::Index> stack;
+      // ray is captured by reference on purpose: bvh2 takes it as const Ray&, but the object
+      // itself is ours and mutable, and the traversal reads tmax afresh at every node test.
+      bvh->intersect<false, useRobustTraversal>(
+        ray, bvh->get_root().index, stack, [&](size_t beginPrimitive, size_t endPrimitive) {
+          for (size_t primitive = beginPrimitive; primitive < endPrimitive; ++primitive) {
+            const BoundedSurface& surface = *surfaces[bvh->prim_ids[primitive]];
+            ++gRayCandidateCount;
+            surfaceHits.clear();
+            // the per-surface bound keeps a margin past the current candidate, so the candidate's
+            // own cluster partners -- which decide whether it is a crossing at all -- are never
+            // the hits that get cut
+            const double bound =
+              pruning ? std::min(stepmax, bestCandidate + clusterMargin(bestCandidate)) : stepmax;
+            surface.appendIntersections(rayOrigin, rayDirection, kDistanceRayTolerance, bound, surfaceHits);
+            for (const auto& hit : surfaceHits) {
+              collectedHits.push_back(hit);
+              if (crossingSense(hit, rayDirection) == wanted && hit.distance < bestCandidate) {
+                bestCandidate = hit.distance;
+              }
             }
           }
-        }
-        if (pruning && bestDistance < stepmax) {
-          ray.tmax = std::min(ray.tmax, truncateRoundUp(bestDistance + kBVHBoxTolerance));
-        }
-        return false; // keep traversing; the shrunk tmax does the pruning
-      });
-    return bestDistance;
+          if (pruning && bestCandidate < stepmax) {
+            ray.tmax = std::min(ray.tmax, truncateRoundUp(bestCandidate + kBVHBoxTolerance));
+          }
+          return false; // keep traversing; the shrunk tmax does the pruning
+        });
+
+      bool grazedFirst = false;
+      const double distance = nearestCrossingInHits<wantEntering>(collectedHits, rayDirection, grazedFirst);
+      if (!pruning || !grazedFirst) {
+        return distance;
+      }
+    }
+    return TGeoShape::Big(); // unreachable: the second attempt never prunes
   }
 
   /// Same query without the BVH: visit every surface. Oracle and baseline for nearestCrossing.
@@ -428,20 +535,18 @@ struct O2BVHSurfaceSolid::Impl {
   double nearestCrossingLoop(const Vec3& rayOrigin, const Vec3& rayDirection, double stepmax) const
   {
     static thread_local std::vector<RayHit> surfaceHits;
+    static thread_local std::vector<RayHit> collectedLoopHits;
 
-    double bestDistance = TGeoShape::Big();
+    // No pruning at all here: this is the oracle the accelerated query is checked against, so it
+    // trades the shrinking upper bound for having every hit in hand and needing no retry.
+    collectedLoopHits.clear();
     for (const auto& surface : surfaces) {
       surfaceHits.clear();
-      // the shrinking upper bound prunes surfaces that cannot beat the current best hit
-      surface->appendIntersections(rayOrigin, rayDirection, kRayTolerance, std::min(stepmax, bestDistance),
-                                   surfaceHits);
-      for (const auto& hit : surfaceHits) {
-        if (isWantedCrossing<wantEntering>(hit, rayDirection) && hit.distance < bestDistance) {
-          bestDistance = hit.distance;
-        }
-      }
+      surface->appendIntersections(rayOrigin, rayDirection, kDistanceRayTolerance, stepmax, surfaceHits);
+      collectedLoopHits.insert(collectedLoopHits.end(), surfaceHits.begin(), surfaceHits.end());
     }
-    return bestDistance;
+    bool grazedFirst = false;
+    return nearestCrossingInHits<wantEntering>(collectedLoopHits, rayDirection, grazedFirst);
   }
 
   /// Parity of the crossings of the ray (\a point, \a direction) with the whole surface set: the
@@ -1286,16 +1391,20 @@ bool O2BVHSurfaceSolid::Contains(const Double_t* point) const
     return false;
   }
 
+  if (fImpl->bvh == nullptr) {
+    // Before CloseShape there is no acceleration structure *and* no bounding box: fDX/fDY/fDZ and
+    // fOrigin are all still zero. So this fallback has to come first -- with the box pre-check
+    // ahead of it, every point further than 1e-9 from the origin was rejected outright and the
+    // documented fallback could never run, which disabled Contains() on any solid that had not
+    // been closed yet. See CodeReview_Fable.md S2.
+    return Contains_Loop(point);
+  }
+
   const Vec3 testPoint = makeVec3(point);
   if (std::abs(testPoint.xCoord - fOrigin[0]) > fDX + kTolerance ||
       std::abs(testPoint.yCoord - fOrigin[1]) > fDY + kTolerance ||
       std::abs(testPoint.zCoord - fOrigin[2]) > fDZ + kTolerance) {
     return false;
-  }
-
-  if (fImpl->bvh == nullptr) {
-    // before CloseShape there is no acceleration structure yet; stay usable via the plain loop
-    return Contains_Loop(point);
   }
 
   // boundary policy: a point within tolerance of any surface patch counts as inside

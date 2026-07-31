@@ -2869,3 +2869,170 @@ BOOST_AUTO_TEST_CASE(ContainsReshootsThroughSurfaceGaps)
     }
   }
 }
+
+
+namespace
+{
+// An L-shaped prism: the adversarial fixture the review found missing (CodeReview_Fable.md S4,
+// "no concave fixture exists"). Its footprint is ([0,3]x[0,1]) union ([0,1]x[1,2]) extruded over
+// z in [0, height], so it has a *reflex* (concave) vertical edge at x = 1, y = 1 -- the one place
+// where a ray can touch the boundary from inside and stay inside, which no convex fixture can
+// reproduce. Built from eight planar faces with outward normals, so it is closed and consistently
+// oriented.
+std::unique_ptr<SurfaceSolid> makeLPrismSolid(const char* name, double height = 1.)
+{
+  // footprint, counter-clockwise; (1,1) is the reflex vertex
+  const std::vector<Point2D> footprint{{0., 0.}, {3., 0.}, {3., 1.}, {1., 1.}, {1., 2.}, {0., 2.}};
+
+  auto solid = std::make_unique<SurfaceSolid>(name);
+
+  // bottom (outward normal -z) and top (+z); axisU x axisV fixes the normal
+  std::vector<Point2D> bottomWire;
+  bottomWire.reserve(footprint.size());
+  for (const auto& vertex : footprint) {
+    bottomWire.push_back({vertex[1], vertex[0]}); // (u, v) = (y, x) so that axisU x axisV = -z
+  }
+  BOOST_REQUIRE(solid->AddPlanarSurface({0., 0., 0.}, {0., 1., 0.}, {1., 0., 0.}, bottomWire));
+  BOOST_REQUIRE(solid->AddPlanarSurface({0., 0., height}, {1., 0., 0.}, {0., 1., 0.}, footprint));
+
+  // one vertical wall per footprint edge; axisU along the edge and axisV = +z put the normal at
+  // (dy, -dx, 0), which points out of a counter-clockwise footprint
+  for (size_t index = 0; index < footprint.size(); ++index) {
+    const auto& start = footprint[index];
+    const auto& end = footprint[(index + 1) % footprint.size()];
+    const double deltaU = end[0] - start[0];
+    const double deltaV = end[1] - start[1];
+    const double length = std::hypot(deltaU, deltaV);
+    BOOST_REQUIRE(solid->AddPlanarSurface({start[0], start[1], 0.}, {deltaU / length, deltaV / length, 0.},
+                                          {0., 0., 1.}, rectangleWire(length, height)));
+  }
+  solid->CloseShape();
+  return solid;
+}
+} // namespace
+
+// S2: the bounding-box pre-check ran *before* the documented "no BVH yet, fall back to the plain
+// loop" branch. Before CloseShape() the box is still all zeros, so the pre-check rejected every
+// point outside a 1e-9 cube at the origin and the fallback was unreachable -- Contains() was
+// effectively disabled on any solid that had not been closed yet.
+BOOST_AUTO_TEST_CASE(ContainsWorksBeforeCloseShape)
+{
+  SurfaceSolid box("preCloseBox");
+  addBoxSurfaces(box, 1., 2., 3.);
+  BOOST_REQUIRE(!box.HasBVH()); // the premise: no acceleration structure and no bounding box yet
+
+  for (const auto& point : probeGrid(4.5, 5)) {
+    BOOST_TEST_CONTEXT("point = (" << point[0] << ", " << point[1] << ", " << point[2] << ")")
+    {
+      const bool inside = std::abs(point[0]) < 1. && std::abs(point[1]) < 2. && std::abs(point[2]) < 3.;
+      BOOST_CHECK_EQUAL(box.Contains(point.data()), inside);
+      BOOST_CHECK_EQUAL(box.Contains(point.data()), box.Contains_Loop(point.data()));
+    }
+  }
+}
+
+// S3: a point *on* a face is inside for Contains, but its t = 0 exit was below the minimum ray
+// parameter and therefore invisible to DistFromInside, which then returned Big. A navigator that
+// asks "how far to the wall" while standing on the wall and is told "never" tunnels straight
+// through the geometry. ROOT's own primitives answer 0 here, and so must this.
+BOOST_AUTO_TEST_CASE(BoundaryPointsAgreeBetweenContainsAndDistances)
+{
+  const auto box = makeBoxSolid("boundaryPolicyBox", 1., 2., 3.);
+  const std::array<double, 3> onFace{1., 0.5, 0.5}; // exactly on the +x face
+  const std::array<double, 3> outward{1., 0., 0.};
+  const std::array<double, 3> inward{-1., 0., 0.};
+
+  BOOST_CHECK(box->Contains(onFace.data())); // documented policy: on a face counts as inside
+
+  TGeoBBox reference("boundaryPolicyReference", 1., 2., 3.);
+  BOOST_CHECK_EQUAL(box->DistFromInside(onFace.data(), outward.data(), 3), 0.);
+  BOOST_CHECK_EQUAL(box->DistFromOutside(onFace.data(), inward.data(), 3), 0.);
+  checkClose(box->DistFromInside(onFace.data(), outward.data(), 3),
+             reference.DistFromInside(onFace.data(), outward.data(), 3));
+  checkClose(box->DistFromOutside(onFace.data(), inward.data(), 3),
+             reference.DistFromOutside(onFace.data(), inward.data(), 3));
+
+  // going the other way the far wall is still the answer, so the fix is not "always return 0"
+  checkClose(box->DistFromInside(onFace.data(), inward.data(), 3), 2.);
+
+  // the BVH and loop paths must agree on all of it
+  for (const auto& direction : {outward, inward}) {
+    checkDistanceAgainstLoop(*box, onFace, direction);
+  }
+}
+
+// S4 / S5: a ray that only *touches* the boundary has not crossed it. Contains() knows this --
+// near-equal hits are clustered and a cluster carrying both an entering and an exiting hit
+// contributes even parity -- but the distance queries classified every hit on its own, so they
+// reported the touch as a crossing. The two then disagree about the same ray: DistFromOutside
+// hands the navigator a step to the touch point, Contains says it is still outside once it gets
+// there, and the navigator takes zero-length steps forever.
+//
+// Both flavours are covered. A convex edge graze (box) is the outside-facing case, and the L-prism
+// reflex edge is the inside-facing one, which no convex solid can produce: there the ray leaves
+// and re-enters the material at a single point and must be reported as never having left.
+BOOST_AUTO_TEST_CASE(EdgeGrazesAreNotCrossings)
+{
+  const double invSqrt2 = 1. / std::sqrt(2.);
+
+  // --- convex: touch the box edge x = +1, y = +2 and stay outside on both sides of the touch
+  const auto box = makeBoxSolid("grazeBox", 1., 2., 3.);
+  const std::array<double, 3> grazeDirection{invSqrt2, -invSqrt2, 0.};
+  const std::array<double, 3> grazeOrigin{1. - 5. * invSqrt2, 2. + 5. * invSqrt2, 0.};
+  BOOST_REQUIRE(!box->Contains(grazeOrigin.data()));
+
+  // a point just past the touch is still outside, so nothing was entered ...
+  const std::array<double, 3> pastTouch{1. + 1.e-3 * invSqrt2, 2. - 1.e-3 * invSqrt2, 0.};
+  BOOST_REQUIRE(!box->Contains(pastTouch.data()));
+  // ... and the distance query must say so too
+  BOOST_CHECK_EQUAL(box->DistFromOutside(grazeOrigin.data(), grazeDirection.data(), 3), TGeoShape::Big());
+  BOOST_CHECK_EQUAL(box->DistFromOutside_Loop(grazeOrigin.data(), grazeDirection.data()), TGeoShape::Big());
+
+  // --- concave: the L-prism's reflex edge at x = 1, y = 1
+  const auto prism = makeLPrismSolid("grazePrism");
+  BOOST_REQUIRE(prism->IsNavigable());
+  checkClose(prism->Capacity(), 4.); // 3x1 plus 1x1, extruded over unit height
+
+  // a ray through the reflex edge along (1,-1): inside before the touch, inside after it, so the
+  // touch is not an exit. The real exit is where it leaves the long arm at y = 0.
+  const std::array<double, 3> reflexDirection{invSqrt2, -invSqrt2, 0.};
+  const std::array<double, 3> reflexOrigin{1. - 0.5 * invSqrt2, 1. + 0.5 * invSqrt2, 0.5};
+  BOOST_REQUIRE(prism->Contains(reflexOrigin.data()));
+  const std::array<double, 3> pastReflex{1. + 1.e-3 * invSqrt2, 1. - 1.e-3 * invSqrt2, 0.5};
+  BOOST_REQUIRE(prism->Contains(pastReflex.data())); // still inside: the touch was not an exit
+
+  const double touchDistance = 0.5;
+  const double exitDistance = 0.5 + std::sqrt(2.); // on to (2, 0, 0.5), in the middle of the y = 0 wall
+  const double reported = prism->DistFromInside(reflexOrigin.data(), reflexDirection.data(), 3);
+  BOOST_CHECK_GT(reported, touchDistance + 1.e-6); // the touch is not the answer ...
+  checkClose(reported, exitDistance);              // ... the far wall is
+  BOOST_CHECK_EQUAL(prism->DistFromInside_Loop(reflexOrigin.data(), reflexDirection.data()), reported);
+}
+
+// The concave fixture earns its keep beyond the single grazing ray: the whole sweep battery is
+// run on it, since every invariant the convex fixtures pin (BVH == loop, direction-independent
+// parity, Contains consistent with the distance answers) is weaker on shapes with no reflex edge.
+BOOST_AUTO_TEST_CASE(LPrismSweeps)
+{
+  const auto prism = makeLPrismSolid("sweepPrism");
+  BOOST_REQUIRE(prism->IsNavigable());
+
+  sweepDistanceAgainstLoop(*prism, 3.5, 5);
+
+  const auto directions = spiralDirections(13);
+  for (const auto& point : probeGrid(3.5, 7)) {
+    const bool inside = prism->Contains(point.data());
+    BOOST_TEST_CONTEXT("point = (" << point[0] << ", " << point[1] << ", " << point[2] << ")")
+    {
+      BOOST_CHECK_EQUAL(prism->Contains_Loop(point.data()), inside);
+      for (const auto& direction : directions) {
+        BOOST_CHECK_EQUAL(prism->ContainsAlongDirection(point.data(), direction.data()), inside);
+      }
+      // the closed-form answer for the extruded L footprint
+      const bool expected = point[2] > 0. && point[2] < 1. &&
+                            ((point[0] > 0. && point[0] < 3. && point[1] > 0. && point[1] < 1.) ||
+                             (point[0] > 0. && point[0] < 1. && point[1] >= 1. && point[1] < 2.));
+      BOOST_CHECK_EQUAL(inside, expected);
+    }
+  }
+}
