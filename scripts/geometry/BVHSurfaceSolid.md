@@ -1231,3 +1231,54 @@ matching `kWireJoinTolerance = 1e-5` (both looser than the `1e-9` boundary toler
 	session used a scratch folder. And a ROOT macro is the wrong vehicle for a quick kernel probe on
 	this machine (cling trips over unrelated headers); compiling a 40-line `.cxx` against
 	`$B/stage/lib -lO2DetectorsBase` takes a minute and just works.
+- 2026-07-31: **`BucketLink2` diagnosed, and Phase 1 item 4 steps 1-4 of five** — commits
+  `5716d0070d`, `1bc5c4fbc9`, `9f45887ef7`, `cacd64e4a5`, `f612f895a9`. Full account in
+  [`CodeReview_Fable.md`](CodeReview_Fable.md) **Section 13** (the diagnosis) and
+  [`TolerancePolicy.md`](TolerancePolicy.md) §5 (the four steps, with their measurements).
+  `ctest -R BVHSurfaceSolid` green, **53 cases** (from 48). Tree clean.
+
+	**The best remaining lead turned out not to be a kernel defect at all.** `BucketLink2` was the
+	only navigable Bagger part still failing the gate — 24 missed `distout` crossings, 48 `distin`,
+	6.3% capacity drift — and no theory covered it. Three throwaway probes settled it. Its 24 + 48
+	distance disagreements are an artifact of the *gate*: the sample generator assigns a ray to the
+	"outside" or "inside" category using the tessellated reference, and that mesh is not watertight
+	(its own `Check` reports hundreds of two-neighbour facets) and puts the part's left plate half a
+	centimetre off. OpenCascade classifies all 20 recorded offender origins opposite to their
+	assigned category; the exact solid agrees with OpenCascade on **20 of 20**, and where the
+	category is right its distances match the oracle to every printed digit. The gate was asking
+	`DistFromOutside` of an interior point and comparing it against an exit distance. And the 6.3%
+	capacity drift is **quadrature, not geometry**: a 4M-point Monte Carlo of the exact solid gives
+	17.061 ± 0.052 cm³ against OpenCascade's 17.079 while `Capacity()` returns 16.004.
+	`integrateOverCurveTrim` is a fixed-128 midpoint rule over a characteristic function, so it
+	converges at O(1/N); across the whole model the only four parts whose capacity matches the
+	oracle exactly are the only four with no wire-trimmed quadric. So `BucketLink2` is not evidence
+	for K4 or K6 and is no longer a lead; two precisely-scoped items replace it (gate ray-category
+	soundness, and Green's-theorem capacity for wire-trimmed quadrics).
+
+	**Phase 1 item 4, steps 1-4.** Every surface now reports its first fundamental form
+	(`parametricMetric`), so a parametric separation can be turned into the length it actually
+	spans. The wire join checks in the kernel *and* in the loader go through it and compare against
+	one constant in cm, closing **K3, K12 and S10**: three places used to decide the same question
+	with three different rules — 1e-5, 1e-9 and a bare per-coordinate 1e-5 — none of them a
+	distance, although one extractor feeds all three. The constant moved 1e-5 → 1e-6 cm, measured
+	rather than assumed (690 joins across both corpora, worst residual **4.06e-11 cm**). Sidecar
+	**version 2** carries the model's own declared tolerance (`Bagger.step`: 1e-8 cm) so the kernel
+	stops guessing what epsilon two faces of an imported solid should agree to. And the on-boundary
+	band is sized from the representation's real accuracy instead of optimism, closing **K5**: a
+	1e-9 band around a 1e-5 polyline made `Boundary` unreachable for every B-spline trim, and
+	winding and distance measured against two different polylines, which is now one.
+
+	**All four steps gate bit-identical** (fixtures 6/9, Bagger 4/12, `contains` 0 and 2). For steps
+	1 and 3 that is the required outcome. For steps 2 and 4 it is the *expected* one and not
+	evidence that nothing changed — no face on this corpus was ever near either join threshold, and
+	a 1e-5-wide boundary shell is not something bbox-spread samples land in. Each is pinned by tests
+	instead, and step 2's two tests were verified to fail against the pre-fix rule (five assertions,
+	each named in the test's own comments).
+
+	**Where to pick up.** Step 5 — rim-based closure and `maxGap` (K9/S8) — is the only Phase 1 work
+	left, and `TolerancePolicy.md` **§8** now splits it in two: build the rim gap measurement and
+	report it while changing no verdict (the gate must stay bit-identical, which is a real check
+	that it has not leaked into one), and only then let it decide navigability, in the same commit
+	as the mandatory direction-independence sweep. That split exists because a closure criterion
+	that succeeds more often moves solids onto `Contains`'s single-shot fast path, whose licence is
+	a measurement taken while the closure check under-reported `Reliable`.

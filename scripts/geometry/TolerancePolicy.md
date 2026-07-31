@@ -1,13 +1,17 @@
 # Tolerance policy and the closure criterion — plan for Phase 1 item 4
 
-Status: **not started.** Written 2026-07-31 at the end of the session that completed Phase 1
-items 1-3 (see [`CodeReview_Fable.md`](CodeReview_Fable.md) Section 12). This is the last
-outstanding Phase 1 item; Phase 2 should not start before it, because Phase 2's whole premise is
-that "closed" becomes a statement you can act on.
+Status: **steps 1-4 of five are done** (2026-07-31, commits `1bc5c4fbc9`, `9f45887ef7`,
+`cacd64e4a5`, `f612f895a9`). **Step 5 — rim-based closure and `maxGap` — is not started**, and it
+is the one with design content. See §5 for the state of each step and §8 for what step 5 now looks
+like after the first four; §8 is the part to read before starting it.
+
+This is the last outstanding Phase 1 item; Phase 2 should not start before it, because Phase 2's
+whole premise is that "closed" becomes a statement you can act on.
 
 This document covers findings **K3, K5, K9, K12, S8 and S10** of the review, which are all one
 problem seen from six places: *the code compares distances that are not distances*, and then
-judges closure by exact equality of numbers it never had reason to expect to be equal.
+judges closure by exact equality of numbers it never had reason to expect to be equal. K3, K5,
+K12 and S10 are closed; **K9 and S8 are what step 5 is for.**
 
 Read [`CodeReview_Fable.md`](CodeReview_Fable.md) Sections 5, 6 and 12 first.
 
@@ -38,7 +42,11 @@ capacity for wire-trimmed quadrics. Neither blocks the work below.
 
 ## 1. What is actually wrong
 
-### 1.1 Distances in mixed units (K3, K12, S10)
+> **Historical, as of the state before steps 1-4.** §1.1 and §1.2 are fixed; their file:line
+> references are pre-fix and will not resolve against the current tree. §1.3 is still true and is
+> what step 5 addresses. Kept as written because the diagnosis is the argument for the design.
+
+### 1.1 Distances in mixed units (K3, K12, S10) — fixed in step 2
 
 Quadric trims live in parametric domains whose two coordinates have different units and different
 physical meaning:
@@ -77,7 +85,7 @@ Note the model is **not** on this machine — `scripts/geometry/STEP_examples/` 
 synthetically instead (see the first test in §4.3); the measured numbers above are the
 acceptance target.
 
-### 1.2 A boundary band tighter than the thing it measures (K5)
+### 1.2 A boundary band tighter than the thing it measures (K5) — fixed in step 4
 
 `CurveWire::classify` returns `WireClassification::Boundary` when a point is within `kTolerance`
 (1e-9) of a trim curve. For a B-spline trim the curve it measures against is the *flattened
@@ -91,7 +99,7 @@ cache), so the two can disagree about the same point.
 This is the same defect as K3 wearing a different hat, and it needs the same metric: the band has
 to be expressed as a *length* and set from the representation's actual accuracy.
 
-### 1.3 A closure criterion that cannot succeed (K9, S8)
+### 1.3 A closure criterion that cannot succeed (K9, S8) — still open, this is step 5
 
 `validateClosure` (`BoundedSurface.h:3919`) quantizes 3D vertices onto a 1e-7 cm lattice
 (`kClosureQuantum`) and matches *chord endpoints* by exact equality of the lattice key. Two
@@ -322,21 +330,30 @@ For every part in both models, over the full sample set, `ContainsAlongDirection
 
 ---
 
-## 5. Suggested order
+## 5. The five steps, and where they stand
 
 Each step is a commit, gated before and after.
 
-1. **`parametricMetric` on all six surface classes, plus tests.** Pure addition, no behaviour
-   change. The gate must be bit-identical — if it is not, the metric is wrong.
-2. **Apply it to the wire join checks** (kernel and IO), retiring `kWireJoinTolerance` and closing
-   K12. Expect `contains` unchanged and possibly more faces accepted.
-3. **Sidecar v2 + model tolerance**, reader and writer, both versions loading.
-4. **The on-boundary band (K5)**, including collapsing the two polylines into one.
-5. **Rim-based closure + `maxGap` (K9/S8)**, then the §4.2 sweep, then reconcile
-   `containsByParity`'s gating with what the sweep says.
-
-Steps 1-3 are mechanical and low-risk. Step 5 is the one with design content; do not start it
-before step 1 exists, or the metric will be built twice.
+1. **[done, `1bc5c4fbc9`] `parametricMetric` on all six surface classes, plus tests.** Pure
+   addition. Gate bit-identical, as required. The test checks each family against central
+   differences of the surface's own parametrisation rather than restating the closed form.
+2. **[done, `9f45887ef7`] Apply it to the wire join checks** (kernel and IO). `kWireJoinTolerance`
+   is now a length in cm and moved 1e-5 → 1e-6; K3, K12 and S10 are closed. The value was measured,
+   not assumed: 690 curve-wire joins across the Bagger and fixture sidecars have a worst residual
+   of **4.06e-11 cm**, 471 of them exactly zero. Gate bit-identical, which is the expected outcome
+   — no face on this corpus was ever near either threshold. Both tests were verified to fail
+   against the pre-fix rule.
+   - Design decision recorded: `CurveWire`/`SurfaceWire` take an optional `ParametricMetric`
+     callback (option (a)), not moved-up validation (option (b)), because it keeps both wire types
+     usable on their own and (b) needs a shared helper that amounts to the same callback.
+3. **[done, `cacd64e4a5`] Sidecar v2 + model tolerance**, reader and writer, both versions loading.
+   `Bagger.step` declares **1e-8 cm**. Nothing consults it yet — step 5 is where `CloseShape` does.
+4. **[done, `f612f895a9`] The on-boundary band (K5)**, including collapsing the two polylines into
+   one. Gate bit-identical; that is *expected rather than reassuring*, because a 1e-5-wide shell
+   around a trim boundary is not something ~5000 bbox-spread samples per part will land in. The
+   change is pinned by tests instead.
+5. **[not started] Rim-based closure + `maxGap` (K9/S8)**, then the §4.2 sweep, then reconcile
+   `containsByParity`'s gating with what the sweep says. **Read §8 before starting.**
 
 ---
 
@@ -375,3 +392,48 @@ If the same question gets asked twice, promote it to a harness flag
 - **Never** write generated artifacts into `scripts/geometry/STEP_examples/`. Every session so far
   has used a scratch folder; keep it that way.
 - The branch's targets appear only after a CMake re-run (`cmake .` in `$B`).
+
+---
+
+## 8. Step 5, after steps 1-4 — split it in two
+
+§3 still describes what to build. What the first four steps changed is the *risk*, and there is a
+decomposition that removes most of it. Do not do step 5 in one commit.
+
+**The risk.** §3.4 is the whole problem: a closure criterion that succeeds more often moves solids
+onto `Contains`'s single-shot fast path, which is licensed by a measurement taken when the closure
+check under-reported `Reliable`. So "build rim matching" and "let rim matching decide navigability"
+are two changes, and only the second one invalidates that measurement. Landing them together means
+that if the §4.2 sweep cannot be finished, the solid is left with a fast path whose justification
+no longer applies — which is exactly the half-finished state to avoid.
+
+**5a — measure, report, decide nothing.** Add rims and the gap number, and change no verdict.
+
+- `ClosureReport` gains `maxGap`, `unmatchedRimLength`, `totalRimLength` and per-rim counts.
+  `closed`, `boundaryEdges`, `nonManifoldEdges`, `reversedEdges` and everything
+  `NavigationReliability` derives from them stay exactly as they are.
+- Report `maxGap` in `Print()`, in the harness's per-part line and in its `--json` under
+  `navigation`, next to the existing reliability fields.
+- The gate **must be bit-identical**, which is a real check here: if it is not, rim matching has
+  leaked into a verdict.
+- Cheap way in: `appendDirectedEdges` already emits each loop's edges consecutively, so a default
+  `appendRims` on `BoundedSurface` can recover the rims by chaining maximal runs where one edge's
+  end equals the next one's start, instead of overriding it in all seven classes. Same data, no
+  per-class churn. Override later only if a class turns out to need it.
+- Use the sidecar's model tolerance (step 3) as the declared epsilon, falling back on a documented
+  constant when it is zero — `GetModelTolerance()` returns zero for "not stated" on purpose.
+
+That commit alone answers the question the item exists to answer: **how far apart are the faces,
+in cm?** On this corpus expect the cyl-cyl parts to stay open at ~1.3e-5 cm (the 2026-07-26
+shared-edge pcurve measurement) and `tube_window` to stop claiming 1418 boundary edges about a
+4-face solid.
+
+**5b — let it decide.** Only then switch `NavigationReliability` over to the rim verdict, run the
+§4.2 direction-independence sweep in the same commit, and reconcile `containsByParity`'s gating
+with what the sweep says. §3.3's two prohibitions apply here and nowhere else: do not tune epsilon
+until parts pass, and do not let the counts drift from what the enum documentation promises.
+
+The Section 4.4 ambiguity-band refinement of `containsByParity` (deferred out of step 4) belongs
+in 5b for the same reason: it changes which points get re-shot, so it needs the same sweep.
+
+---
