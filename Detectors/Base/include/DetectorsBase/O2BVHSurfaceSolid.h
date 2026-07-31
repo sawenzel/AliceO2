@@ -202,6 +202,25 @@ class O2BVHSurfaceSolid : public TGeoBBox
   static void ResetRayCandidateCounter();
   static long long GetRayCandidateCount();
 
+  /// One crossing of the containment parity ray, as seen by Contains().
+  struct ContainsCrossing {
+    double distance = 0.;      ///< ray parameter of the hit
+    double normalAlignment = 0.; ///< dot(hit normal, test direction): < 0 enters, > 0 exits
+  };
+
+  /// Diagnostic hook: the parity ray's crossing list at \a point, from the BVH traversal into
+  /// \a bvhCrossings and from the all-surfaces loop into \a loopCrossings, both sorted by
+  /// distance. Contains() and Contains_Loop() are the parities of these two lists, so when they
+  /// disagree this shows *why* -- a crossing present in one list and not the other, or a pair
+  /// close enough that one path clustered it and the other did not.
+  ///
+  /// It exists because the disagreement on non-manifold parts was attributed to order-dependent
+  /// clustering, which reading the code does not support: the clusterer sorts first, so it is a
+  /// function of the sorted distances alone. That leaves differing hit *multisets* as the
+  /// explanation, which is what this dumps. Measure before theorizing (CodeReview_Fable.md, S6).
+  void DescribeContainsCrossings(const Point3D& point, std::vector<ContainsCrossing>& bvhCrossings,
+                                 std::vector<ContainsCrossing>& loopCrossings) const;
+
   /// Whether the closed shape forms a closed 2-manifold (every boundary edge shared by two faces).
   /// Meaningful only after CloseShape(); detects e.g. missing faces.
   bool IsClosed() const;

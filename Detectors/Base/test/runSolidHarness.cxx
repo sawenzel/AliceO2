@@ -27,11 +27,14 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <map>
 #include <iostream>
 #include <optional>
 #include <set>
@@ -60,6 +63,8 @@ struct Options {
   std::string jsonOut;
   int warmup = 1;
   int repeat = 3;
+  std::string dumpSamples; ///< directory to write per-part sample sets into, for the OCCT oracle
+  std::string refAnswers;  ///< directory holding the oracle's answers for those sample sets
 };
 
 struct Part {
@@ -79,7 +84,16 @@ void printUsage(const char* argv0)
     "  --loop-crosscheck  also run the surface solid's non-BVH _Loop twins and require exact\n"
     "                     agreement; this is the correctness guard that does not involve the mesh\n"
     "  --pruning-ab       re-run the distance kernels with ray tmax pruning disabled, reporting\n"
-    "                     the BVH candidate counts and ns/call both ways (prices the optimization)\n\n"
+    "                     the BVH candidate counts and ns/call both ways (prices the optimization)\n"
+    "  --dump-samples D   write each part's sample set to D/samples_<part>.json\n"
+    "  --ref-answers D    validate against D/answers_<part>.json instead of the mesh; those are\n"
+    "                     produced by scripts/geometry/occtOracle.py from the part's .brep, so a\n"
+    "                     disagreement outside the model tolerance is a defect, not chording\n\n"
+    "OCCT oracle round trip:\n"
+    "  " << argv0 << " --db <db> --dump-samples /tmp/o\n"
+    "  occtOracle.py --brep <part>.brep --samples /tmp/o/samples_<part>.json \\\n"
+    "                --out /tmp/o/answers_<part>.json\n"
+    "  " << argv0 << " --db <db> --ref-answers /tmp/o\n\n"
     "perf record entry point (single kernel, one part):\n"
     "  perf record -g " << argv0 << " --db <db> --parts oTOF --only distout --rays 200000\n";
 }
@@ -133,6 +147,10 @@ bool parseArgs(int argc, char** argv, Options& opt)
       opt.warmup = std::stoi(next("--warmup"));
     } else if (a == "--repeat") {
       opt.repeat = std::stoi(next("--repeat"));
+    } else if (a == "--dump-samples") {
+      opt.dumpSamples = next("--dump-samples");
+    } else if (a == "--ref-answers") {
+      opt.refAnswers = next("--ref-answers");
     } else if (a == "-h" || a == "--help") {
       printUsage(argv[0]);
       return false;
@@ -184,7 +202,9 @@ json validationToJson(const ValidationResult& r)
   j["nSamples"] = r.nSamples;
   j["nAgree"] = r.nAgree;
   j["nMismatchWithinBand"] = r.nMismatchWithinBand;
+  j["nMismatchMissedSurface"] = r.nMismatchMissedSurface;
   j["nMismatchUnexplained"] = r.nMismatchUnexplained;
+  j["nNoVerdict"] = r.nNoVerdict;
   j["worstDeviation"] = r.worstDeviation;
   json offenders = json::array();
   for (const auto& o : r.worstOffenders) {
@@ -193,10 +213,148 @@ json validationToJson(const ValidationResult& r)
                          {"candidateValue", o.candidateValue},
                          {"referenceValue", o.referenceValue},
                          {"deviation", o.deviation},
-                         {"referenceSafety", o.referenceSafety}});
+                         {"referenceSafety", o.referenceSafety},
+                         {"incidenceCosine", o.incidenceCosine}});
   }
   j["worstOffenders"] = offenders;
   return j;
+}
+
+// The sample/answer JSON contract shared with scripts/geometry/occtOracle.py. Bump on both sides
+// together; the oracle refuses a version it does not speak rather than guessing.
+constexpr int kOracleFormatVersion = 1;
+
+/// Part ids carry '/' and other path-hostile characters; the oracle round trip pairs files by
+/// this sanitized form on both sides.
+std::string sanitizePartId(const std::string& id)
+{
+  std::string out;
+  out.reserve(id.size());
+  for (const char c : id) {
+    out.push_back((std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '.') ? c : '_');
+  }
+  return out;
+}
+
+json pointsToJson(const std::vector<Point3D>& points)
+{
+  json array = json::array();
+  for (const auto& p : points) {
+    array.push_back({p[0], p[1], p[2]});
+  }
+  return array;
+}
+
+json raysToJson(const std::vector<Ray>& rays)
+{
+  json array = json::array();
+  for (const auto& r : rays) {
+    array.push_back({{"o", {r.origin[0], r.origin[1], r.origin[2]}},
+                     {"d", {r.dir[0], r.dir[1], r.dir[2]}}});
+  }
+  return array;
+}
+
+/// Serialize a sample set so an external oracle can answer exactly the same queries. The samples
+/// come from a seeded mt19937_64 inside the harness, so nothing outside can regenerate them;
+/// dumping is the only way to ask another implementation about the same points.
+void writeSamples(const std::string& dir, const std::string& partId, const SampleSet& samples)
+{
+  json doc;
+  doc["version"] = kOracleFormatVersion;
+  doc["part"] = partId;
+  doc["bboxMin"] = {samples.bboxMin[0], samples.bboxMin[1], samples.bboxMin[2]};
+  doc["bboxMax"] = {samples.bboxMax[0], samples.bboxMax[1], samples.bboxMax[2]};
+  doc["points"] = {{"bulk", pointsToJson(samples.bulkPoints)},
+                   {"boundary", pointsToJson(samples.boundaryPoints)},
+                   {"inside", pointsToJson(samples.insidePoints)}};
+  doc["rays"] = {{"outside", raysToJson(samples.outsideRays)},
+                 {"inside", raysToJson(samples.insideRays)}};
+  const std::string path = dir + "/samples_" + sanitizePartId(partId) + ".json";
+  std::ofstream out(path);
+  if (!out) {
+    throw std::runtime_error("cannot write " + path);
+  }
+  out << doc.dump(1);
+  std::printf("  wrote samples: %s\n", path.c_str());
+}
+
+/// Oracle answers for one part, or `has == false` when no answer file exists for it.
+struct OracleAnswers {
+  bool has = false;
+  double tolerance = 0.;
+  double capacity = 0.;
+  bool valid = false;
+  std::map<std::string, std::vector<int>> containsState;
+  std::map<std::string, std::vector<double>> boundaryDistance;
+  std::map<std::string, std::vector<double>> distOutside;
+  std::map<std::string, std::vector<double>> distInside;
+};
+
+template <typename T>
+std::map<std::string, std::vector<T>> readColumns(const json& parent, const char* key)
+{
+  std::map<std::string, std::vector<T>> columns;
+  if (!parent.contains(key)) {
+    return columns;
+  }
+  for (const auto& [category, values] : parent.at(key).items()) {
+    columns[category] = values.template get<std::vector<T>>();
+  }
+  return columns;
+}
+
+OracleAnswers loadOracleAnswers(const std::string& dir, const std::string& partId)
+{
+  OracleAnswers answers;
+  const std::string path = dir + "/answers_" + sanitizePartId(partId) + ".json";
+  std::ifstream in(path);
+  if (!in) {
+    std::printf("  oracle: no answers file %s, skipping oracle validation\n", path.c_str());
+    return answers;
+  }
+  json doc;
+  in >> doc;
+  const int version = doc.value("version", -1);
+  if (version != kOracleFormatVersion) {
+    throw std::runtime_error(path + ": answer format version " + std::to_string(version) +
+                             ", this harness speaks " + std::to_string(kOracleFormatVersion));
+  }
+  answers.has = true;
+  answers.tolerance = doc.value("tolerance", 0.);
+  answers.capacity = doc.value("capacity", 0.);
+  answers.valid = doc.value("valid", false);
+  answers.containsState = readColumns<int>(doc, "contains");
+  answers.boundaryDistance = readColumns<double>(doc, "safetyUpperBound");
+  answers.distOutside = readColumns<double>(doc, "distFromOutside");
+  answers.distInside = readColumns<double>(doc, "distFromInside");
+  return answers;
+}
+
+/// Concatenate the oracle's per-category columns in the same order the harness concatenates its
+/// point categories, so index i of the merged column belongs to point i of `allPoints`.
+///
+/// Each column is padded to its category's *point count* before the next one is appended. That
+/// padding is not cosmetic: the oracle answers `contains` for every point but caps the expensive
+/// boundary-distance query, so its columns have different lengths per category. Concatenating
+/// them raw would shift every later category's answers onto the wrong points -- a silent,
+/// systematic mis-scoring rather than an error.
+template <typename T>
+std::vector<T> mergeCategories(const std::map<std::string, std::vector<T>>& columns,
+                               const std::array<size_t, 3>& categorySizes, T missing)
+{
+  static constexpr std::array<const char*, 3> kOrder = {"bulk", "boundary", "inside"};
+  std::vector<T> merged;
+  for (size_t categoryIndex = 0; categoryIndex < kOrder.size(); ++categoryIndex) {
+    const size_t expected = categorySizes[categoryIndex];
+    const auto it = columns.find(kOrder[categoryIndex]);
+    const size_t available = it == columns.end() ? 0 : std::min(expected, it->second.size());
+    for (size_t i = 0; i < available; ++i) {
+      merged.push_back(it->second[i]);
+    }
+    merged.insert(merged.end(), expected - available, missing);
+  }
+  return merged;
 }
 
 json timingToJson(const TimingResult& t)
@@ -206,10 +364,15 @@ json timingToJson(const TimingResult& t)
 
 void printValidation(const std::string& name, const ValidationResult& r)
 {
-  const double agreePct = r.nSamples ? 100. * static_cast<double>(r.nAgree) / static_cast<double>(r.nSamples) : 0.;
-  std::printf("  %-10s samples=%-7zu agree=%6.2f%%  mismatch(band=%zu,unexplained=%zu)  worstDev=%.6g\n",
-             name.c_str(), r.nSamples, agreePct, r.nMismatchWithinBand, r.nMismatchUnexplained, r.worstDeviation);
-  if (r.nMismatchUnexplained > 0) {
+  // Scored = everything the reference was willing to answer. Reporting the percentage against
+  // nSamples would let a reference that abstains on half the points look like agreement.
+  const size_t scored = r.nSamples - r.nNoVerdict;
+  const double agreePct = scored ? 100. * static_cast<double>(r.nAgree) / static_cast<double>(scored) : 0.;
+  std::printf("  %-10s scored=%-7zu agree=%6.2f%%  mismatch(band=%zu,missed=%zu,unexplained=%zu)"
+             "  noVerdict=%zu  worstDev=%.6g\n",
+             name.c_str(), scored, agreePct, r.nMismatchWithinBand, r.nMismatchMissedSurface,
+             r.nMismatchUnexplained, r.nNoVerdict, r.worstDeviation);
+  if (r.nMismatchUnexplained > 0 || r.nMismatchMissedSurface > 0) {
     const size_t nShow = std::min<size_t>(3, r.worstOffenders.size());
     for (size_t i = 0; i < nShow; ++i) {
       const auto& o = r.worstOffenders[i];
@@ -358,6 +521,73 @@ int main(int argc, char** argv)
     std::vector<Point3D> allPoints = samples.bulkPoints;
     allPoints.insert(allPoints.end(), samples.boundaryPoints.begin(), samples.boundaryPoints.end());
     allPoints.insert(allPoints.end(), samples.insidePoints.begin(), samples.insidePoints.end());
+    const std::array<size_t, 3> categorySizes{samples.bulkPoints.size(), samples.boundaryPoints.size(),
+                                              samples.insidePoints.size()};
+
+    if (!opt.dumpSamples.empty()) {
+      writeSamples(opt.dumpSamples, part.id, samples);
+    }
+
+    // Ground-truth validation, when the oracle has answered this part. Kept separate from the
+    // mesh comparison below rather than replacing it: the mesh columns stay comparable with every
+    // measurement recorded so far, while these columns are the ones a gate can be written against.
+    if (!opt.refAnswers.empty()) {
+      const OracleAnswers oracle = loadOracleAnswers(opt.refAnswers, part.id);
+      if (oracle.has) {
+        ValidationOptions oracleOpt;
+        // The band is now the model's own declared tolerance instead of a guessed mesh sagitta.
+        // A floor keeps a perfectly-toleranced synthetic fixture from demanding bit equality.
+        oracleOpt.meshBand = std::max(oracle.tolerance, oracleOpt.distanceTolerance);
+        const auto boundaryDistance =
+          mergeCategories<double>(oracle.boundaryDistance, categorySizes, -1.);
+        const auto containsState = mergeCategories<int>(oracle.containsState, categorySizes, -1);
+
+        std::printf("  oracle: %s tolerance=%.3g capacity=%.6g cm^3 (band=%.3g)\n",
+                   oracle.valid ? "valid" : "*** NOT BRepCheck-VALID ***", oracle.tolerance,
+                   oracle.capacity, oracleOpt.meshBand);
+        json oracleJson;
+        oracleJson["tolerance"] = oracle.tolerance;
+        oracleJson["capacity"] = oracle.capacity;
+        oracleJson["valid"] = oracle.valid;
+        const double capacity = surf.Capacity();
+        oracleJson["capacityCandidate"] = capacity;
+        oracleJson["capacityRelativeDeviation"] =
+          oracle.capacity != 0. ? (capacity - oracle.capacity) / oracle.capacity : 0.;
+        std::printf("  oracle: capacity candidate=%.6g reference=%.6g relDev=%.3g\n", capacity,
+                   oracle.capacity, oracleJson["capacityRelativeDeviation"].get<double>());
+
+        if (opt.only.count("contains")) {
+          auto v = validateContainsAgainstOracle(candidate, allPoints, containsState,
+                                                 boundaryDistance, oracleOpt);
+          printValidation("O:contains", v);
+          oracleJson["contains"] = validationToJson(v);
+        }
+        if (opt.only.count("distout")) {
+          const auto it = oracle.distOutside.find("outside");
+          if (it != oracle.distOutside.end()) {
+            auto v = validateDistanceAgainstOracle(candidate, samples.outsideRays, it->second,
+                                                   /*wantInside=*/false, oracleOpt);
+            printValidation("O:distout", v);
+            oracleJson["distout"] = validationToJson(v);
+          }
+        }
+        if (opt.only.count("distin")) {
+          const auto it = oracle.distInside.find("inside");
+          if (it != oracle.distInside.end()) {
+            auto v = validateDistanceAgainstOracle(candidate, samples.insideRays, it->second,
+                                                   /*wantInside=*/true, oracleOpt);
+            printValidation("O:distin", v);
+            oracleJson["distin"] = validationToJson(v);
+          }
+        }
+        if (opt.only.count("safety")) {
+          auto v = validateSafetyAgainstOracle(candidate, allPoints, boundaryDistance, oracleOpt);
+          printValidation("O:safety", v);
+          oracleJson["safety"] = validationToJson(v);
+        }
+        partJson["oracle"] = oracleJson;
+      }
+    }
 
     if (opt.only.count("contains")) {
       auto v = validateContains(candidate, reference, allPoints);
@@ -425,9 +655,37 @@ int main(int argc, char** argv)
       // minimum over the same hits from the same kernels and differ only in which surfaces the
       // BVH lets them skip, so any difference at all is a traversal or pruning bug.
       size_t containsAgree = 0;
+      size_t crossingDumps = 0;
+      constexpr size_t kMaxCrossingDumps = 3;
+      std::vector<O2BVHSurfaceSolid::ContainsCrossing> bvhCrossings;
+      std::vector<O2BVHSurfaceSolid::ContainsCrossing> loopCrossings;
       for (const auto& p : allPoints) {
         if (surf.Contains(p.data()) == surf.Contains_Loop(p.data())) {
           ++containsAgree;
+          continue;
+        }
+        // A parity disagreement between two paths over the same kernels means the two hit lists
+        // differ. Print them: the difference is the diagnosis, and guessing at it has already
+        // cost this project one three-item plan built on a wrong premise.
+        if (crossingDumps++ >= kMaxCrossingDumps) {
+          continue;
+        }
+        surf.DescribeContainsCrossings(p, bvhCrossings, loopCrossings);
+        std::printf("      BVH!=Loop at (%.9g,%.9g,%.9g): BVH=%d (%zu crossings) Loop=%d (%zu crossings)\n",
+                   p[0], p[1], p[2], static_cast<int>(surf.Contains(p.data())), bvhCrossings.size(),
+                   static_cast<int>(surf.Contains_Loop(p.data())), loopCrossings.size());
+        const size_t nShow = std::max(bvhCrossings.size(), loopCrossings.size());
+        for (size_t i = 0; i < nShow; ++i) {
+          const char* bvhKind = i < bvhCrossings.size()
+                                  ? (bvhCrossings[i].normalAlignment < 0. ? "ENTER" : "EXIT ") : "-----";
+          const char* loopKind = i < loopCrossings.size()
+                                   ? (loopCrossings[i].normalAlignment < 0. ? "ENTER" : "EXIT ") : "-----";
+          const double bvhT = i < bvhCrossings.size() ? bvhCrossings[i].distance : -1.;
+          const double loopT = i < loopCrossings.size() ? loopCrossings[i].distance : -1.;
+          std::printf("        [%2zu] BVH %s t=%-18.12g   Loop %s t=%-18.12g%s\n", i, bvhKind, bvhT,
+                     loopKind, loopT,
+                     (i < bvhCrossings.size() && i < loopCrossings.size() &&
+                      std::fabs(bvhT - loopT) > 1.e-12) ? "   <-- differs" : "");
         }
       }
       std::printf("  loop-crosscheck contains: BVH==Loop for %zu/%zu points\n", containsAgree, allPoints.size());

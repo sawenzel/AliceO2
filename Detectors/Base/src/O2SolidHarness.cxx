@@ -175,12 +175,21 @@ SampleSet generateSamples(const TGeoShape* reference, const Point3D& bboxMin, co
 namespace
 {
 
-void recordOffender(ValidationResult& result, const ValidationOptions& opt, Offender&& off, bool withinBand)
+enum class MismatchClass { WithinBand, MissedSurface, Unexplained };
+
+void recordOffender(ValidationResult& result, const ValidationOptions& opt, Offender&& off,
+                    MismatchClass mismatchClass)
 {
-  if (withinBand) {
-    ++result.nMismatchWithinBand;
-  } else {
-    ++result.nMismatchUnexplained;
+  switch (mismatchClass) {
+    case MismatchClass::WithinBand:
+      ++result.nMismatchWithinBand;
+      break;
+    case MismatchClass::MissedSurface:
+      ++result.nMismatchMissedSurface;
+      break;
+    case MismatchClass::Unexplained:
+      ++result.nMismatchUnexplained;
+      break;
   }
   result.worstDeviation = std::max(result.worstDeviation, std::fabs(off.deviation));
   result.worstOffenders.push_back(std::move(off));
@@ -189,6 +198,50 @@ void recordOffender(ValidationResult& result, const ValidationOptions& opt, Offe
   if (result.worstOffenders.size() > opt.maxOffenders) {
     result.worstOffenders.resize(opt.maxOffenders);
   }
+}
+
+/// How far a ray's crossing may legitimately move when the reference surface itself is uncertain
+/// by `opt.meshBand`. A surface displaced by d shifts the crossing of a ray meeting it at
+/// incidence angle theta by d/|cos theta|, so a grazing hit is allowed much more slack than a
+/// perpendicular one. `normalSource` supplies the surface normal at the probe point; when it
+/// cannot (no shape, or a degenerate normal) the perpendicular case is assumed, which is the
+/// strict end of the range.
+double allowedCrossingShift(const TGeoShape* normalSource, const Point3D& probePoint,
+                            const Point3D& dir, const ValidationOptions& opt, double& cosIncidence)
+{
+  cosIncidence = 1.;
+  if (normalSource != nullptr) {
+    double normal[3] = {0., 0., 0.};
+    // ComputeNormal takes non-const pointers in the TGeo API but does not modify the inputs.
+    auto* mutableShape = const_cast<TGeoShape*>(normalSource);
+    mutableShape->ComputeNormal(probePoint.data(), dir.data(), normal);
+    const double normalNorm =
+      std::sqrt(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]);
+    if (normalNorm > 0.) {
+      const double dotProduct =
+        (normal[0] * dir[0] + normal[1] * dir[1] + normal[2] * dir[2]) / normalNorm;
+      cosIncidence = std::fabs(dotProduct);
+    }
+  }
+  const double effectiveCosine = std::max(cosIncidence, opt.minIncidenceCosine);
+  return std::max(opt.distanceTolerance, opt.meshBand / effectiveCosine);
+}
+
+/// Shared classification for both distance queries. `dc`/`dr` are the candidate and reference
+/// distances; `reference` (may be null) is used only to measure the incidence angle.
+MismatchClass classifyDistanceMismatch(const TGeoShape* reference, const Ray& ray, double dc,
+                                       double dr, bool dcBig, bool drBig,
+                                       const ValidationOptions& opt, double& cosIncidence)
+{
+  cosIncidence = 1.;
+  // One side found a crossing where the other found none. No amount of surface uncertainty
+  // explains a missing wall, so this can never be counted as "within band".
+  if (dcBig != drBig) {
+    return MismatchClass::MissedSurface;
+  }
+  const Point3D probePoint = add(ray.origin, scale(ray.dir, dr));
+  const double allowed = allowedCrossingShift(reference, probePoint, ray.dir, opt, cosIncidence);
+  return std::fabs(dc - dr) <= allowed ? MismatchClass::WithinBand : MismatchClass::Unexplained;
 }
 
 } // namespace
@@ -212,7 +265,10 @@ ValidationResult validateContains(const TGeoShape* candidate, const TGeoShape* r
     off.referenceValue = br ? 1. : 0.;
     off.deviation = refSafety; // rank Contains mismatches by how deep into the "unambiguous" region they are
     off.referenceSafety = refSafety;
-    recordOffender(result, opt, std::move(off), refSafety < opt.meshBand);
+    // A point closer to the reference surface than the reference's own positional uncertainty
+    // genuinely has no defined reference answer; further out, the reference is authoritative.
+    recordOffender(result, opt, std::move(off),
+                   refSafety < opt.meshBand ? MismatchClass::WithinBand : MismatchClass::Unexplained);
   }
   return result;
 }
@@ -235,17 +291,17 @@ ValidationResult validateDistFromOutside(const TGeoShape* candidate, const TGeoS
       ++result.nAgree;
       continue;
     }
-    const double probeDist = dcBig ? dr : dc;
-    const Point3D probePoint = add(r.origin, scale(r.dir, probeDist));
-    const double refSafety = reference->Safety(probePoint.data(), reference->Contains(probePoint.data()));
+    double cosIncidence = 1.;
+    const MismatchClass mismatchClass =
+      classifyDistanceMismatch(reference, r, dc, dr, dcBig, drBig, opt, cosIncidence);
     Offender off;
     off.point = r.origin;
     off.dir = r.dir;
     off.candidateValue = dcBig ? opt.stepmax : dc;
     off.referenceValue = drBig ? opt.stepmax : dr;
     off.deviation = off.candidateValue - off.referenceValue;
-    off.referenceSafety = refSafety;
-    recordOffender(result, opt, std::move(off), refSafety < opt.meshBand);
+    off.incidenceCosine = cosIncidence;
+    recordOffender(result, opt, std::move(off), mismatchClass);
   }
   return result;
 }
@@ -268,17 +324,17 @@ ValidationResult validateDistFromInside(const TGeoShape* candidate, const TGeoSh
       ++result.nAgree;
       continue;
     }
-    const double probeDist = dcBig ? dr : dc;
-    const Point3D probePoint = add(r.origin, scale(r.dir, probeDist));
-    const double refSafety = reference->Safety(probePoint.data(), reference->Contains(probePoint.data()));
+    double cosIncidence = 1.;
+    const MismatchClass mismatchClass =
+      classifyDistanceMismatch(reference, r, dc, dr, dcBig, drBig, opt, cosIncidence);
     Offender off;
     off.point = r.origin;
     off.dir = r.dir;
     off.candidateValue = dcBig ? opt.stepmax : dc;
     off.referenceValue = drBig ? opt.stepmax : dr;
     off.deviation = off.candidateValue - off.referenceValue;
-    off.referenceSafety = refSafety;
-    recordOffender(result, opt, std::move(off), refSafety < opt.meshBand);
+    off.incidenceCosine = cosIncidence;
+    recordOffender(result, opt, std::move(off), mismatchClass);
   }
   return result;
 }
@@ -315,7 +371,140 @@ ValidationResult validateSafety(const TGeoShape* shape, const std::vector<Point3
     off.referenceValue = minProbed;
     off.deviation = s - minProbed;
     off.referenceSafety = s;
-    recordOffender(result, opt, std::move(off), /*withinBand=*/false);
+    recordOffender(result, opt, std::move(off), MismatchClass::Unexplained);
+  }
+  return result;
+}
+
+// ------------------------------------------------------------------------------------------
+// Validation against an external oracle
+// ------------------------------------------------------------------------------------------
+
+namespace
+{
+/// The oracle computes the exact boundary distance only for a capped prefix of each category
+/// (it is the most expensive query it has). Points beyond the cap return a negative value,
+/// meaning "unknown", and are then scored without a distance-based abstention.
+constexpr double kUnknownDistance = -1.;
+
+double oracleDistanceAt(const std::vector<double>& distances, size_t index)
+{
+  return index < distances.size() ? distances[index] : kUnknownDistance;
+}
+} // namespace
+
+ValidationResult validateContainsAgainstOracle(const TGeoShape* candidate,
+                                               const std::vector<Point3D>& points,
+                                               const std::vector<int>& oracleState,
+                                               const std::vector<double>& oracleBoundaryDistance,
+                                               const ValidationOptions& opt)
+{
+  ValidationResult result;
+  result.nSamples = points.size();
+  for (size_t index = 0; index < points.size(); ++index) {
+    const int state = index < oracleState.size() ? oracleState[index] : -1;
+    const double boundaryDistance = oracleDistanceAt(oracleBoundaryDistance, index);
+    // Two ways the oracle abstains: it classified the point as ON the boundary, or the point is
+    // closer to the boundary than the model's own tolerance. Neither is a defect in the
+    // candidate -- the truth itself is undefined there.
+    if (state < 0 || (boundaryDistance >= 0. && boundaryDistance < opt.meshBand)) {
+      ++result.nNoVerdict;
+      continue;
+    }
+    const bool candidateInside = candidate->Contains(points[index].data());
+    if (candidateInside == (state == 1)) {
+      ++result.nAgree;
+      continue;
+    }
+    Offender off;
+    off.point = points[index];
+    off.candidateValue = candidateInside ? 1. : 0.;
+    off.referenceValue = state == 1 ? 1. : 0.;
+    // Rank by how far into unambiguous territory the disagreement sits: a wrong answer 1 cm from
+    // any surface is a different animal from one 1 um away.
+    off.deviation = boundaryDistance >= 0. ? boundaryDistance : 0.;
+    off.referenceSafety = boundaryDistance;
+    recordOffender(result, opt, std::move(off), MismatchClass::Unexplained);
+  }
+  return result;
+}
+
+ValidationResult validateDistanceAgainstOracle(const TGeoShape* candidate,
+                                               const std::vector<Ray>& rays,
+                                               const std::vector<double>& oracleDistance,
+                                               bool wantInside, const ValidationOptions& opt)
+{
+  ValidationResult result;
+  result.nSamples = rays.size();
+  for (size_t index = 0; index < rays.size(); ++index) {
+    if (index >= oracleDistance.size()) {
+      ++result.nNoVerdict;
+      continue;
+    }
+    const auto& ray = rays[index];
+    const double dc = wantInside
+                        ? candidate->DistFromInside(ray.origin.data(), ray.dir.data(), kIact, opt.stepmax)
+                        : candidate->DistFromOutside(ray.origin.data(), ray.dir.data(), kIact, opt.stepmax);
+    const double dr = oracleDistance[index];
+    const bool dcBig = isBig(dc);
+    const bool drBig = isBig(dr);
+    if (dcBig && drBig) {
+      ++result.nAgree;
+      continue;
+    }
+    if (!dcBig && !drBig && std::fabs(dc - dr) <= opt.distanceTolerance) {
+      ++result.nAgree;
+      continue;
+    }
+    // No reference shape to take a normal from, so the incidence cannot be measured here and the
+    // strict (perpendicular) allowance applies. That is the right default against ground truth:
+    // the oracle's crossing is exact, only the model tolerance is in play.
+    double cosIncidence = 1.;
+    const MismatchClass mismatchClass =
+      classifyDistanceMismatch(nullptr, ray, dc, dr, dcBig, drBig, opt, cosIncidence);
+    Offender off;
+    off.point = ray.origin;
+    off.dir = ray.dir;
+    off.candidateValue = dcBig ? opt.stepmax : dc;
+    off.referenceValue = drBig ? opt.stepmax : dr;
+    off.deviation = off.candidateValue - off.referenceValue;
+    off.incidenceCosine = cosIncidence;
+    recordOffender(result, opt, std::move(off), mismatchClass);
+  }
+  return result;
+}
+
+ValidationResult validateSafetyAgainstOracle(const TGeoShape* candidate,
+                                             const std::vector<Point3D>& points,
+                                             const std::vector<double>& oracleBoundaryDistance,
+                                             const ValidationOptions& opt)
+{
+  ValidationResult result;
+  result.nSamples = points.size();
+  for (size_t index = 0; index < points.size(); ++index) {
+    const double trueDistance = oracleDistanceAt(oracleBoundaryDistance, index);
+    if (trueDistance < 0.) {
+      ++result.nNoVerdict;
+      continue;
+    }
+    const bool inside = candidate->Contains(points[index].data());
+    const double safety = candidate->Safety(points[index].data(), inside);
+    // Safety is contractually a lower bound on the true distance, and never negative. Being too
+    // small is legal (if pessimistic); being too large is a navigation bug that lets a track step
+    // through a surface.
+    const bool violatesLowerBound = safety < -opt.distanceTolerance;
+    const bool violatesUpperBound = safety > trueDistance + opt.distanceTolerance;
+    if (!violatesLowerBound && !violatesUpperBound) {
+      ++result.nAgree;
+      continue;
+    }
+    Offender off;
+    off.point = points[index];
+    off.candidateValue = safety;
+    off.referenceValue = trueDistance;
+    off.deviation = safety - trueDistance;
+    off.referenceSafety = trueDistance;
+    recordOffender(result, opt, std::move(off), MismatchClass::Unexplained);
   }
   return result;
 }
