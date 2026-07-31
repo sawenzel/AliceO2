@@ -1,0 +1,328 @@
+// File: slice_cigar_with_halfspaces.C
+//
+// Run with:
+//   root -l slice_cigar_with_halfspaces.C
+// or
+//   .x slice_cigar_with_halfspaces.C
+//
+// Change:
+//   const int    M = 12;
+//   double cutDirMother[3] = {0., 0., 1.};   // slice along mother Z
+//
+// to any other direction if needed.
+
+#include <vector>
+#include <string>
+#include <cmath>
+#include <algorithm>
+#include <iostream>
+
+#include "TCanvas.h"
+#include "TColor.h"
+#include "TGeoBBox.h"
+#include "TGeoBoolNode.h"
+#include "TGeoCompositeShape.h"
+#include "TGeoEltu.h"
+#include "TGeoHalfSpace.h"
+#include "TGeoManager.h"
+#include "TGeoMatrix.h"
+#include "TGeoVolume.h"
+#include "TMath.h"
+#include "TPolyLine3D.h"
+
+namespace {
+
+std::vector<TObject*> gKeepAlive;
+std::vector<TPolyLine3D*> gLines;
+
+void Normalize(double v[3])
+{
+  const double n = std::sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+  if (n <= 0.) return;
+  v[0] /= n; v[1] /= n; v[2] /= n;
+}
+
+double Dot(const double a[3], const double b[3])
+{
+  return a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+}
+
+void DrawBBoxWireframe(double xmin, double ymin, double zmin,
+                       double xmax, double ymax, double zmax,
+                       int color = kRed, int width = 1)
+{
+  double p[8][3] = {
+    {xmin, ymin, zmin},
+    {xmax, ymin, zmin},
+    {xmax, ymax, zmin},
+    {xmin, ymax, zmin},
+    {xmin, ymin, zmax},
+    {xmax, ymin, zmax},
+    {xmax, ymax, zmax},
+    {xmin, ymax, zmax}
+  };
+
+  int e[12][2] = {
+    {0,1},{1,2},{2,3},{3,0},
+    {4,5},{5,6},{6,7},{7,4},
+    {0,4},{1,5},{2,6},{3,7}
+  };
+
+  for (int i = 0; i < 12; ++i) {
+    auto l = new TPolyLine3D(2);
+    l->SetPoint(0, p[e[i][0]][0], p[e[i][0]][1], p[e[i][0]][2]);
+    l->SetPoint(1, p[e[i][1]][0], p[e[i][1]][1], p[e[i][1]][2]);
+    l->SetLineColor(color);
+    l->SetLineWidth(width);
+    gLines.push_back(l);
+    l->Draw();
+  }
+}
+
+void GetLocalBBoxCorners(const TGeoBBox* box, double corners[8][3])
+{
+  const double dx = box->GetDX();
+  const double dy = box->GetDY();
+  const double dz = box->GetDZ();
+  const double* o = box->GetOrigin();
+
+  corners[0][0] = o[0] - dx; corners[0][1] = o[1] - dy; corners[0][2] = o[2] - dz;
+  corners[1][0] = o[0] + dx; corners[1][1] = o[1] - dy; corners[1][2] = o[2] - dz;
+  corners[2][0] = o[0] + dx; corners[2][1] = o[1] + dy; corners[2][2] = o[2] - dz;
+  corners[3][0] = o[0] - dx; corners[3][1] = o[1] + dy; corners[3][2] = o[2] - dz;
+  corners[4][0] = o[0] - dx; corners[4][1] = o[1] - dy; corners[4][2] = o[2] + dz;
+  corners[5][0] = o[0] + dx; corners[5][1] = o[1] - dy; corners[5][2] = o[2] + dz;
+  corners[6][0] = o[0] + dx; corners[6][1] = o[1] + dy; corners[6][2] = o[2] + dz;
+  corners[7][0] = o[0] - dx; corners[7][1] = o[1] + dy; corners[7][2] = o[2] + dz;
+}
+
+void GetMotherAABBFromLocalBBox(const TGeoMatrix* mat,
+                                const TGeoBBox* localBox,
+                                double& xmin, double& ymin, double& zmin,
+                                double& xmax, double& ymax, double& zmax)
+{
+  double local[8][3];
+  GetLocalBBoxCorners(localBox, local);
+
+  double master[3];
+  xmin = ymin = zmin =  1e100;
+  xmax = ymax = zmax = -1e100;
+
+  for (int i = 0; i < 8; ++i) {
+    mat->LocalToMaster(local[i], master);
+    xmin = std::min(xmin, master[0]);
+    ymin = std::min(ymin, master[1]);
+    zmin = std::min(zmin, master[2]);
+    xmax = std::max(xmax, master[0]);
+    ymax = std::max(ymax, master[1]);
+    zmax = std::max(zmax, master[2]);
+  }
+}
+
+void BuildRotationZToDir(const double dir[3], TGeoRotation& rot)
+{
+  // Build orthonormal basis with ez = dir.
+  double ez[3] = {dir[0], dir[1], dir[2]};
+  Normalize(ez);
+
+  double ref[3] = {0., 0., 1.};
+  if (std::fabs(Dot(ez, ref)) > 0.9) {
+    ref[0] = 0.; ref[1] = 1.; ref[2] = 0.;
+  }
+
+  double ex[3] = {
+    ref[1]*ez[2] - ref[2]*ez[1],
+    ref[2]*ez[0] - ref[0]*ez[2],
+    ref[0]*ez[1] - ref[1]*ez[0]
+  };
+  Normalize(ex);
+
+  double ey[3] = {
+    ez[1]*ex[2] - ez[2]*ex[1],
+    ez[2]*ex[0] - ez[0]*ex[2],
+    ez[0]*ex[1] - ez[1]*ex[0]
+  };
+  Normalize(ey);
+
+  // ROOT rotation matrix columns are local axes expressed in master frame.
+  double m[9] = {
+    ex[0], ey[0], ez[0],
+    ex[1], ey[1], ez[1],
+    ex[2], ey[2], ez[2]
+  };
+  rot.SetMatrix(m);
+}
+
+TGeoCompositeShape* MakeSliceShape(TGeoShape* baseShape,
+                                   const TGeoCombiTrans* placementInMother,
+                                   const double cutDirMotherIn[3],
+                                   double s0Mother,
+                                   double s1Mother,
+                                   int islice)
+{
+  // Convert mother-space cut direction into local shape coordinates.
+  double uMother[3] = {cutDirMotherIn[0], cutDirMotherIn[1], cutDirMotherIn[2]};
+  Normalize(uMother);
+
+  double uLocal[3];
+  placementInMother->MasterToLocalVect(uMother, uLocal);
+  Normalize(uLocal);
+
+  // Plane offsets in local coordinates:
+  // uMother.(R*xLocal + t) = s  =>  uLocal.xLocal = s - uMother.t
+  const double* t = placementInMother->GetTranslation();
+  const double tproj = Dot(uMother, t);
+  const double c0 = s0Mother - tproj;
+  const double c1 = s1Mother - tproj;
+
+  // Lower plane: keep uLocal.x >= c0   => outward normal = -uLocal
+  // Upper plane: keep uLocal.x <= c1   => outward normal = +uLocal
+  double pLow[3]  = {c0*uLocal[0], c0*uLocal[1], c0*uLocal[2]};
+  double nLow[3]  = {-uLocal[0], -uLocal[1], -uLocal[2]};
+  double pHigh[3] = {c1*uLocal[0], c1*uLocal[1], c1*uLocal[2]};
+  double nHigh[3] = { uLocal[0],  uLocal[1],  uLocal[2]};
+
+  std::cout << " pLow " << pLow[0] << " " << pLow[1] << " " << pLow[2] << "\n";
+  std::cout << " pLow " << pHigh[0] << " " << pHigh[1] << " " << pHigh[2] << "\n";
+
+  auto hsLow  = new TGeoHalfSpace(Form("hsLow_%d",  islice), pLow,  nLow);
+  auto hsHigh = new TGeoHalfSpace(Form("hsHigh_%d", islice), pHigh, nHigh);
+  gKeepAlive.push_back(hsLow);
+  gKeepAlive.push_back(hsHigh);
+
+  auto node1 = new TGeoIntersection(baseShape, hsLow);
+  auto tmp   = new TGeoCompositeShape(Form("sliceTmp_%d", islice), node1);
+  gKeepAlive.push_back(tmp);
+
+  auto node2 = new TGeoIntersection(tmp, hsHigh);
+  auto part  = new TGeoCompositeShape(Form("slice_%d", islice), node2);
+  part->ComputeBBox();
+
+  std::cout << " part capacity is " << part->Capacity() << "\n";
+  std::cout << " new part with origin " << part->GetOrigin()[0] << part->GetOrigin()[1] << part->GetOrigin()[2] << "\n";
+
+  gKeepAlive.push_back(part);
+
+  return part;
+}
+
+} // namespace
+
+void slice_cigar_with_halfspaces()
+{
+  // -----------------------
+  // User controls
+  // -----------------------
+  const int M = 12;                     // number of slices
+  double cutDirMother[3] = {0., 0., 1.}; // slice along mother Z
+  Normalize(cutDirMother);
+
+  // -----------------------
+  // Geometry setup
+  // -----------------------
+  auto geom = new TGeoManager("geom", "Slice placed cigar with halfspaces");
+
+  auto top = geom->MakeBox("TOP", nullptr, 300., 300., 300.);
+  geom->SetTopVolume(top);
+
+  // Long, thin "cigar" (elliptical tube)
+  const double dx = 5.0;
+  const double dy = 5.0;
+  const double dz = 120.0;
+
+  auto cigarShape = new TGeoEltu("cigarShape", dx, dy, dz);
+  auto cigarVol   = new TGeoVolume("CIGAR", cigarShape);
+  cigarVol->SetLineColor(kAzure + 1);
+  cigarVol->SetFillColor(kAzure + 1);
+  cigarVol->SetTransparency(0);
+
+  // Place local Z along mother (1,1,1)
+  double axisMother[3] = {1., 1., 1.};
+  Normalize(axisMother);
+
+  auto rot = new TGeoRotation();
+  BuildRotationZToDir(axisMother, *rot);
+
+  auto tr  = new TGeoTranslation(0., 0., 0.);
+  auto ct  = new TGeoCombiTrans(*tr, *rot);
+
+  top->AddNode(cigarVol, 1, ct);
+  geom->CloseGeometry();
+
+  // -----------------------
+  // Determine slicing interval [smin, smax] in mother coordinates
+  // using the mother-space AABB of the full placed base shape.
+  // -----------------------
+  cigarShape->ComputeBBox();
+
+  double fullXmin, fullYmin, fullZmin, fullXmax, fullYmax, fullZmax;
+  GetMotherAABBFromLocalBBox(ct, cigarShape,
+                             fullXmin, fullYmin, fullZmin,
+                             fullXmax, fullYmax, fullZmax);
+
+  double fullCorners[8][3] = {
+    {fullXmin, fullYmin, fullZmin},
+    {fullXmax, fullYmin, fullZmin},
+    {fullXmax, fullYmax, fullZmin},
+    {fullXmin, fullYmax, fullZmin},
+    {fullXmin, fullYmin, fullZmax},
+    {fullXmax, fullYmin, fullZmax},
+    {fullXmax, fullYmax, fullZmax},
+    {fullXmin, fullYmax, fullZmax}
+  };
+
+  double smin =  1e100;
+  double smax = -1e100;
+  for (int i = 0; i < 8; ++i) {
+    const double s = Dot(fullCorners[i], cutDirMother);
+    smin = std::min(smin, s);
+    smax = std::max(smax, s);
+  }
+
+  const double ds = (smax - smin) / M;
+
+  // -----------------------
+  // Build slices and their mother-space AABBs
+  // -----------------------
+  struct BoxRec {
+    double xmin, ymin, zmin, xmax, ymax, zmax;
+  };
+  std::vector<BoxRec> boxes;
+  boxes.reserve(M);
+
+  for (int i = 0; i < M; ++i) {
+    const double a = smin + i*ds;
+    const double b = (i == M-1) ? smax : (smin + (i+1)*ds);
+
+    auto part = MakeSliceShape(cigarShape, ct, cutDirMother, a, b, i);
+
+    double xmin, ymin, zmin, xmax, ymax, zmax;
+    GetMotherAABBFromLocalBBox(ct, part, xmin, ymin, zmin, xmax, ymax, zmax);
+
+    boxes.push_back({xmin, ymin, zmin, xmax, ymax, zmax});
+
+    std::cout << "slice " << i
+              << "  s in [" << a << ", " << b << "]"
+              << "  mother AABB = [("
+              << xmin << ", " << ymin << ", " << zmin << ") -> ("
+              << xmax << ", " << ymax << ", " << zmax << ")]\n";
+  }
+
+  // -----------------------
+  // Draw original placed shape + all slice boxes
+  // -----------------------
+  auto c = new TCanvas("c", "Placed cigar + slice AABBs", 1100, 900);
+  top->Draw("ogl");
+  c->Update();
+
+  for (int i = 0; i < M; ++i) {
+    // color ramp through ROOT default palette region
+    int color = 2 + (i % 7);
+    DrawBBoxWireframe(boxes[i].xmin, boxes[i].ymin, boxes[i].zmin,
+                      boxes[i].xmax, boxes[i].ymax, boxes[i].zmax,
+                      color, 1);
+  }
+
+  c->Modified();
+  c->Update();
+}
