@@ -1282,3 +1282,54 @@ matching `kWireJoinTolerance = 1e-5` (both looser than the `1e-9` boundary toler
 	as the mandatory direction-independence sweep. That split exists because a closure criterion
 	that succeeds more often moves solids onto `Contains`'s single-shot fast path, whose licence is
 	a measurement taken while the closure check under-reported `Reliable`.
+- 2026-08-01: **Phase 1 item 4 step 5, and with it Phase 1, is finished** — commits `213b8aca8c`
+  (5a, measure) and `d32196029e` (5b, decide). Full account in
+  [`TolerancePolicy.md`](TolerancePolicy.md) **§9 and §10** (every table) and
+  [`CodeReview_Fable.md`](CodeReview_Fable.md) **Section 14**. `ctest -R BVHSurfaceSolid` green,
+  **57 cases** (from 53). Both gates bit-identical on both commits — fixtures 6/9, Bagger 4/12,
+  `contains` 0 and 2. Tree clean. **K9 and S8 are closed.**
+
+	**"How far apart are the faces, in cm?" now has an answer, and it is not the recorded one.**
+	Closure is a curve comparison: each face emits rims (one ordered polyline per trim loop) and
+	each rim chord is matched at its midpoint against the chords of every other face, at the
+	model's own declared tolerance from sidecar v2. `TolerancePolicy.md` §3.3 predicted the Bagger
+	cyl-cyl parts would stay open at ~1.3e-5 cm, the shared-edge pcurve disagreement. **They are
+	open by 0.25 to 0.75 cm**, over 4-15% of their rim length — a face missing or trimmed to the
+	wrong curve, not two pcurves disagreeing in the fifth decimal. Phase 2's premise for those
+	parts changes accordingly: they are not nearly closed and then spoiled by tolerance.
+	`tube_window` went from **1418 boundary edges** to seven rims of which three are open, 9.94 cm
+	of 53 cm.
+
+	**The other prediction was wrong in the opposite direction.** §1.3 said vertex matching fails
+	on real CAD because the two faces of a shared edge sample it at different phases. The
+	structural defect is real — a unit test builds a box whose last face carries twice the chord
+	count and the old check calls that closed box open — but no part of either corpus exercises
+	it. Every part the old check called closed is rim-matched and vice versa, part for part, which
+	is why 5b's verdict switch is a gate no-op. "This corpus does not test the thing" is the right
+	reading, not "the thing was not a problem".
+
+	**The mandatory sweep passed and left one lead.** 21 parts, 11k points, 13 golden-spiral
+	directions, before and after the switch: the same 13 `Reliable` parts, **one** disagreement in
+	143000 points, and the parts that do disagree between directions are exactly the ones the
+	closure check rejects (0.55%-7.0%). So `Contains`'s single-shot fast path keeps its licence.
+	The offender — `cyl_cross_cyl` at `(0.65334264649649720, 0.88394684996026007,
+	0.97463122696308724)`, 1 of 13 directions, `Safety` 0.0992 cm — is not a gap shadow and is now
+	the cheapest known reproducer for **K6**.
+
+	**One piece deliberately not shipped, measured rather than assumed.** §2.4's ambiguity band:
+	the free form — re-shoot whenever a parity cluster held more than one coincident hit — costs
+	0.2-1.3% of `Contains` on seven fixtures and **15.8%** on `box_minus_cyl` and moved **not one**
+	of the 143000 sweep points, including the offender it was aimed at. Dropped, with the numbers
+	left in `containsByParity`. The parametric-domain band §2.4 actually asks for is unbuilt and
+	is deferred behind diagnosing that point.
+
+	**Three things the plan did not anticipate**, all pinned by tests. The parametric-rectangle
+	quadrics interleave their two rims rather than emitting each loop consecutively, so §8's
+	"chain consecutive runs" does not work — chaining by matching endpoints does, and still needs
+	no change in any of the seven surface classes. A full-turn patch whose `fullSweep()` does not
+	fire emits its seam twice in opposite directions; that cancels in the half-edge check, so it
+	had never been noticed, but it chains into a two-point rim straddling the patch and produced a
+	spurious boundary rim on five of nine fixtures. And the sampling noise floor has to be
+	estimated from the *turn angle* — a vertex's deviation from the chord joining its neighbours
+	calls a box corner 2.4 cm of noise. `maxGap` is reported next to that floor and should never
+	be quoted without it.
