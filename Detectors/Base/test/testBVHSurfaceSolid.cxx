@@ -3552,3 +3552,140 @@ BOOST_AUTO_TEST_CASE(RejectedFacesAreNeverSilentlyAdded)
   BOOST_CHECK(!o2::base::LoadSurfaceSolid(path.string(), loaded));
   std::filesystem::remove(path);
 }
+
+// The rim-based closure measurement (TolerancePolicy.md section 3, finding K9/S8).
+//
+// The half-edge check asks whether two faces emitted the *same vertices* along a shared edge. On
+// real CAD that question has the answer "no" for reasons that are not gaps: each face samples the
+// shared curve independently, so the vertices genuinely are not the same points and no tolerance
+// on vertex equality can help. The rim measurement compares the boundaries as curves instead, and
+// reports the answer as a length in cm rather than as a chord count.
+//
+// Nothing derives a verdict from it yet -- IsNavigable() still reads the chord counters -- so
+// these tests pin the measurement, not a change of behaviour.
+BOOST_AUTO_TEST_CASE(RimClosureMeasuresTheGapInCentimetres)
+{
+  constexpr double halfX = 1.;
+  constexpr double halfY = 1.5;
+  constexpr double halfZ = 2.;
+
+  // a closed box: one rim per face, all matched, and no gap at all
+  SurfaceSolid closedBox("rimClosedBox");
+  addBoxSurfaces(closedBox, halfX, halfY, halfZ);
+  closedBox.CloseShape(false);
+  BOOST_REQUIRE(closedBox.IsNavigable());
+  BOOST_CHECK_EQUAL(closedBox.GetRimCount(), 6);
+  BOOST_CHECK_EQUAL(closedBox.GetMatchedRimCount(), 6);
+  BOOST_CHECK_EQUAL(closedBox.GetBoundaryRimCount(), 0);
+  BOOST_CHECK_SMALL(closedBox.GetMaxRimGap(), 1.e-12);
+  BOOST_CHECK_SMALL(closedBox.GetUnmatchedRimLength(), 1.e-12);
+  // a box has no curved rim, so its polylines are exact and the measurement has no noise floor
+  BOOST_CHECK_SMALL(closedBox.GetRimChordResolution(), 1.e-12);
+  // the summed perimeter of the six faces, which is what "how much boundary" is measured in
+  BOOST_CHECK_CLOSE(closedBox.GetTotalRimLength(), 16. * (halfX + halfY + halfZ), 1.e-9);
+
+  // the same box with the +z face lifted by a known delta: maxGap must *be* that delta, which is
+  // the whole point of the item -- "how far apart are the faces, in cm"
+  constexpr double delta = 1.e-3;
+  SurfaceSolid shiftedBox("rimShiftedBox");
+  for (int faceIndex = 0; faceIndex < 6; ++faceIndex) {
+    const Point3D center = faceIndex == 4 ? Point3D{0., 0., delta} : Point3D{0., 0., 0.};
+    BOOST_REQUIRE(addBoxFace(shiftedBox, faceIndex, halfX, halfY, halfZ, false, center));
+  }
+  shiftedBox.CloseShape(false);
+  BOOST_CHECK_CLOSE(shiftedBox.GetMaxRimGap(), delta, 1.e-6);
+  // and the shift is far above the sampling noise floor, so the number means what it says
+  BOOST_CHECK(shiftedBox.GetMaxRimGap() > shiftedBox.GetRimChordResolution());
+}
+
+// The structural failure of the old criterion, pinned: two faces that sample one shared edge at
+// different chord counts emit different vertices, so vertex matching calls a perfectly closed box
+// open -- and open by *chords*, which is how a four-face solid comes to report 1418 boundary
+// edges. Rim matching compares the curves and gets it right.
+BOOST_AUTO_TEST_CASE(RimClosureSurvivesUnequalChordCounts)
+{
+  constexpr double halfX = 1.;
+  constexpr double halfY = 1.5;
+  constexpr double halfZ = 2.;
+
+  SurfaceSolid resampled("rimResampledBox");
+  for (int faceIndex = 0; faceIndex < 5; ++faceIndex) {
+    BOOST_REQUIRE(addBoxFace(resampled, faceIndex, halfX, halfY, halfZ));
+  }
+  // the last face again, but with every edge split in two: the same rectangle, twice the vertices
+  const FaceFrame frame = boxFaceFrame(5, halfX, halfY, halfZ);
+  const double extentU = frame.extentU;
+  const double extentV = frame.extentV;
+  BOOST_REQUIRE(resampled.AddPlanarSurface(frame.origin, frame.axisU, frame.axisV,
+                                           {{0., 0.},
+                                            {0.5 * extentU, 0.},
+                                            {extentU, 0.},
+                                            {extentU, 0.5 * extentV},
+                                            {extentU, extentV},
+                                            {0.5 * extentU, extentV},
+                                            {0., extentV},
+                                            {0., 0.5 * extentV}}));
+  resampled.CloseShape(false);
+
+  // the half-edge check calls this closed box open, and counts the disagreement in chords
+  BOOST_CHECK(!resampled.IsClosed());
+  BOOST_CHECK(resampled.GetBoundaryEdgeCount() > 0);
+
+  // the rim measurement sees one boundary curve per face, all matched, and no gap
+  BOOST_CHECK_EQUAL(resampled.GetRimCount(), 6);
+  BOOST_CHECK_EQUAL(resampled.GetMatchedRimCount(), 6);
+  BOOST_CHECK_EQUAL(resampled.GetBoundaryRimCount(), 0);
+  BOOST_CHECK_SMALL(resampled.GetMaxRimGap(), 1.e-12);
+  BOOST_CHECK_SMALL(resampled.GetUnmatchedRimLength(), 1.e-12);
+}
+
+// Rims are counted per boundary loop and measured in centimetres, not counted per chord. A bare
+// cylinder wall is the clearest case: two circular rims, sampled at kArcSamples chords each.
+BOOST_AUTO_TEST_CASE(RimCountsAreLoopsAndLengthsNotChords)
+{
+  constexpr double radius = 1.;
+  constexpr double halfHeight = 2.;
+  SurfaceSolid openTube("rimOpenTube");
+  BOOST_REQUIRE(
+    openTube.AddCylindricalSurface({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, radius, -halfHeight, halfHeight));
+  openTube.CloseShape(false);
+
+  // the chord counter reports every sample of both rims
+  BOOST_CHECK(openTube.GetBoundaryEdgeCount() >= 2 * surf::kArcSamples);
+  // the rim measurement reports two open loops, and how long they are
+  BOOST_CHECK_EQUAL(openTube.GetRimCount(), 2);
+  BOOST_CHECK_EQUAL(openTube.GetBoundaryRimCount(), 2);
+  BOOST_CHECK_EQUAL(openTube.GetMatchedRimCount(), 0);
+  // both rims are open, and the length is the sampled circumference (a chord polygon, so slightly
+  // under 2*pi*r); it is the *length* that is reported, not the sample count
+  BOOST_CHECK_CLOSE(openTube.GetUnmatchedRimLength(), openTube.GetTotalRimLength(), 1.e-9);
+  BOOST_CHECK_CLOSE(openTube.GetTotalRimLength(), 2. * surf::kTwoPi * radius, 1.);
+
+  // the sagitta of a circle of this radius sampled at kArcSamples per turn, from the closed form:
+  // r (1 - cos(pi/kArcSamples)). The estimator must recover it, because it is the floor below
+  // which a rim gap is how the rims were sampled rather than how far apart the faces are.
+  const double exactSagitta = radius * (1. - std::cos(surf::kPi / surf::kArcSamples));
+  BOOST_CHECK_CLOSE(openTube.GetRimChordResolution(), exactSagitta, 1.);
+
+  // Two rims and no third: a full-turn patch emits its seam twice, once each way, and that pair
+  // bounds nothing -- it cancels in the half-edge check for the same reason. Chained naively it
+  // would become a two-point rim straddling the patch, reporting a gap the size of the patch.
+}
+
+// The matching tolerance is the model's own declared one when the sidecar states it (version 2),
+// and a documented constant when it does not. Before this the kernel had no way to know what
+// epsilon two faces of an imported solid should agree to, and guessed.
+BOOST_AUTO_TEST_CASE(RimMatchToleranceComesFromTheModel)
+{
+  SurfaceSolid unstated("rimToleranceUnstated");
+  addBoxSurfaces(unstated, 1., 1., 1.);
+  unstated.CloseShape(false);
+  BOOST_CHECK_EQUAL(unstated.GetModelTolerance(), 0.);
+  BOOST_CHECK_CLOSE(unstated.GetRimMatchTolerance(), surf::kRimMatchTolerance, 1.e-9);
+
+  SurfaceSolid stated("rimToleranceStated");
+  addBoxSurfaces(stated, 1., 1., 1.);
+  stated.SetModelTolerance(2.5e-7);
+  stated.CloseShape(false);
+  BOOST_CHECK_CLOSE(stated.GetRimMatchTolerance(), 2.5e-7, 1.e-9);
+}

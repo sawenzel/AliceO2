@@ -336,6 +336,44 @@ class O2BVHSurfaceSolid : public TGeoBBox
   int GetNonManifoldEdgeCount() const;
   int GetReversedEdgeCount() const;
 
+  /// \name The rim-based closure measurement
+  /// The counts above compare the *vertices* two faces emit along a shared edge, which on real
+  /// CAD is a question with the answer "different" for reasons that are not gaps: each face
+  /// samples the shared curve independently, so the vertices genuinely are not the same points.
+  /// They are also counted per chord, which is how a four-face solid reports 1418 boundary edges.
+  ///
+  /// These accessors measure the same boundary as *curves*, in centimetres, and count it per rim
+  /// (one trim loop of one face). **They do not decide anything yet**: GetNavigationReliability()
+  /// still reads the chord counters. Switching it over changes which solids take Contains()'s
+  /// single-shot parity fast path, whose licence is a direction-independence measurement taken
+  /// while the old check under-reported Reliable, so it may only be done together with re-running
+  /// that measurement. See scripts/geometry/TolerancePolicy.md section 8.
+  /// @{
+  /// The largest distance in cm from any face's trim boundary to the nearest trim boundary of a
+  /// *different* face -- the answer to "how far apart are the faces". Zero when there is nothing
+  /// to compare (fewer than two faces with rims). Read it together with GetRimChordResolution():
+  /// a rim is a polyline, and two faces sampling one shared curve at different phases differ by
+  /// up to that much even when the curve is shared exactly.
+  double GetMaxRimGap() const;
+  /// How far a rim polyline can itself sit from the smooth rim it samples, in cm. This is the
+  /// floor below which GetMaxRimGap() is sampling noise rather than geometry.
+  double GetRimChordResolution() const;
+  /// The tolerance rim matching used, in cm: the model's own declared tolerance when the sidecar
+  /// states one (see GetModelTolerance), else a documented fallback.
+  double GetRimMatchTolerance() const;
+  /// Summed length of every face's trim boundary, in cm, and how much of it has no other face
+  /// within GetRimMatchTolerance(). This is the honest replacement for a chord count: it says how
+  /// much boundary is open, not how many samples were emitted along it.
+  double GetTotalRimLength() const;
+  double GetUnmatchedRimLength() const;
+  /// Rim counts: total, and split by the same four states as the edge counters above.
+  int GetRimCount() const;
+  int GetMatchedRimCount() const;
+  int GetBoundaryRimCount() const;
+  int GetNonManifoldRimCount() const;
+  int GetReversedRimCount() const;
+  /// @}
+
   void ComputeBBox() override;
 
   int DistancetoPrimitive(int, int) override { return 99999; }
