@@ -1319,6 +1319,25 @@ struct Curve2D {
     return pointAtAngle(endAngle);
   }
 
+  /// dC/dt at curve parameter \a parameter in [0, 1], unnormalized. tangentAt() is this
+  /// normalized; a contour integral needs the length, because dv = v'(t) dt is what it integrates
+  /// against.
+  Vec2 derivativeAt(double parameter) const
+  {
+    if (kind == CurveKind::Line) {
+      return {lineEnd.uCoord - lineStart.uCoord, lineEnd.vCoord - lineStart.vCoord};
+    }
+    if (kind == CurveKind::BSpline) {
+      const double span = bsplineT1() - bsplineT0();
+      Vec2 point;
+      Vec2 derivative;
+      bsplineEval(bsplineT0() + parameter * span, point, derivative);
+      return {derivative.uCoord * span, derivative.vCoord * span};
+    }
+    const double angle = startAngle + parameter * sweep();
+    return {-radius * std::sin(angle) * sweep(), radius * std::cos(angle) * sweep()};
+  }
+
   /// Unit tangent at parameter \a parameter, pointing in the direction of increasing parameter.
   Vec2 tangentAt(double parameter) const
   {
@@ -1961,10 +1980,107 @@ inline bool curveTrimContains(const CurveWire& outerWire, const std::vector<Curv
   return true;
 }
 
+/// Number of Gauss-Legendre nodes per contour sub-interval in integrateOverCurveTrimByParts, and
+/// the largest span in u one sub-interval may cover.
+///
+/// The antiderivatives the quadric surfaces supply are entire in u -- sines, cosines and u itself
+/// -- so Gauss-Legendre converges geometrically rather than at any fixed order, and the only thing
+/// that has to be bounded is how many oscillations sit inside one interval. Capping the span at a
+/// quarter turn and spending 20 nodes on it leaves a wide margin: the error of n-node
+/// Gauss-Legendre on exp(i w x) over a half-width h falls like (w h / 2)^(2n) / (2n)!, which for
+/// w h = pi/8 and n = 20 is far below double precision.
+inline constexpr int kContourQuadratureOrder = 20;
+inline constexpr double kContourMaxSpanU = 0.25 * kPi;
+
+/// Integrate F(u, v) dv along one directed curve of a trim wire, from \a from to \a to in the
+/// curve's own [0, 1] parameter.
+template <typename Antiderivative>
+double contourIntegralAlongCurve(const Curve2D& curve, const Antiderivative& antiderivative, double from,
+                                 double to)
+{
+  static thread_local std::vector<double> nodes;
+  static thread_local std::vector<double> weights;
+  if (static_cast<int>(nodes.size()) != kContourQuadratureOrder) {
+    gaussLegendre(kContourQuadratureOrder, nodes, weights);
+  }
+  // split so no piece spans more than a quarter turn in u
+  const double spanU = std::abs(curve.pointAt(to).uCoord - curve.pointAt(from).uCoord);
+  const int pieces = std::max(1, static_cast<int>(std::ceil(spanU / kContourMaxSpanU)));
+  double total = 0.;
+  for (int piece = 0; piece < pieces; ++piece) {
+    const double low = from + (to - from) * piece / pieces;
+    const double high = from + (to - from) * (piece + 1) / pieces;
+    const double half = 0.5 * (high - low);
+    const double mid = 0.5 * (high + low);
+    for (int nodeIndex = 0; nodeIndex < kContourQuadratureOrder; ++nodeIndex) {
+      const double parameter = mid + half * nodes[nodeIndex];
+      const Vec2 point = curve.pointAt(parameter);
+      const Vec2 derivative = curve.derivativeAt(parameter);
+      total += weights[nodeIndex] * half * antiderivative(point.uCoord, point.vCoord) * derivative.vCoord;
+    }
+  }
+  return total;
+}
+
+/// Green's theorem for a wire-trimmed patch: given \a antiderivative F with dF/du = f,
+///
+///     double-integral over D of f(u, v) du dv  =  contour integral around dD of F(u, v) dv
+///
+/// where D is the outer loop minus the holes. The wires are already oriented for this (outer
+/// counter-clockwise, inner clockwise, normalized by buildCurveTrim), so summing every loop's
+/// every curve gives the signed total directly.
+///
+/// This replaces a 128x128 midpoint rule over a characteristic function. That rule books every
+/// boundary cell whole or not at all, so it converged at O(1/N) and *oscillated* as the staircase
+/// re-phased -- on Bagger/BucketLink2 it gave 16.004, 17.710, 16.927, 17.244, 17.032 cm^3 at 128
+/// to 2048 samples per axis against OpenCascade's 17.079. The gate's 1e-6 relative capacity band
+/// was unreachable at any practical N, and the entire capacity column of the Bagger gate was this
+/// and no geometry defect at all (CodeReview_Fable.md, finding H2 in Section 13).
+///
+/// It is also much cheaper: 16384 point-in-wire classifications per patch, each walking every
+/// curve of every loop, become a few hundred closed-form evaluations.
+///
+/// The contour is closed explicitly. A wire's curves are imported with independently sampled
+/// endpoints that agree only to kWireJoinTolerance, and a first-order gap in the contour is a
+/// first-order error in the integral -- 1e-5 parametric units against a 1e-6 target band. So each
+/// seam is bridged by the straight segment between the raw endpoints, which is exactly the piece
+/// that makes the loop a loop. (CurveWire::signedArea does not do this and carries the same
+/// residual; it is not on this path.)
+template <typename Antiderivative>
+double integrateOverCurveTrimByParts(const CurveWire& outerWire, const std::vector<CurveWire>& innerWires,
+                                     const Antiderivative& antiderivative)
+{
+  const auto loopIntegral = [&antiderivative](const CurveWire& wire) {
+    double total = 0.;
+    for (size_t index = 0; index < wire.curves.size(); ++index) {
+      const auto& curve = wire.curves[index];
+      total += contourIntegralAlongCurve(curve, antiderivative, 0., 1.);
+      // seam bridge: a straight run from this curve's end to the next curve's start
+      const Vec2 seamFrom = curve.endPoint();
+      const Vec2 seamTo = wire.curves[(index + 1) % wire.curves.size()].startPoint();
+      const double deltaV = seamTo.vCoord - seamFrom.vCoord;
+      if (deltaV != 0.) {
+        const Curve2D bridge = Curve2D::makeLine(seamFrom, seamTo);
+        total += contourIntegralAlongCurve(bridge, antiderivative, 0., 1.);
+      }
+    }
+    return total;
+  };
+
+  double total = loopIntegral(outerWire);
+  for (const auto& innerWire : innerWires) {
+    total += loopIntegral(innerWire);
+  }
+  return total;
+}
+
 /// Numerically integrate \a integrand(u, v) over the curve-wire-trimmed region (outer loop
 /// minus holes) by midpoint quadrature on a regular grid across the outer loop's parametric
-/// bounding box. Used for the (inexact) capacity contribution of wire-trimmed quadric patches;
-/// the untrimmed rectangle path keeps its exact closed form.
+/// bounding box.
+///
+/// Superseded for capacity by integrateOverCurveTrimByParts, which is both exact-in-practice and
+/// faster; kept because it is the only integrator that needs nothing of the integrand but its
+/// value, and so is the independent check the unit tests measure the contour form against.
 template <typename Integrand>
 double integrateOverCurveTrim(const CurveWire& outerWire, const std::vector<CurveWire>& innerWires,
                               const Integrand& integrand, int samplesPerAxis = 128)
@@ -3106,14 +3222,27 @@ class CylindricalBoundedSurface final : public BoundedSurface
     cylinderParametricMetric(mRadius, gUU, gUV, gVV);
   }
 
-  /// Exact divergence-theorem contribution over the (phi, h) rectangle; for a wire trim the same
-  /// integrand (1/3) X . n |X_phi x X_h| (with |X_phi x X_h| = radius) is integrated numerically.
+  /// Exact divergence-theorem contribution over the (phi, h) rectangle.
+  ///
+  /// For a wire trim the same integrand is reduced by Green's theorem to a contour integral around
+  /// the trim wire. With X = C + r(cos phi U + sin phi V) + h W and n = s(cos phi U + sin phi V),
+  ///
+  ///     f(phi, h) = (1/3) X . n |X_phi x X_h| = (s r / 3) (a cos phi + b sin phi + r)
+  ///
+  /// with a = C.U and b = C.V -- and no dependence on h at all, because the h W term of X is
+  /// orthogonal to the normal. So the antiderivative in phi is elementary:
+  ///
+  ///     F(phi, h) = (s r / 3) (a sin phi - b cos phi + r phi)
+  ///
+  /// and the double integral collapses to the contour integral of F dh around the trim.
   double capacityContribution() const override
   {
     if (mHasWireTrim) {
-      return integrateOverCurveTrim(mTrimOuter, mTrimInner, [this](double phi, double height) {
-        const Vec3 surfacePoint = pointAt(phi, height);
-        return dot(surfacePoint, normalAt(surfacePoint)) * mRadius / 3.;
+      const double centreU = dot(mCenter, mAxisU);
+      const double centreV = dot(mCenter, mAxisV);
+      const double factor = mNormalSign * mRadius / 3.;
+      return integrateOverCurveTrimByParts(mTrimOuter, mTrimInner, [=](double phi, double) {
+        return factor * (centreU * std::sin(phi) - centreV * std::cos(phi) + mRadius * phi);
       });
     }
     const double endPhi = mPhiStart + mPhiSweep;
@@ -3430,15 +3559,30 @@ class SphericalBoundedSurface final : public BoundedSurface
     sphereParametricMetric(mRadius, uv.vCoord, gUU, gUV, gVV);
   }
 
-  /// Exact divergence-theorem contribution over the (theta, phi) rectangle; for a wire trim the
-  /// same integrand (1/3) X . n |X_phi x X_theta| (with |X_phi x X_theta| = R^2 sin theta) is
-  /// integrated numerically over the (phi, theta) domain.
+  /// Exact divergence-theorem contribution over the (theta, phi) rectangle.
+  ///
+  /// For a wire trim, Green's theorem in the (u, v) = (phi, theta) trim domain. With
+  /// X = C + R(sin theta cos phi U + sin theta sin phi V + cos theta W) and n = s (X - C)/R,
+  ///
+  ///     f(phi, theta) = (s R^2 / 3) sin theta (a sin theta cos phi + b sin theta sin phi
+  ///                                            + c cos theta + R)
+  ///
+  /// so integrating in phi at fixed theta,
+  ///
+  ///     F(phi, theta) = (s R^2 / 3) sin theta (a sin theta sin phi - b sin theta cos phi
+  ///                                            + (c cos theta + R) phi).
   double capacityContribution() const override
   {
     if (mHasWireTrim) {
-      return integrateOverCurveTrim(mTrimOuter, mTrimInner, [this](double phi, double theta) {
-        const Vec3 surfacePoint = pointAt(theta, phi);
-        return dot(surfacePoint, normalAt(surfacePoint)) * mRadius * mRadius * std::sin(theta) / 3.;
+      const double centreU = dot(mCenter, mAxisU);
+      const double centreV = dot(mCenter, mAxisV);
+      const double centreW = dot(mCenter, mAxisW);
+      const double factor = mNormalSign * mRadius * mRadius / 3.;
+      return integrateOverCurveTrimByParts(mTrimOuter, mTrimInner, [=](double phi, double theta) {
+        const double sinTheta = std::sin(theta);
+        return factor * sinTheta *
+               (sinTheta * (centreU * std::sin(phi) - centreV * std::cos(phi)) +
+                (centreW * std::cos(theta) + mRadius) * phi);
       });
     }
     const double endPhi = mPhiStart + mPhiSweep;
@@ -3809,16 +3953,28 @@ class ConicalBoundedSurface final : public BoundedSurface
     coneParametricMetric(radiusAt(uv.vCoord), mSlope, gUU, gUV, gVV);
   }
 
-  /// Exact divergence-theorem contribution over the (phi, h) rectangle; for a wire trim the same
-  /// integrand (1/3) X . n |X_phi x X_h| (with |X_phi x X_h| = r(h) sqrt(1 + slope^2)) is
-  /// integrated numerically.
+  /// Exact divergence-theorem contribution over the (phi, h) rectangle.
+  ///
+  /// For a wire trim, the same Green's-theorem reduction as the cylinder. The sqrt(1 + slope^2) of
+  /// the area element cancels against the same factor in the unit normal, leaving
+  ///
+  ///     f(phi, h) = (s/3) r(h) (a cos phi + b sin phi + r(h) - m (c + h))
+  ///
+  /// with a = C.U, b = C.V, c = C.W, m = slope and r(h) = r0 + m h. Only the cos/sin terms carry
+  /// phi, so
+  ///
+  ///     F(phi, h) = (s/3) r(h) (a sin phi - b cos phi + (r(h) - m (c + h)) phi).
   double capacityContribution() const override
   {
     if (mHasWireTrim) {
-      const double slopeFactor = std::sqrt(1. + mSlope * mSlope);
-      return integrateOverCurveTrim(mTrimOuter, mTrimInner, [this, slopeFactor](double phi, double height) {
-        const Vec3 surfacePoint = pointAt(phi, height);
-        return dot(surfacePoint, normalAt(surfacePoint)) * radiusAt(height) * slopeFactor / 3.;
+      const double centreU = dot(mCenter, mAxisU);
+      const double centreV = dot(mCenter, mAxisV);
+      const double centreW = dot(mCenter, mAxisW);
+      return integrateOverCurveTrimByParts(mTrimOuter, mTrimInner, [=](double phi, double height) {
+        const double localRadius = radiusAt(height);
+        return mNormalSign / 3. * localRadius *
+               (centreU * std::sin(phi) - centreV * std::cos(phi) +
+                (localRadius - mSlope * (centreW + height)) * phi);
       });
     }
     const double endPhi = mPhiStart + mPhiSweep;
@@ -4198,15 +4354,30 @@ class TorusBoundedSurface final : public BoundedSurface
   }
 
   /// Exact divergence-theorem contribution (1/3) integral X . n |X_u x X_v| over the
-  /// (phiRing, phiTube) rectangle, with |X_u x X_v| = r (R + r cos v); for a wire trim the same
-  /// integrand is integrated numerically.
+  /// (phiRing, phiTube) rectangle, with |X_u x X_v| = r (R + r cos v).
+  ///
+  /// For a wire trim, Green's theorem again. Writing rho = R + r cos v and e = cos u U + sin u V,
+  /// X = C + rho e + r sin v W and n = s(cos v e + sin v W), so
+  ///
+  ///     f(u, v) = (s r rho / 3) (cos v (a cos u + b sin u) + c sin v + rho cos v + r sin^2 v)
+  ///
+  /// with a = C.U, b = C.V, c = C.W. Only the (a cos u + b sin u) term carries u, so
+  ///
+  ///     F(u, v) = (s r rho / 3) (cos v (a sin u - b cos u)
+  ///                              + (c sin v + rho cos v + r sin^2 v) u).
   double capacityContribution() const override
   {
     if (mHasWireTrim) {
-      return integrateOverCurveTrim(mTrimOuter, mTrimInner, [this](double phiRing, double phiTube) {
-        const Vec3 surfacePoint = pointAt(phiRing, phiTube);
-        const double jacobian = mMinorRadius * (mMajorRadius + mMinorRadius * std::cos(phiTube));
-        return dot(surfacePoint, normalAt(surfacePoint)) * jacobian / 3.;
+      const double centreU = dot(mCenter, mAxisU);
+      const double centreV = dot(mCenter, mAxisV);
+      const double centreW = dot(mCenter, mAxisW);
+      return integrateOverCurveTrimByParts(mTrimOuter, mTrimInner, [=](double phiRing, double phiTube) {
+        const double cosTube = std::cos(phiTube);
+        const double sinTube = std::sin(phiTube);
+        const double rho = mMajorRadius + mMinorRadius * cosTube;
+        return mNormalSign * mMinorRadius * rho / 3. *
+               (cosTube * (centreU * std::sin(phiRing) - centreV * std::cos(phiRing)) +
+                (centreW * sinTube + rho * cosTube + mMinorRadius * sinTube * sinTube) * phiRing);
       });
     }
     // Closed form over u in [u0, u1] (ring) and v in [v0, v1] (tube). See BVHSurfaceSolid.md.
