@@ -626,3 +626,136 @@ rather than a trim-boundary one. Diagnose the offender first; build the band onl
 turns out to be what it is for.
 
 ---
+
+## 11. The offender diagnosed — it is the trim boundary, and the band is now built
+
+§10.2 ended by saying: diagnose the single direction-dependent point before building §2.4's
+parametric ambiguity band, because the band is the fix for a *trim-boundary* ambiguity and that
+point might not be one. It is one. The band is built.
+
+### 11.1 What the offending ray actually does
+
+`cyl_cross_cyl` is two unit cylinders on the z and x axes, fused, so the truth is analytic. At the
+offending point the truth is **outside**, and the golden-spiral direction #10 of 13 is the one that
+says inside. Its crossing list, against the two crossings the truth has:
+
+| | t | n·d | hit | ρ_z − 1 | ρ_x − 1 |
+| --- | --- | --- | --- | --- | --- |
+| truth | 0.33836336623124036 | — | — | — | — |
+| solid | 0.33836336623124036 | −0.203 | (0.76639, 0.64238, 0.76641) | −1.1e-16 | **+1.70e-05** |
+| solid | 0.33838167219971466 | −0.930 | (0.76639, 0.64237, 0.76640) | **−3.71e-06** | +0.0 |
+| truth / solid | 2.4325853070001155 | +0.930 | (1.46604, −0.85273, −0.52234) | +0.696 | −3.3e-16 |
+
+The first hit is the z-cylinder and is genuine — it sits 1.7e-5 cm *outside* the x-cylinder, so it
+is on the union's boundary. The second is the x-cylinder, 1.83e-5 further along, and it sits
+3.71e-6 cm **inside** the z-cylinder. A point of the x-cylinder that is inside the z-cylinder is
+interior to the fused solid; that patch should have been trimmed away there. It was not. Three
+crossings instead of two, odd parity, "inside".
+
+**The two hits are not clustered and never could be.** They are 5.4e-5 apart in relative terms and
+`sameIntersection` merges at 1e-7·|t|. That is why §10.2's coincident-hit trigger stayed silent on
+the one point it was aimed at — the mechanism was never coincident hits.
+
+### 11.2 The trim overhang, measured directly rather than waited for
+
+The two cylinders meet on `P(θ) = (cos θ, sin θ, ±cos θ)`. Walking along the x-cylinder's surface
+away from that curve by a signed arc length and asking the solid whether its patch is still there
+(shoot a short ray along the normal; a hit at the expected distance means yes), bisected at each of
+720 θ on both branches:
+
+| | value |
+| --- | --- |
+| sampled positions | 1440 |
+| positions that **overhang** the true seam | **1440 (all of them)** |
+| positions that undercut it | **0** |
+| worst overhang | **1.95e-05 cm** |
+| overhang floor | **1.00e-05 cm** |
+| mean | 1.33e-05 cm |
+
+So the error is **systematic and one-sided**: every patch keeps a sliver past the true seam, none
+stops short. That is not what an approximation error looks like — an approximation would err both
+ways — and the floor says why.
+
+### 11.3 The cause is the on-boundary band's tie-break, i.e. step 4's own choice
+
+`CurveWire::classify` returns `Boundary` within `boundaryBand`, whose floor for a B-spline trim is
+`representationTolerance()` = `kBSplineFlatness` = **1e-5** — exactly the measured floor. And
+`curveTrimContains` resolves `Boundary` as **inside the trim**:
+
+```
+  if (outerClassification == WireClassification::Boundary) { *boundary = true; return true; }
+```
+
+That is a tie-break, not a fact, and it is one-sided by construction. The excess above the floor,
+0 to 1e-5 and oscillating with θ, is the polyline flattening of the B-spline seam on top of it.
+
+Step 4 was right to widen the band — a 1e-9 band around a 1e-5 polyline was measuring noise (K5).
+What step 4 did not do is say what a hit *in* the band means to a ray, and "accept it silently" is
+the one answer that turns an undecidable point into a wrong answer with no trace.
+
+**This is K5's other half, not K6.** K6 (cancellation in the naive quadratic) remains untouched and
+has lost its only reproducer: the roots here are accurate to the last printed digit, and both
+cylinders are hit exactly where they should be. The defect is entirely in which hits are *kept*.
+
+### 11.4 What shipped
+
+`RayHit` carries `onTrimBoundary`. The five `appendIntersections` that can produce a wire-trimmed
+hit (planar, curved-planar, cylinder, cone, sphere, torus) set it from the `bool*` out-param
+`curveTrimContains` already had and every caller was passing `nullptr` to. `parityAlong` reports
+whether any counted crossing carried it, and `containsByParity` — on a `Reliable` solid, where it
+would otherwise return a single shot — re-shoots through `containsByVote` when one did.
+
+This is §2.4's instrument, and it is much cheaper than §2.4 feared: no new geometry, no per-class
+trim mathematics, one bool through five call sites, because the classification already knew.
+
+Measured on `cyl_cross_cyl`, against the analytic truth:
+
+| | uniform, 5e6 points | seam-aimed, 2e6 points |
+| --- | --- | --- |
+| re-shoot fires | 48 (9.6e-06 of shots) | — |
+| flagged hits / all hits | 58 / 3145428 (1.8e-05) | — |
+| fires **and changes** the answer | 24 | 453008 (22.7%) |
+| — of which corrected | **24** | **453008** |
+| — of which broken | **0** | **0** |
+| `Contains` wrong before | 24 (4.8e-06) | 453008 (22.7%) |
+| `Contains` wrong after | **0** | **0** |
+
+"Seam-aimed" starts each ray on the true crossing curve and backs off along the fixed direction, so
+the ray passes through the sliver by construction — the adversarial case, where the old single shot
+is wrong 22.7% of the time and the new answer is never wrong.
+
+**Cost.** The re-shoot fires on one shot in 104000 and costs at most five extra parity shots when
+it does, so ~5e-5 of `Contains` amortised. The gate's own timing cannot resolve that: its
+`contains` column moved by −29% to +46% between two runs of the *same* code path, which is the
+noise floor of this machine, not an effect. Do not quote the gate's timings for anything at this
+scale.
+
+### 11.5 Acceptance
+
+- `ctest -R BVHSurfaceSolid` green at **58 cases**, from 57 (`TrimBoundaryHitsAreFlaggedAsAmbiguous`).
+- Both gates **bit-identical** to the baseline: fixtures 6/9, Bagger 4/12, `contains` 0 and 2, and
+  `gate.json` matching field for field once the `timing*`/`*Seconds` keys are removed. The gate
+  cannot see this change — its `contains` column already agreed 5000/5000 on every `Reliable` part,
+  and the defect is at the 1e-5 rate.
+- §4.2 direction-independence sweep re-run over both corpora: 13 `Reliable` parts, 143000 points,
+  13 directions — **0** direction-split points, and `Contains` differs from the raw fixed shot at
+  **0** of them.
+
+  Read that carefully. The sweep's split metric is `ContainsAlongDirection` against itself, and
+  that entry point documents that it bypasses the re-shoot policy, so **the metric is blind to this
+  change by construction**. The previous session's 1-in-143000 and this session's 0-in-143000 are
+  different samples of the same rate, not a before/after. The improvement is the §11.4 table; the
+  sweep's job here is only to confirm that no solid moved and nothing regressed.
+
+### 11.6 What this does not fix
+
+The sliver is still there. `Contains` now declines to be decided by it; `DistFromOutside`,
+`DistFromInside` and `ComputeNormal` still consume the flagged hit silently, and `nearestCrossing`
+has no equivalent policy (S4 is the same gap seen from the distance side). The honest scope is:
+**parity is now self-checking about its own tie-breaks; the distance queries are not.**
+
+Removing the sliver rather than labelling it needs the seam to be known better than either face's
+own chart knows it — which is Phase 2, adjacency-based exact trims, and is what `onTrimBoundary`
+would become the acceptance test for: on a model with exact adjacency, this flag should never fire.
+
+---
