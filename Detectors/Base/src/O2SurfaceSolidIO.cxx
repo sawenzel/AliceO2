@@ -20,6 +20,8 @@
 #include "DetectorsBase/O2BVHSurfaceSolid.h"
 #include "DetectorsBase/O2Tessellated.h"
 
+#include "BoundedSurface.h"
+
 #include <TError.h>
 
 #include <cmath>
@@ -146,20 +148,67 @@ bool edgeEndpoints(const SidecarEdge& edge, O2BVHSurfaceSolid::Point2D& start, O
   return false;
 }
 
+/// The first fundamental form of the surface a sidecar record describes, so the reader can judge
+/// its wires' join gaps in centimetres exactly as the kernel will. It reads the record's own
+/// parameter block and defers to the kernel's closed forms; the layouts below are the argument
+/// orders of the matching O2BVHSurfaceSolid::Add*Surface overload.
+struct RecordMetric {
+  uint32_t surfaceType = 0;
+  const double* params = nullptr;
+
+  static void evaluate(const void* context, const surface::Vec2& uv, double& gUU, double& gUV, double& gVV)
+  {
+    const auto& record = *static_cast<const RecordMetric*>(context);
+    const double* p = record.params;
+    switch (record.surfaceType) {
+      case kPlane:
+        surface::planeParametricMetric({p[3], p[4], p[5]}, {p[6], p[7], p[8]}, gUU, gUV, gVV);
+        return;
+      case kCylinder:
+        surface::cylinderParametricMetric(p[9], gUU, gUV, gVV);
+        return;
+      case kCone: {
+        // r(h) = radiusAtMin + slope * (h - heightMin), with slope from the two radii/heights
+        const double slope = (p[10] - p[9]) / (p[12] - p[11]);
+        surface::coneParametricMetric(p[9] + slope * (uv.vCoord - p[11]), slope, gUU, gUV, gVV);
+        return;
+      }
+      case kSphere:
+        surface::sphereParametricMetric(p[9], uv.vCoord, gUU, gUV, gVV);
+        return;
+      case kTorus:
+        surface::torusParametricMetric(p[9], p[10], uv.vCoord, gUU, gUV, gVV);
+        return;
+      default:
+        // an unknown type is rejected further down; the identity keeps this total meanwhile
+        gUU = 1.;
+        gUV = 0.;
+        gVV = 1.;
+        return;
+    }
+  }
+
+  surface::ParametricMetric metric() const { return {&evaluate, this}; }
+};
+
 /// Convert a sidecar wire into the public PlanarBoundaryCurve loop expected by
 /// AddCurvedPlanarSurface, validating that consecutive edges join end-to-start. Sets
 /// \a anyArc when the wire carries at least one circular-arc edge.
+///
+/// \a metric is the surface's first fundamental form, built from the record's own parameters by
+/// RecordMetric above. The join gap is judged as a 3D length in cm against exactly the
+/// kernel's kWireJoinTolerance -- the loader used to apply a bare 1e-5 to a mixed rad/cm
+/// separation, a different rule from the one the kernel would apply to the same wire moments
+/// later, which is finding S10 (and the reason the known ST1829909_01 rejection happened at all:
+/// six joins drifting under 3e-5 rad on cylinder trims, a negligible arc length, read as three
+/// times over tolerance).
 bool wireToCurves(const std::string& file, size_t surfaceIndex, const SidecarWire& wire,
-                  std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>& curves, bool& anyArc)
+                  std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>& curves, bool& anyArc,
+                  const surface::ParametricMetric& metric)
 {
   using Curve = O2BVHSurfaceSolid::PlanarBoundaryCurve;
   curves.clear();
   curves.reserve(wire.edges.size());
-  // The extractor projects/samples curve endpoints in the surface frame, so a line vertex and the
-  // shared endpoint of a neighbouring arc or B-spline can differ by the extractor's ~1e-6 sampling
-  // precision. The kernel's own CurveWire closure tolerance is looser, so accept that join gap
-  // here (a stricter 1e-9 wrongly rejected mixed line/arc/bspline loops such as D-shaped caps).
-  constexpr double kJoinTolerance = 1.e-5;
   for (size_t e = 0; e < wire.edges.size(); ++e) {
     const auto& edge = wire.edges[e];
     O2BVHSurfaceSolid::Point2D start{}, end{};
@@ -172,9 +221,11 @@ bool wireToCurves(const std::string& file, size_t surfaceIndex, const SidecarWir
     if (!edgeEndpoints(wire.edges[(e + 1) % wire.edges.size()], nextStart, nextEnd)) {
       return false;
     }
-    if (std::abs(end[0] - nextStart[0]) > kJoinTolerance || std::abs(end[1] - nextStart[1]) > kJoinTolerance) {
-      ::Error("LoadSurfaceSolid", "%s: surface %zu: wire edge %zu end does not join the next edge start",
-              file.c_str(), surfaceIndex, e);
+    const double joinGapSq = metric.distanceSq({end[0], end[1]}, {nextStart[0], nextStart[1]});
+    if (joinGapSq > surface::kWireJoinToleranceSq) {
+      ::Error("LoadSurfaceSolid",
+              "%s: surface %zu: wire edge %zu end does not join the next edge start (gap %.3g cm, tolerance %.3g cm)",
+              file.c_str(), surfaceIndex, e, std::sqrt(joinGapSq), surface::kWireJoinTolerance);
       return false;
     }
     if (edge.curveType == kCircularArc) {
@@ -201,13 +252,14 @@ bool wireToCurves(const std::string& file, size_t surfaceIndex, const SidecarWir
 /// (u = phi[rad]; v = height[cm] for cylinder/cone, v = theta[rad] for sphere).
 bool collectQuadricTrim(const std::string& file, size_t surfaceIndex, const std::vector<SidecarWire>& wires,
                         std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>& outer,
-                        std::vector<std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>>& inners)
+                        std::vector<std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>>& inners,
+                        const surface::ParametricMetric& metric)
 {
   bool haveOuter = false;
   bool anyArc = false; // quadric domains accept both line and arc trim edges
   for (const auto& wire : wires) {
     std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve> curves;
-    if (!wireToCurves(file, surfaceIndex, wire, curves, anyArc)) {
+    if (!wireToCurves(file, surfaceIndex, wire, curves, anyArc, metric)) {
       return false;
     }
     if (wire.role == 0) {
@@ -293,6 +345,7 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
     }
 
     const bool innerWall = (flags & kFlagInnerWall) != 0;
+    const RecordMetric recordMetric{surfaceType, p.data()};
     bool added = false;
 
     switch (surfaceType) {
@@ -309,7 +362,7 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
         bool anyArc = false;
         for (const auto& wire : wires) {
           std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve> curves;
-          if (!wireToCurves(file, s, wire, curves, anyArc)) {
+          if (!wireToCurves(file, s, wire, curves, anyArc, recordMetric.metric())) {
             return false;
           }
           if (wire.role == 0) {
@@ -359,7 +412,7 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
         } else {
           std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve> outer;
           std::vector<std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>> inners;
-          if (!collectQuadricTrim(file, s, wires, outer, inners)) {
+          if (!collectQuadricTrim(file, s, wires, outer, inners, recordMetric.metric())) {
             return false;
           }
           added = solid.AddCylindricalSurface(point3(p, 0), point3(p, 3), point3(p, 6), p[9], p[10], p[11], p[12],
@@ -378,7 +431,7 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
         } else {
           std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve> outer;
           std::vector<std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>> inners;
-          if (!collectQuadricTrim(file, s, wires, outer, inners)) {
+          if (!collectQuadricTrim(file, s, wires, outer, inners, recordMetric.metric())) {
             return false;
           }
           added = solid.AddConicalSurface(point3(p, 0), point3(p, 3), point3(p, 6), p[9], p[10], p[11], p[12], p[13],
@@ -398,7 +451,7 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
         } else {
           std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve> outer;
           std::vector<std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>> inners;
-          if (!collectQuadricTrim(file, s, wires, outer, inners)) {
+          if (!collectQuadricTrim(file, s, wires, outer, inners, recordMetric.metric())) {
             return false;
           }
           added = solid.AddSphericalSurface(point3(p, 0), point3(p, 3), point3(p, 6), p[9], p[10], p[11], p[12],
@@ -418,7 +471,7 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
         } else {
           std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve> outer;
           std::vector<std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>> inners;
-          if (!collectQuadricTrim(file, s, wires, outer, inners)) {
+          if (!collectQuadricTrim(file, s, wires, outer, inners, recordMetric.metric())) {
             return false;
           }
           added = solid.AddToroidalSurface(point3(p, 0), point3(p, 3), point3(p, 6), p[9], p[10], p[11], p[12], p[13],
