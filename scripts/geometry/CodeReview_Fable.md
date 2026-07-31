@@ -865,3 +865,37 @@ hit silently, and `nearestCrossing` has no equivalent policy — which is S4 see
 side. And the sliver itself remains; labelling it is not removing it. Removing it needs the seam
 known better than either face's chart knows it, which is Phase 2 — for which `onTrimBoundary`
 becomes a ready-made acceptance test: on a model with exact adjacency it should never fire.
+
+## 17. Phase 1 follow-up item 3 (2026-08-01) — the gate now categorises its own rays
+
+NEXT.md item 3: the sample generator assigns a ray to `distout` or `distin` from the *tessellated*
+reference, and Section 13's H1 showed that on `BucketLink2` that mesh is not watertight and its
+left plate sits 0.2 cm from the BREP's, so all 20 recorded offenders had the opposite category.
+The harness then asked the candidate for an entry distance from a point that was inside, compared
+it against an exit distance, and booked a correct answer as a missed surface.
+
+**This is a gate change, and its effect must be read as one.** Nothing in the kernel moved.
+
+The oracle already reported what was needed — `occtOracle.py` has emitted `originContains` per ray
+category since it was written, precisely so "the consumer can check that assumption rather than
+trust it." Nobody consumed it. Now `validateDistanceAgainstOracle` takes the column and lets it
+decide, per ray, which TGeo entry point the candidate is asked; an origin the oracle calls ON the
+boundary abstains, because neither entry point is defined there. An answer file without the column
+falls back to the category name, so older runs still score. `nRelabelled` is reported on the
+harness line and in `--json`, so a moved number can always be traced to the re-labelling.
+
+The rule never consults the candidate, which is what makes it sound.
+
+**Measured.** Bagger, 30 outside-ray and 148 inside-ray origins re-labelled across the model:
+
+| part | before | after |
+| --- | --- | --- |
+| `BucketLink2` | distout 30 (missed 24), distin 48, capacity 0.063 | **capacity 0.063 only** |
+| `BoomCylinderOuter` | distin 4 | distin 3 |
+| `cyl_inter_cyl` (fixtures) | distout 2 (missed 2), capacity 3.5e-4 | **capacity 3.5e-4 only** |
+
+So H1 is confirmed by the gate itself: **all 78 of `BucketLink2`'s distance disagreements were the
+gate's own mis-categorisation**, and that part now fails on capacity and nothing else. Totals are
+unchanged — fixtures 6/9, Bagger 4/12 — because every part that improved still fails its capacity
+column, which is item 2's subject and not this one's.
+

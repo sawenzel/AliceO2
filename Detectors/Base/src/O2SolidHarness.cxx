@@ -432,7 +432,8 @@ ValidationResult validateContainsAgainstOracle(const TGeoShape* candidate,
 ValidationResult validateDistanceAgainstOracle(const TGeoShape* candidate,
                                                const std::vector<Ray>& rays,
                                                const std::vector<double>& oracleDistance,
-                                               bool wantInside, const ValidationOptions& opt)
+                                               bool wantInside, const ValidationOptions& opt,
+                                               const std::vector<int>& oracleOriginState)
 {
   ValidationResult result;
   result.nSamples = rays.size();
@@ -441,8 +442,23 @@ ValidationResult validateDistanceAgainstOracle(const TGeoShape* candidate,
       ++result.nNoVerdict;
       continue;
     }
+    // The origin's own classification, from the oracle, decides which entry point is defined
+    // here. The category the sample generator assigned is only a hint, and on a non-watertight
+    // reference mesh it is a wrong one.
+    bool askInside = wantInside;
+    if (index < oracleOriginState.size()) {
+      const int state = oracleOriginState[index];
+      if (state < 0) {
+        ++result.nNoVerdict; // origin ON the boundary: neither entry point is defined
+        continue;
+      }
+      askInside = state == 1;
+      if (askInside != wantInside) {
+        ++result.nRelabelled;
+      }
+    }
     const auto& ray = rays[index];
-    const double dc = wantInside
+    const double dc = askInside
                         ? candidate->DistFromInside(ray.origin.data(), ray.dir.data(), kIact, opt.stepmax)
                         : candidate->DistFromOutside(ray.origin.data(), ray.dir.data(), kIact, opt.stepmax);
     const double dr = oracleDistance[index];
