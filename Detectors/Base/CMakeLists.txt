@@ -78,7 +78,7 @@ o2_add_test(
   BVHSurfaceSolid
   SOURCES test/testBVHSurfaceSolid.cxx
   COMPONENT_NAME DetectorsBase
-  PUBLIC_LINK_LIBRARIES O2::DetectorsBase ROOT::Geom
+  PUBLIC_LINK_LIBRARIES O2::DetectorsBase ROOT::Geom ROOT::RIO
   LABELS detectorsbase)
 
 o2_add_executable(
