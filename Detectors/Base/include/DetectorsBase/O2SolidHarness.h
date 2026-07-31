@@ -104,6 +104,8 @@ struct ValidationResult {
   size_t nMismatchMissedSurface = 0; // one side found no crossing where the other did
   size_t nMismatchUnexplained = 0;
   size_t nNoVerdict = 0;          // oracle mode only: the reference declined to answer
+  size_t nRelabelled = 0;         // ray queries, oracle mode: origins whose category the oracle
+                                  // contradicted, so the other TGeo entry point was asked
   double worstDeviation = 0.;
   std::vector<Offender> worstOffenders; // bounded by opt.maxOffenders, worst-first
 };
@@ -169,12 +171,27 @@ ValidationResult validateContainsAgainstOracle(const TGeoShape* candidate,
                                                const ValidationOptions& opt = {});
 
 /// `oracleDistance` holds the nearest positive ray/boundary crossing, or >= TGeoShape::Big() for
-/// a miss. `wantInside` selects which TGeo entry point the candidate is asked (the oracle uses
-/// one computation for both -- see occtOracle.py).
+/// a miss. The oracle uses one computation for both directions (see occtOracle.py), so which TGeo
+/// entry point the candidate must be asked is decided by where the *origin* is -- and that is the
+/// one thing the sample generator cannot be trusted about.
+///
+/// `oracleOriginState` is the oracle's own classification of each ray origin: 1 inside, 0 outside,
+/// -1 ON the boundary. When it is present it decides the entry point, per ray, overriding
+/// `wantInside`; a -1 origin abstains (`nNoVerdict`) because neither entry point is defined there.
+/// When it is empty -- an older answer file -- `wantInside` decides as before.
+///
+/// This exists because the generator labels a ray from the *tessellated* reference, and that mesh
+/// can be wrong: on Bagger/BucketLink2 it is not watertight and its left plate sits 0.2 cm from
+/// the BREP's, so all 20 recorded offenders had the opposite category, the harness asked the
+/// candidate for an entry distance from a point that was inside, compared it against an exit
+/// distance, and booked a correct answer as a missed surface. Re-labelling is sound precisely
+/// because it never consults the candidate: the oracle is ground truth for its own origins.
+/// See CodeReview_Fable.md, finding H1 in Section 13.
 ValidationResult validateDistanceAgainstOracle(const TGeoShape* candidate,
                                                const std::vector<Ray>& rays,
                                                const std::vector<double>& oracleDistance,
-                                               bool wantInside, const ValidationOptions& opt = {});
+                                               bool wantInside, const ValidationOptions& opt = {},
+                                               const std::vector<int>& oracleOriginState = {});
 
 /// Safety's contract against ground truth: `0 <= safety <= trueDistance`. Unlike
 /// `validateSafety`, which can only probe six directions of the shape's own distance functions,
