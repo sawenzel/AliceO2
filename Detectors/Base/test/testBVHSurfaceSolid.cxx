@@ -2765,6 +2765,100 @@ BOOST_AUTO_TEST_CASE(BoundaryBandMatchesTheRepresentation)
   BOOST_CHECK(driftedWire.classify({3., 0.}) == WireClassification::Outside);
 }
 
+// The other half of K5, and the instrument TolerancePolicy.md section 2.4 asks for.
+//
+// BoundaryBandMatchesTheRepresentation above pins the *width* of the band. This pins what happens
+// to a ray that lands in it. Resolving Boundary as "inside the trim" is a tie-break, not a fact,
+// and it is one-sided: the patch keeps a sliver of the band's width past its true trim curve. On a
+// Boolean seam that sliver lies in the solid's interior, where a crossing must not be counted, so
+// a ray through it gains a spurious crossing and Contains() flips.
+//
+// Measured on cyl_cross_cyl (two unit cylinders fused, whose seam is transcendental in either
+// face's chart, so it has to be carried as a B-spline): every one of 1440 sampled positions along
+// the true seam overhangs by 1.0e-5 to 1.9e-5 cm and *none* undercuts -- the floor being the band
+// itself and the excess the polyline flattening. That is the single direction-dependent point the
+// section 4.2 sweep found, and it is not the root-finding defect (K6) it was filed as.
+//
+// The kernel cannot remove the sliver -- the data does not say where the seam is to better than
+// this -- so it labels it instead, and Contains() re-aims when a shot rests on one. Hence the
+// contract here: the flag is set exactly when the answer came from the tie-break, and is *not*
+// set for a hit the trim decides on its own, because a flag that fired everywhere would put every
+// query on the voting path.
+BOOST_AUTO_TEST_CASE(TrimBoundaryHitsAreFlaggedAsAmbiguous)
+{
+  using surf::Curve2D;
+  std::string error;
+
+  // a cylinder of radius 2 carrying a circular B-spline window of radius 0.5 in (phi, h)
+  const double centrePhi = surf::kPi;
+  const double trimRadius = 0.5;
+  surf::CylindricalBoundedSurface splineTrimmed;
+  BOOST_REQUIRE(splineTrimmed.initialize({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, 2., -1., 1., 0., surf::kTwoPi,
+                                         false,
+                                         {quarterCircleBSpline(centrePhi, 0., trimRadius, 0.),
+                                          quarterCircleBSpline(centrePhi, 0., trimRadius, surf::kHalfPi),
+                                          quarterCircleBSpline(centrePhi, 0., trimRadius, surf::kPi),
+                                          quarterCircleBSpline(centrePhi, 0., trimRadius, 3. * surf::kHalfPi)},
+                                         {}, error));
+
+  // the same window held exactly, as one arc: it claims no width, so nothing is ever ambiguous
+  surf::CylindricalBoundedSurface arcTrimmed;
+  BOOST_REQUIRE(arcTrimmed.initialize({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, 2., -1., 1., 0., surf::kTwoPi, false,
+                                      {Curve2D::makeCircle({centrePhi, 0.}, trimRadius)}, {}, error));
+
+  // a radial ray that meets the wall at azimuth phi, h = 0
+  const auto hitAt = [](const surf::CylindricalBoundedSurface& surface, double phi) {
+    std::vector<surf::RayHit> hits;
+    surface.appendIntersections({0., 0., 0.}, {std::cos(phi), std::sin(phi), 0.}, 0., 1.e30, hits);
+    return hits;
+  };
+
+  // The band on this surface is the representation's own tolerance: 1e-5 in (phi, h), since the
+  // length floor kTolerance / maxScale is 1e-9 / 2 and loses.
+  const double band = surf::kBSplineFlatness;
+  const double justInside = 0.5 * band;
+
+  // 1. well inside the window the trim decides by itself -- accepted, and NOT flagged
+  {
+    const auto hits = hitAt(splineTrimmed, centrePhi);
+    BOOST_REQUIRE_EQUAL(hits.size(), 1u);
+    BOOST_CHECK(!hits.front().onTrimBoundary);
+  }
+  // 2. inside the window but within the band of its edge -- accepted, and flagged
+  {
+    const auto hits = hitAt(splineTrimmed, centrePhi + trimRadius - justInside);
+    BOOST_REQUIRE_EQUAL(hits.size(), 1u);
+    BOOST_CHECK(hits.front().onTrimBoundary);
+  }
+  // 3. OUTSIDE the window, still within the band -- accepted anyway, and flagged. This is the
+  //    sliver: the tie-break keeps material the trim curve does not enclose.
+  {
+    const auto hits = hitAt(splineTrimmed, centrePhi + trimRadius + justInside);
+    BOOST_REQUIRE_EQUAL(hits.size(), 1u);
+    BOOST_CHECK(hits.front().onTrimBoundary);
+  }
+  // 4. beyond the band the patch really does end
+  {
+    BOOST_CHECK(hitAt(splineTrimmed, centrePhi + trimRadius + 100. * band).empty());
+  }
+  // 5. an exactly-held trim has no sliver to label: the same offsets are decided, not flagged
+  {
+    const auto inside = hitAt(arcTrimmed, centrePhi + trimRadius - justInside);
+    BOOST_REQUIRE_EQUAL(inside.size(), 1u);
+    BOOST_CHECK(!inside.front().onTrimBoundary);
+    BOOST_CHECK(hitAt(arcTrimmed, centrePhi + trimRadius + justInside).empty());
+  }
+  // 6. and an untrimmed patch never sets it, which is what keeps the fast path fast
+  {
+    surf::CylindricalBoundedSurface plain;
+    BOOST_REQUIRE(plain.initialize({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, 2., -1., 1., 0., surf::kTwoPi, false,
+                                   error));
+    const auto hits = hitAt(plain, centrePhi);
+    BOOST_REQUIRE_EQUAL(hits.size(), 1u);
+    BOOST_CHECK(!hits.front().onTrimBoundary);
+  }
+}
+
 BOOST_AUTO_TEST_CASE(BSplineSidecarRoundTrip)
 {
   // a closed box whose first face carries a (collinear) B-spline boundary edge round-trips through

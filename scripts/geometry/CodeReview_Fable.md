@@ -809,3 +809,59 @@ its neighbours, calls a box corner 2.4 cm of noise.
   (Not built in this session per the user's choice.)
 - pythonOCC/OCCT working invocation: see Section 8 (alibuild `python3.10`, not system 3.12).
 - `alienv` is at `/home/swenzel/alisw/alibuild/alienv`; `ALIBUILD_WORK_DIR=/home/swenzel/alisw/sw`.
+
+## 16. Phase 1 follow-up item 1 (2026-08-01) — the direction-dependent point is K5, not K6
+
+NEXT.md's item 1 asked to diagnose the single disagreement the section 4.2 sweep left, on the
+theory that it was the cheapest known reproducer for **K6** (cancellation in the naive quadratic
+formula). It is not, and K6 loses its only reproducer. Full measurements in
+[`TolerancePolicy.md`](TolerancePolicy.md) section 11; the headlines are here.
+
+**The roots are fine; the trim is not.** On `cyl_cross_cyl` the offending ray gains a third
+crossing on the x-cylinder at a point that lies 3.7e-6 cm *inside* the z-cylinder — interior to
+the fused solid, where that patch should have been trimmed away. Both cylinders are hit exactly
+where they should be, to the last printed digit. The two hits are 5.4e-5 apart in relative terms,
+so no clustering rule could ever have merged them, which is also why section 10.2's coincident-hit
+trigger was silent on the one point it was aimed at.
+
+**The overhang is systematic and one-sided, and its floor names its cause.** Walking the analytic
+seam of the two cylinders and bisecting where each patch actually ends: **all 1440** sampled
+positions overhang the true seam, **none** undercuts, worst 1.95e-5 cm, floor **1.00e-5 cm** — and
+1e-5 is `kBSplineFlatness`, i.e. `CurveWire::boundaryBand` for a B-spline trim. `curveTrimContains`
+resolves the `Boundary` state as *inside the trim*. That tie-break is one-sided by construction, so
+every wire-trimmed patch keeps a sliver of the band's width past its own trim curve, and on a
+Boolean seam that sliver sits in the solid's interior.
+
+So this is **K5's other half**. Step 4 widened the band correctly — a 1e-9 band around a 1e-5
+polyline was measuring noise — but never said what a hit *inside* the band means to a ray, and
+"accept it silently" converts an undecidable point into a wrong answer that leaves no trace.
+
+**The fix is section 2.4's ambiguity band, and it was far cheaper than section 2.4 feared.** No new
+geometry and no per-class trim mathematics: `curveTrimContains` already computed the flag and every
+caller was passing `nullptr` to it. `RayHit` gains `onTrimBoundary`, the five `appendIntersections`
+that can produce a wire-trimmed hit set it, `parityAlong` reports it, and `containsByParity`
+re-shoots through the existing vote when a `Reliable` solid's single shot rests on one.
+
+**Measured on `cyl_cross_cyl` against the analytic truth**: uniform sampling, 5e6 points — the
+re-shoot fires on 48 shots (9.6e-6), changes 24 answers, **corrects 24, breaks 0**, and `Contains`
+goes from 24 wrong to **0**. Aimed at the seam, 2e6 points — 453008 wrong before, **0 after, 0
+broken**. Cost: one shot in 104000, at most five extra parity shots each, ~5e-5 amortised.
+
+**Both gates bit-identical** (fixtures 6/9, Bagger 4/12, `contains` 0 and 2) and `ctest` green at
+**58 cases**. The gate cannot see this: its `contains` column already agreed 5000/5000 on every
+`Reliable` part and the defect is at the 1e-5 rate. Two traps recorded for whoever reads those
+numbers next:
+
+- **The section 4.2 sweep is blind to this change by construction.** Its metric is
+  `ContainsAlongDirection`, which documents that it bypasses the re-shoot policy. The previous
+  session's 1-in-143000 and this session's 0-in-143000 are two samples of the same rate, not a
+  before and an after.
+- **The gate's timing column cannot resolve anything at this scale.** Its `contains` numbers moved
+  by −29% to +46% between two runs of the same code path on this machine.
+
+**Scope, stated plainly.** Parity is now self-checking about its own tie-breaks. The distance
+queries are not: `DistFromOutside`, `DistFromInside` and `ComputeNormal` still consume a flagged
+hit silently, and `nearestCrossing` has no equivalent policy — which is S4 seen from the distance
+side. And the sliver itself remains; labelling it is not removing it. Removing it needs the seam
+known better than either face's chart knows it, which is Phase 2 — for which `onTrimBoundary`
+becomes a ready-made acceptance test: on a model with exact adjacency it should never fire.

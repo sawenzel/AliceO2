@@ -278,6 +278,10 @@ class O2BVHSurfaceSolid : public TGeoBBox
   struct ContainsCrossing {
     double distance = 0.;      ///< ray parameter of the hit
     double normalAlignment = 0.; ///< dot(hit normal, test direction): < 0 enters, > 0 exits
+    /// The hit landed inside its patch's own on-boundary band, so it was kept by a tie-break the
+    /// data does not decide. Contains() re-shoots when it sees one of these; this is how often
+    /// that happens and where, which is otherwise invisible from outside.
+    bool onTrimBoundary = false;
   };
 
   /// Diagnostic hook: the parity ray's crossing list at \a point, from the BVH traversal into
@@ -291,6 +295,15 @@ class O2BVHSurfaceSolid : public TGeoBBox
   /// function of the sorted distances alone. That leaves differing hit *multisets* as the
   /// explanation, which is what this dumps. Measure before theorizing (CodeReview_Fable.md, S6).
   void DescribeContainsCrossings(const Point3D& point, std::vector<ContainsCrossing>& bvhCrossings,
+                                 std::vector<ContainsCrossing>& loopCrossings) const;
+
+  /// The same dump for an explicit shooting \a direction (normalized internally), i.e. the crossing
+  /// list behind ContainsAlongDirection() rather than behind Contains(). A point whose answer
+  /// depends on the direction has one list that is right and another that is not, and only a
+  /// side-by-side reading of the two says which crossing was gained or lost; the fixed-direction
+  /// overload cannot show that because it can only ever dump one of them.
+  void DescribeContainsCrossings(const Point3D& point, const Point3D& direction,
+                                 std::vector<ContainsCrossing>& bvhCrossings,
                                  std::vector<ContainsCrossing>& loopCrossings) const;
 
   /// Whether the closed shape forms a closed 2-manifold (every boundary edge shared by two faces).
