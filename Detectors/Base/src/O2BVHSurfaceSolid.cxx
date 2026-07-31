@@ -62,6 +62,30 @@ Vec3 makeVec3(const Double_t* point)
 // avoids evident symmetries (same as O2Tessellated), normalized so hit distances are lengths.
 const Vec3 kContainsTestDirection = normalized({1., 1.41421356237, 1.73205080757});
 
+/// Directions the re-shoot votes over on a solid whose surface set is not a closed manifold; see
+/// containsByVote. A golden-angle spiral is quasi-uniform on the sphere, so the directions are
+/// mutually well separated and none aligns with a coordinate axis or a 45-degree symmetry plane.
+/// Both properties matter: an earlier hand-picked triple failed on 13 of 55 known-bad points
+/// precisely because two of its directions turned out correlated, and agreed on the wrong answer.
+///
+/// Five is where the measurement stops paying: over those 55 points the majority is right 50/55
+/// with three directions, 53/55 with five, and 55/55 with thirteen. Five buys almost all of it at
+/// a bounded cost, and the residue is a defect the vote is not meant to repair -- Phase 2 is.
+const std::array<Vec3, 5>& reshootDirections()
+{
+  static const std::array<Vec3, 5> directions = [] {
+    std::array<Vec3, 5> spiral{};
+    for (int index = 0; index < 5; ++index) {
+      const double cosTheta = 1. - 2. * (index + 0.5) / 5.;
+      const double sinTheta = std::sqrt(1. - cosTheta * cosTheta);
+      const double phi = 2.399963229728653 * index; // golden angle
+      spiral[index] = normalized({sinTheta * std::cos(phi), sinTheta * std::sin(phi), cosTheta});
+    }
+    return spiral;
+  }();
+  return directions;
+}
+
 // Ray tmax tightening in the BVH distance queries; see O2BVHSurfaceSolid::SetRayTMaxPruning.
 bool gRayTMaxPruning = true;
 // Per-thread diagnostic counter of leaf surface patches visited by the BVH distance queries.
@@ -418,6 +442,63 @@ struct O2BVHSurfaceSolid::Impl {
       }
     }
     return bestDistance;
+  }
+
+  /// Parity of the crossings of the ray (\a point, \a direction) with the whole surface set: the
+  /// containment answer for one shooting direction. \a useBVH selects the accelerated candidate
+  /// set or the plain all-surfaces loop; both must produce the same hit multiset and hence the
+  /// same answer, which is what Contains vs Contains_Loop cross-validates.
+  ///
+  /// Shared by Contains, Contains_Loop and the re-shoot, so that all three evaluate parity by
+  /// exactly the same rule -- a re-shoot that disagreed with the primary shot for reasons other
+  /// than the direction would be untestable.
+  bool parityAlong(const Vec3& point, const Vec3& direction, bool useBVH) const
+  {
+    // reused across calls so containment allocates nothing on the hot path; the capacity is paid
+    // once per thread. Distinct from the distance queries' buffers, which are their own.
+    static thread_local std::vector<RayHit> parityHits;
+    parityHits.clear();
+    if (useBVH) {
+      visitRayCandidates(point, direction, [&](const BoundedSurface& surface) {
+        surface.appendIntersections(point, direction, kRayTolerance, TGeoShape::Big(), parityHits);
+      });
+    } else {
+      for (const auto& surface : surfaces) {
+        surface->appendIntersections(point, direction, kRayTolerance, TGeoShape::Big(), parityHits);
+      }
+    }
+    return oddCrossingParity(parityHits, direction);
+  }
+
+  /// Containment by majority vote over reshootDirections(): the re-shoot of CodeReview_Fable.md
+  /// Section 4.4, for solids whose surface set is not a closed 2-manifold.
+  ///
+  /// A gap in the surface set costs the parity ray exactly the crossings that fall inside the gap,
+  /// so a point is misclassified over the gap's whole *shadow* along the shooting direction --
+  /// which is why the errors are centimetres wide and far from any surface, and equally why they
+  /// are escapable: the shadow belongs to the direction, not to the point. Voting over several
+  /// spread directions puts the point outside most of the shadows it is in.
+  ///
+  /// This mitigates a defect, it does not repair one. The answer is still undefined in the sense
+  /// that IsNavigable() reports; what changes is that a single unlucky aim no longer decides it.
+  /// Stops as soon as a majority is settled, so a point all directions agree on costs three shots
+  /// rather than five.
+  bool containsByVote(const Vec3& point, bool useBVH) const
+  {
+    constexpr int kMajority = 3; // of the five directions
+    int inside = 0;
+    int outside = 0;
+    for (const auto& direction : reshootDirections()) {
+      if (parityAlong(point, direction, useBVH)) {
+        ++inside;
+      } else {
+        ++outside;
+      }
+      if (inside >= kMajority || outside >= kMajority) {
+        break;
+      }
+    }
+    return inside > outside;
   }
 
   /// Visit every surface whose BVH leaf box contains the point; stops early (returning true)
@@ -1223,14 +1304,21 @@ bool O2BVHSurfaceSolid::Contains(const Double_t* point) const
     return true;
   }
 
-  // reused across calls so containment allocates nothing on the hot path; the capacity is paid
-  // once per thread. Distinct from the distance queries' buffers, which are their own.
-  static thread_local std::vector<RayHit> containsHits;
-  containsHits.clear();
-  fImpl->visitRayCandidates(testPoint, kContainsTestDirection, [&](const BoundedSurface& surface) {
-    surface.appendIntersections(testPoint, kContainsTestDirection, kRayTolerance, TGeoShape::Big(), containsHits);
-  });
-  return oddCrossingParity(containsHits, kContainsTestDirection);
+  return containsByParity(point, true);
+}
+
+bool O2BVHSurfaceSolid::ContainsAlongDirection(const Double_t* point, const Double_t* direction) const
+{
+  if (fImpl == nullptr || fImpl->surfaces.empty()) {
+    return false;
+  }
+  const Vec3 testPoint = makeVec3(point);
+  for (const auto& surface : fImpl->surfaces) {
+    if (surface->containsPointOnSurface(testPoint)) {
+      return true;
+    }
+  }
+  return fImpl->parityAlong(testPoint, normalized(makeVec3(direction)), fImpl->bvh != nullptr);
 }
 
 bool O2BVHSurfaceSolid::Contains_Loop(const Double_t* point) const
@@ -1246,12 +1334,27 @@ bool O2BVHSurfaceSolid::Contains_Loop(const Double_t* point) const
     }
   }
 
-  static thread_local std::vector<RayHit> containsLoopHits;
-  containsLoopHits.clear();
-  for (const auto& surface : fImpl->surfaces) {
-    surface->appendIntersections(testPoint, kContainsTestDirection, kRayTolerance, TGeoShape::Big(), containsLoopHits);
+  return containsByParity(point, false);
+}
+
+bool O2BVHSurfaceSolid::containsByParity(const Double_t* point, bool useBVH) const
+{
+  // On a closed, consistently oriented 2-manifold parity is a topological invariant, so the answer
+  // cannot depend on where the ray is aimed and one shot is the whole story. That is not a
+  // convenient assumption but a measured one: over the Phase 0 corpus (10 synthetic fixtures plus
+  // the 12 converted Bagger parts, ~11k points each) every part the closure check calls Reliable
+  // has zero disagreements between shooting directions, and every part that does disagree is one
+  // the closure check already rejects. So the fast path costs nothing where it is valid, and the
+  // vote is paid exactly where the geometry has already admitted it is broken.
+  //
+  // The direction of the closure check's own error keeps this safe: it under-reports Reliable
+  // rather than over-reporting it (CodeReview_Fable.md S8/K9), so a defective solid taking the
+  // one-shot path would need the check to be wrong in the direction it is not wrong in.
+  const Vec3 testPoint = makeVec3(point);
+  if (GetNavigationReliability() == NavigationReliability::Reliable) {
+    return fImpl->parityAlong(testPoint, kContainsTestDirection, useBVH);
   }
-  return oddCrossingParity(containsLoopHits, kContainsTestDirection);
+  return fImpl->containsByVote(testPoint, useBVH);
 }
 
 void O2BVHSurfaceSolid::DescribeContainsCrossings(const Point3D& point,
