@@ -344,6 +344,13 @@ class O2BVHSurfaceSolid : public TGeoBBox
   /// Trivial non-BVH Contains looping over all surfaces; kept for debugging and
   /// cross-validation of the BVH-accelerated path (see O2Tessellated::Contains_Loop).
   bool Contains_Loop(const Double_t* point) const;
+  /// Diagnostic hook: the parity answer for one explicit shooting \a direction (normalized
+  /// internally), bypassing the re-shoot policy that Contains() applies. On a closed, consistently
+  /// oriented 2-manifold the answer is independent of the direction, so a point where it *does*
+  /// depend on the direction is one where the surface set has a defect the ray happens to hit.
+  /// That distinction is what separates "a re-shoot would rescue this" from "the geometry has a
+  /// hole"; measure with it before attributing either.
+  bool ContainsAlongDirection(const Double_t* point, const Double_t* direction) const;
   /// Trivial non-BVH DistFromOutside/DistFromInside looping over all surfaces. They are both the
   /// oracle the BVH paths are cross-validated against (they must agree exactly: same hits, same
   /// arithmetic, only a different visiting order) and the baseline the BVH speedup is measured
@@ -362,6 +369,13 @@ class O2BVHSurfaceSolid : public TGeoBBox
   const std::vector<BVHSurfaceRecord>& GetSurfaceRecords() const { return fRecords; }
 
  private:
+  /// The containment answer shared by Contains() and Contains_Loop(): one parity shot on a solid
+  /// the closure check calls Reliable, and a majority vote over several spread directions on one
+  /// it does not (CodeReview_Fable.md Section 4.4). \a useBVH selects the accelerated candidate
+  /// set. Both public entry points route through here so that the re-shoot policy can never make
+  /// them differ -- their bit-identical agreement is the branch's strongest self-check.
+  bool containsByParity(const Double_t* point, bool useBVH) const;
+
   /// Discard the derived state and replay fRecords through the Add*Surface methods, then
   /// CloseShape(). Used by the Streamer when reading. Returns false (having left the solid
   /// undefined, i.e. NavigationReliability::Undetermined) when there is nothing to replay or when

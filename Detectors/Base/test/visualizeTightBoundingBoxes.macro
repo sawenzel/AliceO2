@@ -1,0 +1,137 @@
+// File: test_cigar_diag_bbox.C
+//
+// Run with:
+//   root -l test_cigar_diag_bbox.C
+// or
+//   .x test_cigar_diag_bbox.C
+
+#include <vector>
+#include <cmath>
+#include <algorithm>
+
+#include "TCanvas.h"
+#include "TGeoManager.h"
+#include "TGeoMatrix.h"
+#include "TGeoVolume.h"
+#include "TGeoEltu.h"
+#include "TGeoBBox.h"
+#include "TPolyLine3D.h"
+#include "TMath.h"
+
+namespace {
+  std::vector<TPolyLine3D*> gLines; // keep wireframe objects alive
+
+  void DrawBBoxWireframe(double xmin, double ymin, double zmin,
+                         double xmax, double ymax, double zmax,
+                         int color = kRed, int width = 2)
+  {
+    double p[8][3] = {
+      {xmin, ymin, zmin},
+      {xmax, ymin, zmin},
+      {xmax, ymax, zmin},
+      {xmin, ymax, zmin},
+      {xmin, ymin, zmax},
+      {xmax, ymin, zmax},
+      {xmax, ymax, zmax},
+      {xmin, ymax, zmax}
+    };
+
+    int e[12][2] = {
+      {0,1},{1,2},{2,3},{3,0},
+      {4,5},{5,6},{6,7},{7,4},
+      {0,4},{1,5},{2,6},{3,7}
+    };
+
+    for (int i = 0; i < 12; ++i) {
+      auto l = new TPolyLine3D(2);
+      l->SetPoint(0, p[e[i][0]][0], p[e[i][0]][1], p[e[i][0]][2]);
+      l->SetPoint(1, p[e[i][1]][0], p[e[i][1]][1], p[e[i][1]][2]);
+      l->SetLineColor(color);
+      l->SetLineWidth(width);
+      gLines.push_back(l);
+      l->Draw();
+    }
+  }
+
+  void DrawPlacedShapeBBox(const TGeoMatrix* mat,
+                           double dx, double dy, double dz,
+                           int color = kRed, int width = 2)
+  {
+    // Local axis-aligned bbox corners of the tube shape
+    double local[8][3] = {
+      {-dx, -dy, -dz},
+      { dx, -dy, -dz},
+      { dx,  dy, -dz},
+      {-dx,  dy, -dz},
+      {-dx, -dy,  dz},
+      { dx, -dy,  dz},
+      { dx,  dy,  dz},
+      {-dx,  dy,  dz}
+    };
+
+    double master[3];
+    double xmin =  1e100, ymin =  1e100, zmin =  1e100;
+    double xmax = -1e100, ymax = -1e100, zmax = -1e100;
+
+    for (int i = 0; i < 8; ++i) {
+      mat->LocalToMaster(local[i], master);
+      xmin = std::min(xmin, master[0]);
+      ymin = std::min(ymin, master[1]);
+      zmin = std::min(zmin, master[2]);
+      xmax = std::max(xmax, master[0]);
+      ymax = std::max(ymax, master[1]);
+      zmax = std::max(zmax, master[2]);
+    }
+
+    DrawBBoxWireframe(xmin, ymin, zmin, xmax, ymax, zmax, color, width);
+  }
+}
+
+void test_cigar_bbox()
+{
+  auto geom = new TGeoManager("geom", "Long tube along (1,1,1) with big mother bbox");
+
+  // Big world volume
+  auto top = geom->MakeBox("TOP", nullptr, 300., 300., 300.);
+  geom->SetTopVolume(top);
+
+  // Very long, thin cigar-like tube (local long axis = local Z)
+  const double dx = 5.0;    // local half-width in X
+  const double dy = 10.0;    // local half-width in Y
+  const double dz = 120.0;  // local half-length in Z
+
+  auto cigarShape = new TGeoEltu("cigarShape", dx, dy, dz);
+  auto cigarVol   = new TGeoVolume("CIGAR", cigarShape);
+  cigarVol->SetLineColor(kAzure + 1);
+  cigarVol->SetFillColor(kAzure + 1);
+  cigarVol->SetTransparency(0);
+
+  // Rotate local Z into the (1,1,1) direction:
+  //   first rotate around Y by acos(1/sqrt(3))
+  //   then around Z by 45 degrees
+  const double beta = TMath::ACos(1.0 / TMath::Sqrt(3.0)) * TMath::RadToDeg();
+
+  auto rot = new TGeoRotation();
+  rot->RotateY(beta);
+  rot->RotateZ(45.0);
+
+  // Place it in the mother
+  const double tx = 0.0;
+  const double ty = 0.0;
+  const double tz = 0.0;
+
+  auto combi = new TGeoCombiTrans(tx, ty, tz, rot);
+  top->AddNode(cigarVol, 1, combi);
+
+  geom->CloseGeometry();
+
+  auto c = new TCanvas("c", "Tube along (1,1,1) + mother AABB", 1000, 800);
+  top->Draw("ogl");
+  c->Update();
+
+  // Draw the axis-aligned bounding box in mother coordinates
+  DrawPlacedShapeBBox(combi, dx, dy, dz, kRed, 2);
+
+  c->Modified();
+  c->Update();
+}

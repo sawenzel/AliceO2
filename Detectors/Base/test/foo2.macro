@@ -1,0 +1,303 @@
+// File: slice_cone_localz_visible.C
+//
+// Run with:
+//   root -l slice_cone_localz_visible.C
+// or
+//   .x slice_cone_localz_visible.C
+//
+// What changed vs. the half-space version:
+//   - slicing is still in the cone LOCAL frame
+//   - but each slice is now cone * translated finite slab-box
+//   - this is much more viewer-friendly than half-spaces
+//   - slices are placed with the same mother transform as the original cone
+//   - sampled mother AABBs are still overlaid as wireframes
+
+#include <vector>
+#include <cmath>
+#include <algorithm>
+#include <iostream>
+
+#include "TCanvas.h"
+#include "TColor.h"
+#include "TGeoBBox.h"
+#include "TGeoCompositeShape.h"
+#include "TGeoCone.h"
+#include "TGeoManager.h"
+#include "TGeoMatrix.h"
+#include "TGeoVolume.h"
+#include "TMath.h"
+#include "TPolyLine3D.h"
+
+namespace {
+
+std::vector<TObject*> gKeepAlive;
+std::vector<TPolyLine3D*> gLines;
+
+void Normalize(double v[3])
+{
+  const double n = std::sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+  if (n <= 0.) return;
+  v[0] /= n; v[1] /= n; v[2] /= n;
+}
+
+double Dot(const double a[3], const double b[3])
+{
+  return a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+}
+
+void BuildRotationZToDir(const double dir[3], TGeoRotation& rot)
+{
+  double ez[3] = {dir[0], dir[1], dir[2]};
+  Normalize(ez);
+
+  double ref[3] = {0., 0., 1.};
+  if (std::fabs(Dot(ez, ref)) > 0.9) {
+    ref[0] = 0.; ref[1] = 1.; ref[2] = 0.;
+  }
+
+  double ex[3] = {
+    ref[1]*ez[2] - ref[2]*ez[1],
+    ref[2]*ez[0] - ref[0]*ez[2],
+    ref[0]*ez[1] - ref[1]*ez[0]
+  };
+  Normalize(ex);
+
+  double ey[3] = {
+    ez[1]*ex[2] - ez[2]*ex[1],
+    ez[2]*ex[0] - ez[0]*ex[2],
+    ez[0]*ex[1] - ez[1]*ex[0]
+  };
+  Normalize(ey);
+
+  // columns = local axes expressed in mother frame
+  double m[9] = {
+    ex[0], ey[0], ez[0],
+    ex[1], ey[1], ez[1],
+    ex[2], ey[2], ez[2]
+  };
+  rot.SetMatrix(m);
+}
+
+void DrawBBoxWireframe(double xmin, double ymin, double zmin,
+                       double xmax, double ymax, double zmax,
+                       int color = kRed, int width = 1)
+{
+  double p[8][3] = {
+    {xmin, ymin, zmin},
+    {xmax, ymin, zmin},
+    {xmax, ymax, zmin},
+    {xmin, ymax, zmin},
+    {xmin, ymin, zmax},
+    {xmax, ymin, zmax},
+    {xmax, ymax, zmax},
+    {xmin, ymax, zmax}
+  };
+
+  int e[12][2] = {
+    {0,1},{1,2},{2,3},{3,0},
+    {4,5},{5,6},{6,7},{7,4},
+    {0,4},{1,5},{2,6},{3,7}
+  };
+
+  for (int i = 0; i < 12; ++i) {
+    auto l = new TPolyLine3D(2);
+    l->SetPoint(0, p[e[i][0]][0], p[e[i][0]][1], p[e[i][0]][2]);
+    l->SetPoint(1, p[e[i][1]][0], p[e[i][1]][1], p[e[i][1]][2]);
+    l->SetLineColor(color);
+    l->SetLineWidth(width);
+    gLines.push_back(l);
+    l->Draw();
+  }
+}
+
+bool ApproxMotherAABBBySampling(TGeoShape* shape,
+                                const TGeoMatrix* localToMother,
+                                int nx, int ny, int nz,
+                                double& xmin, double& ymin, double& zmin,
+                                double& xmax, double& ymax, double& zmax)
+{
+  shape->ComputeBBox();
+  auto box = dynamic_cast<TGeoBBox*>(shape);
+  if (!box) return false;
+
+  const double dx = box->GetDX();
+  const double dy = box->GetDY();
+  const double dz = box->GetDZ();
+  const double* o = box->GetOrigin();
+
+  std::cout << "Bounding box for this slice is " << dx << " " << dy << " " << dz << "\n";
+
+  xmin = ymin = zmin =  1e100;
+  xmax = ymax = zmax = -1e100;
+
+  bool found = false;
+  double local[3], master[3];
+
+  for (int ix = 0; ix < nx; ++ix) {
+    const double x = o[0] - dx + (2.0*dx) * (ix + 0.5) / nx;
+    for (int iy = 0; iy < ny; ++iy) {
+      const double y = o[1] - dy + (2.0*dy) * (iy + 0.5) / ny;
+      for (int iz = 0; iz < nz; ++iz) {
+        const double z = o[2] - dz + (2.0*dz) * (iz + 0.5) / nz;
+
+        local[0] = x; local[1] = y; local[2] = z;
+        if (!shape->Contains(local)) continue;
+
+        localToMother->LocalToMaster(local, master);
+
+        xmin = std::min(xmin, master[0]);
+        ymin = std::min(ymin, master[1]);
+        zmin = std::min(zmin, master[2]);
+        xmax = std::max(xmax, master[0]);
+        ymax = std::max(ymax, master[1]);
+        zmax = std::max(zmax, master[2]);
+        found = true;
+      }
+    }
+  }
+  return found;
+}
+
+} // namespace
+
+void DrawTGeoNodeBBox(const TGeoNode* node,
+                      int color = kBlue, int width = 4)
+  {
+    auto mat = node->GetMatrix();
+    auto dx = ((TGeoBBox*)node->GetVolume()->GetShape())->GetDX();
+    auto dy = ((TGeoBBox*)node->GetVolume()->GetShape())->GetDY();
+    auto dz = ((TGeoBBox*)node->GetVolume()->GetShape())->GetDZ();
+    // origin ??
+
+    // Local axis-aligned bbox corners of the tube shape
+    double local[8][3] = {
+      {-dx, -dy, -dz},
+      { dx, -dy, -dz},
+      { dx,  dy, -dz},
+      {-dx,  dy, -dz},
+      {-dx, -dy,  dz},
+      { dx, -dy,  dz},
+      { dx,  dy,  dz},
+      {-dx,  dy,  dz}
+    };
+
+    double master[3];
+    double xmin =  1e100, ymin =  1e100, zmin =  1e100;
+    double xmax = -1e100, ymax = -1e100, zmax = -1e100;
+
+    for (int i = 0; i < 8; ++i) {
+      mat->LocalToMaster(local[i], master);
+      xmin = std::min(xmin, master[0]);
+      ymin = std::min(ymin, master[1]);
+      zmin = std::min(zmin, master[2]);
+      xmax = std::max(xmax, master[0]);
+      ymax = std::max(ymax, master[1]);
+      zmax = std::max(zmax, master[2]);
+    }
+
+    DrawBBoxWireframe(xmin, ymin, zmin, xmax, ymax, zmax, color, width);
+  }
+
+void slice_cone_localz_visible()
+{
+  const int M = 20;
+
+  // Sampling density for approximate mother AABBs
+  const int NSX = 20;
+  const int NSY = 20;
+  const int NSZ = 50;
+
+  auto geom = new TGeoManager("geom", "Cone sliced by finite slabs in local z");
+
+  auto top = geom->MakeBox("TOP", nullptr, 350., 350., 350.);
+  geom->SetTopVolume(top);
+
+  // Base cone in LOCAL coordinates
+  const double dz    = 120.0;
+  const double rLow  = 4.0;
+  const double rHigh = 25.0;
+
+  auto cone = new TGeoCone("baseCone", dz, 0.0, rLow, 0.0, rHigh);
+  auto baseConeVol = new TGeoVolume("baseCone_vol", cone);
+  gKeepAlive.push_back(cone);
+
+  // One big slab shape, reused with different z-translations in the Boolean expression
+  const double step  = (2.0 * dz) / M;
+  const double slabXY = 80.0; // comfortably larger than cone radius everywhere
+  auto slab = new TGeoBBox("sliceSlab", slabXY, slabXY, 0.5 * step);
+  gKeepAlive.push_back(slab);
+
+  // Mother placement: local +Z -> mother (1,1,1)
+  double dir[3] = {1., 1., 1.};
+  Normalize(dir);
+
+  auto rot = new TGeoRotation();
+  BuildRotationZToDir(dir, *rot);
+
+  auto ct = new TGeoCombiTrans(0., 0., 0., rot);
+
+  auto baseNode = top->AddNode(baseConeVol, 1, ct);
+
+  std::vector<TGeoCompositeShape*> sliceShapes;
+  std::vector<TGeoVolume*> sliceVols;
+
+  const double zminLocal = -dz;
+
+  for (int i = 0; i < M; ++i) {
+    const double zc = zminLocal + (i + 0.5) * step;
+
+    // Position slab in the COMPOSITE local frame
+    auto trSlab = new TGeoTranslation(Form("slabTr_%d", i), 0., 0., zc);
+    trSlab->RegisterYourself();
+    gKeepAlive.push_back(trSlab);
+
+    // Slice = cone * translated slab
+    auto sliceShape = new TGeoCompositeShape(
+      Form("slice_%d", i),
+      Form("baseCone*sliceSlab:slabTr_%d", i)
+    );
+    gKeepAlive.push_back(sliceShape);
+    sliceShapes.push_back(sliceShape);
+
+    auto vol = new TGeoVolume(Form("SLICEVOL_%d", i), sliceShape);
+    const int color = 2 + (i % 7);
+    vol->SetLineColor(color);
+    vol->SetFillColor(color);
+    vol->SetTransparency(20);
+
+    // All slices get the same mother placement as the full cone
+    // top->AddNode(vol, i + 1, ct);
+    sliceVols.push_back(vol);
+  }
+
+  geom->CloseGeometry();
+
+  auto c = new TCanvas("c", "Visible local-z cone slices", 1200, 900);
+  top->Draw("ogl");
+  c->Update();
+
+  //
+  DrawTGeoNodeBBox(baseNode);
+
+  // Overlay sampled mother-space AABBs
+  for (int i = 0; i < M; ++i) {
+    double xmin, ymin, zmin, xmax, ymax, zmax;
+    const bool ok = ApproxMotherAABBBySampling(sliceShapes[i], ct,
+                                               NSX, NSY, NSZ,
+                                               xmin, ymin, zmin,
+                                               xmax, ymax, zmax);
+    if (!ok) continue;
+
+    DrawBBoxWireframe(xmin, ymin, zmin, xmax, ymax, zmax, 2 + (i % 7), 1);
+
+    std::cout << "slice " << i
+              << " local z-center = " << (zminLocal + (i + 0.5) * step)
+              << "  approx mother AABB = [("
+              << xmin << ", " << ymin << ", " << zmin << ") -> ("
+              << xmax << ", " << ymax << ", " << zmax << ")]\n";
+    
+    }
+
+  c->Modified();
+  c->Update();
+}

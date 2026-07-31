@@ -2754,3 +2754,118 @@ BOOST_AUTO_TEST_CASE(EmptySolidIsNotReliable)
   BOOST_CHECK(!empty.IsNavigable());
   BOOST_CHECK(!empty.IsClosed());
 }
+
+
+namespace
+{
+// A golden-angle spiral of unit directions: quasi-uniform on the sphere, so no two are
+// near-parallel and none aligns with a coordinate axis or a 45-degree symmetry plane. Used to
+// test the invariant that containment does not depend on where the parity ray is aimed.
+std::vector<std::array<double, 3>> spiralDirections(int count)
+{
+  std::vector<std::array<double, 3>> directions;
+  directions.reserve(count);
+  for (int index = 0; index < count; ++index) {
+    const double cosTheta = 1. - 2. * (index + 0.5) / count;
+    const double sinTheta = std::sqrt(1. - cosTheta * cosTheta);
+    const double phi = 2.399963229728653 * index;
+    directions.push_back({sinTheta * std::cos(phi), sinTheta * std::sin(phi), cosTheta});
+  }
+  return directions;
+}
+} // namespace
+
+// Parity containment answers a topological question, so on a closed, consistently oriented
+// 2-manifold it cannot depend on where the ray is aimed. That invariant is what licenses the
+// single-shot fast path: Contains() casts one fixed direction and stops.
+//
+// It is also the sharpest available oracle for the surface set itself -- no reference shape is
+// involved, only the solid disagreeing with itself. Measured over the Phase 0 corpus, every part
+// the closure check calls Reliable has *zero* direction disagreements in 11k points, and every
+// part with disagreements is one the closure check already rejects; see
+// scripts/geometry/CodeReview_Fable.md Section 4.4.
+BOOST_AUTO_TEST_CASE(ContainsIsDirectionIndependentOnClosedSolids)
+{
+  const auto box = makeBoxSolid("dirBox", 1., 2., 3.);
+  const auto tube = makeTubeSolid("dirTube", 1., 2., 3.);
+  const auto cone = makeConeSolid("dirCone", 2., 1., 3.);
+  const auto sphere = makeSphereSolid("dirSphere", 2.);
+  const auto torus = makeTorusSolid("dirTorus", 3., 1.);
+  const auto capsule = makeCapsuleSolid("dirCapsule", 2., 3.);
+
+  const auto directions = spiralDirections(13);
+  for (const auto* solid : {box.get(), tube.get(), cone.get(), sphere.get(), torus.get(), capsule.get()}) {
+    BOOST_TEST_CONTEXT("solid = " << solid->GetName())
+    {
+      BOOST_REQUIRE(solid->IsNavigable());
+      for (const auto& point : probeGrid(4.5, 7)) {
+        const bool reference = solid->Contains(point.data());
+        for (const auto& direction : directions) {
+          BOOST_TEST_CONTEXT("point = (" << point[0] << ", " << point[1] << ", " << point[2] << ") direction = ("
+                                         << direction[0] << ", " << direction[1] << ", " << direction[2] << ")")
+          {
+            BOOST_CHECK_EQUAL(solid->ContainsAlongDirection(point.data(), direction.data()), reference);
+          }
+        }
+      }
+    }
+  }
+}
+
+// Section 4.4's re-shoot, on the defect it exists for. A gap in the surface set costs the parity
+// ray exactly the crossings that fall inside the gap, so a point is misclassified over the whole
+// *shadow* of the gap along the shooting direction -- centimetres of wrong answers arbitrarily far
+// from any surface. Aiming the ray somewhere else escapes that shadow, which is why a majority
+// over several directions recovers the right answer: measured over the 55 points where the single
+// fixed direction disagrees with the OpenCascade oracle on the Phase 0 corpus, not one point is
+// wrong in every direction.
+//
+// The fixture makes the mechanism explicit rather than statistical: the +x face of a box is split
+// into two rectangles with a thin strip left out, so a ray leaving along +x from inside sees no
+// crossing at all and reports "outside".
+BOOST_AUTO_TEST_CASE(ContainsReshootsThroughSurfaceGaps)
+{
+  constexpr double halfX = 1.;
+  constexpr double halfY = 2.;
+  constexpr double halfZ = 3.;
+  constexpr double gap = 0.05; // half-width in z of the missing strip on the +x face
+
+  SurfaceSolid gapped("gappedBox");
+  for (int faceIndex = 1; faceIndex < 6; ++faceIndex) { // every face but +x
+    BOOST_REQUIRE(addBoxFace(gapped, faceIndex, halfX, halfY, halfZ));
+  }
+  // the +x face as two rectangles, leaving z in (-gap, +gap) uncovered. Frame of face 0:
+  // origin (halfX, -halfY, -halfZ), axisU = +y, axisV = +z.
+  BOOST_REQUIRE(gapped.AddPlanarSurface({halfX, -halfY, -halfZ}, {0., 1., 0.}, {0., 0., 1.},
+                                        rectangleWire(2. * halfY, halfZ - gap)));
+  BOOST_REQUIRE(gapped.AddPlanarSurface({halfX, -halfY, gap}, {0., 1., 0.}, {0., 0., 1.},
+                                        rectangleWire(2. * halfY, halfZ - gap)));
+  gapped.CloseShape(false);
+
+  // the gap is what makes the solid unnavigable, and only an unnavigable solid re-shoots
+  BOOST_REQUIRE(!gapped.IsNavigable());
+  BOOST_CHECK_EQUAL(static_cast<int>(gapped.GetNavigationReliability()),
+                    static_cast<int>(SurfaceSolid::NavigationReliability::OpenSurfaceSet));
+
+  // a point deep inside whose +x ray leaves straight through the gap
+  const std::array<double, 3> insidePoint{0., 0.3, 0.};
+  const std::array<double, 3> throughGap{1., 0., 0.};
+  BOOST_CHECK(!gapped.ContainsAlongDirection(insidePoint.data(), throughGap.data())); // the defect itself
+  BOOST_CHECK(gapped.Contains(insidePoint.data()));                                   // the re-shoot recovers it
+  BOOST_CHECK(gapped.Contains_Loop(insidePoint.data()));                              // ... on both paths
+
+  // the same point in the same box *without* the gap is inside from every direction, so the
+  // fixture isolates the gap and not some accident of the point
+  const auto intact = makeBoxSolid("intactBox", halfX, halfY, halfZ);
+  BOOST_CHECK(intact->Contains(insidePoint.data()));
+  BOOST_CHECK(intact->ContainsAlongDirection(insidePoint.data(), throughGap.data()));
+
+  // and the BVH and loop parities still agree everywhere on the defective solid: the re-shoot is
+  // applied by one shared helper, so it can never make the two paths differ
+  for (const auto& point : probeGrid(4.5, 7)) {
+    BOOST_TEST_CONTEXT("point = (" << point[0] << ", " << point[1] << ", " << point[2] << ")")
+    {
+      BOOST_CHECK_EQUAL(gapped.Contains(point.data()), gapped.Contains_Loop(point.data()));
+    }
+  }
+}
