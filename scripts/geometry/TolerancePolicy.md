@@ -1,9 +1,10 @@
 # Tolerance policy and the closure criterion — plan for Phase 1 item 4
 
-Status: **steps 1-4 of five are done** (2026-07-31, commits `1bc5c4fbc9`, `9f45887ef7`,
-`cacd64e4a5`, `f612f895a9`). **Step 5 — rim-based closure and `maxGap` — is not started**, and it
-is the one with design content. See §5 for the state of each step and §8 for what step 5 now looks
-like after the first four; §8 is the part to read before starting it.
+Status: **steps 1-4 and step 5a are done** (2026-07-31/08-01, commits `1bc5c4fbc9`, `9f45887ef7`,
+`cacd64e4a5`, `f612f895a9`, and step 5a). **Step 5b — letting the rim verdict decide navigability —
+is what is left.** See §5 for the state of each step, §8 for the split and §9 for what 5a measured;
+**§9 is the part to read before starting 5b**, because the measurement changed what 5b is likely to
+cost.
 
 This is the last outstanding Phase 1 item; Phase 2 should not start before it, because Phase 2's
 whole premise is that "closed" becomes a statement you can act on.
@@ -11,7 +12,8 @@ whole premise is that "closed" becomes a statement you can act on.
 This document covers findings **K3, K5, K9, K12, S8 and S10** of the review, which are all one
 problem seen from six places: *the code compares distances that are not distances*, and then
 judges closure by exact equality of numbers it never had reason to expect to be equal. K3, K5,
-K12 and S10 are closed; **K9 and S8 are what step 5 is for.**
+K12 and S10 are closed. **K9 and S8 are what step 5 is for**: 5a measures the gap and reports it
+(done, §9), 5b lets it decide.
 
 Read [`CodeReview_Fable.md`](CodeReview_Fable.md) Sections 5, 6 and 12 first.
 
@@ -259,10 +261,12 @@ Report `maxGap` in `Print()`, in the harness's per-part line and in its `--json`
 ### 3.3 Two things not to do
 
 - **Do not tune epsilon until parts pass.** The oracle gate is the arbiter of correctness; the
-  closure check is a *diagnostic*. If a Bagger cylinder part reports a 1.3e-5 cm gap, the right
-  outcome is that it stays unnavigable and now says how badly — not that epsilon becomes 1e-4. The
-  2026-07-26 measurement puts the shared-edge pcurve disagreement at ~1.3e-5 model units, so
-  expect the cyl-cyl parts to remain open. That is the correct answer until Phase 2.
+  closure check is a *diagnostic*. If a Bagger cylinder part reports a gap, the right outcome is
+  that it stays unnavigable and now says how badly — not that epsilon grows until it passes.
+  > **Superseded in its numbers, not in its rule.** This paragraph used to predict, from the
+  > 2026-07-26 shared-edge pcurve measurement, that the cyl-cyl parts would stay open at
+  > ~1.3e-5 cm. Step 5a measured them: they are open by **0.25 to 0.75 cm**. See §9.1. The
+  > prohibition stands and matters more, not less — but nobody should carry the 1.3e-5 forward.
 - **Do not let the counts drift from the semantics `NavigationReliability` promises.** Its doc
   comment states what each state means; if rim matching changes what "boundary edge" counts, update
   the enum documentation in the same commit.
@@ -352,8 +356,15 @@ Each step is a commit, gated before and after.
    one. Gate bit-identical; that is *expected rather than reassuring*, because a 1e-5-wide shell
    around a trim boundary is not something ~5000 bbox-spread samples per part will land in. The
    change is pinned by tests instead.
-5. **[not started] Rim-based closure + `maxGap` (K9/S8)**, then the §4.2 sweep, then reconcile
-   `containsByParity`'s gating with what the sweep says. **Read §8 before starting.**
+5. **Rim-based closure + `maxGap` (K9/S8)**, split by §8 into 5a and 5b.
+   - **[done] 5a — measure and report, decide nothing.** `SurfaceRim`, a default `appendRims`,
+     `measureRimClosure`, and the numbers on `ClosureReport`, `Print()`, the harness line and
+     `--json`. Gate bit-identical on both corpora, which was the required outcome and is a real
+     check here. **The measurement is in §9 and it did not come out as this document predicted.**
+   - **[not started] 5b — let it decide.** Switch `NavigationReliability` to the rim verdict, run
+     the §4.2 sweep in the same commit, reconcile `containsByParity`'s gating with it, and add the
+     §2.4/Section 4.4 ambiguity band. Read §9 first: on this corpus the verdict switch is a no-op,
+     which makes 5b much cheaper than §8 feared, and the reason is worth knowing before starting.
 
 ---
 
@@ -424,9 +435,9 @@ no longer applies — which is exactly the half-finished state to avoid.
   constant when it is zero — `GetModelTolerance()` returns zero for "not stated" on purpose.
 
 That commit alone answers the question the item exists to answer: **how far apart are the faces,
-in cm?** On this corpus expect the cyl-cyl parts to stay open at ~1.3e-5 cm (the 2026-07-26
-shared-edge pcurve measurement) and `tube_window` to stop claiming 1418 boundary edges about a
-4-face solid.
+in cm?** It is done, and the answer is in §9: the cyl-cyl parts are open by a quarter to three
+quarters of a centimetre, not by the ~1.3e-5 cm this document expected, and `tube_window` reports
+seven rims of which three are open instead of 1418 boundary edges.
 
 **5b — let it decide.** Only then switch `NavigationReliability` over to the rim verdict, run the
 §4.2 direction-independence sweep in the same commit, and reconcile `containsByParity`'s gating
@@ -435,5 +446,113 @@ until parts pass, and do not let the counts drift from what the enum documentati
 
 The Section 4.4 ambiguity-band refinement of `containsByParity` (deferred out of step 4) belongs
 in 5b for the same reason: it changes which points get re-shot, so it needs the same sweep.
+
+---
+
+## 9. Step 5a executed — what the gap actually is
+
+5a is committed and both gates are bit-identical (fixtures 6/9, Bagger 4/12, `contains` 0 and 2;
+`gate.json` matches the baseline field for field once the timing keys and the new `navigation`
+keys are removed). `ctest -R BVHSurfaceSolid` is green at **57 cases**, from 53.
+
+### 9.1 The headline: §3.3's prediction was wrong by four orders of magnitude
+
+§3.3 says "the 2026-07-26 measurement puts the shared-edge pcurve disagreement at ~1.3e-5 model
+units, so expect the cyl-cyl parts to remain open" — and treats that as the *reason* they stay
+open. They do stay open, but not for that reason and not by that much. Matching at the model's own
+declared 1e-8 cm:
+
+| Bagger part | rims | matched | boundary | `maxGap` cm | chord res. cm | open / total cm |
+| --- | --- | --- | --- | --- | --- | --- |
+| `BasePin` | 4 | 4 | 0 | 9.5e-16 | 8.6e-3 | 0 / 25.1 |
+| `Base` | 62 | 62 | 0 | 1.2e-12 | 0.262 | 0 / 660 |
+| `Boom` | 52 | 52 | 0 | 9.7e-12 | 0.704 | 0 / 953 |
+| `Stick` | 45 | 45 | 0 | 1.3e-11 | 0.691 | 0 / 631 |
+| `BucketLink2` | 40 | 40 | 0 | 4.1e-11 | 0.057 | 0 / 270 |
+| `BucketLink1` | 38 | 32 | 6 | **1.6e-3** | 0.041 | 20 / 215 |
+| `BucketCylinderOuter` | 17 | 14 | 3 | **0.252** | 8.6e-3 | 5.9 / 60.1 |
+| `BoomCylinderOuter` | 15 | 12 | 3 | **0.475** | 0.013 | 13.9 / 92 |
+| `StickCylinderOuter` | 15 | 12 | 3 | **0.475** | 0.013 | 13.9 / 92 |
+| `BoomCylinderInner` | 11 | 10 | 1 | **0.747** | 0.010 | 3.8 / 59 |
+| `StickCylinderInner` | 11 | 10 | 1 | **0.747** | 0.010 | 3.8 / 59 |
+| `BucketCylinderInner` | 11 | 10 | 1 | **0.748** | 7.7e-3 | 2.2 / 41.7 |
+
+The six failing cylinder parts are open by **a quarter to three quarters of a centimetre**, over
+4-15% of their rim length. That is not two pcurves disagreeing in the fifth decimal; it is a face
+that is missing or trimmed to the wrong curve, and it is visible at the scale of the part. Whatever
+Phase 2 does for these parts, "reconcile the shared-edge pcurves" is not it — the geometry is not
+nearly closed and then spoiled by tolerance.
+
+`BucketLink1` is the one part in a different class: 1.6e-3 cm, which is *below* its own chord
+resolution of 4.1e-2 cm. That is the honest reading — for that part this measurement does not
+resolve the gap, and it is the only part where the sagitta ceiling of §9.3 actually bites.
+
+The fixtures agree, and add the tidiest result of the item:
+
+| fixture | rims | matched | boundary | `maxGap` cm | chord res. cm | open / total cm |
+| --- | --- | --- | --- | --- | --- | --- |
+| `box`, `box_union_box` | 6, 10 | all | 0 | 0 | 0 | 0 |
+| `box_minus_cyl` | 10 | 10 | 0 | 2.1e-14 | 6.8e-3 | 0 / 116 |
+| `cyl_cross_cyl` | 12 | 12 | 0 | 3.9e-9 | 8.6e-3 | 0 / 80.7 |
+| `cyl_inter_cyl` | 6 | 6 | 0 | 3.9e-9 | 1.7e-4 | 0 / 38.6 |
+| `cyl_plus_cone` | 6 | 6 | 0 | 2.8e-13 | 8.6e-3 | 0 / 31.3 |
+| `sphere_minus_cyl` | 4 | 4 | 0 | 8.3e-13 | 5.1e-3 | 0 / 15 |
+| `torus_union_cyl` | 10 | 10 | 0 | 3.3e-13 | 0.028 | 0 / 142 |
+| `tube_window` | 7 | 4 | **3** | **2.61** | 0.013 | **9.94 / 53** |
+
+`tube_window` was the motivating case for "the counts are chord-inflated": **1418 boundary edges**
+for a solid with seven boundary loops, of which three are open, accounting for 9.94 cm of 53 cm.
+§3.2 asked for exactly that replacement and it is now what the harness prints.
+
+### 9.2 What this means for 5b — it is a no-op on this corpus
+
+Across both models, **every part the half-edge check calls closed has `boundaryRims == 0`, and
+every part it calls open has `boundaryRims > 0`.** The two criteria agree part for part here, so
+switching `NavigationReliability` to the rim verdict changes no verdict on either corpus, no solid
+moves onto `Contains`'s single-shot fast path, and the §4.2 sweep should reproduce its previous
+result exactly. §3.4's warning is real and still governs — it just does not fire here.
+
+The reason the criteria agree is worth stating, because §1.3 predicted they would not: on both
+corpora the converter emits **matching chord counts and phases** for the two faces of a shared
+edge, so vertex matching happens to work. The structural blocker §1.3 describes is real — a unit
+test builds a box whose last face is sampled at twice the chord count and the half-edge check calls
+that closed box open — but no part of either corpus exercises it. Take that as "this corpus does
+not test the thing", not as "the thing was not a problem".
+
+### 9.3 Four things the plan did not anticipate
+
+- **§8's "cheap way in" does not work as written.** It says `appendDirectedEdges` "already emits
+  each loop's edges consecutively", so runs of consecutive edges can be chained. The wire-trimmed
+  and planar faces do; the parametric-rectangle quadrics **interleave** their two rims, one bottom
+  chord then one top chord. Chaining by matching endpoints instead costs nothing more, works for
+  both, and still needs no change in any of the seven classes — so the goal of §8's suggestion is
+  met, by a different mechanism.
+- **A full-turn patch emits its seam twice, once each way**, when `fullSweep()` does not recognise
+  the sweep as full. That pair bounds nothing and cancels in the half-edge check, which is why
+  nobody had noticed it; chained naively it becomes a **two-point rim straddling the patch**, and
+  it alone produced a spurious boundary rim and a gap the size of the patch (2 cm on
+  `box_minus_cyl`) on five of the nine fixtures. Reversed duplicates within a face are cancelled
+  before chaining, for the same reason the half-edge check cancels them.
+- **The sampling noise floor has to be estimated from the turn angle, not from the polyline's
+  deviation.** The obvious estimator — how far a rim vertex sits from the chord joining its
+  neighbours — reports the *corner offset* on a box: 2.4 cm on a 4 cm box, where the true sampling
+  error is zero. What separates a corner from a sample of a smooth run is the turn angle, so
+  vertices turning by more than ~30° are skipped and the rest contribute `(chord/2)·tan(turn/4)`.
+  A unit test checks that against the closed form `r(1 - cos(π/kArcSamples))` on a bare cylinder.
+- **Probe chord midpoints, not rim vertices.** A box corner vertex legitimately lies on the rims
+  of two other faces at once and would read as non-manifold; a chord interior belongs to exactly
+  one shared edge.
+
+### 9.4 The ceiling this measurement has, stated once
+
+A rim is a polyline sampled at `kArcSamples = 24` per turn, radius-independent. Two faces sampling
+one shared *curved* edge at different phases differ by up to the chord sagitta, `r(1-cos(π/24))` ≈
+`8.6e-3 · r` cm, whatever the true gap is. So `maxGap` on a curved rim cannot resolve anything
+below that, and `rimChordResolution` is reported next to it so nobody reads it as more than it is.
+
+On this corpus it does not bite — the phases coincide, and every closed part measures below
+4.1e-11 cm — but it is the reason `maxGap` must never be quoted alone, and it is the thing to fix
+(rim sampling driven by a target sagitta in cm, not a fixed count per turn) if a future model
+lands between 1e-8 and 1e-2 cm and needs an answer.
 
 ---
