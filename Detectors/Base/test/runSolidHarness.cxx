@@ -205,6 +205,7 @@ json validationToJson(const ValidationResult& r)
   j["nMismatchMissedSurface"] = r.nMismatchMissedSurface;
   j["nMismatchUnexplained"] = r.nMismatchUnexplained;
   j["nNoVerdict"] = r.nNoVerdict;
+  j["nRelabelled"] = r.nRelabelled;
   j["worstDeviation"] = r.worstDeviation;
   json offenders = json::array();
   for (const auto& o : r.worstOffenders) {
@@ -286,6 +287,9 @@ struct OracleAnswers {
   double capacity = 0.;
   bool valid = false;
   std::map<std::string, std::vector<int>> containsState;
+  /// Per ray category, the oracle's classification of each ray *origin* (1/0/-1). This is what
+  /// makes the distance columns soundly categorised rather than categorised by the reference mesh.
+  std::map<std::string, std::vector<int>> originContains;
   std::map<std::string, std::vector<double>> boundaryDistance;
   std::map<std::string, std::vector<double>> distOutside;
   std::map<std::string, std::vector<double>> distInside;
@@ -325,6 +329,7 @@ OracleAnswers loadOracleAnswers(const std::string& dir, const std::string& partI
   answers.capacity = doc.value("capacity", 0.);
   answers.valid = doc.value("valid", false);
   answers.containsState = readColumns<int>(doc, "contains");
+  answers.originContains = readColumns<int>(doc, "originContains");
   answers.boundaryDistance = readColumns<double>(doc, "safetyUpperBound");
   answers.distOutside = readColumns<double>(doc, "distFromOutside");
   answers.distInside = readColumns<double>(doc, "distFromInside");
@@ -372,6 +377,13 @@ void printValidation(const std::string& name, const ValidationResult& r)
              "  noVerdict=%zu  worstDev=%.6g\n",
              name.c_str(), scored, agreePct, r.nMismatchWithinBand, r.nMismatchMissedSurface,
              r.nMismatchUnexplained, r.nNoVerdict, r.worstDeviation);
+  if (r.nRelabelled > 0) {
+    // Not a candidate result: it says how many rays the sample generator had put in the wrong
+    // category, which is a statement about the reference mesh. Printed so an improvement in these
+    // columns is never mistaken for a kernel improvement.
+    std::printf("  %-10s relabelled=%zu ray(s) by the oracle's own origin classification\n",
+               name.c_str(), r.nRelabelled);
+  }
   if (r.nMismatchUnexplained > 0 || r.nMismatchMissedSurface > 0) {
     const size_t nShow = std::min<size_t>(3, r.worstOffenders.size());
     for (size_t i = 0; i < nShow; ++i) {
@@ -580,11 +592,16 @@ int main(int argc, char** argv)
           printValidation("O:contains", v);
           oracleJson["contains"] = validationToJson(v);
         }
+        const auto originStateFor = [&oracle](const char* category) {
+          const auto it = oracle.originContains.find(category);
+          return it == oracle.originContains.end() ? std::vector<int>{} : it->second;
+        };
         if (opt.only.count("distout")) {
           const auto it = oracle.distOutside.find("outside");
           if (it != oracle.distOutside.end()) {
             auto v = validateDistanceAgainstOracle(candidate, samples.outsideRays, it->second,
-                                                   /*wantInside=*/false, oracleOpt);
+                                                   /*wantInside=*/false, oracleOpt,
+                                                   originStateFor("outside"));
             printValidation("O:distout", v);
             oracleJson["distout"] = validationToJson(v);
           }
@@ -593,7 +610,8 @@ int main(int argc, char** argv)
           const auto it = oracle.distInside.find("inside");
           if (it != oracle.distInside.end()) {
             auto v = validateDistanceAgainstOracle(candidate, samples.insideRays, it->second,
-                                                   /*wantInside=*/true, oracleOpt);
+                                                   /*wantInside=*/true, oracleOpt,
+                                                   originStateFor("inside"));
             printValidation("O:distin", v);
             oracleJson["distin"] = validationToJson(v);
           }
