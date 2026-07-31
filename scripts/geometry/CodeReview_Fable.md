@@ -899,3 +899,73 @@ gate's own mis-categorisation**, and that part now fails on capacity and nothing
 unchanged — fixtures 6/9, Bagger 4/12 — because every part that improved still fails its capacity
 column, which is item 2's subject and not this one's.
 
+## 18. Phase 1 follow-up item 2 (2026-08-01) — Green's theorem for wire-trimmed quadrics
+
+NEXT.md item 2, and Section 13's H2 acted on. `integrateOverCurveTrim` was a fixed-128 midpoint
+rule over a characteristic function: every boundary cell booked whole or not at all, so O(1/N)
+with an *oscillation* as the staircase re-phased, and the gate's 1e-6 relative band unreachable at
+any practical N.
+
+**The reduction.** For all four quadrics the divergence-theorem integrand
+`f = (1/3) X.n |X_u x X_v|` depends on the first parameter only through `sin u`, `cos u` and `u`
+itself, so an antiderivative `F` with `dF/du = f` exists in closed form and
+
+    double-integral over D of f du dv  =  contour integral around dD of F dv.
+
+For the cylinder `f` does not depend on `h` at all (the `h W` term of `X` is orthogonal to the
+normal); for the cone the `sqrt(1 + slope^2)` of the area element cancels against the same factor
+in the unit normal. The four antiderivatives are written out at each `capacityContribution`.
+`buildCurveTrim` already orients outer loops counter-clockwise and inner ones clockwise, so summing
+every loop's every curve gives the signed total with no extra bookkeeping.
+
+Two implementation points worth carrying:
+
+- **The contour must be closed explicitly.** A wire's curves are imported with independently
+  sampled endpoints agreeing only to `kWireJoinTolerance` = 1e-5, and a first-order gap in the
+  contour is a first-order error in the integral — 1e-5 against a 1e-6 target. Each seam is
+  therefore bridged by the straight segment between the raw endpoints. (`CurveWire::signedArea`
+  does not do this and carries the same residual; it is not on this path.)
+- **Gauss-Legendre needs a span cap, not a high order.** `F` is entire in `u`, so convergence is
+  geometric and only the number of oscillations per interval matters. Capping a sub-interval at a
+  quarter turn and spending 20 nodes leaves a very wide margin.
+
+**Measured — capacity, relative to OpenCascade.**
+
+| part | before | after |
+| --- | --- | --- |
+| `cyl_cross_cyl` | 2.27e-04 | **1.8e-12** |
+| `cyl_inter_cyl` | 3.47e-04 | **1.0e-11** |
+| `BucketLink1` | 6.19e-02 | **2.9e-12** |
+| `BucketLink2` | 6.30e-02 | **1.0e-12** |
+| `BucketCylinderOuter` | 2.04e-02 | 1.22e-04 |
+| `StickCylinderInner` | 3.16e-03 | 6.87e-04 |
+| `BoomCylinderInner` | 1.75e-03 | 4.88e-04 |
+| `StickCylinderOuter` | 2.61e-03 | 3.78e-04 |
+| `BucketCylinderInner` | 5.75e-04 | 3.04e-04 |
+| `BoomCylinderOuter` | 9.67e-04 | 1.08e-04 |
+| `tube_window` | 4.42e-03 | 3.02e-05 |
+
+Every closed part lands at machine precision. **What is left is not quadrature**: the six parts
+still deviating at 1e-4 are exactly the six the closure check rejects at 0.25-0.75 cm
+(`TolerancePolicy.md` §9.1), and a divergence-theorem volume over a surface set with a hole in it
+is wrong by roughly what the hole subtends. That is §9.1's diagnosis confirmed from a completely
+independent direction, and it makes capacity a *measure* of the closure defect rather than noise
+on top of it. (`BucketLink1` is the exception that fits: it is called open, but at 1.6e-3 cm —
+below its own chord resolution — and its volume is exact, i.e. it is unresolved rather than open.)
+
+**Measured — cost.** `CloseShape` runs the capacity integral, and 16384 point-in-wire
+classifications per patch became a few hundred closed-form evaluations: **3.7x to 14.9x** faster on
+every part with wire trims (`cyl_inter_cyl` 0.175 s -> 0.012 s, `BoomCylinderOuter` 0.147 s ->
+0.023 s), and unchanged where there are none.
+
+**Gate: fixtures 6/9 -> 8/9, Bagger 4/12 -> 5/12.** `cyl_cross_cyl`, `cyl_inter_cyl` and
+`BucketLink2` now pass. `ctest` green at **59 cases**; two pre-existing wire-trim capacity
+tolerances that existed only to accommodate the grid rule (1e-3 on the cone and the sphere) are
+tightened to 1e-9, so a regression to it fails loudly.
+
+**`capacityIsExact()` still returns false for a wire trim, deliberately.** In this codebase
+"exact" means analytically exact, and Gauss-Legendre on `sin(u(t))` is at machine precision but not
+that; for a B-spline trim the pcurve is an approximation of the true seam regardless of how the
+integral is done. Whether to introduce a weaker, honest predicate is a real question and is left
+open rather than decided by flipping a flag the measurements do not license.
+
