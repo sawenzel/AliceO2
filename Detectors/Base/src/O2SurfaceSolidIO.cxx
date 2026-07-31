@@ -10,7 +10,7 @@
 // or submit itself to any jurisdiction.
 
 /// \file O2SurfaceSolidIO.cxx
-/// \brief Reader for the exact-surface sidecar format (surfaces_*.bin, version 1).
+/// \brief Reader for the exact-surface sidecar format (surfaces_*.bin, versions 1 and 2).
 ///
 /// The binary layout is documented in scripts/geometry/BVHSurfaceSolid.md
 /// ("Surface sidecar format") and written by write_surfaces_bin in
@@ -38,7 +38,18 @@ namespace base
 namespace
 {
 
-constexpr uint32_t kSidecarVersion = 1;
+/// Sidecar versions this reader understands. Version 2 appends a float64 model tolerance (cm) to
+/// the fixed header; everything after the header is unchanged, so a v1 file is a v2 file that
+/// simply does not say what its model's tolerance is.
+constexpr uint32_t kSidecarVersionMin = 1;
+constexpr uint32_t kSidecarVersionMax = 2;
+
+/// What a version-1 sidecar's model tolerance is taken to be, in cm. Version 1 carried no such
+/// statement, so this is the project's measured extractor precision standing in for one -- the
+/// same number kWireJoinTolerance is set from. It is a fallback, not a measurement of the model,
+/// and the reader says so.
+constexpr double kSidecarV1FallbackTolerance = 1.e-6;
+
 constexpr uint32_t kFlagInnerWall = 1u << 0;
 
 enum SurfaceType : uint32_t {
@@ -303,10 +314,26 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
     ::Error("LoadSurfaceSolid", "%s: truncated header", file.c_str());
     return false;
   }
-  if (version != kSidecarVersion) {
-    ::Error("LoadSurfaceSolid", "%s: unsupported sidecar version %u (reader supports %u)", file.c_str(), version,
-            kSidecarVersion);
+  if (version < kSidecarVersionMin || version > kSidecarVersionMax) {
+    ::Error("LoadSurfaceSolid", "%s: unsupported sidecar version %u (reader supports %u..%u)", file.c_str(), version,
+            kSidecarVersionMin, kSidecarVersionMax);
     return false;
+  }
+
+  if (version >= 2) {
+    double modelTolerance = 0.;
+    in.read(reinterpret_cast<char*>(&modelTolerance), sizeof(modelTolerance));
+    if (!in) {
+      ::Error("LoadSurfaceSolid", "%s: truncated version-2 header (no model tolerance)", file.c_str());
+      return false;
+    }
+    solid.SetModelTolerance(modelTolerance);
+  } else {
+    ::Warning("LoadSurfaceSolid",
+              "%s is a version-1 sidecar and states no model tolerance; assuming %g cm (the extractor's precision). "
+              "Re-run the converter to record the model's own value.",
+              file.c_str(), kSidecarV1FallbackTolerance);
+    solid.SetModelTolerance(kSidecarV1FallbackTolerance);
   }
 
   for (size_t s = 0; s < nSurfaces; ++s) {

@@ -1149,6 +1149,16 @@ bool O2BVHSurfaceSolid::IsDefined() const
   return fImpl != nullptr && fImpl->defined;
 }
 
+void O2BVHSurfaceSolid::SetModelTolerance(double toleranceCm)
+{
+  if (!(toleranceCm >= 0.) || !std::isfinite(toleranceCm)) {
+    Error("SetModelTolerance", "Shape %s: ignoring a non-finite or negative model tolerance %g; it stays %g",
+          GetName(), toleranceCm, fModelTolerance);
+    return;
+  }
+  fModelTolerance = toleranceCm;
+}
+
 bool O2BVHSurfaceSolid::HasBVH() const
 {
   return fImpl != nullptr && fImpl->bvh != nullptr;
@@ -1306,6 +1316,12 @@ void O2BVHSurfaceSolid::Print(Option_t*) const
   if (reliability != NavigationReliability::Reliable && reliability != NavigationReliability::Undetermined) {
     std::cout << " (UNRELIABLE; boundary=" << GetBoundaryEdgeCount() << " non-manifold=" << GetNonManifoldEdgeCount()
               << " reversed=" << GetReversedEdgeCount() << ")";
+  }
+  std::cout << "\n    model tolerance: ";
+  if (fModelTolerance > 0.) {
+    std::cout << fModelTolerance << " cm (from the source model)";
+  } else {
+    std::cout << "not stated";
   }
   std::cout << "\n";
 }

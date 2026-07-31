@@ -235,6 +235,21 @@ class O2BVHSurfaceSolid : public TGeoBBox
   int GetNsurfaces() const;
   bool IsDefined() const;
 
+  /// \name The model's own tolerance
+  /// How well the CAD model that produced this solid says its boundary is defined, in cm. It is
+  /// the source model's declared tolerance (the largest BRep sub-shape tolerance), carried through
+  /// the sidecar rather than guessed: without it the kernel has no way to know what epsilon two
+  /// faces of the same imported solid should be expected to agree to, and every closure or
+  /// adjacency decision has to fall back on a constant that nobody chose for this geometry.
+  ///
+  /// Zero means "not stated": a solid built through the Add*Surface API directly, or read from a
+  /// sidecar older than version 2. Consumers must treat zero as unknown and fall back on their own
+  /// documented constant rather than on a tolerance of nothing.
+  /// @{
+  void SetModelTolerance(double toleranceCm);
+  double GetModelTolerance() const { return fModelTolerance; }
+  /// @}
+
   /// Whether the BVH acceleration structure has been built (after CloseShape).
   bool HasBVH() const;
   /// Fill the BVH root-node bounding box; returns false when no BVH has been built.
@@ -388,7 +403,10 @@ class O2BVHSurfaceSolid : public TGeoBBox
   /// The persistent state: everything else is rebuilt from it. See BVHSurfaceRecord.
   std::vector<BVHSurfaceRecord> fRecords;
 
-  ClassDefOverride(O2BVHSurfaceSolid, 2) // BVH surface-bounded shape class
+  /// The source model's declared tolerance in cm; 0 when unknown. See SetModelTolerance.
+  double fModelTolerance = 0.;
+
+  ClassDefOverride(O2BVHSurfaceSolid, 3) // BVH surface-bounded shape class
 };
 
 } // namespace base
