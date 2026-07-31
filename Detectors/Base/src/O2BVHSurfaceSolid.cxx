@@ -162,8 +162,13 @@ void forEachCrossingCluster(std::vector<RayHit>& hits, const Vec3& rayDirection,
     bool entering = false;
     bool exiting = false;
     size_t clusterEnd = hitIndex;
+    // Compared against the cluster's *first* member, not its predecessor. Chaining neighbour to
+    // neighbour is transitive: N hits spaced just inside the window merge into one cluster N
+    // windows wide, so a thin feature at large ray parameter -- where the window is relative and
+    // therefore large -- silently collapses into a single mixed cluster and stops being a
+    // boundary. Anchoring bounds every cluster to one window (CodeReview_Fable.md K8).
     while (clusterEnd < hits.size() &&
-           (clusterEnd == hitIndex || sameIntersection(hits[clusterEnd].distance, hits[clusterEnd - 1].distance))) {
+           (clusterEnd == hitIndex || sameIntersection(hits[clusterEnd].distance, hits[hitIndex].distance))) {
       switch (crossingSense(hits[clusterEnd], rayDirection)) {
         case CrossingSense::Entering:
           entering = true;

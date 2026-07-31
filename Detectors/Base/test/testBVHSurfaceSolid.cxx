@@ -3036,3 +3036,141 @@ BOOST_AUTO_TEST_CASE(LPrismSweeps)
     }
   }
 }
+
+
+// K1: the B-spline endpoint shortcut assumed a clamped knot vector. A clamped curve interpolates
+// its first and last pole, so returning those is exact and free; an unclamped one -- which is what
+// OCC writes for a periodic tube-tube intersection curve before SetNotPeriodic -- starts and ends
+// strictly inside its control polygon, and the shortcut then returned points that are not on the
+// curve at all. Downstream, the wire's edges no longer meet (so it reads as Open and the whole
+// face is thrown away) or the off-curve endpoint corrupts the winding classification, since
+// CurveWire::classify deliberately uses canonical shared endpoints.
+BOOST_AUTO_TEST_CASE(UnclampedBSplineEndpointsAreOnTheCurve)
+{
+  using surf::Curve2D;
+  using surf::Vec2;
+
+  // the same cubic control polygon read twice: once with a clamped knot vector, once with a
+  // uniform (unclamped) one. Only the clamped curve may claim its poles as endpoints.
+  const std::vector<Vec2> poles{{0., 0.}, {1., 2.}, {3., 2.}, {4., 0.}};
+  const Curve2D clamped = Curve2D::makeBSpline(3, poles, {}, {0., 0., 0., 0., 1., 1., 1., 1.});
+  const Curve2D uniform = Curve2D::makeBSpline(3, poles, {}, {0., 1., 2., 3., 4., 5., 6., 7.});
+
+  BOOST_REQUIRE(clamped.valid());
+  BOOST_REQUIRE(uniform.valid());
+
+  // the endpoints must lie on their own curve, whatever the knot vector says
+  for (const auto* curve : {&clamped, &uniform}) {
+    const Vec2 start = curve->startPoint();
+    const Vec2 end = curve->endPoint();
+    const Vec2 evaluatedStart = curve->pointAt(0.);
+    const Vec2 evaluatedEnd = curve->pointAt(1.);
+    checkClose(start.uCoord, evaluatedStart.uCoord);
+    checkClose(start.vCoord, evaluatedStart.vCoord);
+    checkClose(end.uCoord, evaluatedEnd.uCoord);
+    checkClose(end.vCoord, evaluatedEnd.vCoord);
+  }
+
+  // and the two curves really are different, so the test is not vacuous: the clamped one
+  // interpolates its outer poles, the uniform one does not come near them
+  checkClose(clamped.startPoint().uCoord, 0.);
+  checkClose(clamped.endPoint().uCoord, 4.);
+  BOOST_CHECK_GT(std::hypot(uniform.startPoint().uCoord - poles.front().uCoord,
+                            uniform.startPoint().vCoord - poles.front().vCoord),
+                 0.1);
+
+  // a wire closed on the *curve* must validate, which is what the shortcut used to prevent: with
+  // poles.front() as the reported start, the joining line would have missed it by that distance
+  const Vec2 uniformStart = uniform.startPoint();
+  const Vec2 uniformEnd = uniform.endPoint();
+  surf::CurveWire wire;
+  surf::WireStatus status = surf::WireStatus::Valid;
+  BOOST_CHECK(wire.initialize({uniform, Curve2D::makeLine(uniformEnd, uniformStart)}, surf::WireRole::Outer, status));
+}
+
+// K2: the full-turn rejection measured the *control-point hull*, not the curve. A closed trim
+// curve that wraps nearly a full turn in phi has poles outside its own span (that is what makes
+// the hull a conservative bound), so the check saw more than 2*pi and refused a perfectly legal
+// through-hole host face -- and a refused face is a face missing from the parity solid, i.e. wrong
+// containment throughout its shadow.
+BOOST_AUTO_TEST_CASE(NearFullTurnTrimIsNotRejectedOnItsPoleHull)
+{
+  using surf::Curve2D;
+  using surf::Vec2;
+  std::string error;
+
+  // A trim wrapping 350 degrees of a cylinder, spelled as two quadratic B-spline spans whose
+  // middle poles sit *outside* the span in phi -- which is exactly what makes the control-point
+  // hull a conservative bound and not the curve's own extent. The curve stays inside 2*pi; its
+  // pole hull does not.
+  const double sweep = 350. * surf::kPi / 180.;
+  const double overshoot = 0.4;
+  const std::vector<Curve2D> outer{
+    Curve2D::makeBSpline(2, {{0., -1.}, {-overshoot, 0.}, {0.5 * sweep, 1.}}, {}, {0., 0., 0., 1., 1., 1.}),
+    Curve2D::makeBSpline(2, {{0.5 * sweep, 1.}, {sweep + overshoot, 0.}, {sweep, -1.}}, {}, {0., 0., 0., 1., 1., 1.}),
+    Curve2D::makeLine({sweep, -1.}, {0., -1.})};
+
+  // the pole hull must genuinely exceed a full turn, otherwise the fixture proves nothing
+  Vec2 hullLower{1.e300, 1.e300};
+  Vec2 hullUpper{-1.e300, -1.e300};
+  surf::CurveWire hullWire;
+  surf::WireStatus hullStatus = surf::WireStatus::Valid;
+  BOOST_REQUIRE(hullWire.initialize(outer, surf::WireRole::Outer, hullStatus));
+  hullWire.parametricBounds(hullLower, hullUpper);
+  BOOST_REQUIRE_GT(hullUpper.uCoord - hullLower.uCoord, surf::kTwoPi);
+
+  // ... while the curve itself does not
+  Vec2 tightLower{1.e300, 1.e300};
+  Vec2 tightUpper{-1.e300, -1.e300};
+  hullWire.tightParametricBounds(tightLower, tightUpper);
+  BOOST_CHECK_LT(tightUpper.uCoord - tightLower.uCoord, surf::kTwoPi);
+
+  // so the surface must be accepted
+  surf::CylindricalBoundedSurface surface;
+  BOOST_CHECK_MESSAGE(surface.initialize({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, 2., -2., 2., 0., surf::kTwoPi,
+                                         false, outer, {}, error),
+                      "near-full-turn trim rejected: " << error);
+
+  // a trim that really does wrap more than a full turn is still refused
+  surf::CylindricalBoundedSurface tooWide;
+  const std::vector<Curve2D> overWrapped{Curve2D::makeLine({0., -1.}, {surf::kTwoPi + 0.5, -1.}),
+                                         Curve2D::makeLine({surf::kTwoPi + 0.5, -1.}, {surf::kTwoPi + 0.5, 1.}),
+                                         Curve2D::makeLine({surf::kTwoPi + 0.5, 1.}, {0., 1.}),
+                                         Curve2D::makeLine({0., 1.}, {0., -1.})};
+  BOOST_CHECK(!tooWide.initialize({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, 2., -2., 2., 0., surf::kTwoPi, false,
+                                  overWrapped, {}, error));
+}
+
+// K7 claimed a face that fails to build is logged and silently omitted from the parity solid.
+// Reading the code does not support that on any production path: Add*Surface returns false, and
+// the sidecar loader turns that into a whole-file rejection, which the converter's generated macro
+// turns into an exception. What is true is the weaker statement that the *return value* is the
+// only signal, so this pins both halves -- the rejection is reported, and nothing is added behind
+// the caller's back. Recorded rather than "fixed", in the same spirit as the S6 correction.
+BOOST_AUTO_TEST_CASE(RejectedFacesAreNeverSilentlyAdded)
+{
+  SurfaceSolid solid("rejectingSolid");
+  BOOST_REQUIRE(addBoxFace(solid, 0, 1., 2., 3.));
+  BOOST_REQUIRE_EQUAL(solid.GetNsurfaces(), 1);
+
+  // degenerate frame (axisU parallel to axisV), a wire with too few vertices, and a zero-radius
+  // cylinder: each must be refused, and none may leave a surface behind
+  BOOST_CHECK(!solid.AddPlanarSurface({0., 0., 0.}, {1., 0., 0.}, {1., 0., 0.}, rectangleWire(1., 1.)));
+  BOOST_CHECK(!solid.AddPlanarSurface({0., 0., 0.}, {1., 0., 0.}, {0., 1., 0.}, {{0., 0.}, {1., 0.}}));
+  BOOST_CHECK(!solid.AddCylindricalSurface({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, 0., -1., 1.));
+  BOOST_CHECK_EQUAL(solid.GetNsurfaces(), 1);
+  BOOST_CHECK_EQUAL(static_cast<int>(solid.GetSurfaceRecords().size()), 1);
+
+  // the loader's contract on the same failure: reject the file rather than return a partial solid
+  std::vector<char> bytes;
+  appendSidecarHeader(bytes, 1);
+  appendU32(bytes, 2);  // cylinder
+  appendU32(bytes, 0);  // flags
+  appendU32(bytes, 14); // nParams
+  appendDoubles(bytes, {0., 0., 0., 0., 0., 1., 1., 0., 0., 0. /* radius */, -1., 1., 0., 2. * surf::kPi});
+  appendU32(bytes, 0); // nWires
+  const auto path = writeSidecarFile("o2_sidecar_rejected_face.bin", bytes);
+  SurfaceSolid loaded("loadedRejecting");
+  BOOST_CHECK(!o2::base::LoadSurfaceSolid(path.string(), loaded));
+  std::filesystem::remove(path);
+}
