@@ -109,6 +109,19 @@ inline Vec2 operator-(const Vec2& firstPoint, const Vec2& secondPoint)
   return {firstPoint.uCoord - secondPoint.uCoord, firstPoint.vCoord - secondPoint.vCoord};
 }
 
+/// The 3D length squared of a parametric displacement \a delta, given a surface's first
+/// fundamental form (\a gUU, \a gUV, \a gVV) at the point the displacement starts from.
+///
+/// This is the only honest way to compare a parametric separation against a tolerance: the (u, v)
+/// domains of this file mix radians and centimetres, so `du^2 + dv^2` is a number with no physical
+/// meaning, and any constant compared against it silently means a different thing on every
+/// surface. See BoundedSurface::parametricMetric.
+inline double parametricLengthSq(double gUU, double gUV, double gVV, const Vec2& delta)
+{
+  return gUU * delta.uCoord * delta.uCoord + 2. * gUV * delta.uCoord * delta.vCoord +
+         gVV * delta.vCoord * delta.vCoord;
+}
+
 inline double dot(const Vec3& firstVector, const Vec3& secondVector)
 {
   return firstVector.xCoord * secondVector.xCoord + firstVector.yCoord * secondVector.yCoord +
@@ -1906,6 +1919,32 @@ class BoundedSurface
   /// Outward-oriented normal at (or nearest to) the given point.
   virtual Vec3 normalAt(const Vec3& point) const = 0;
 
+  /// The first fundamental form (\a gUU, \a gUV, \a gVV) of the surface at the parametric point
+  /// \a uv, so that a parametric displacement (du, dv) from there spans the 3D length
+  ///   sqrt(gUU*du*du + 2*gUV*du*dv + gVV*dv*dv)   (see parametricLengthSq).
+  ///
+  /// This is what turns the parametric coordinates -- which mix radians and centimetres, with a
+  /// different mixture per surface family -- back into distances. Every tolerance applied to a
+  /// parametric separation has to go through it, or it means a different physical thing on a
+  /// 0.01 cm hole than on a 100 cm cylinder.
+  ///
+  /// Two properties callers must respect. The form is *not* constant over the domain (only the
+  /// planar families have that luxury), so it must be evaluated at the point of interest rather
+  /// than once per surface. And gUU vanishes at a sphere's poles and at a cone's apex, where a
+  /// separation in the angular coordinate really is of zero length; that is the correct answer,
+  /// but code that divides by the scale has to handle it.
+  virtual void parametricMetric(const Vec2& uv, double& gUU, double& gUV, double& gVV) const = 0;
+
+  /// The 3D length squared spanned by a parametric displacement \a delta starting at \a uv.
+  double parametricLengthSqAt(const Vec2& uv, const Vec2& delta) const
+  {
+    double gUU = 0.;
+    double gUV = 0.;
+    double gVV = 0.;
+    parametricMetric(uv, gUU, gUV, gVV);
+    return parametricLengthSq(gUU, gUV, gVV, delta);
+  }
+
   /// Signed divergence-theorem contribution to the enclosed volume.
   virtual double capacityContribution() const = 0;
 
@@ -2116,6 +2155,16 @@ class PlanarBoundedSurface final : public BoundedSurface
       parametricArea -= std::abs(innerWire.signedArea());
     }
     return std::max(0., parametricArea) * mAreaScale;
+  }
+
+  /// Constant over the plane, and the only family with a cross term: the frame axes carry the
+  /// domain's units and need be neither unit-length nor orthogonal. These are the same three
+  /// numbers initialize() already computes to invert the frame.
+  void parametricMetric(const Vec2&, double& gUU, double& gUV, double& gVV) const override
+  {
+    gUU = mMetricUU;
+    gUV = mMetricUV;
+    gVV = mMetricVV;
   }
 
   double capacityContribution() const override { return dot(mOrigin, mNormal) * area() / 3.; }
@@ -2349,6 +2398,15 @@ class CurvedPlanarBoundedSurface final : public BoundedSurface
       parametricArea -= std::abs(innerWire.signedArea());
     }
     return std::max(0., parametricArea);
+  }
+
+  /// The identity form: initialize() rejects a frame whose axes are not orthonormal, so (u, v)
+  /// here are already lengths in centimetres. (The polygon-wire plane is the general case.)
+  void parametricMetric(const Vec2&, double& gUU, double& gUV, double& gVV) const override
+  {
+    gUU = 1.;
+    gUV = 0.;
+    gVV = 1.;
   }
 
   double capacityContribution() const override { return dot(mOrigin, mNormal) * area() / 3.; }
@@ -2623,6 +2681,16 @@ class CylindricalBoundedSurface final : public BoundedSurface
     }
     return (mAxisU * (localPoint.xCoord / radialDistance) + mAxisV * (localPoint.yCoord / radialDistance)) *
            mNormalSign;
+  }
+
+  /// (u, v) = (phi[rad], h[cm]), so X_phi has length r and X_h is the unit axis. Constant over
+  /// the domain, and orthogonal, but the radius factor is exactly the one whose absence made a
+  /// single parametric tolerance mean 1e-5 cm on a 1 cm cylinder and 1e-3 cm on a 100 cm one.
+  void parametricMetric(const Vec2&, double& gUU, double& gUV, double& gVV) const override
+  {
+    gUU = mRadius * mRadius;
+    gUV = 0.;
+    gVV = 1.;
   }
 
   /// Exact divergence-theorem contribution over the (phi, h) rectangle; for a wire trim the same
@@ -2931,6 +2999,18 @@ class SphericalBoundedSurface final : public BoundedSurface
     }
     return (mAxisU * localPoint.xCoord + mAxisV * localPoint.yCoord + mAxisW * localPoint.zCoord) *
            (mNormalSign / pointRadius);
+  }
+
+  /// (u, v) = (phi[rad], theta[rad]) -- the trim domain's order, which is the transpose of
+  /// pointAt's argument order. Both coordinates are angles, so the scale is the radius in each,
+  /// but the azimuth's shrinks with the parallel it sits on: gUU vanishes at either pole, where a
+  /// phi separation genuinely spans no distance at all.
+  void parametricMetric(const Vec2& uv, double& gUU, double& gUV, double& gVV) const override
+  {
+    const double parallelRadius = mRadius * std::sin(uv.vCoord);
+    gUU = parallelRadius * parallelRadius;
+    gUV = 0.;
+    gVV = mRadius * mRadius;
   }
 
   /// Exact divergence-theorem contribution over the (theta, phi) rectangle; for a wire trim the
@@ -3300,6 +3380,17 @@ class ConicalBoundedSurface final : public BoundedSurface
     return (mAxisU * (localPoint.xCoord / radialDistance) + mAxisV * (localPoint.yCoord / radialDistance) -
             mAxisW * mSlope) *
            normalScale;
+  }
+
+  /// (u, v) = (phi[rad], h[cm]). Unlike the cylinder this varies along the axis: the azimuthal
+  /// scale is the local radius, which reaches zero at an apex, and a step in h also walks along
+  /// the slope, so it spans sqrt(1 + slope^2) rather than 1.
+  void parametricMetric(const Vec2& uv, double& gUU, double& gUV, double& gVV) const override
+  {
+    const double localRadius = radiusAt(uv.vCoord);
+    gUU = localRadius * localRadius;
+    gUV = 0.;
+    gVV = 1. + mSlope * mSlope;
   }
 
   /// Exact divergence-theorem contribution over the (phi, h) rectangle; for a wire trim the same
@@ -3679,6 +3770,18 @@ class TorusBoundedSurface final : public BoundedSurface
 
   Vec3 normalAt(const Vec3& point) const override { return localNormal(toLocal(point)); }
 
+  /// (u, v) = (phiRing[rad], phiTube[rad]). Both are angles; the tube's scale is the minor radius
+  /// everywhere, while the ring's is the distance from the axis, which runs from R - r on the
+  /// inside of the torus to R + r on the outside. The product of the two is the Jacobian the
+  /// capacity integrand already uses.
+  void parametricMetric(const Vec2& uv, double& gUU, double& gUV, double& gVV) const override
+  {
+    const double ringRadius = mMajorRadius + mMinorRadius * std::cos(uv.vCoord);
+    gUU = ringRadius * ringRadius;
+    gUV = 0.;
+    gVV = mMinorRadius * mMinorRadius;
+  }
+
   /// Exact divergence-theorem contribution (1/3) integral X . n |X_u x X_v| over the
   /// (phiRing, phiTube) rectangle, with |X_u x X_v| = r (R + r cos v); for a wire trim the same
   /// integrand is integrated numerically.
@@ -3877,6 +3980,15 @@ class DummyBoundedSurface final : public BoundedSurface
   }
 
   Vec3 normalAt(const Vec3&) const override { return mNormal; }
+
+  /// A placeholder triangle carries no parametric domain, so there is nothing to convert; the
+  /// identity form keeps the interface total without inventing a scale.
+  void parametricMetric(const Vec2&, double& gUU, double& gUV, double& gVV) const override
+  {
+    gUU = 1.;
+    gUV = 0.;
+    gVV = 1.;
+  }
 
   double capacityContribution() const override { return 0.; }
 
