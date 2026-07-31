@@ -2316,7 +2316,7 @@ BOOST_AUTO_TEST_CASE(PolygonAndCurveWiresShareOneJoinRule)
 
 namespace
 {
-// Helpers writing the surface sidecar binary format (version 1) documented in
+// Helpers writing the surface sidecar binary format documented in
 // scripts/geometry/BVHSurfaceSolid.md. Kept independent of the loader implementation so the
 // test is a true round-trip through the documented byte layout.
 void appendU32(std::vector<char>& bytes, uint32_t value)
@@ -2333,12 +2333,19 @@ void appendDoubles(std::vector<char>& bytes, std::initializer_list<double> value
   }
 }
 
-void appendSidecarHeader(std::vector<char>& bytes, uint32_t nSurfaces)
+// The fixed header. Version 1 is the three-uint32 form; version 2 appends the model tolerance in
+// cm. The default stays at version 1 on purpose: every sidecar test below then doubles as a
+// regression test that the reader still accepts the older format.
+void appendSidecarHeader(std::vector<char>& bytes, uint32_t nSurfaces, uint32_t version = 1,
+                         double modelTolerance = 0.)
 {
   bytes.insert(bytes.end(), {'O', '2', 'S', 'S'});
-  appendU32(bytes, 1); // version
+  appendU32(bytes, version);
   appendU32(bytes, nSurfaces);
   appendU32(bytes, 0); // reserved
+  if (version >= 2) {
+    appendDoubles(bytes, {modelTolerance});
+  }
 }
 
 // plane record (type 1) with a single rectangular outer wire of four line-segment edges
@@ -2473,6 +2480,72 @@ BOOST_AUTO_TEST_CASE(SurfaceSidecarRoundTrip)
   SurfaceSolid truncated("sidecarTruncated");
   BOOST_CHECK(!o2::base::LoadSurfaceSolid(truncatedPath.string(), truncated));
   std::filesystem::remove(truncatedPath);
+}
+
+// Sidecar version 2 carries the source model's own tolerance, so the kernel stops guessing what
+// epsilon two faces of an imported solid should agree to. Both versions must load: a v1 file is a
+// v2 file that simply does not state one.
+BOOST_AUTO_TEST_CASE(SidecarModelToleranceRoundTrip)
+{
+  constexpr double halfX = 1.;
+  constexpr double halfY = 2.;
+  constexpr double halfZ = 3.;
+  const auto boxBytesWithHeader = [&](uint32_t version, double modelTolerance) {
+    std::vector<char> bytes;
+    appendSidecarHeader(bytes, 6, version, modelTolerance);
+    for (int faceIndex = 0; faceIndex < 6; ++faceIndex) {
+      appendPlaneRecord(bytes, boxFaceFrame(faceIndex, halfX, halfY, halfZ));
+    }
+    return bytes;
+  };
+  const auto loadFrom = [](const char* name, const std::vector<char>& bytes, SurfaceSolid& solid) {
+    const auto path = writeSidecarFile(name, bytes);
+    const bool ok = o2::base::LoadSurfaceSolid(path.string(), solid);
+    std::filesystem::remove(path);
+    return ok;
+  };
+
+  // version 2: the written tolerance reaches the solid untouched, and survives to CloseShape
+  SurfaceSolid v2("sidecarV2");
+  BOOST_REQUIRE(loadFrom("o2_sidecar_v2.bin", boxBytesWithHeader(2, 3.5e-5), v2));
+  BOOST_CHECK_EQUAL(v2.GetNsurfaces(), 6);
+  checkClose(v2.GetModelTolerance(), 3.5e-5, 1.e-18);
+  v2.CloseShape();
+  checkClose(v2.GetModelTolerance(), 3.5e-5, 1.e-18);
+
+  // a v2 file may still state nothing, and "nothing" is zero rather than an invented number
+  SurfaceSolid v2Silent("sidecarV2Silent");
+  BOOST_REQUIRE(loadFrom("o2_sidecar_v2_silent.bin", boxBytesWithHeader(2, 0.), v2Silent));
+  BOOST_CHECK_EQUAL(v2Silent.GetModelTolerance(), 0.);
+
+  // version 1: still loads, and gets the reader's documented fallback rather than zero
+  SurfaceSolid v1("sidecarV1");
+  BOOST_REQUIRE(loadFrom("o2_sidecar_v1.bin", boxBytesWithHeader(1, 0.), v1));
+  BOOST_CHECK_EQUAL(v1.GetNsurfaces(), 6);
+  checkClose(v1.GetModelTolerance(), 1.e-6, 1.e-18);
+
+  // a solid nobody told anything keeps zero: "not stated" is not the same as "the fallback"
+  SurfaceSolid handBuilt("handBuilt");
+  BOOST_CHECK_EQUAL(handBuilt.GetModelTolerance(), 0.);
+  handBuilt.SetModelTolerance(1.e-4);
+  checkClose(handBuilt.GetModelTolerance(), 1.e-4, 1.e-18);
+  handBuilt.SetModelTolerance(-1.); // refused, and the previous value stands
+  checkClose(handBuilt.GetModelTolerance(), 1.e-4, 1.e-18);
+
+  // an unknown version is refused rather than reinterpreted
+  SurfaceSolid v3("sidecarV3");
+  BOOST_CHECK(!loadFrom("o2_sidecar_v3.bin", boxBytesWithHeader(3, 1.e-5), v3));
+  BOOST_CHECK_EQUAL(v3.GetNsurfaces(), 0);
+
+  // and a v2 header that stops before its tolerance is a truncated file, not a v1 one
+  std::vector<char> stump;
+  stump.insert(stump.end(), {'O', '2', 'S', 'S'});
+  appendU32(stump, 2);
+  appendU32(stump, 6);
+  appendU32(stump, 0);
+  SurfaceSolid stumped("sidecarV2Stump");
+  BOOST_CHECK(!loadFrom("o2_sidecar_v2_stump.bin", stump, stumped));
+  BOOST_CHECK_EQUAL(stumped.GetNsurfaces(), 0);
 }
 
 BOOST_AUTO_TEST_CASE(WireTrimmedSidecarRoundTrip)
@@ -2926,6 +2999,18 @@ BOOST_AUTO_TEST_CASE(PersistenceRoundTrip)
   const auto restoredTrimmed = writeAndReadBack(trimmed);
   BOOST_REQUIRE(restoredTrimmed != nullptr);
   checkSolidsIdentical(trimmed, *restoredTrimmed, 4.5, 5);
+
+  // the model's own tolerance is solid-level state, not derived from the records, so it has to be
+  // streamed rather than recomputed on replay
+  SurfaceSolid toleranced("persistTolerance");
+  for (int faceIndex = 0; faceIndex < 6; ++faceIndex) {
+    BOOST_REQUIRE(addBoxFace(toleranced, faceIndex, 1., 2., 3.));
+  }
+  toleranced.SetModelTolerance(7.25e-5);
+  toleranced.CloseShape(false);
+  const auto restoredToleranced = writeAndReadBack(toleranced);
+  BOOST_REQUIRE(restoredToleranced != nullptr);
+  checkClose(restoredToleranced->GetModelTolerance(), 7.25e-5, 1.e-18);
 
   // an unnavigable solid must come back unnavigable: the failure mode S1 describes is precisely a
   // defective solid that acquires a clean bill of health by losing its surfaces on the way

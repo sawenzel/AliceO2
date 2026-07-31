@@ -681,18 +681,23 @@ Sections 3-4 for the full derivation). These principles govern all subsequent mi
 
 ## Surface sidecar format
 
-Version 1 of the exact-surface sidecar (`surfaces_<VOLNAME>_<LID>.bin`), written by
+The exact-surface sidecar (`surfaces_<VOLNAME>_<LID>.bin`), written by
 `write_surfaces_bin` in `scripts/geometry/O2_CADtoTGeo.py` and read by
 `o2::base::LoadSurfaceSolid` (`Detectors/Base/include/DetectorsBase/O2SurfaceSolidIO.h`).
 All integers are little-endian `uint32`, all geometry values are little-endian `float64`,
 lengths in cm, angles in radians.
 
+**Version 2** appends one `float64` to the fixed header and changes nothing else, so a version-1
+file is a version-2 file that does not state its model's tolerance. The converter writes version 2;
+the reader accepts both, and warns when it falls back for a version-1 file.
+
 ```
 header:
   char[4]  magic        = "O2SS"
-  uint32   version      = 1
+  uint32   version      = 2
   uint32   nSurfaces
   uint32   reserved     = 0
+  float64  modelTolerance          # version 2 only; cm; 0 = not stated
 per surface (nSurfaces times):
   uint32   surfaceType     1=plane 2=cylinder 3=cone 4=sphere 5=torus
   uint32   flags           bit 0: innerWall (quadrics/torus: outward normal towards the axis/center/tube spine)
