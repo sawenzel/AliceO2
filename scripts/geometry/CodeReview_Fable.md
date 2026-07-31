@@ -623,7 +623,8 @@ verified to fail against the pre-fix code.
 
 ### Still open
 
-- **Phase 1 item 4** (not started): per-domain metrics (angular <-> length via radius) in kernel
+- **Phase 1 item 4** (not started), planned in detail in [`TolerancePolicy.md`](TolerancePolicy.md):
+  per-domain metrics (angular <-> length via radius) in kernel
   *and* IO (K3/S10), sidecar v2 carrying the model tolerance, and a closure criterion matched at
   the topology level with a quantitative gap metric (K9/S8). K5 (a 1e-9 boundary band tested
   against a ~1e-5 polyline) belongs with it — it needs the same metric.

@@ -1202,7 +1202,8 @@ matching `kWireJoinTolerance = 1e-5` (both looser than the `1e-9` boundary toler
 	grazes, unclamped B-spline endpoints and the full-turn trim rejection.
 
 	**Where to pick up, in order.**
-	1. **Phase 1 item 4** (the only Phase 1 work left): per-domain metrics (angular <-> length via
+	1. **Phase 1 item 4** (the only Phase 1 work left), planned in detail in
+	   [`TolerancePolicy.md`](TolerancePolicy.md): per-domain metrics (angular <-> length via
 	   radius) in kernel *and* IO (K3/S10), sidecar v2 carrying the model tolerance, and a closure
 	   criterion matched at the topology level with a quantitative gap metric (K9/S8) so that
 	   "closed" becomes achievable and meaningful. **K5 belongs with it** — a 1e-9 boundary band
