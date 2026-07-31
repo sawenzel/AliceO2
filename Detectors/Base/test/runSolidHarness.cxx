@@ -479,6 +479,14 @@ int main(int argc, char** argv)
     std::printf("  navigation: %s%s  (boundary=%d non-manifold=%d reversed=%d)\n", reliabilityName,
                navigable ? "" : "  *** UNRELIABLE: results below are not a measurement of accuracy ***",
                surf.GetBoundaryEdgeCount(), surf.GetNonManifoldEdgeCount(), surf.GetReversedEdgeCount());
+    // The same boundary measured as curves, in cm. Nothing above derives from it yet; it is here
+    // to answer "how far apart are the faces", which a chord count cannot. Always with the chord
+    // resolution next to it -- a gap below that is how the rims were sampled, not a real gap.
+    std::printf("  rim gap: max %.3g cm (chord resolution %.3g cm, matched at %.3g cm); rims %d "
+                "(matched=%d boundary=%d non-manifold=%d reversed=%d), open %.3g of %.3g cm\n",
+                surf.GetMaxRimGap(), surf.GetRimChordResolution(), surf.GetRimMatchTolerance(), surf.GetRimCount(),
+                surf.GetMatchedRimCount(), surf.GetBoundaryRimCount(), surf.GetNonManifoldRimCount(),
+                surf.GetReversedRimCount(), surf.GetUnmatchedRimLength(), surf.GetTotalRimLength());
     if (!navigable) {
       unreliableParts.push_back(part.id + " (" + reliabilityName + ")");
     }
@@ -516,7 +524,17 @@ int main(int argc, char** argv)
                               {"navigable", navigable},
                               {"boundaryEdges", surf.GetBoundaryEdgeCount()},
                               {"nonManifoldEdges", surf.GetNonManifoldEdgeCount()},
-                              {"reversedEdges", surf.GetReversedEdgeCount()}};
+                              {"reversedEdges", surf.GetReversedEdgeCount()},
+                              {"maxRimGap", surf.GetMaxRimGap()},
+                              {"rimChordResolution", surf.GetRimChordResolution()},
+                              {"rimMatchTolerance", surf.GetRimMatchTolerance()},
+                              {"totalRimLength", surf.GetTotalRimLength()},
+                              {"unmatchedRimLength", surf.GetUnmatchedRimLength()},
+                              {"rims", surf.GetRimCount()},
+                              {"matchedRims", surf.GetMatchedRimCount()},
+                              {"boundaryRims", surf.GetBoundaryRimCount()},
+                              {"nonManifoldRims", surf.GetNonManifoldRimCount()},
+                              {"reversedRims", surf.GetReversedRimCount()}};
 
     std::vector<Point3D> allPoints = samples.bulkPoints;
     allPoints.insert(allPoints.end(), samples.boundaryPoints.begin(), samples.boundaryPoints.end());

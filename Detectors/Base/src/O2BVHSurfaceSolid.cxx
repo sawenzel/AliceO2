@@ -1098,7 +1098,7 @@ void O2BVHSurfaceSolid::CloseShape(bool check)
     surface->appendDisplayMesh(fImpl->displayVertices, fImpl->displayTriangles);
   }
 
-  fImpl->closure = validateClosure(fImpl->surfaces);
+  fImpl->closure = validateClosure(fImpl->surfaces, fModelTolerance);
   fImpl->defined = true;
 
   if (check) {
@@ -1253,6 +1253,56 @@ int O2BVHSurfaceSolid::GetReversedEdgeCount() const
   return fImpl == nullptr ? 0 : fImpl->closure.reversedEdges;
 }
 
+double O2BVHSurfaceSolid::GetMaxRimGap() const
+{
+  return fImpl == nullptr ? 0. : fImpl->closure.maxGap;
+}
+
+double O2BVHSurfaceSolid::GetRimChordResolution() const
+{
+  return fImpl == nullptr ? 0. : fImpl->closure.rimChordResolution;
+}
+
+double O2BVHSurfaceSolid::GetRimMatchTolerance() const
+{
+  return fImpl == nullptr ? 0. : fImpl->closure.rimEpsilon;
+}
+
+double O2BVHSurfaceSolid::GetTotalRimLength() const
+{
+  return fImpl == nullptr ? 0. : fImpl->closure.totalRimLength;
+}
+
+double O2BVHSurfaceSolid::GetUnmatchedRimLength() const
+{
+  return fImpl == nullptr ? 0. : fImpl->closure.unmatchedRimLength;
+}
+
+int O2BVHSurfaceSolid::GetRimCount() const
+{
+  return fImpl == nullptr ? 0 : fImpl->closure.rims;
+}
+
+int O2BVHSurfaceSolid::GetMatchedRimCount() const
+{
+  return fImpl == nullptr ? 0 : fImpl->closure.matchedRims;
+}
+
+int O2BVHSurfaceSolid::GetBoundaryRimCount() const
+{
+  return fImpl == nullptr ? 0 : fImpl->closure.boundaryRims;
+}
+
+int O2BVHSurfaceSolid::GetNonManifoldRimCount() const
+{
+  return fImpl == nullptr ? 0 : fImpl->closure.nonManifoldRims;
+}
+
+int O2BVHSurfaceSolid::GetReversedRimCount() const
+{
+  return fImpl == nullptr ? 0 : fImpl->closure.reversedRims;
+}
+
 void O2BVHSurfaceSolid::ComputeBBox()
 {
   if (fImpl == nullptr || fImpl->surfaces.empty()) {
@@ -1322,6 +1372,16 @@ void O2BVHSurfaceSolid::Print(Option_t*) const
     std::cout << fModelTolerance << " cm (from the source model)";
   } else {
     std::cout << "not stated";
+  }
+  // The gap, and the resolution it was measured at, always together: below the chord resolution
+  // the number is how the two faces were sampled, not how far apart they are.
+  if (GetRimCount() > 0) {
+    std::cout << "\n    rim gap: max " << GetMaxRimGap() << " cm (chord resolution " << GetRimChordResolution()
+              << " cm, matched at " << GetRimMatchTolerance() << " cm)"
+              << "\n    rims: " << GetRimCount() << " (matched=" << GetMatchedRimCount()
+              << " boundary=" << GetBoundaryRimCount() << " non-manifold=" << GetNonManifoldRimCount()
+              << " reversed=" << GetReversedRimCount() << "), open " << GetUnmatchedRimLength() << " of "
+              << GetTotalRimLength() << " cm";
   }
   std::cout << "\n";
 }
