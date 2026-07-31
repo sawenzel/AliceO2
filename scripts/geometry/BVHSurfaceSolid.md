@@ -1098,3 +1098,66 @@ matching `kWireJoinTolerance = 1e-5` (both looser than the `1e-9` boundary toler
 	- **Still open:** 367 `contains` disagreements outside the non-manifold part, and no part closing yet.
 	  Diagnose those the same way before resuming any converter work. Items 1 and 2 of
 	  `ExactTrimTopology.md` are marked "do not start" pending such evidence.
+- 2026-07-31: **Comprehensive review + Phase 0 (test infrastructure) — commit `09f20bc32f`.**
+  A full review of the branch is in [`CodeReview_Fable.md`](CodeReview_Fable.md); its Sections 3-4
+  derive why per-face 2D trim curves can never make a tube-tube part watertight, Section 9 defines
+  the new success gates, Section 10 the phased plan, and **Section 11 records the measured Phase 0
+  baseline**. The durable design decisions it produced are at the top of this file under
+  "Adopted design principles (2026-07-31)". Phase 0 built the missing reference and fixtures; it
+  deliberately changed **no** navigation or converter semantics.
+
+	**Everything is committed and `ctest -R BVHSurfaceSolid` is green (36 cases).** A new session can
+	start Phase 1 from a clean tree.
+
+	**How to run the gate** (all paths relative to the O2 checkout):
+	```bash
+	# build (incremental; the branch's targets appear after a cmake re-run)
+	export ALIBUILD_WORK_DIR=$HOME/alisw/sw
+	B=$HOME/alisw/sw/BUILD/O2-latest/O2
+	cd $B && eval "$($HOME/alisw/alibuild/alienv printenv O2/latest-dev-o2,ninja/latest,CMake/latest)"
+	ninja o2-test-detectorsbase-BVHSurfaceSolid o2-bench-detectorsbase-solid-harness
+	# NOTE: ctest and the harness resolve libO2DetectorsBase from the *installed* prefix unless the
+	# build's stage dirs come first -- otherwise you get an undefined-symbol failure or, worse, a
+	# silently stale measurement.
+	LD_LIBRARY_PATH=$B/stage/lib:$B/stage/lib64:$LD_LIBRARY_PATH ctest -R BVHSurfaceSolid
+
+	# the whole gate in one command (converts, dumps samples, runs the oracle, scores)
+	O2_BUILD_DIR=$B python3 scripts/geometry/runOracleGate.py --workdir /tmp/gate --fixtures
+	O2_BUILD_DIR=$B python3 scripts/geometry/runOracleGate.py --workdir /tmp/gate2 \
+	    --model scripts/geometry/STEP_examples/Bagger.step
+	# validate the oracle itself first if anything looks surprising -- it is the trust anchor
+	$HOME/alisw/sw/ubuntu2404_aarch64/Python/latest/bin/python3.10 scripts/geometry/occtOracle.py --self-test
+	```
+	pythonOCC needs the alibuild Python 3.10 (the system `python3` is 3.12 and cannot import `OCC`);
+	`runOracleGate.py` sets that environment itself. Never write generated artifacts into
+	`scripts/geometry/STEP_examples/` -- use a scratch folder, as every session here has.
+
+	**Baseline to beat (measured, seed 1, 2000 points / 2000 rays):** fixture ladder **6/10**,
+	`Bagger.step` **4/12**. The three failing fixtures are exactly the three with a genuine
+	cylinder-cylinder intersection curve (`cyl_cross_cyl`, `cyl_inter_cyl`, `tube_window`), and
+	`oblique_cut_cyl` does not convert at all (the ellipse planar-trim blocker, i.e. Bagger's
+	`Bucket` reduced to three faces). Full table in `CodeReview_Fable.md` Section 11.
+
+	**Phase 1 is next**, in this order (details and file:line references in `CodeReview_Fable.md`
+	Sections 5-6; each item wants its own regression test, and the gate above is the acceptance
+	measurement -- run it before and after every item so the effect is attributable):
+	1. **Ambiguity band + re-shoot parity** (Section 4.4). `pointInTrim` is a hard binary and
+	   `Contains` casts one fixed direction with no retry, so a hit landing within epsilon of a trim
+	   boundary is classified by coin flip and the error is the whole shadow of the seam. Expected to
+	   move the `contains` columns the most.
+	2. **The safety-critical solid bugs**: S1 (a streamed-and-read solid comes back *empty* and
+	   reports itself `Reliable` -- fix first, it is actively harmful), S2 (`Contains` is disabled
+	   before `CloseShape`), S3/S5 (boundary policy differs between `Contains` and the distance
+	   queries), S4 (distance queries lack the mixed-cluster cancellation `Contains` has).
+	3. **Kernel bugs K1-K8**, notably K1 (B-spline clamping assumed, never validated), K2 (full-turn
+	   trims rejected on the pole hull), K3 (`kWireJoinTolerance` applied to mixed rad/cm units),
+	   K7 (a face that fails to build is silently dropped from the parity solid).
+	4. **Tolerance policy and the closure criterion** (K3/S10, K9/S8): per-domain metrics
+	   (angular <-> length via radius) in kernel *and* IO, and a closure check matched at the
+	   topology level with a quantitative gap metric, so "closed" becomes achievable and meaningful.
+
+	**Diagnose before planning.** `DescribeContainsCrossings` now prints both parity hit lists when
+	BVH and loop disagree (`--loop-crosscheck`); the recorded "order-dependent clustering"
+	explanation for those disagreements is **not supported by the code** (the clusterer sorts first,
+	so it is a function of the sorted distances alone -- see S6). Measure it before fixing it. Phase 2
+	(adjacency-based exact trims, the actual fix for the tube-tube class) starts only after Phase 1.
