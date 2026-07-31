@@ -83,7 +83,7 @@ from OCC.Core.GeomAbs import (
 )
 from OCC.Core.TopExp import TopExp_Explorer
 from OCC.Core.TopLoc import TopLoc_Location
-from OCC.Core.TopAbs import TopAbs_REVERSED, TopAbs_WIRE, TopAbs_EDGE
+from OCC.Core.TopAbs import TopAbs_REVERSED, TopAbs_WIRE, TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
 from OCC.Core.TopoDS import topods
 from OCC.Extend.TopologyUtils import TopologyExplorer
 
@@ -694,13 +694,34 @@ def build_surface_report(step_path: str, scale_to_cm: float, recognize_surfaces:
 # loader o2::base::LoadSurfaceSolid (DetectorsBase/O2SurfaceSolidIO.h).
 
 SURFACE_SIDECAR_MAGIC = b"O2SS"
-SURFACE_SIDECAR_VERSION = 1
+# Version 2 appends a float64 model tolerance (cm) to the fixed header. The kernel reads both.
+SURFACE_SIDECAR_VERSION = 2
 SURFACE_TYPE_ENUM = {"plane": 1, "cylinder": 2, "cone": 3, "sphere": 4, "torus": 5}
 CURVE_TYPE_ENUM = {"line": 0, "arc": 1, "bspline": 2}
 SURFACE_FLAG_INNER_WALL = 1 << 0
 
 
-def write_surfaces_bin(path: _Path, surfaces: List[dict]):
+def shape_model_tolerance(shape, scale_to_cm: float) -> float:
+    """The model's own statement about how well its boundary is defined, in cm.
+
+    This is the largest BRep tolerance over the shape's faces, edges and vertices, converted to
+    cm. It is what the kernel needs and cannot compute: without it there is no way to know what
+    epsilon two faces of the same imported solid should be expected to agree to, so every closure
+    or adjacency decision falls back on a constant nobody chose for this geometry. The oracle
+    reports the same quantity (occtOracle.shape_tolerance) and uses it as its gate band.
+    """
+    worst = 0.0
+    for shape_type, getter in ((TopAbs_FACE, lambda sub: BRep_Tool.Tolerance(topods.Face(sub))),
+                               (TopAbs_EDGE, lambda sub: BRep_Tool.Tolerance(topods.Edge(sub))),
+                               (TopAbs_VERTEX, lambda sub: BRep_Tool.Tolerance(topods.Vertex(sub)))):
+        explorer = TopExp_Explorer(shape, shape_type)
+        while explorer.More():
+            worst = max(worst, getter(explorer.Current()))
+            explorer.Next()
+    return worst * scale_to_cm
+
+
+def write_surfaces_bin(path: _Path, surfaces: List[dict], model_tolerance_cm: float = 0.0):
     """
     Writes the surface sidecar. `surfaces` is a list of records:
       {"type": "plane"|"cylinder"|"cone"|"sphere"|"torus",
@@ -711,11 +732,16 @@ def write_surfaces_bin(path: _Path, surfaces: List[dict]):
           {"role": "outer"|"inner",     # general line/arc loops (polygon, disk, rounded rect)
            "edges": [{"curve": "line"|"arc", "params": [float, ...]}, ...]},
        ]}
+
+    `model_tolerance_cm` is the source model's declared tolerance (shape_model_tolerance), written
+    into the version-2 header. Zero means "not stated"; the reader then falls back on its own
+    documented constant and says so.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "wb") as f:
         f.write(SURFACE_SIDECAR_MAGIC)
         f.write(struct.pack("<III", SURFACE_SIDECAR_VERSION, len(surfaces), 0))
+        f.write(struct.pack("<d", float(model_tolerance_cm)))
         for srec in surfaces:
             stype = SURFACE_TYPE_ENUM[srec["type"]]
             flags = SURFACE_FLAG_INNER_WALL if srec.get("inner_wall") else 0
@@ -3032,7 +3058,7 @@ def emit_root_macro(
             volname = sanitize_filename(disp) if disp else "vol"
             name_suffix = f"{volname}_{sanitize_filename(lid)}"
             fpath = (out_folder / f"surfaces_{name_suffix}.bin").resolve()
-            write_surfaces_bin(fpath, surfaces)
+            write_surfaces_bin(fpath, surfaces, shape_model_tolerance(shape, scale_to_cm))
             surface_files[lid] = str(fpath)
             if dump_brep:
                 bpath = (out_folder / f"brep_{name_suffix}.brep").resolve()
