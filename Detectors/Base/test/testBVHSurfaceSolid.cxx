@@ -2107,6 +2107,136 @@ BOOST_AUTO_TEST_CASE(WireTrimmedQuadricKernels)
 
 namespace
 {
+// Estimate the first fundamental form at (u, v) by central differences of a surface's own
+// parametrisation. Checking parametricMetric against this is a proof that the closed form
+// describes the map the rest of the kernel actually evaluates -- restating the formula in the
+// test would only prove it was copied twice.
+template <typename PointAt>
+void checkMetricAgainstFiniteDifference(const surf::BoundedSurface& surface, const PointAt& pointAt,
+                                        double uCoord, double vCoord, double tolerance = 1.e-6)
+{
+  const double step = 1.e-5;
+  const surf::Vec3 dU = (pointAt(uCoord + step, vCoord) - pointAt(uCoord - step, vCoord)) * (0.5 / step);
+  const surf::Vec3 dV = (pointAt(uCoord, vCoord + step) - pointAt(uCoord, vCoord - step)) * (0.5 / step);
+
+  double gUU = 0.;
+  double gUV = 0.;
+  double gVV = 0.;
+  surface.parametricMetric({uCoord, vCoord}, gUU, gUV, gVV);
+  checkClose(gUU, dot(dU, dU), tolerance);
+  checkClose(gUV, dot(dU, dV), tolerance);
+  checkClose(gVV, dot(dV, dV), tolerance);
+}
+} // namespace
+
+// The first fundamental form of every surface family, against the surface's own parametrisation,
+// plus the two degeneracies and the cross term the callers of it have to cope with. This is the
+// conversion that makes a parametric tolerance mean a length (findings K3, K5, K12, S10).
+BOOST_AUTO_TEST_CASE(ParametricMetricIsTheFirstFundamentalForm)
+{
+  using surf::Vec2;
+  using surf::Vec3;
+  std::string error;
+
+  // (1) plane with deliberately non-orthonormal axes: the only family with a cross term, and the
+  // only one whose (u, v) are not already lengths.
+  const Vec3 axisU{2., 0., 0.};
+  const Vec3 axisV{1., 3., 0.}; // not unit, not orthogonal to axisU
+  const std::vector<Vec2> unitSquare{{0., 0.}, {1., 0.}, {1., 1.}, {0., 1.}};
+  surf::PlanarBoundedSurface plane;
+  BOOST_REQUIRE(plane.initialize({0.5, -1., 2.}, axisU, axisV, unitSquare, {}, error));
+  checkMetricAgainstFiniteDifference(plane, [&](double u, double v) { return plane.toGlobal({u, v}); }, 0.3, 0.7);
+  {
+    double gUU = 0.;
+    double gUV = 0.;
+    double gVV = 0.;
+    plane.parametricMetric({0., 0.}, gUU, gUV, gVV);
+    checkClose(gUU, 4.);
+    checkClose(gUV, 2.); // dot(axisU, axisV) -- zero for every other family
+    checkClose(gVV, 10.);
+    // and it really measures 3D length: (du, dv) = (1, 0) spans |axisU| = 2 cm
+    checkClose(std::sqrt(plane.parametricLengthSqAt({0., 0.}, {1., 0.})), 2.);
+    checkClose(std::sqrt(plane.parametricLengthSqAt({0., 0.}, {0., 1.})), std::sqrt(10.));
+  }
+
+  // (2) curved planar: initialize() insists on an orthonormal frame, so (u, v) are centimetres.
+  surf::CurvedPlanarBoundedSurface curvedPlane;
+  BOOST_REQUIRE(curvedPlane.initialize({0., 0., 0.}, {1., 0., 0.}, {0., 1., 0.},
+                                       {surf::Curve2D::makeCircle({0., 0.}, 1.)}, {}, error));
+  checkMetricAgainstFiniteDifference(
+    curvedPlane, [&](double u, double v) { return curvedPlane.toGlobal({u, v}); }, 0.2, -0.4);
+
+  // (3) cylinder, (u, v) = (phi, h). The radius factor is the whole point: the same parametric
+  // drift is a different distance on a small hole and on a large cylinder.
+  for (const double radius : {0.01, 100.}) {
+    surf::CylindricalBoundedSurface cylinder;
+    BOOST_REQUIRE(cylinder.initialize({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, radius, -1., 1., 0., surf::kTwoPi,
+                                      false, error));
+    checkMetricAgainstFiniteDifference(cylinder, [&](double u, double v) { return cylinder.pointAt(u, v); }, 1.1, 0.3,
+                                       1.e-4 * radius * radius);
+    // a 2e-5 rad join drift is 2e-7 cm on the small cylinder and 2e-3 cm on the large one
+    checkClose(std::sqrt(cylinder.parametricLengthSqAt({1.1, 0.3}, {2.e-5, 0.})), 2.e-5 * radius, 1.e-12);
+  }
+
+  // (4) sphere, (u, v) = (phi, theta) -- the trim domain's order, the transpose of pointAt's.
+  surf::SphericalBoundedSurface sphere;
+  BOOST_REQUIRE(sphere.initialize({1., 2., 3.}, {0., 0., 1.}, {1., 0., 0.}, 2.5, 0., surf::kPi, 0., surf::kTwoPi,
+                                  false, error));
+  checkMetricAgainstFiniteDifference(sphere, [&](double u, double v) { return sphere.pointAt(v, u); }, 0.9, 1.2);
+  {
+    double gUU = 0.;
+    double gUV = 0.;
+    double gVV = 0.;
+    // at the pole the azimuth degenerates: a phi separation there spans no distance at all
+    sphere.parametricMetric({0.9, 0.}, gUU, gUV, gVV);
+    checkClose(gUU, 0.);
+    checkClose(gVV, 2.5 * 2.5);
+    checkClose(sphere.parametricLengthSqAt({0.9, 0.}, {1., 0.}), 0.);
+    sphere.parametricMetric({0.9, surf::kPi}, gUU, gUV, gVV);
+    checkClose(gUU, 0.);
+    // and on the equator it is the full radius
+    sphere.parametricMetric({0.9, surf::kHalfPi}, gUU, gUV, gVV);
+    checkClose(gUU, 2.5 * 2.5);
+  }
+
+  // (5) cone, (u, v) = (phi, h): the azimuthal scale shrinks to zero at the apex, and a step in h
+  // walks along the slope rather than along the axis.
+  surf::ConicalBoundedSurface cone;
+  BOOST_REQUIRE(cone.initialize({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, 0., 4., 0., 2., 0., surf::kTwoPi, false,
+                                error));
+  checkMetricAgainstFiniteDifference(cone, [&](double u, double v) { return cone.pointAt(u, v); }, 2.0, 1.3);
+  {
+    double gUU = 0.;
+    double gUV = 0.;
+    double gVV = 0.;
+    cone.parametricMetric({2.0, 0.}, gUU, gUV, gVV); // the apex, where r(h) = 0
+    checkClose(gUU, 0.);
+    checkClose(gVV, 1. + 2. * 2.); // slope = (4 - 0) / (2 - 0)
+    checkClose(cone.parametricLengthSqAt({2.0, 0.}, {1., 0.}), 0.);
+    cone.parametricMetric({2.0, 2.}, gUU, gUV, gVV); // the wide end, r = 4
+    checkClose(gUU, 16.);
+  }
+
+  // (6) torus, (u, v) = (phiRing, phiTube): the ring scale runs from R - r to R + r around the
+  // tube, so it is the one family whose gUU varies without any degeneracy.
+  surf::TorusBoundedSurface torus;
+  BOOST_REQUIRE(torus.initialize({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, 5., 1.5, 0., surf::kTwoPi, 0.,
+                                 surf::kTwoPi, false, error));
+  checkMetricAgainstFiniteDifference(torus, [&](double u, double v) { return torus.pointAt(u, v); }, 0.7, 2.1);
+  {
+    double gUU = 0.;
+    double gUV = 0.;
+    double gVV = 0.;
+    torus.parametricMetric({0.7, 0.}, gUU, gUV, gVV); // outside of the ring
+    checkClose(gUU, 6.5 * 6.5);
+    checkClose(gVV, 1.5 * 1.5);
+    torus.parametricMetric({0.7, surf::kPi}, gUU, gUV, gVV); // inside of the ring
+    checkClose(gUU, 3.5 * 3.5);
+  }
+}
+
+namespace
+{
 // Helpers writing the surface sidecar binary format (version 1) documented in
 // scripts/geometry/BVHSurfaceSolid.md. Kept independent of the loader implementation so the
 // test is a true round-trip through the documented byte layout.
