@@ -826,6 +826,26 @@ struct Curve2D {
   double bsplineT0() const { return knots[degree]; }
   double bsplineT1() const { return knots[poles.size()]; }
 
+  /// True when the knot vector is *clamped*: the first and last degree+1 knots each coincide.
+  /// Only then does the curve interpolate its first and last pole, which is the shortcut
+  /// startPoint()/endPoint() take. An unclamped or periodic knot vector -- exactly what OCC
+  /// writes for a tube-tube intersection curve before SetNotPeriodic -- starts and ends somewhere
+  /// strictly inside the control polygon, so the shortcut would return a point that is not on the
+  /// curve at all: the wire then reads as Open (its edges no longer meet) and the face is
+  /// rejected, or the off-curve endpoint corrupts the winding classification. See
+  /// CodeReview_Fable.md K1.
+  bool bsplineIsClamped() const
+  {
+    const size_t lastKnot = knots.size() - 1;
+    for (int offset = 1; offset <= degree; ++offset) {
+      if (std::abs(knots[offset] - knots[0]) > kTolerance ||
+          std::abs(knots[lastKnot - offset] - knots[lastKnot]) > kTolerance) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   /// True if the curve carries non-unit weights (a rational B-spline).
   bool bsplineRational() const
   {
@@ -1061,7 +1081,9 @@ struct Curve2D {
       return lineStart;
     }
     if (kind == CurveKind::BSpline) {
-      return poles.front(); // clamped knot vector: first pole is the start point
+      // a clamped knot vector interpolates its first pole exactly, which is both cheaper and
+      // more accurate than evaluating; anything else has to be evaluated (K1)
+      return bsplineIsClamped() ? poles.front() : bsplinePointAt(0.);
     }
     return pointAtAngle(startAngle);
   }
@@ -1071,7 +1093,7 @@ struct Curve2D {
       return lineEnd;
     }
     if (kind == CurveKind::BSpline) {
-      return poles.back(); // clamped knot vector: last pole is the end point
+      return bsplineIsClamped() ? poles.back() : bsplinePointAt(1.);
     }
     return pointAtAngle(endAngle);
   }
@@ -1146,6 +1168,36 @@ struct Curve2D {
       }
       return;
     }
+    includeAnalyticExtremes(include);
+  }
+
+  /// As extendBounds, but measured on the curve rather than on the control polygon: a B-spline
+  /// contributes its sampled polyline instead of its pole hull. Tight rather than conservative,
+  /// for the callers that reject a wire when the box is too large (see
+  /// CurveWire::tightParametricBounds).
+  void extendTightBounds(Vec2& lower, Vec2& upper) const
+  {
+    auto include = [&](const Vec2& point) {
+      lower.uCoord = std::min(lower.uCoord, point.uCoord);
+      lower.vCoord = std::min(lower.vCoord, point.vCoord);
+      upper.uCoord = std::max(upper.uCoord, point.uCoord);
+      upper.vCoord = std::max(upper.vCoord, point.vCoord);
+    };
+    if (kind == CurveKind::BSpline) {
+      for (const auto& sample : bsplineSamples()) {
+        include(sample);
+      }
+      return;
+    }
+    includeAnalyticExtremes(include);
+  }
+
+  /// Endpoints plus, for an arc, the axis-extreme points inside the sweep: the exact extent of a
+  /// line or arc. Shared by the conservative and the tight bounds, which differ only in how they
+  /// treat a B-spline.
+  template <typename Include>
+  void includeAnalyticExtremes(const Include& include) const
+  {
     include(startPoint());
     include(endPoint());
     if (kind == CurveKind::Arc) {
@@ -1503,11 +1555,26 @@ struct CurveWire {
     return area;
   }
 
-  /// Accumulate the loop's exact extent into a parametric axis-aligned bounding box.
+  /// Accumulate the loop's conservative extent into a parametric axis-aligned bounding box. For
+  /// B-spline curves this is the control-point hull, which contains the curve but can be much
+  /// larger than it -- the right trade for a BVH box, the wrong one for deciding whether the loop
+  /// fits inside a full turn (see tightParametricBounds).
   void parametricBounds(Vec2& lower, Vec2& upper) const
   {
     for (const auto& curve : curves) {
       curve.extendBounds(lower, upper);
+    }
+  }
+
+  /// The loop's extent measured on the curves themselves: exact for lines and arcs, and from the
+  /// adaptively sampled polyline for B-splines. Never larger than parametricBounds() and usually
+  /// smaller, so it is the bound to use for any test that *rejects* a wire for being too big --
+  /// a conservative box turns "the curve fits" into "the control polygon fits", which is a
+  /// different and much stronger demand (CodeReview_Fable.md K2).
+  void tightParametricBounds(Vec2& lower, Vec2& upper) const
+  {
+    for (const auto& curve : curves) {
+      curve.extendTightBounds(lower, upper);
     }
   }
 
@@ -1679,8 +1746,22 @@ inline bool buildCurveTrim(const std::vector<Curve2D>& outerTrim,
     return false;
   }
   if (upper.uCoord - lower.uCoord > kTwoPi + kTolerance) {
-    errorMessage = "quadric trim wire spans more than a full turn in phi";
-    return false;
+    // The box above is conservative -- a B-spline contributes its control-point hull, which can
+    // overshoot the curve considerably. A closed intersection curve that wraps almost a full turn
+    // has poles outside its own span, so the conservative box crosses 2*pi and a perfectly legal
+    // through-hole host face was rejected outright. Re-measure on the curves themselves before
+    // refusing (CodeReview_Fable.md K2).
+    Vec2 tightLower{std::numeric_limits<double>::infinity(), std::numeric_limits<double>::infinity()};
+    Vec2 tightUpper{-std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity()};
+    outerWire.tightParametricBounds(tightLower, tightUpper);
+    if (!finite(tightLower) || !finite(tightUpper) || tightUpper.uCoord - tightLower.uCoord > kTwoPi + kTolerance) {
+      errorMessage = "quadric trim wire spans more than a full turn in phi";
+      return false;
+    }
+    // the wire is admissible; keep the tight box, since the conservative one is not a valid
+    // parametric window for a periodic coordinate once it exceeds a full turn
+    lower = tightLower;
+    upper = tightUpper;
   }
   return true;
 }
