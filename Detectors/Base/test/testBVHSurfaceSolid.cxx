@@ -19,6 +19,7 @@
 
 #include "../src/BoundedSurface.h"
 
+#include "TFile.h"
 #include "TGeoBBox.h"
 #include "TGeoCone.h"
 #include "TGeoShape.h"
@@ -2588,4 +2589,168 @@ BOOST_AUTO_TEST_CASE(BSplineHoleInCylinderWall)
       BOOST_CHECK_EQUAL(singleEdgeHoled.containsPointOnSurface(point), arcHoled.containsPointOnSurface(point));
     }
   }
+}
+
+namespace
+{
+// The public-API mirror of quarterCircleBSpline, for building a NURBS trim through Add*Surface.
+BoundaryCurve quarterCircleBoundaryCurve(double cu, double cv, double r, double a0)
+{
+  const double a1 = a0 + surf::kHalfPi;
+  const double aMid = 0.5 * (a0 + a1);
+  const std::vector<Point2D> poles{{cu + r * std::cos(a0), cv + r * std::sin(a0)},
+                                   {cu + r * std::sqrt(2.) * std::cos(aMid), cv + r * std::sqrt(2.) * std::sin(aMid)},
+                                   {cu + r * std::cos(a1), cv + r * std::sin(a1)}};
+  return BoundaryCurve::makeBSpline(2, poles, {1., std::sqrt(0.5), 1.}, {0., 0., 0., 1., 1., 1.});
+}
+
+// Assert that two solids are the *same* solid, not merely similar ones: identical closure
+// diagnostics and reliability, identical bounding box and capacity, and bit-identical answers
+// from all four navigation kernels over the standard probe grid and direction set. This is the
+// acceptance criterion for persistence -- a solid that survives a write/read cycle must be
+// indistinguishable through the public interface.
+void checkSolidsIdentical(const SurfaceSolid& solid, const SurfaceSolid& other, double extent, int samples)
+{
+  BOOST_CHECK_EQUAL(other.GetNsurfaces(), solid.GetNsurfaces());
+  BOOST_CHECK_EQUAL(other.IsDefined(), solid.IsDefined());
+  BOOST_CHECK_EQUAL(other.HasBVH(), solid.HasBVH());
+  BOOST_CHECK_EQUAL(other.IsClosed(), solid.IsClosed());
+  BOOST_CHECK_EQUAL(other.IsOrientationConsistent(), solid.IsOrientationConsistent());
+  BOOST_CHECK_EQUAL(static_cast<int>(other.GetNavigationReliability()),
+                    static_cast<int>(solid.GetNavigationReliability()));
+  BOOST_CHECK_EQUAL(other.GetBoundaryEdgeCount(), solid.GetBoundaryEdgeCount());
+  BOOST_CHECK_EQUAL(other.GetNonManifoldEdgeCount(), solid.GetNonManifoldEdgeCount());
+  BOOST_CHECK_EQUAL(other.GetReversedEdgeCount(), solid.GetReversedEdgeCount());
+
+  BOOST_CHECK_EQUAL(other.GetDX(), solid.GetDX());
+  BOOST_CHECK_EQUAL(other.GetDY(), solid.GetDY());
+  BOOST_CHECK_EQUAL(other.GetDZ(), solid.GetDZ());
+  for (int dimension = 0; dimension < 3; ++dimension) {
+    BOOST_CHECK_EQUAL(other.GetOrigin()[dimension], solid.GetOrigin()[dimension]);
+  }
+  BOOST_CHECK_EQUAL(other.Capacity(), solid.Capacity());
+
+  for (const auto& point : probeGrid(extent, samples)) {
+    BOOST_TEST_CONTEXT("point = (" << point[0] << ", " << point[1] << ", " << point[2] << ")")
+    {
+      BOOST_CHECK_EQUAL(other.Contains(point.data()), solid.Contains(point.data()));
+      BOOST_CHECK_EQUAL(other.Safety(point.data(), solid.Contains(point.data())),
+                        solid.Safety(point.data(), solid.Contains(point.data())));
+      for (const auto& direction : probeDirections()) {
+        BOOST_CHECK_EQUAL(other.DistFromOutside(point.data(), direction.data(), 3),
+                          solid.DistFromOutside(point.data(), direction.data(), 3));
+        BOOST_CHECK_EQUAL(other.DistFromInside(point.data(), direction.data(), 3),
+                          solid.DistFromInside(point.data(), direction.data(), 3));
+      }
+    }
+  }
+}
+
+// Write "solid" to a ROOT file and read it back as an independent object.
+std::unique_ptr<SurfaceSolid> writeAndReadBack(const SurfaceSolid& solid)
+{
+  const auto path = std::filesystem::temp_directory_path() /
+                    (std::string("o2_bvhsurfacesolid_persist_") + solid.GetName() + ".root");
+  {
+    TFile file(path.string().c_str(), "RECREATE");
+    BOOST_REQUIRE(!file.IsZombie());
+    // WriteObject takes a non-const pointer; the call does not modify the solid.
+    file.WriteObject(const_cast<SurfaceSolid*>(&solid), "solid");
+  }
+  std::unique_ptr<SurfaceSolid> restored;
+  {
+    TFile file(path.string().c_str(), "READ");
+    BOOST_REQUIRE(!file.IsZombie());
+    restored.reset(file.Get<SurfaceSolid>("solid"));
+  }
+  std::filesystem::remove(path);
+  return restored;
+}
+} // namespace
+
+// ROOT persistence round trip. The kernel objects behind the solid (BoundedSurface, the BVH, the
+// display mesh) are all *derived* state; what has to survive a write/read cycle is the sequence of
+// Add*Surface calls the solid was built from, after which CloseShape() reconstructs the rest.
+//
+// It regresses CodeReview_Fable.md S1, where nothing at all was streamed: fImpl was transient, so
+// a read-back solid came back with zero surfaces, CloseShape(false) then zeroed the streamed
+// bounding box, and an *empty* ClosureReport defaults to closed/consistent -- so the husk reported
+// NavigationReliability::Reliable and answered "outside" everywhere with full confidence. Any
+// TGeoManager::Export/Import of a geometry containing one of these solids silently replaced it by
+// an authoritatively-reliable empty point.
+BOOST_AUTO_TEST_CASE(PersistenceRoundTrip)
+{
+  // every surface family and both trim flavours (scalar range and wire trim, the latter with
+  // line, arc and B-spline curves) must survive, so each record field is exercised
+  const auto box = makeBoxSolid("persistBox", 1., 2., 3.);
+  const auto tube = makeTubeSolid("persistTube", 1., 2., 3.); // inner wall + annular arc-wire caps
+  const auto cone = makeConeSolid("persistCone", 2., 1., 3.);
+  const auto sphere = makeSphereSolid("persistSphere", 2.);
+  const auto torus = makeTorusSolid("persistTorus", 3., 1.);
+  const auto capsule = makeCapsuleSolid("persistCapsule", 2., 3.);
+
+  for (const auto* solid : {box.get(), tube.get(), cone.get(), sphere.get(), torus.get(), capsule.get()}) {
+    BOOST_TEST_CONTEXT("solid = " << solid->GetName())
+    {
+      const auto restored = writeAndReadBack(*solid);
+      BOOST_REQUIRE(restored != nullptr);
+      checkSolidsIdentical(*solid, *restored, 4.5, 5);
+    }
+  }
+
+  // a wire-trimmed cylinder whose window is a NURBS loop: the B-spline degree, poles, weights and
+  // knots all have to make the round trip, and the trimmed overload has to be the one replayed
+  SurfaceSolid trimmed("persistTrimmed");
+  constexpr double radius = 2.;
+  constexpr double halfHeight = 3.;
+  const std::vector<BoundaryCurve> window{quarterCircleBoundaryCurve(surf::kPi, 0., 0.5, 0.),
+                                          quarterCircleBoundaryCurve(surf::kPi, 0., 0.5, surf::kHalfPi),
+                                          quarterCircleBoundaryCurve(surf::kPi, 0., 0.5, surf::kPi),
+                                          quarterCircleBoundaryCurve(surf::kPi, 0., 0.5, 3. * surf::kHalfPi)};
+  BOOST_REQUIRE(trimmed.AddCylindricalSurface({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, radius, -halfHeight,
+                                              halfHeight, 0., surf::kTwoPi, false, window));
+  BOOST_REQUIRE(addDiskSurface(trimmed, {0., 0., halfHeight}, {1., 0., 0.}, {0., 1., 0.}, radius));
+  BOOST_REQUIRE(addDiskSurface(trimmed, {0., 0., -halfHeight}, {1., 0., 0.}, {0., -1., 0.}, radius));
+  trimmed.CloseShape(false);
+  BOOST_CHECK_EQUAL(trimmed.GetNsurfaces(), 3);
+
+  const auto restoredTrimmed = writeAndReadBack(trimmed);
+  BOOST_REQUIRE(restoredTrimmed != nullptr);
+  checkSolidsIdentical(trimmed, *restoredTrimmed, 4.5, 5);
+
+  // an unnavigable solid must come back unnavigable: the failure mode S1 describes is precisely a
+  // defective solid that acquires a clean bill of health by losing its surfaces on the way
+  SurfaceSolid openBox("persistOpenBox");
+  for (int faceIndex = 0; faceIndex < 5; ++faceIndex) { // deliberately missing the sixth face
+    BOOST_REQUIRE(addBoxFace(openBox, faceIndex, 1., 2., 3.));
+  }
+  openBox.CloseShape(false);
+  BOOST_REQUIRE(!openBox.IsNavigable());
+  BOOST_CHECK_EQUAL(static_cast<int>(openBox.GetNavigationReliability()),
+                    static_cast<int>(SurfaceSolid::NavigationReliability::OpenSurfaceSet));
+
+  const auto restoredOpenBox = writeAndReadBack(openBox);
+  BOOST_REQUIRE(restoredOpenBox != nullptr);
+  BOOST_CHECK(!restoredOpenBox->IsNavigable());
+  checkSolidsIdentical(openBox, *restoredOpenBox, 4.5, 5);
+}
+
+// A solid that reaches the reader with no surface records -- a file written by an older version,
+// or a solid streamed before CloseShape() -- must report Undetermined rather than manufacture a
+// clean ClosureReport out of an empty surface set. "I do not know" is the only honest answer, and
+// the difference matters: NavigationReliability is the flag callers are told to check.
+BOOST_AUTO_TEST_CASE(EmptySolidIsNotReliable)
+{
+  SurfaceSolid empty("emptySolid");
+  BOOST_CHECK_EQUAL(static_cast<int>(empty.GetNavigationReliability()),
+                    static_cast<int>(SurfaceSolid::NavigationReliability::Undetermined));
+  BOOST_CHECK(!empty.IsNavigable());
+
+  // CloseShape on an empty surface set must not define the shape, with or without checking
+  empty.CloseShape(false);
+  BOOST_CHECK(!empty.IsDefined());
+  BOOST_CHECK_EQUAL(static_cast<int>(empty.GetNavigationReliability()),
+                    static_cast<int>(SurfaceSolid::NavigationReliability::Undetermined));
+  BOOST_CHECK(!empty.IsNavigable());
+  BOOST_CHECK(!empty.IsClosed());
 }

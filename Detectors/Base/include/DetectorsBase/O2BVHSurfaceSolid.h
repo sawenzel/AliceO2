@@ -25,6 +25,63 @@ namespace o2
 namespace base
 {
 
+/// One boundary curve of a BVHSurfaceRecord, in the flat form ROOT streams: a straight segment,
+/// a circular arc or a (rational) B-spline. This is the persistent mirror of
+/// O2BVHSurfaceSolid::PlanarBoundaryCurve and is deliberately a separate type, so that the
+/// on-disk schema is a decision of its own rather than an accident of the in-memory API.
+struct BVHSurfaceCurveRecord {
+  int kind = 0;                   ///< PlanarBoundaryCurve::Kind: 0 = Line, 1 = Arc, 2 = BSpline
+  double lineStart[2] = {0., 0.};
+  double lineEnd[2] = {0., 0.};
+  double center[2] = {0., 0.};
+  double radius = 0.;
+  double startAngle = 0.;
+  double endAngle = 0.;
+  int degree = 0;                 ///< B-spline degree
+  std::vector<double> poles;      ///< B-spline control points, flattened (u, v) pairs
+  std::vector<double> weights;    ///< B-spline weights (empty => non-rational)
+  std::vector<double> knots;      ///< B-spline clamped flat knot vector
+};
+
+/// The persistent record of one successful O2BVHSurfaceSolid::Add*Surface call.
+///
+/// The kernel objects a solid is made of (the bounded surfaces, the BVH, the display mesh) are
+/// all *derived* state, cheaply reconstructed by replaying the calls that produced them. So the
+/// records are what the solid persists, and reading one back means replaying them and calling
+/// CloseShape() -- which also means the closure diagnostics of a read-back solid are recomputed
+/// rather than trusted.
+struct BVHSurfaceRecord {
+  enum Kind { PlanarPolygon = 0, CurvedPlanar = 1, Cylindrical = 2, Spherical = 3, Conical = 4, Toroidal = 5 };
+
+  int kind = PlanarPolygon;
+  double origin[3] = {0., 0., 0.}; ///< origin / centerPoint / center
+  double axisA[3] = {0., 0., 0.};  ///< axisU / axis / polarAxis
+  double axisB[3] = {0., 0., 0.};  ///< axisV / referenceAxisU
+
+  /// The remaining scalar arguments, in the declaration order of the Add*Surface signature:
+  ///   PlanarPolygon, CurvedPlanar : (none)
+  ///   Cylindrical : radius, heightMin, heightMax, phiStart, phiSweep
+  ///   Spherical   : radius, thetaMin, thetaMax, phiStart, phiSweep
+  ///   Conical     : radiusAtMin, radiusAtMax, heightMin, heightMax, phiStart, phiSweep
+  ///   Toroidal    : majorRadius, minorRadius, phiStart, phiSweep, tubeStart, tubeSweep
+  /// The count is checked against the kind on replay, so a truncated or foreign record is
+  /// rejected instead of being silently reinterpreted.
+  std::vector<double> scalars;
+
+  bool innerWall = false;
+  bool trimmed = false;                      ///< the wire-trim overload was used (quadrics only)
+
+  /// The wires, outer wire first and then the inner wires (holes). PlanarPolygon surfaces store
+  /// their vertices in \a polygonPoints as flattened (u, v) pairs; every other kind stores its
+  /// boundary curves in \a curves. \a wireSizes says how many points/curves each wire owns.
+  std::vector<double> polygonPoints;
+  std::vector<BVHSurfaceCurveRecord> curves;
+  std::vector<int> wireSizes;
+
+  /// How many entries \a scalars must hold for \a kind, or -1 for an unknown kind.
+  static int expectedScalarCount(int recordKind);
+};
+
 class O2BVHSurfaceSolid : public TGeoBBox
 {
  public:
@@ -299,11 +356,25 @@ class O2BVHSurfaceSolid : public TGeoBBox
   void ComputeNormal(const Double_t* point, const Double_t* dir, Double_t* norm) const override;
   Double_t Capacity() const override;
 
+  /// The Add*Surface calls this solid was built from, in order. Public and const so that the
+  /// converter tooling and the tests can inspect what a solid actually carries; the only way to
+  /// add to it is to call Add*Surface.
+  const std::vector<BVHSurfaceRecord>& GetSurfaceRecords() const { return fRecords; }
+
  private:
+  /// Discard the derived state and replay fRecords through the Add*Surface methods, then
+  /// CloseShape(). Used by the Streamer when reading. Returns false (having left the solid
+  /// undefined, i.e. NavigationReliability::Undetermined) when there is nothing to replay or when
+  /// a record does not rebuild -- an unusable solid must never present itself as a usable one.
+  bool RebuildFromRecords();
+
   struct Impl;
   Impl* fImpl = nullptr; //! private bounded-surface implementation
 
-  ClassDefOverride(O2BVHSurfaceSolid, 1) // BVH surface-bounded shape class
+  /// The persistent state: everything else is rebuilt from it. See BVHSurfaceRecord.
+  std::vector<BVHSurfaceRecord> fRecords;
+
+  ClassDefOverride(O2BVHSurfaceSolid, 2) // BVH surface-bounded shape class
 };
 
 } // namespace base

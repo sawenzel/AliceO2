@@ -93,6 +93,159 @@ inline bool isWantedCrossing(const RayHit& hit, const Vec3& rayDirection)
   }
 }
 
+/// @name Persistent surface records
+///
+/// Translation between the public Add*Surface arguments and the flat BVHSurfaceRecord the solid
+/// streams. Records are appended only on success, so replaying them reproduces exactly the
+/// surface list the original solid ended up with -- including any face that the original refused,
+/// which stays refused rather than reappearing.
+/// @{
+
+void fillPoint3(double (&target)[3], const O2BVHSurfaceSolid::Point3D& source)
+{
+  target[0] = source[0];
+  target[1] = source[1];
+  target[2] = source[2];
+}
+
+O2BVHSurfaceSolid::Point3D makePoint3D(const double (&source)[3])
+{
+  return {source[0], source[1], source[2]};
+}
+
+/// The frame-and-scalars part of a record, shared by all six surface families.
+BVHSurfaceRecord makeRecord(int kind, const O2BVHSurfaceSolid::Point3D& origin,
+                            const O2BVHSurfaceSolid::Point3D& axisA, const O2BVHSurfaceSolid::Point3D& axisB,
+                            std::vector<double> scalars, bool innerWall, bool trimmed)
+{
+  BVHSurfaceRecord record;
+  record.kind = kind;
+  fillPoint3(record.origin, origin);
+  fillPoint3(record.axisA, axisA);
+  fillPoint3(record.axisB, axisB);
+  record.scalars = std::move(scalars);
+  record.innerWall = innerWall;
+  record.trimmed = trimmed;
+  return record;
+}
+
+BVHSurfaceCurveRecord makeCurveRecord(const O2BVHSurfaceSolid::PlanarBoundaryCurve& curve)
+{
+  BVHSurfaceCurveRecord record;
+  record.kind = static_cast<int>(curve.kind);
+  record.lineStart[0] = curve.lineStart[0];
+  record.lineStart[1] = curve.lineStart[1];
+  record.lineEnd[0] = curve.lineEnd[0];
+  record.lineEnd[1] = curve.lineEnd[1];
+  record.center[0] = curve.center[0];
+  record.center[1] = curve.center[1];
+  record.radius = curve.radius;
+  record.startAngle = curve.startAngle;
+  record.endAngle = curve.endAngle;
+  record.degree = curve.degree;
+  record.poles.reserve(2 * curve.poles.size());
+  for (const auto& pole : curve.poles) {
+    record.poles.push_back(pole[0]);
+    record.poles.push_back(pole[1]);
+  }
+  record.weights = curve.weights;
+  record.knots = curve.knots;
+  return record;
+}
+
+O2BVHSurfaceSolid::PlanarBoundaryCurve makeBoundaryCurve(const BVHSurfaceCurveRecord& record)
+{
+  O2BVHSurfaceSolid::PlanarBoundaryCurve curve;
+  curve.kind = static_cast<O2BVHSurfaceSolid::PlanarBoundaryCurve::Kind>(record.kind);
+  curve.lineStart = {record.lineStart[0], record.lineStart[1]};
+  curve.lineEnd = {record.lineEnd[0], record.lineEnd[1]};
+  curve.center = {record.center[0], record.center[1]};
+  curve.radius = record.radius;
+  curve.startAngle = record.startAngle;
+  curve.endAngle = record.endAngle;
+  curve.degree = record.degree;
+  curve.poles.reserve(record.poles.size() / 2);
+  for (size_t index = 0; index + 1 < record.poles.size(); index += 2) {
+    curve.poles.push_back({record.poles[index], record.poles[index + 1]});
+  }
+  curve.weights = record.weights;
+  curve.knots = record.knots;
+  return curve;
+}
+
+/// Store an outer wire plus its holes as one flat curve list with per-wire sizes.
+void storeCurveWires(BVHSurfaceRecord& record, const std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>& outerWire,
+                     const std::vector<std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>>& innerWires)
+{
+  record.wireSizes.push_back(static_cast<int>(outerWire.size()));
+  for (const auto& curve : outerWire) {
+    record.curves.push_back(makeCurveRecord(curve));
+  }
+  for (const auto& innerWire : innerWires) {
+    record.wireSizes.push_back(static_cast<int>(innerWire.size()));
+    for (const auto& curve : innerWire) {
+      record.curves.push_back(makeCurveRecord(curve));
+    }
+  }
+}
+
+/// The inverse of storeCurveWires. Returns false when the per-wire sizes do not add up to the
+/// stored curve count, i.e. when the record is truncated or corrupt.
+bool loadCurveWires(const BVHSurfaceRecord& record, std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>& outerWire,
+                    std::vector<std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>>& innerWires)
+{
+  size_t consumed = 0;
+  for (size_t wireIndex = 0; wireIndex < record.wireSizes.size(); ++wireIndex) {
+    const int wireSize = record.wireSizes[wireIndex];
+    if (wireSize < 0 || consumed + static_cast<size_t>(wireSize) > record.curves.size()) {
+      return false;
+    }
+    auto& wire = wireIndex == 0 ? outerWire : innerWires.emplace_back();
+    for (int curveIndex = 0; curveIndex < wireSize; ++curveIndex) {
+      wire.push_back(makeBoundaryCurve(record.curves[consumed + curveIndex]));
+    }
+    consumed += static_cast<size_t>(wireSize);
+  }
+  return consumed == record.curves.size();
+}
+
+/// storeCurveWires/loadCurveWires for the polygon-vertex flavour of a planar surface.
+void storePolygonWires(BVHSurfaceRecord& record, const std::vector<O2BVHSurfaceSolid::Point2D>& outerWire,
+                       const std::vector<std::vector<O2BVHSurfaceSolid::Point2D>>& innerWires)
+{
+  const auto append = [&record](const std::vector<O2BVHSurfaceSolid::Point2D>& wire) {
+    record.wireSizes.push_back(static_cast<int>(wire.size()));
+    for (const auto& vertex : wire) {
+      record.polygonPoints.push_back(vertex[0]);
+      record.polygonPoints.push_back(vertex[1]);
+    }
+  };
+  append(outerWire);
+  for (const auto& innerWire : innerWires) {
+    append(innerWire);
+  }
+}
+
+bool loadPolygonWires(const BVHSurfaceRecord& record, std::vector<O2BVHSurfaceSolid::Point2D>& outerWire,
+                      std::vector<std::vector<O2BVHSurfaceSolid::Point2D>>& innerWires)
+{
+  size_t consumed = 0;
+  for (size_t wireIndex = 0; wireIndex < record.wireSizes.size(); ++wireIndex) {
+    const int wireSize = record.wireSizes[wireIndex];
+    if (wireSize < 0 || 2 * (consumed + static_cast<size_t>(wireSize)) > record.polygonPoints.size()) {
+      return false;
+    }
+    auto& wire = wireIndex == 0 ? outerWire : innerWires.emplace_back();
+    for (int vertexIndex = 0; vertexIndex < wireSize; ++vertexIndex) {
+      const size_t offset = 2 * (consumed + vertexIndex);
+      wire.push_back({record.polygonPoints[offset], record.polygonPoints[offset + 1]});
+    }
+    consumed += static_cast<size_t>(wireSize);
+  }
+  return 2 * consumed == record.polygonPoints.size();
+}
+/// @}
+
 // Ray-parity evaluation of a full intersection list (sorts hits in place). Near-equal
 // intersections are clustered (shared edges/vertices seen by several surfaces). A cluster whose
 // hits all enter or all exit is one genuine crossing; a mixed cluster means the ray grazes an
@@ -302,6 +455,23 @@ struct O2BVHSurfaceSolid::Impl {
   }
 };
 
+int BVHSurfaceRecord::expectedScalarCount(int recordKind)
+{
+  switch (recordKind) {
+    case PlanarPolygon:
+    case CurvedPlanar:
+      return 0;
+    case Cylindrical: // radius, heightMin, heightMax, phiStart, phiSweep
+    case Spherical:   // radius, thetaMin, thetaMax, phiStart, phiSweep
+      return 5;
+    case Conical: // radiusAtMin, radiusAtMax, heightMin, heightMax, phiStart, phiSweep
+    case Toroidal: // majorRadius, minorRadius, phiStart, phiSweep, tubeStart, tubeSweep
+      return 6;
+    default:
+      return -1;
+  }
+}
+
 O2BVHSurfaceSolid::O2BVHSurfaceSolid() : TGeoBBox(), fImpl(new Impl)
 {
 }
@@ -354,6 +524,10 @@ bool O2BVHSurfaceSolid::AddPlanarSurface(const Point3D& origin, const Point3D& a
     Warning("AddPlanarSurface", "Shape %s: planar surface %d had a wire re-oriented to match its role", GetName(),
             static_cast<int>(fImpl->surfaces.size()));
   }
+
+  auto record = makeRecord(BVHSurfaceRecord::PlanarPolygon, origin, axisU, axisV, {}, false, false);
+  storePolygonWires(record, outerWire, innerWires);
+  fRecords.push_back(std::move(record));
 
   fImpl->surfaces.emplace_back(std::move(surface));
   fImpl->displayVertices.clear();
@@ -413,6 +587,10 @@ bool O2BVHSurfaceSolid::AddCurvedPlanarSurface(const Point3D& origin, const Poin
     return false;
   }
 
+  auto record = makeRecord(BVHSurfaceRecord::CurvedPlanar, origin, axisU, axisV, {}, false, false);
+  storeCurveWires(record, outerWire, innerWires);
+  fRecords.push_back(std::move(record));
+
   fImpl->surfaces.emplace_back(std::move(surface));
   fImpl->displayVertices.clear();
   fImpl->displayTriangles.clear();
@@ -438,6 +616,9 @@ bool O2BVHSurfaceSolid::AddCylindricalSurface(const Point3D& centerPoint, const 
     Error("AddCylindricalSurface", "%s", errorMessage.c_str());
     return false;
   }
+
+  fRecords.push_back(makeRecord(BVHSurfaceRecord::Cylindrical, centerPoint, axis, referenceAxisU,
+                                {radius, heightMin, heightMax, phiStart, phiSweep}, innerWall, false));
 
   fImpl->surfaces.emplace_back(std::move(surface));
   fImpl->displayVertices.clear();
@@ -474,6 +655,11 @@ bool O2BVHSurfaceSolid::AddCylindricalSurface(const Point3D& centerPoint, const 
     return false;
   }
 
+  auto record = makeRecord(BVHSurfaceRecord::Cylindrical, centerPoint, axis, referenceAxisU,
+                           {radius, heightMin, heightMax, phiStart, phiSweep}, innerWall, true);
+  storeCurveWires(record, outerTrim, innerTrims);
+  fRecords.push_back(std::move(record));
+
   fImpl->surfaces.emplace_back(std::move(surface));
   fImpl->displayVertices.clear();
   fImpl->displayTriangles.clear();
@@ -499,6 +685,9 @@ bool O2BVHSurfaceSolid::AddSphericalSurface(const Point3D& center, const Point3D
     Error("AddSphericalSurface", "%s", errorMessage.c_str());
     return false;
   }
+
+  fRecords.push_back(makeRecord(BVHSurfaceRecord::Spherical, center, polarAxis, referenceAxisU,
+                                {radius, thetaMin, thetaMax, phiStart, phiSweep}, innerWall, false));
 
   fImpl->surfaces.emplace_back(std::move(surface));
   fImpl->displayVertices.clear();
@@ -535,6 +724,11 @@ bool O2BVHSurfaceSolid::AddSphericalSurface(const Point3D& center, const Point3D
     return false;
   }
 
+  auto record = makeRecord(BVHSurfaceRecord::Spherical, center, polarAxis, referenceAxisU,
+                           {radius, thetaMin, thetaMax, phiStart, phiSweep}, innerWall, true);
+  storeCurveWires(record, outerTrim, innerTrims);
+  fRecords.push_back(std::move(record));
+
   fImpl->surfaces.emplace_back(std::move(surface));
   fImpl->displayVertices.clear();
   fImpl->displayTriangles.clear();
@@ -561,6 +755,10 @@ bool O2BVHSurfaceSolid::AddConicalSurface(const Point3D& centerPoint, const Poin
     Error("AddConicalSurface", "%s", errorMessage.c_str());
     return false;
   }
+
+  fRecords.push_back(makeRecord(BVHSurfaceRecord::Conical, centerPoint, axis, referenceAxisU,
+                                {radiusAtMin, radiusAtMax, heightMin, heightMax, phiStart, phiSweep}, innerWall,
+                                false));
 
   fImpl->surfaces.emplace_back(std::move(surface));
   fImpl->displayVertices.clear();
@@ -598,6 +796,11 @@ bool O2BVHSurfaceSolid::AddConicalSurface(const Point3D& centerPoint, const Poin
     return false;
   }
 
+  auto record = makeRecord(BVHSurfaceRecord::Conical, centerPoint, axis, referenceAxisU,
+                           {radiusAtMin, radiusAtMax, heightMin, heightMax, phiStart, phiSweep}, innerWall, true);
+  storeCurveWires(record, outerTrim, innerTrims);
+  fRecords.push_back(std::move(record));
+
   fImpl->surfaces.emplace_back(std::move(surface));
   fImpl->displayVertices.clear();
   fImpl->displayTriangles.clear();
@@ -624,6 +827,10 @@ bool O2BVHSurfaceSolid::AddToroidalSurface(const Point3D& centerPoint, const Poi
     Error("AddToroidalSurface", "%s", errorMessage.c_str());
     return false;
   }
+
+  fRecords.push_back(makeRecord(BVHSurfaceRecord::Toroidal, centerPoint, axis, referenceAxisU,
+                                {majorRadius, minorRadius, phiStart, phiSweep, tubeStart, tubeSweep}, innerWall,
+                                false));
 
   fImpl->surfaces.emplace_back(std::move(surface));
   fImpl->displayVertices.clear();
@@ -661,6 +868,11 @@ bool O2BVHSurfaceSolid::AddToroidalSurface(const Point3D& centerPoint, const Poi
     return false;
   }
 
+  auto record = makeRecord(BVHSurfaceRecord::Toroidal, centerPoint, axis, referenceAxisU,
+                           {majorRadius, minorRadius, phiStart, phiSweep, tubeStart, tubeSweep}, innerWall, true);
+  storeCurveWires(record, outerTrim, innerTrims);
+  fRecords.push_back(std::move(record));
+
   fImpl->surfaces.emplace_back(std::move(surface));
   fImpl->displayVertices.clear();
   fImpl->displayTriangles.clear();
@@ -672,8 +884,17 @@ void O2BVHSurfaceSolid::CloseShape(bool check)
   if (fImpl == nullptr) {
     fImpl = new Impl;
   }
-  if (check && fImpl->surfaces.empty()) {
-    Error("CloseShape", "Shape %s has no bounded surfaces", GetName());
+  // An empty surface set is not a degenerate solid, it is an *unknown* one, and the difference is
+  // the whole point of NavigationReliability. Every closure counter of an empty set is zero, so a
+  // default ClosureReport calls it a closed, consistently oriented 2-manifold and the shape would
+  // answer Reliable -- with full confidence and no surfaces to be confident about. Leave it
+  // undefined (Undetermined) instead, and leave the bounding box alone: for a solid arriving from
+  // a ROOT file the streamed box is better information than a zeroed one. This guard is
+  // unconditional; \a check selects whether defects are *reported*, not whether they are honest.
+  // See CodeReview_Fable.md S1.
+  if (fImpl->surfaces.empty()) {
+    Error("CloseShape", "Shape %s has no bounded surfaces; it stays undefined and reports itself not navigable",
+          GetName());
     return;
   }
 
@@ -689,7 +910,7 @@ void O2BVHSurfaceSolid::CloseShape(bool check)
   fImpl->closure = validateClosure(fImpl->surfaces);
   fImpl->defined = true;
 
-  if (check && !fImpl->surfaces.empty()) {
+  if (check) {
     const auto& closure = fImpl->closure;
     // State the *consequence*, not only the counts. A warning that reads as a quality metric gets
     // read as one: this defect went unnoticed for two sessions because "699 boundary edge(s)"
@@ -1216,11 +1437,116 @@ Double_t O2BVHSurfaceSolid::Capacity() const
   return std::abs(capacity);
 }
 
+bool O2BVHSurfaceSolid::RebuildFromRecords()
+{
+  // Add*Surface refuses to run on a defined shape and re-appends to fRecords as it replays, so
+  // take the records aside and start from a fresh implementation.
+  std::vector<BVHSurfaceRecord> records;
+  records.swap(fRecords);
+  delete fImpl;
+  fImpl = new Impl;
+
+  if (records.empty()) {
+    Error("RebuildFromRecords",
+          "Shape %s carries no surface records: it was either written before CloseShape() or by a version that did "
+          "not persist them. The shape stays undefined and not navigable rather than pretending to be an empty "
+          "closed solid; check GetNavigationReliability() before using it.",
+          GetName());
+    return false;
+  }
+
+  for (size_t recordIndex = 0; recordIndex < records.size(); ++recordIndex) {
+    const auto& record = records[recordIndex];
+    const int expectedScalars = BVHSurfaceRecord::expectedScalarCount(record.kind);
+    if (expectedScalars < 0 || record.scalars.size() != static_cast<size_t>(expectedScalars)) {
+      Error("RebuildFromRecords", "Shape %s: surface record %d has kind %d with %d scalar(s), expected %d", GetName(),
+            static_cast<int>(recordIndex), record.kind, static_cast<int>(record.scalars.size()), expectedScalars);
+      fRecords.clear();
+      delete fImpl;
+      fImpl = new Impl;
+      return false;
+    }
+
+    const Point3D origin = makePoint3D(record.origin);
+    const Point3D axisA = makePoint3D(record.axisA);
+    const Point3D axisB = makePoint3D(record.axisB);
+    const auto& s = record.scalars;
+
+    std::vector<PlanarBoundaryCurve> outerWire;
+    std::vector<std::vector<PlanarBoundaryCurve>> innerWires;
+    std::vector<Point2D> outerPolygon;
+    std::vector<std::vector<Point2D>> innerPolygons;
+    const bool wiresLoaded = record.kind == BVHSurfaceRecord::PlanarPolygon
+                               ? loadPolygonWires(record, outerPolygon, innerPolygons)
+                               : loadCurveWires(record, outerWire, innerWires);
+
+    bool added = false;
+    if (!wiresLoaded) {
+      Error("RebuildFromRecords", "Shape %s: surface record %d has inconsistent wire sizes", GetName(),
+            static_cast<int>(recordIndex));
+    } else {
+      switch (record.kind) {
+        case BVHSurfaceRecord::PlanarPolygon:
+          added = AddPlanarSurface(origin, axisA, axisB, outerPolygon, innerPolygons);
+          break;
+        case BVHSurfaceRecord::CurvedPlanar:
+          added = AddCurvedPlanarSurface(origin, axisA, axisB, outerWire, innerWires);
+          break;
+        case BVHSurfaceRecord::Cylindrical:
+          added = record.trimmed ? AddCylindricalSurface(origin, axisA, axisB, s[0], s[1], s[2], s[3], s[4],
+                                                         record.innerWall, outerWire, innerWires)
+                                 : AddCylindricalSurface(origin, axisA, axisB, s[0], s[1], s[2], s[3], s[4],
+                                                         record.innerWall);
+          break;
+        case BVHSurfaceRecord::Spherical:
+          added = record.trimmed ? AddSphericalSurface(origin, axisA, axisB, s[0], s[1], s[2], s[3], s[4],
+                                                       record.innerWall, outerWire, innerWires)
+                                 : AddSphericalSurface(origin, axisA, axisB, s[0], s[1], s[2], s[3], s[4],
+                                                       record.innerWall);
+          break;
+        case BVHSurfaceRecord::Conical:
+          added = record.trimmed ? AddConicalSurface(origin, axisA, axisB, s[0], s[1], s[2], s[3], s[4], s[5],
+                                                     record.innerWall, outerWire, innerWires)
+                                 : AddConicalSurface(origin, axisA, axisB, s[0], s[1], s[2], s[3], s[4], s[5],
+                                                     record.innerWall);
+          break;
+        case BVHSurfaceRecord::Toroidal:
+          added = record.trimmed ? AddToroidalSurface(origin, axisA, axisB, s[0], s[1], s[2], s[3], s[4], s[5],
+                                                      record.innerWall, outerWire, innerWires)
+                                 : AddToroidalSurface(origin, axisA, axisB, s[0], s[1], s[2], s[3], s[4], s[5],
+                                                      record.innerWall);
+          break;
+        default:
+          break;
+      }
+    }
+
+    if (!added) {
+      // A solid that is missing a face is not the solid that was written; it is a different one
+      // whose Contains() is wrong throughout that face's shadow. Discard it entirely rather than
+      // hand back a plausible-looking partial shape (K7's failure mode, at the persistence layer).
+      Error("RebuildFromRecords",
+            "Shape %s: surface record %d (kind %d) did not rebuild. The shape is discarded and stays undefined; it "
+            "would otherwise be a *different* solid than the one that was written.",
+            GetName(), static_cast<int>(recordIndex), record.kind);
+      fRecords.clear();
+      delete fImpl;
+      fImpl = new Impl;
+      return false;
+    }
+  }
+
+  // check == false: replaying a solid must not re-emit the closure diagnostics that were already
+  // reported when it was first built. The report itself is recomputed, not trusted.
+  CloseShape(false);
+  return true;
+}
+
 void O2BVHSurfaceSolid::Streamer(TBuffer& buffer)
 {
   if (buffer.IsReading()) {
     buffer.ReadClassBuffer(O2BVHSurfaceSolid::Class(), this);
-    CloseShape(false);
+    RebuildFromRecords();
   } else {
     buffer.WriteClassBuffer(O2BVHSurfaceSolid::Class(), this);
   }
