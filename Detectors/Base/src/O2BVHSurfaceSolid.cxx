@@ -1033,6 +1033,41 @@ bool O2BVHSurfaceSolid::Contains_Loop(const Double_t* point) const
   return oddCrossingParity(containsLoopHits, kContainsTestDirection);
 }
 
+void O2BVHSurfaceSolid::DescribeContainsCrossings(const Point3D& point,
+                                                  std::vector<ContainsCrossing>& bvhCrossings,
+                                                  std::vector<ContainsCrossing>& loopCrossings) const
+{
+  bvhCrossings.clear();
+  loopCrossings.clear();
+  if (fImpl == nullptr || fImpl->surfaces.empty()) {
+    return;
+  }
+  const Vec3 testPoint = makeVec3(point.data());
+
+  auto collect = [&](std::vector<RayHit>& hits, std::vector<ContainsCrossing>& out) {
+    std::sort(hits.begin(), hits.end(),
+              [](const RayHit& first, const RayHit& second) { return first.distance < second.distance; });
+    out.reserve(hits.size());
+    for (const auto& hit : hits) {
+      out.push_back({hit.distance, dot(hit.normal, kContainsTestDirection)});
+    }
+  };
+
+  std::vector<RayHit> loopHits;
+  for (const auto& surface : fImpl->surfaces) {
+    surface->appendIntersections(testPoint, kContainsTestDirection, kRayTolerance, TGeoShape::Big(), loopHits);
+  }
+  collect(loopHits, loopCrossings);
+
+  if (fImpl->bvh != nullptr) {
+    std::vector<RayHit> bvhHits;
+    fImpl->visitRayCandidates(testPoint, kContainsTestDirection, [&](const BoundedSurface& surface) {
+      surface.appendIntersections(testPoint, kContainsTestDirection, kRayTolerance, TGeoShape::Big(), bvhHits);
+    });
+    collect(bvhHits, bvhCrossings);
+  }
+}
+
 Double_t O2BVHSurfaceSolid::DistFromOutside(const Double_t* point, const Double_t* dir, Int_t, Double_t stepmax,
                                            Double_t* safe) const
 {

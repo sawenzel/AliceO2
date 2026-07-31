@@ -1,0 +1,540 @@
+# BVHSurfaceSolid — comprehensive review, conceptual analysis, and reset plan
+
+Date: 2026-07-31. Reviewer: Claude (Fable 5), on branch `swenzel/bvhsurfacesolid`.
+Method: full read of `BVHSurfaceSolid.md`, `ExactTrimTopology.md` and the code; four parallel
+deep-review passes (kernel `BoundedSurface.h`; solid/IO/tests; converter `O2_CADtoTGeo.py`;
+OCCT-oracle feasibility on this machine); plus targeted manual verification of the parity and
+trim-classification code paths. No code was changed.
+
+This document answers the questions posed for this session:
+
+1. Why does the code fail on "easy" examples (Bagger tube-tube combinations) although all the
+   surfaces involved are plain cylinders and planes?
+2. Can such cases be handled *exactly* at all — and if not exactly, what is the correct target?
+3. What do the concepts (patches, trims, curves, Bézier/B-spline, BREP solids) require, with
+   OpenCascade as the reference?
+4. Should we build an OCCT-based reference solid first?
+5. What are the new success criteria, and what does a proper test-driven plan look like?
+
+---
+
+## 1. Verdict (executive summary)
+
+**The kernel and the per-surface mathematics are in good shape; the architecture of *trimming*
+is what fails, and it fails for a fundamental reason, not an incidental one.** The project's
+"easy" failures (tube-tube intersections in `Bagger.step`) are in fact the mathematically hard
+part of the whole problem: the intersection curve of two cylinders is *transcendental in each
+cylinder's parametric chart*, so the per-face 2D trim curves ("pcurves") that both the CAD file
+and our sidecar carry are inherently independent approximations. Two adjacent faces therefore
+never agree exactly about their common boundary, the solid can never pass the watertight closure
+check, and one fixed-direction ray-parity `Contains` turns every seam sliver into an error
+*shadow* that extends arbitrarily far from the boundary. Everything observed on Bagger — the 367
+residual `unexplained` points, "no part closes", the 1.7 cm containment errors before the
+closed-B-spline fix — is this one design decision playing out.
+
+The good news is threefold:
+
+- For **analytic∩analytic edges** (cylinder-cylinder, cylinder-plane, cone-plane, …, i.e. all of
+  Bagger and as1 and much of ALICE3) an *exact* trim representation exists — just not as a 2D
+  curve in the parametric domain. Represent the trim boundary as "the neighbor surface itself"
+  and every membership question becomes a closed-form root/sign computation (Section 4.4). Both
+  faces then agree *by construction*. This is the single most important architectural change to
+  make.
+- For genuinely free-form edges, **consistency, not exactness**, is the achievable and sufficient
+  goal (parity only needs both faces to agree on the boundary), via shared-edge sampling — the
+  route already sketched in `ExactTrimTopology.md` item 1, which was correctly diagnosed as "not
+  the cause of the observed bug" but remains the right *data model*.
+- Independently of the data, single-ray parity must become **self-checking** (ambiguity band on
+  trim hits + re-shoot in a different direction). This is cheap, catches every seam problem at
+  query time instead of silently misclassifying, and is what OCCT, Geant4 and VecGeom all do in
+  some form.
+
+A trusted oracle is missing: today's reference (`O2Tessellated` within a "mesh band") is too weak
+to certify exactness — worse, the review found two soundness holes in the harness's band
+classification that *systematically hide* the worst bug classes (a candidate that misses an
+entire wall is always "explained by mesh chording"), so the residual "367 unexplained" is a
+floor, not a ceiling (Section 6, S9). OCCT 7.9.3 + pythonOCC are installed and working **on this
+machine**; a Python-side OCCT oracle feeding the existing harness is ~2 days of work and should
+come first, because every subsequent claim is judged by it.
+
+Two further findings deserve headline status: **ROOT persistence is actively harmful** (a
+streamed-and-read solid comes back as an empty shape that reports itself `Reliable` — S1), and
+the documented "order-dependent clustering" explanation for the non-manifold `Contains`
+disagreements is **refuted by the code** (the clusterer is deterministic; the hit multisets must
+differ between BVH and loop traversal — S6). Both change what the next debugging session should
+do.
+
+The recommended reset is therefore *not* "go back and rewrite" but: freeze coverage work, build
+the oracle and a synthetic Boolean fixture ladder (tube-tube first), fix the identified kernel
+bugs, then change the trim representation for analytic-analytic edges. Sections 9-10 define the
+gates and the order.
+
+---
+
+## 2. What is solid and should be kept
+
+Credit where due — the following parts were reviewed and found sound, some of them very carefully
+engineered:
+
+- **Analytic surface kernels**: ray/quadric intersections with stable handling of tangent double
+  roots (parity-safe suppression), exact divergence-theorem capacities (incl. the torus closed
+  form), oriented normals, the frame conventions. Verified consistent across the five families.
+- **The Curve2D/CurveWire winding machinery for lines and arcs**: v-monotone arc splitting,
+  half-open canonical-endpoint seam convention, Green's-theorem areas. This is genuinely robust
+  2D computational geometry.
+- **BVH integration**: conservative AABBs with documented tolerance and outward float rounding,
+  `max_leaf_size = 1` with a measured justification, tmax-tightening with a documented pruning
+  argument, `_Loop` twins bit-identical over 85k rays.
+- **The measurement culture**: `SolidNavigationHarness`, the part DB, fixed seeds, the honest
+  handoff notes, and `NavigationReliability`/fail-loudly. The 2026-07-26 root-cause session
+  ("diagnose before planning") is the right template for everything below.
+- **Canonical-form recognition** (surfaces + trim curves) in the converter: model *selection* at
+  machine precision with a bit-identical-geometry acceptance criterion. The as1 lesson ("the
+  stored type is a statement about the exporter, not the geometry") is important and correctly
+  institutionalized.
+
+The test suite (36 cases) is real and green, but it validates almost exclusively *synthetic solids
+built through the C++ API against ROOT primitives* — it never sees the failure class that
+dominates real CAD (independently approximated adjacent trims). That is why everything passed
+while Bagger was wrong by centimetres.
+
+---
+
+## 3. BREP anatomy — the concepts, precisely
+
+Terms used throughout (OpenCascade vocabulary, since it is the reference implementation):
+
+- **Surface**: an untrimmed analytic or NURBS carrier, a map S(u,v) → R³ (infinite plane, full
+  cylinder, …).
+- **Face**: a surface plus a finite region of its (u,v) domain.
+- **Wire**: a closed loop of edges bounding that region (one outer, holes inner).
+- **Edge**: a *topological* entity shared by exactly two faces in a closed manifold shell. It
+  carries: a 3D curve C(t) → R³, a tolerance, and **per adjacent face** a *pcurve*
+  P_F(t) → (u,v)_F, the edge's image in that face's parametric domain.
+- **Shell/Solid**: an oriented, closed collection of faces; watertightness is a *topological*
+  statement (every edge has exactly two incident faces), not a geometric one.
+- **The crucial fine print**: C(t) and the pcurves are *independently fitted* representations.
+  OCCT guarantees only that S_F(P_F(t)) stays within the edge tolerance of C(t)
+  ("SameParameter"). The three curves of one edge (3D + two pcurves) never coincide exactly
+  except in special (canonical) cases. A BREP is exact in its surfaces and *tolerant* in its
+  boundary curves — by design, in every CAD kernel.
+
+Why must it be so? Because closed-form parametric representations of intersection curves do not
+exist in general:
+
+**The tube-tube computation.** Cylinder C1 (axis z, radius r), cylinder C2 (axis x, radius R),
+r < R. A point of C1 is (r cos φ, r sin φ, h). Membership on C2 requires
+(r sin φ)² + h² = R², so the intersection curve in C1's own chart is
+
+    h(φ) = ± sqrt(R² − r² sin²φ)
+
+This is not a line, not an arc, not a polynomial or rational B-spline in (φ, h) — no exact
+`Curve2D` exists for it. (The 3D curve is a degree-4 algebraic space curve; its image in an
+*angular* chart is transcendental.) The same holds for cylinder-cone, cone-cone, anything-torus,
+and — the Bagger `Bucket` case — a plane cutting a cylinder viewed from the *cylinder's* chart
+(from the plane's chart it is an exact ellipse). So:
+
+> **The trim curves of the "easy" Boolean combinations are exactly the objects that have no exact
+> representation in the parametric-wire vocabulary.** The current failure is not a bug in the
+> B-spline code; it is the data model reaching its mathematical ceiling.
+
+This directly answers the session's fear ("if this cannot be done exactly … probably nothing can
+be done"): it *can* be done exactly — but only by changing what a trim *is* (Section 4), not by
+improving the curves.
+
+---
+
+## 4. What "exact" can mean — three regimes and the way out
+
+### 4.1 Regime E1 — exact carrier surfaces (achieved)
+
+Ray ∩ surface, normals, capacities are exact for plane/cylinder/cone/sphere/torus. This is the
+real win over tessellation and it is done and validated. Nothing below touches it.
+
+### 4.2 Regime E2 — analytic∩analytic edges: exactness is possible, but not with pcurves
+
+Where the trim boundary of face F (carrier S1) is "the intersection with neighbor surface S2",
+membership can be decided without any 2D curve:
+
+- The 2D winding test in F's chart casts a scanline (say h = h0, φ increasing). On the carrier
+  this scanline is a *3D circle* (or generator line, meridian, …). Its crossings with the trim
+  boundary are exactly the solutions of {scanline} ∩ S2 — for quadric S2 a **quadratic** (torus:
+  quartic) with closed-form roots. Count crossings with the right branch/interval bookkeeping and
+  the point-in-face answer is exact to machine rounding.
+- Equivalently, and even simpler for ray hits: a candidate hit p on S1 is inside the face iff a
+  small set of *sign conditions* f_S2(p) ≶ 0 … holds (semi-algebraic membership). For locally
+  convex trim regions this is just "AND over neighbors"; in general the winding formulation above
+  is the robust one.
+- **Adjacency is the representation.** Store per trim edge: (neighbor surface, parameter
+  interval, branch selector) instead of a fitted 2D curve. The two faces sharing the edge
+  reference the *same* neighbor surface, so their boundaries agree **identically** — watertight
+  by construction, which no join tolerance can ever achieve. The closure check degenerates into a
+  structural check on edge identity (as in a real BREP kernel).
+
+STEP delivers the required adjacency (each `TopoDS_Edge` knows both faces; the converter already
+has `TopExp.MapShapesAndAncestors` on its shelf), and the surface pair for each edge is known
+after canonical recognition. Applicability on the current examples:
+
+| model | blocking edges | covered by E2? |
+| --- | --- | --- |
+| Bagger tube-tube seams | cyl∩cyl (transcendental pcurve) | **yes — exact** |
+| Bagger `Bucket` ellipses | plane∩cyl | **yes — exact** (from the plane chart it is also an exact arc/ellipse) |
+| as1 (after recognition) | cyl∩plane | **yes — exact** |
+| ALICE3 non-iso recognized trims (373 faces) | mostly quadric∩quadric/plane | **yes — exact** |
+| genuinely free-form edges (B-spline surface involved) | — | no → regime E3 |
+
+This is the single highest-leverage change available: it makes the "easy" examples *actually
+exact*, closes the watertightness gap for them, removes the polyline flattening from navigation,
+and shrinks the sidecars (an edge record becomes a surface reference + interval).
+
+Cost assessment (honest): a new trim-edge kind in the kernel (`Curve2D` gains an implicit-curve
+variant, or better: the trim domain object gains "edge = carrier ∩ neighbor" entries), scanline
+crossing code per carrier/neighbor pair (closed-form; quadric pairs are quadratics, torus pairs
+quartics — all solvers already exist in the file), converter emission of neighbor-surface records
++ sidecar format bump. Estimate 1-2 weeks of focused work including tests — comparable to what
+the B-spline trim milestone took, with a far larger correctness payoff.
+
+### 4.3 Regime E3 — free-form edges: consistency, not exactness
+
+Where a B-spline *surface* is involved, no exact trim exists in any vocabulary; the correct goal
+(as `ExactTrimTopology.md` already concluded) is that both faces derive their trims from **one
+shared sample set of the single 3D edge curve**, with endpoints pinned to the shared vertex
+coordinates. Then the residual disagreement is a *known, coherent* chord error instead of an
+uncontrolled fitting difference, and the closure check can identify paired half-edges by ID with
+a declared epsilon. `ExactTrimTopology.md` item 1's four-step recipe (edge map → shared samples →
+per-face closed-form projection → polyline emission) stands; its "do not start" verdict was about
+*that bug*, not about the data model — with E2 in place, E3 is the fallback for the shrinking
+remainder.
+
+### 4.4 Robustness — parity must be self-checking regardless of data
+
+Verified in code: `pointInTrim` is a hard binary (`BoundedSurface.h:2402-2406` and siblings),
+`oddCrossingParity` (`O2BVHSurfaceSolid.cxx:101-127`) clusters near-equal t only, and `Contains`
+uses one fixed direction (`kContainsTestDirection`) with no retry. Consequences: any hit landing
+within ε of a trim boundary is classified by floating-point coin flip; a lost crossing
+misclassifies the *entire shadow* of the seam; nothing at query time notices.
+
+The standard remedy (OCCT `BRepClass3d_SolidClassifier` re-shoots on degenerate hits; Geant4 and
+VecGeom use surface-tolerance bands):
+
+1. Each patch reports, per hit, whether the (u,v) hit point lies within a declared band of the
+   trim boundary (the 2D distance machinery already exists — `closestPoint`/`distanceSq`).
+2. If any hit in a query's list is boundary-ambiguous, or an unmatched near-cluster appears,
+   **re-shoot along a different direction** (2-3 attempts, then decide by `Safety`).
+3. Result: seam defects cost a bounded retry near edges instead of silent wrong answers far away.
+
+This should be implemented *before* the data-model work, because (i) it very likely removes most
+of the residual 367 `unexplained` points immediately, (ii) it converts future converter/kernel
+regressions from silent to loud, and (iii) it is what makes the solid safe to use in production
+even while coverage grows.
+
+### 4.5 What OCCT itself does (and what to copy vs. not)
+
+- OCCT never tries to make boundary curves agree exactly; it makes tolerance a first-class,
+  per-edge/per-vertex attribute and requires all classification to be tolerance-aware. **Copy the
+  concept**: the sidecar must carry the model tolerance (today it carries none — the C++ closure
+  check literally cannot know what ε to glue with), and per-edge identity.
+- OCCT's classifier (`BRepClass3d`) is a ray classifier with per-face 2D classification, ON
+  states, and ray restart. **Copy the algorithm shape** (Section 4.4), not the implementation —
+  it is ms-per-call, allocation-heavy and effectively single-threaded, which is precisely why
+  this project exists.
+- OCCT's `ShapeAnalysis`/`BRepCheck` machinery is the model for our closure diagnostics: verdicts
+  based on topology + tolerances, not on exact float equality of resampled polylines.
+
+---
+
+## 5. Findings — kernel (`Detectors/Base/src/BoundedSurface.h`, 3894 lines)
+
+Confirmed/strongly-suspected defects, ranked. (Line numbers from the current branch state.)
+
+| # | Where | Defect | Consequence |
+| --- | --- | --- | --- |
+| K1 | `Curve2D::valid()` 1000-1038 vs `startPoint/endPoint` 1058-1077 | Knot-vector **clamping assumed, never validated**; a periodic/unclamped B-spline (exactly what OCC writes for tube-tube curves before `SetNotPeriodic`) returns off-curve poles as endpoints | wire falsely `Open` → whole face silently dropped (see K7); or off-curve canonical endpoint corrupts winding |
+| K2 | `buildCurveTrim` 1681-1684 | Full-turn trim rejection uses the **pole hull** span, not the curve span; a closed intersection curve with overshooting poles reads as "> 2π" | legitimate through-hole host faces rejected → face dropped |
+| K3 | `kWireJoinTolerance` (line 63) applied to **mixed-unit** (φ[rad], h[cm]) distances | closure acceptance depends on radius: small holes falsely open, big cylinders accept real 3D gaps; the known `ST1829909_01` loader rejection is this | faces dropped / bad wires accepted; needs a per-domain metric |
+| K4 | `bsplineSampleRecursive` 964-986 | The closed-curve fix is not fully robust: degenerate-chord recursion probes only the parametric midpoint | a slit-like/self-touching span can still collapse; same failure class as the historical bug |
+| K5 | `CurveWire::classify` 1517-1519 | Boundary band 1e-9 tested against a polyline that is only ~1e-5 accurate; also winding and distance use two slightly different polylines (canonical endpoints vs raw cache) | `Boundary` state unreachable for B-spline trims; in/out flips within ±1e-5 of the true curve |
+| K6 | quadratic roots 2488/2815/3150; cone branch switch 3139; torus quartic 660-732 | Naive `(-b±√)/2a` (cancellation); cone degeneracy switch and torus Ferrari tolerances are **absolute** and scale-dependent; 2 Newton steps can't rescue near-double roots | wrong/lost roots on near-axis cone rays and toroidal fillets → parity flips (live suspect for part of the 367) |
+| K7 | `O2BVHSurfaceSolid.cxx` `Add*Surface` (e.g. 349-352, 471-474) | A face that fails to build is logged and **silently omitted** from the parity solid | one dropped face = wrong `Contains` in its entire shadow; cheapest hypothesis to check against the 367 |
+| K8 | `oddCrossingParity` 108-125 + `sameIntersection` 222-226 | **Transitive** clustering with a relative window: N hits each 1e-7·t apart chain into one cluster spanning N·1e-7·t | thin features at large t merge into "mixed" clusters → even parity → misclassification growing with distance |
+| K9 | closure half-edge check (sampling conventions 570-574, 1698-1706, 3842) | Chord *counts* are synchronized but sample *phases* only match for quarter-turn-related frames; B-spline edges resampled per-face | "no real CAD part closes" is **structural**, not a tuning issue — the check cannot pass on imported CAD as designed |
+| K10 | `CurveWire::initialize` 1437-1473 | no self-touch/self-intersection validation (the polygon path has it, 377-384) | meaningless signed area on dirty input → wrong orientation "normalization" |
+| K11 | sphere `directionInTrim` 2766-2770 | pole over-accept with wire trims | minor, measure-zero |
+| K12 | polygon wires join with `kToleranceSq` (417) but curve wires with `kWireJoinToleranceSq` (1453) | same extractor feeds both | inconsistent acceptance |
+
+**Approximation inventory** (everything that enters navigation, beyond the CAD data itself):
+B-spline→polyline flattening (the effective trim boundary, ~1e-5 param units); canonical seam
+endpoint substitution (≤1e-5 shifts near every seam); pole-hull unwrap windows; tangent-pair
+suppression window scaling with |t|; `kRayTolerance` 1e-9 lower cut; 1e-9 on-surface bands that
+pretend more precision than the data has. Capacity quadrature and display meshes are correctly
+quarantined. **Architectural debts**: no shared-edge entity (the root cause), no exact
+point-in-trim (Bézier clipping/root isolation would retire the polyline from navigation), no
+coherent tolerance policy (four absolute constants across three incompatible unit systems), one
+3900-line header with ~⅓ duplication across the five surface classes (a `TrimDomain2D` value type
+plus a surface-of-revolution base would remove most of it).
+
+---
+
+## 6. Findings — solid / IO / tests / harness
+
+| # | Where | Defect | Consequence |
+| --- | --- | --- | --- |
+| S1 | `Streamer` cxx:1184-1192, `//! fImpl` | **ROOT persistence is broken and actively harmful**: a deserialized solid comes back empty, `CloseShape(false)` then *zeroes* the streamed bbox, and an empty `ClosureReport` defaults to `closed=true` → the husk reports `NavigationReliability::Reliable` | any `TGeoManager::Export/Import` silently converts every solid into an "authoritatively reliable" empty point. Fix first: stream the sidecar-record blob and replay it, or fail loudly / return `Undetermined` |
+| S2 | `Contains` cxx:987-997 | bbox pre-check runs *before* the documented `Contains_Loop` fallback; pre-CloseShape `fDX=0` | `Contains` is effectively disabled before `CloseShape` — the documented fallback path is unreachable |
+| S3 | boundary policy: `kRayTolerance` filter + `isWantedCrossing` | a point exactly on a face is "inside" for `Contains`, but its t≈0 exit is invisible to `DistFromInside` → returns `Big` | navigator tunneling from a boundary; ROOT primitives snap \|t\|<tol to 0. Unify the convention |
+| S4 | `nearestCrossing` cxx:212-247 | distance queries classify each hit independently — the mixed-cluster (tangential graze) cancellation that `Contains` has is missing | phantom entering crossing at a reflex/concave edge graze: `DistFromOutside` returns t, parity says outside → zero-step ping-pong. No concave fixture exists |
+| S5 | cxx:86-94 vs cxx:114 | tangency tolerance differs between parity (strict `<0`) and distance classification (`\|dot\|<=kTolerance`) | Contains and distances disagree exactly on tangency-stressed configurations |
+| S6 | `oddCrossingParity` (whole) | **The documented "order-dependent clustering" diagnosis is wrong**: on a given hit multiset the clusterer is deterministic (sort + consecutive-value chaining). The observed BVH-vs-loop `Contains` disagreements on non-manifold parts must come from *differing hit multisets* (float traversal / candidate sets) | the `CloseShape` error text and enum doc encode a wrong root cause; instrument (dump both sorted hit lists on divergence) before "fixing" clustering |
+| S7 | `ComputeNormal` cxx:1144-1150 | nearest patch chosen by `distanceSqToPatch`, which is only a *lower bound* for wire-trimmed quadrics | wrong-face normals possible near trimmed-away regions — matters for optics/reflection |
+| S8 | `validateClosure` BoundedSurface.h:3838-3890 | exact quantized (1e-7) vertex matching, no neighbor-bin handling, of chords produced through per-face frames consistent only to ~1e-6; B-spline edges resampled per independent pcurve | **the closure criterion structurally cannot say "closed" on real CAD** (independently confirms K9); counts are chord-inflated (~`kArcSamples` per unmatched rim). Needs topology-level matching + a quantitative gap metric |
+| S9 | harness `O2SolidHarness.cxx:238-248` | two soundness holes: (i) candidate-returns-`Big` is probed at the *reference's own hit* → refSafety≈0 → auto-"within band"; (ii) tunneling to a parallel far wall also lands on the reference mesh → "within band"; `meshBand=1e-2` is a fixed guess | **a candidate that misses a whole wall is always "explained by mesh chording"** — the 367 unexplained points are a floor, not a ceiling. Add a `missedSurface` category and classify by \|dc−dr\|, not probe-point proximity |
+| S10 | `O2SurfaceSolidIO.cxx` | `kJoinTolerance=1e-5` mixed-unit (same as K3, at IO layer); `readDoubles` resizes to an unvalidated `uint32` (corrupt file → 32 GB alloc attempt, exception escapes); B-spline clamping assumed, never validated (K1's IO twin) | loader fragility; cap counts against file size, use `angularTolerance(r)` for the φ coordinate |
+| S11 | `DistFrom*` cxx:1039-1040 | O(N) `Safety` computed whenever `safe!=nullptr` regardless of `iact`; `validateClosure` re-runs the 128² capacity quadrature on every `CloseShape` even with `check=false`; per-query stack allocations in `visitPointCandidates`/`nearestCrossing` | avoidable hot-path cost |
+| S12 | scale dependence | `kBVHBoxTolerance=1e-3` cm and relative `sameIntersection` merging (1e-7·\|t\|) untested away from the origin; no fixture at 1e3-1e4 cm offsets or with ≲1e-3 cm faces | unknown behavior at detector-scale coordinates — must be tested, ALICE geometries live at metres |
+
+**TGeoShape support matrix (honest):** `Contains`/`DistFromOutside`/`DistFromInside` implemented
+with BVH + `_Loop` oracles (bit-identical, the branch's strongest asset); `Safety` O(N) loop, no
+BVH (measured worst kernel), underestimate-safe; `ComputeNormal` implemented with the S7 caveat;
+`Capacity` exact for planar/untrimmed quadrics, 128² quadrature for wire trims (exactness flag
+not exposed through `Capacity()`); `ComputeBBox` + visualization implemented;
+`DistancetoPrimitive` stub; `GetPointsOnSegments` **inherits TGeoBBox** (wrong geometry for
+ROOT's overlap checker sampling — worth an override or a loud comment); streaming **broken**
+(S1). `iact` semantics ignored in distance queries.
+
+**Test-coverage gaps, ranked:** (1) persistence round-trip (would catch S1 immediately);
+(2) non-navigable-solid semantics pinned in a test, incl. the known BVH-vs-loop divergence as a
+regression anchor; (3) adversarial distance fixtures — concave/reflex edges, rim grazes from
+outside, on-boundary points vs ROOT primitives, near-tangential `dot` band; (4) randomized
+metamorphic sweeps (parity invariant across several test directions;
+`Contains(origin+d·(DistFromOutside+ε))`; chord consistency) with fixed seeds; (5) scale/offset
+robustness (S12); (6) Safety/ComputeNormal on wire-trimmed quadrics; (7) IO fuzzing (counts,
+NaNs, unclamped knots); (8) concurrency (thread_local buffers, global pruning flag). The
+historical closed-B-spline bug class is now covered; **no fixture anywhere has
+independently-approximated adjacent trims** — the dominant real-CAD failure class enters the test
+suite only via Phase 0's Boolean ladder. No Python-side tests exist at all.
+
+## 7. Findings — converter (`scripts/geometry/O2_CADtoTGeo.py`, exact-surface path ~1450 lines)
+
+| # | Where | Defect | Consequence |
+| --- | --- | --- | --- |
+| C1 | `recognize_and_extract_face` L1679 | `inner_wall = (Orientation()==REVERSED)` for **recognized** faces — but the flag is relative to the *stored* NURBS normal, whose sign vs. the recognized frame is exporter-arbitrary; the reassuring comment is false | **containment-inverting** when wrong; the recognizer already computes the needed normal field — fold its sign in. Explains the known `ST0923290_013` winding warnings |
+| C2 | quadric extractors L1254/1299/1337/1381 | `inner_wall` ignores **indirect (mirrored) gp_Ax3**: OCC's natural normal points inward there, so `reversed == inner_wall` inverts (planes handle this; quadrics don't) | containment-inverting on mirrored parts |
+| C3 | `_quadric_trim_fills_uv_box` L1223-1229 | compares **signed** area to +box area → REVERSED faces likely never take the scalar fast path | correctness OK but doubled trim cost; or (if winding assumption differs) the test can't distinguish winding — needs a unit test either way |
+| C4 | `_quadric_trim_wire` L1179-1188, `extract_planar_face` L1083-1090 | line-line junctions are chained tight, but **arc/B-spline edges keep their own endpoints** → vertex-tolerance gaps at line↔curve joints | parity flips through the gaps; cheap fix: snap all edge endpoints to shared vertex coordinates |
+| C5 | `_recognized_quadric_wire_block` L1614-1626 | wire starting with a degenerate (apex/pole) edge anchors φ=0 arbitrarily; >π wedges across the apex pick the wrong unwrap branch | spurious polygon legs / inverted regions |
+| C6 | `face_supported` L589-619 vs extractors | report gates on **3D** curve types, extractors on **pcurve** types — disagreements in both directions | eligibility numbers are neither an upper nor lower bound; keep extraction as source of truth and say so |
+| C7 | sphere recognition L1750-1752 | polar axis fixed to global ẑ | recognized sphere caps cut by tilted planes rejected unnecessarily |
+| C8 | `_quadric_phi_range` L1114 | silent clamp of >2π UV ranges | wrong trims on pathological seam-crossing faces |
+
+Structural: the exact-surface subsystem (44% of a 3316-line script) is coupled to module globals
+and has **zero automated tests**; it should become a package (`sidecar.py`, `extract.py`,
+`recognize.py`, `report.py`) with in-process `BRepPrimAPI` fixtures (FORWARD and REVERSED and
+mirrored variants of every family — that alone settles C1-C3). The recognizer is duplicated
+between `O2_CADtoTGeo.py` and `analyze_surface_geometry.py` with a subtle policy difference
+(first-at-machine-precision vs smallest-residual). Directory hygiene (five stale script variants,
+editor backups, `a.out`) will bite the first outside contributor.
+
+**The tube-tube walkthrough (what the converter emits today)** — face A and face B each go:
+area test fails → `_quadric_trim_wire` → own pcurve (`BRep_Tool.CurveOnSurface`) → exact affine
+pole map → sidecar B-spline in own (φ,h) chart; recognition finds no canonical form (correctly).
+The only *shared* object, the edge's 3D curve, is dropped; the two emitted trims disagree by up
+to 2× edge tolerance along their whole length, with independent parametrizations and re-derived
+endpoints. The C++ closure check then honestly reports hundreds of boundary edges. No tolerance
+tuning fixes this; only Section 4.2 (exact, for this case) or 4.3 (consistent) can.
+
+---
+
+## 8. The OCCT reference solid — build it, Python-first
+
+Feasibility was verified **on this machine** (aarch64, alibuild): OCCT 7.9.3 with all needed
+toolkits and headers (`BRepClass3d_SolidClassifier`, `IntCurvesFace_ShapeIntersector`,
+`BRepExtrema_DistShapeShape`, `BRepGProp`, `BRepCheck_Analyzer`, `ShapeAnalysis`, STEP I/O);
+pythonOCC 7.9.0 imports and answers containment/ray/volume queries correctly using
+`$SW/Python/latest/bin/python3.10` with `PYTHONPATH=$SW/pythonOCC/latest/lib/python3.10/site-packages:$SW/Python-modules/latest/lib/python3.10/site-packages`
+and `LD_LIBRARY_PATH=$SW/OCCT/latest/lib:$SW/Python/latest/lib` (system python3 is 3.12 — will
+not import). The local `alidist/o2.sh` already lists OCCT as a dependency, and the untracked
+`Utilities/TGeo_Utils/CMakeLists.txt` contains a working `find_package(OpenCASCADE)` pattern.
+
+Recommended: **variant (b), the Python-side dataset oracle, first** (~2 days):
+
+1. `O2_CADtoTGeo.py`/`makeTestPartDB.py`: also write `part_<VOL>_<LID>.brep` per exact part
+   (`breptools.Write`, *after* the mm→cm scaling so units match the sidecar) and index it in the
+   manifest.
+2. Harness: `--dump-samples <json>` (the internal mt19937 samples are otherwise irreproducible).
+3. New `occtOracle.py`: BREP + samples in → answers out (`BRepClass3d_SolidClassifier` for
+   Contains with ON treated as "no verdict"; `IntCurvesFace_ShapeIntersector` min-positive-W for
+   distances; `BRepExtrema_DistShapeShape` for the Safety upper bound; `brepgprop` volume;
+   `BRepCheck_Analyzer` as per-part validity gate).
+4. Harness: `--ref-answers <json>` — the existing `Offender`/validation machinery keeps working,
+   only the reference source changes. Tolerance semantics: classify against a per-part band
+   derived from the model's max face/edge tolerance (which the oracle can also report), **not**
+   from mesh chord length.
+
+The C++ `O2OCCTSolid` (TGeoBBox-derived, in-process, optional `find_package(OpenCASCADE)`) is a
+later convenience (~2-3 days) once a live in-process reference is worth having; keep it out of
+timing tables (BRepClass3d is ~ms/call, not thread-safe).
+
+Note its value honestly: the oracle certifies *agreement with OCCT's tolerant classification*,
+i.e. correctness up to model tolerance — exactly the right bar for real CAD, and a far stronger
+bar than "inside the mesh band".
+
+---
+
+## 9. New success criteria
+
+The current de-facto criterion ("`Contains` matches accelerated `O2Tessellated` outside the mesh
+band, on parts that happen to convert") is retired. New gates, in order; each is a hard gate for
+the work behind it:
+
+- **G0 — kernel integrity.** `ctest -R BVHSurfaceSolid` green, plus new adversarial cases:
+  periodic/unclamped knot input (K1), full-turn trims with overshooting poles (K2), small/large
+  radius join metric (K3), degenerate-chord closed curves (K4), near-axis cone rays and torus
+  fillet grazes (K6), seam-aligned rays, on-boundary points. Property held everywhere:
+  `Contains(BVH) == Contains_Loop`.
+- **G1 — the synthetic Boolean ladder (the new TDD backbone).** pythonOCC-generated STEP
+  fixtures, in increasing order: box∪box (shared face), box−cyl (hole), cyl⊥cyl union ("plus"),
+  cyl∩cyl, cyl−cyl (tube window — the Bagger reproducer minimized), obliquely cut cylinder
+  (ellipse cap), cyl+cone, sphere−cyl, torus∪cyl. For EVERY fixture: `--exact-surfaces required`
+  succeeds; `CloseShape`: **0 boundary edges, 0 non-manifold, Reliable**; vs OCCT oracle:
+  **0 disagreements** for all samples farther than δ from the boundary, δ = the *declared* model
+  tolerance (not mesh band); `Safety` ≤ true distance; capacity within stated tolerance;
+  BVH == Loop bit-identical.
+- **G2 — as1-oc-214**: 5/5 exact, all Reliable, oracle-clean per G1.
+- **G3 — Bagger**: **13/13 exact, all Reliable, oracle-clean.** This is the headline target the
+  user set for this phase; with Section 4.2 it is achievable *exactly* (every Bagger edge is
+  analytic∩analytic).
+- **G4 — oTOF + ALICE3**: coverage reported honestly; **an unreliable exact part must never ship
+  silently** — `auto` mode falls back to tessellated when `NavigationReliability != Reliable`
+  (policy change: today it ships and only warns).
+- **G5 — performance** (after correctness): `Safety` gets the priority-queue BVH; per-query
+  medians within ~2x of `O2Tessellated` on the DB; numbers recorded in
+  `SolidNavigationHarness.md` as now.
+
+A part "converts" only if it passes its gate; eligibility numbers without the Reliable+oracle
+qualifier are no longer quoted.
+
+---
+
+## 10. Recommended plan (ordered)
+
+**Phase 0 — oracle + fixtures (≈3-4 days).** Build the OCCT oracle (Section 8) and the G1
+fixture generator (`scripts/geometry/make_boolean_fixtures.py`); fix the harness classification
+holes (S9: `missedSurface` category, classify by |dc−dr|, band derived from actual deflection).
+Run all of it on the current code and record the honest baseline per fixture. *No solid/converter
+changes in this phase.* Also instrument, not fix, the non-manifold divergence: dump both sorted
+hit lists on any BVH-vs-loop disagreement (S6) — evidence before theory, per the project's own
+2026-07-26 lesson.
+
+**Phase 1 — kernel robustness (≈1-2 weeks).**
+1. Ambiguity band + re-shoot parity (Section 4.4) — expected to clear a large share of residual
+   `unexplained` points and make all later work loud instead of silent.
+2. Fix the safety-critical solid bugs: persistence (S1 — stream the sidecar records or fail
+   loudly), pre-CloseShape `Contains` (S2), boundary-policy unification (S3/S5), cluster-aware
+   distance queries sharing one helper with parity (S4).
+3. Fix K1-K8 (each with its G0 regression test); make face-drop (K7) fatal in `required` mode
+   and downgrade-to-fallback in `auto`.
+4. Unify the tolerance policy: per-domain metrics (angular ↔ length via radius) applied in both
+   kernel and IO (K3/S10), one documented ε family; sidecar format v2 carries the model
+   tolerance (and, for Phase 3, edge IDs). Replace the closure criterion with topology-level
+   matching + a quantitative gap metric (K9/S8) so "closed" becomes achievable and meaningful.
+
+**Phase 2 — exact analytic-analytic trims (≈1-2 weeks).** Implement neighbor-surface trim edges
+(Section 4.2) kernel-side and converter-side, driven strictly by the G1 ladder: first box−cyl,
+then cyl⊥cyl, then the full ladder, then G2/G3. This is the phase that makes Bagger exact and
+watertight, and it is where the TDD discipline the user asked for lives.
+
+**Phase 3 — shared-edge consistency for the remainder (≈1 week).** `ExactTrimTopology.md` item
+1's recipe for free-form edges (edge map, shared samples, per-face closed-form projection,
+pinned vertices), now justified by evidence and needed only where E2 does not apply.
+
+**Phase 4 — resume coverage and performance.** Converter fixes C1-C8; ellipse planar trims
+(subsumed by E2 for plane∩cyl but keep the 3-line fallback); `Safety` BVH; subdivision-BVH;
+then, and only then, re-open the B-spline *surface* milestone with the honest
+exactness-vs-tessellation trade-off already recorded in `BVHSurfaceSolid.md`. Performance
+direction decided 2026-07-31: since the geometry is static once converted, prefer **AOT
+geometry-specific code generation** (converter-emitted specialized C++, VecGeom
+specialized-navigator spirit) over runtime JIT, with cling available if in-process generation is
+ever needed, and clad-style automatic differentiation if Newton-based surface intersection is
+ever implemented — details in the `BVHSurfaceSolid.md` optimization milestone.
+
+**Explicitly de-prioritized**: further coverage sweeps and ALICE3 milestones until G1-G3 are
+green — measuring coverage of an unreliable representation is motion, not progress.
+
+---
+
+## 11. Phase 0 executed (2026-07-31) — the gate exists, and it separates the ladder exactly
+
+Phase 0 of Section 10 is implemented and run. Everything below is measured, not projected.
+
+**What was built.**
+- `scripts/geometry/occtOracle.py` — the OpenCascade oracle. Answers `Contains`
+  (`BRepClass3d_SolidClassifier`, with an explicit ON = *no verdict* state), `DistFrom{Outside,
+  Inside}` (`IntCurvesFace_ShapeIntersector`; deliberately one computation for both, since entry
+  versus exit is a property of the origin, not of the intersector), the exact boundary distance
+  (`BRepExtrema`, the upper bound `Safety` must not exceed), capacity (`BRepGProp`), validity
+  (`BRepCheck_Analyzer`) and the model's own max sub-shape tolerance — which is what makes the
+  comparison band principled instead of guessed. It carries a `--self-test` mode that checks
+  every kernel against closed-form geometry; **it found two defects in itself before it judged
+  anything** (distances were being measured against the solid rather than its shell, so every
+  interior reference distance was 0). Runtime is ~0.3 s for 1250 points + 750 rays.
+- `scripts/geometry/make_boolean_fixtures.py` — the G1 ladder: 10 synthetic CAD fixtures in mm,
+  all `BRepCheck`-valid, volumes cross-checked against closed form to 1e-11…1e-16 (the two
+  without closed form verified by independent quadrature).
+- `scripts/geometry/runOracleGate.py` — one command for the whole round trip (convert → dump
+  samples → oracle → score) with a pass/fail verdict per part.
+- `--dump-brep` in `O2_CADtoTGeo.py` (verified purely additive; units confirmed by volume
+  agreement to 1e-16…7e-14 relative, where a missing mm→cm scale would show as 1000×) and a
+  `brep` field in `makeTestPartDB.py`'s manifest.
+- Harness: `--dump-samples` / `--ref-answers`, the S9 classification fix (a distinct
+  `missedSurface` category that can never be explained away, plus incidence-scaled band
+  `meshBand/|cos θ|`), and `O2BVHSurfaceSolid::DescribeContainsCrossings` — the S6 instrumentation
+  that prints both hit lists when BVH and loop parity disagree, so that divergence gets diagnosed
+  rather than theorized about.
+
+**The measured ladder baseline** (2000 points / 2000 rays, seed 1; band = the model's own 1e-7
+tolerance). A part passes only if it is navigable *and* clean on all four kernels *and* its
+capacity matches:
+
+| fixture | junction curve | navigable | contains | distout | distin | safety | capacity relDev | gate |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `box` | — | yes | 100% | 100% | 100% | 100% | 1.5e-16 | **PASS** |
+| `box_union_box` | shared face | yes | 100% | 100% | 100% | 100% | 0 | **PASS** |
+| `box_minus_cyl` | plane ∩ cyl (circle) | yes | 100% | 100% | 100% | 100% | 2.4e-14 | **PASS** |
+| `cyl_plus_cone` | coaxial (circle) | yes | 100% | 100% | 100% | 100% | 7.7e-14 | **PASS** |
+| `sphere_minus_cyl` | coaxial (circle) | yes | 100% | 100% | 100% | 100% | -8.3e-14 | **PASS** |
+| `torus_union_cyl` | coaxial (circle) | yes | 100% | 100% | 100% | 100% | 9.3e-14 | **PASS** |
+| `cyl_cross_cyl` | **cyl ∩ cyl** | yes | 100% | 100% | 100% | 100% | **2.3e-4** | FAIL |
+| `cyl_inter_cyl` | **cyl ∩ cyl** | yes | 100% | 99.90% (**2 missed**) | 100% | 100% | **3.5e-4** | FAIL |
+| `tube_window` | **cyl ∩ cyl** | **no (1418 boundary edges)** | 99.96% (2) | 99.55% (**8 missed**) | 100% | 100% | **-4.4e-3** | FAIL |
+| `oblique_cut_cyl` | plane ∩ cyl (**ellipse**) | — does not convert: `planar boundary edge is a ellipse curve` — | | | | | | FAIL |
+
+**The predicted failure set is exactly the observed failure set.** Every fixture whose junction
+curves are circles (including the sphere and torus cases — they are coaxial, so their
+intersections *are* circles) is exact to machine precision on all four kernels. Every fixture
+with a genuine cylinder-cylinder intersection curve fails, and the severity tracks how much of
+the boundary that curve carries: `cyl_cross_cyl` (two small seams) still navigates correctly and
+only leaks into the numerically-integrated capacity; `cyl_inter_cyl` (whose entire boundary is
+intersection curve) starts missing ray crossings; `tube_window` is not a closed manifold at all.
+This is Section 4's argument, reproduced on 3-to-8-face fixtures that run in seconds — the
+minimal reproducers Phase 2 needs, replacing an 8-face part inside a 13-volume CAD model.
+
+`oblique_cut_cyl` reproduces the Bagger `Bucket` ellipse blocker in a 3-face fixture.
+
+**Real CAD, same gate** (`Bagger.step`, 12 converted parts): **4/12 pass**. The failures are the
+same three families: not-navigable parts (`BucketLink1`, `StickCylinderInner/Outer`, …), missed
+crossings (`BucketLink2`: 24 missed in `distout`), and capacity drift (0.26%…6.2%). Notably the
+one part checked in detail against both references — `BasePin` — shows **4 "within band"
+mismatches against the mesh but 100% agreement with the oracle** on all four kernels, capacity
+matching to 9e-16 relative: there the mesh was wrong, not the solid. That is the reason the
+oracle exists.
+
+**Gate status: G0 green** (`ctest -R BVHSurfaceSolid`, 36 cases, after every change in this
+phase). **G1 6/10, G3 4/12** — the honest starting line for Phase 1 and Phase 2.
+
+## 12. Environment notes (this machine)
+
+- Build tree `/home/swenzel/alisw/sw/BUILD/O2-latest/O2` builds this checkout (source symlink);
+  the branch's test target `o2-test-detectorsbase-BVHSurfaceSolid` appears after a CMake re-run.
+  (Not built in this session per the user's choice.)
+- pythonOCC/OCCT working invocation: see Section 8 (alibuild `python3.10`, not system 3.12).
+- `alienv` is at `/home/swenzel/alisw/alibuild/alienv`; `ALIBUILD_WORK_DIR=/home/swenzel/alisw/sw`.

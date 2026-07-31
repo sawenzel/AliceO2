@@ -4,11 +4,13 @@ Build a test-part database for the solid-navigation harness (see
 scripts/geometry/SolidNavigationHarness.md, Step 1).
 
 For each input CAD model, runs O2_CADtoTGeo.py with `--exact-surfaces auto --mesh
---surface-report`, which writes (for every leaf logical volume that converts exactly) both a
-`surfaces_<VOL>_<LID>.bin` sidecar and a `facets_<VOL>_<LID>.bin` mesh into the same output
-directory. This script does not compute anything geometric itself: it only orchestrates the
-converter runs and indexes the paired artifacts (a part enters the database only when both files
-exist) into a single `manifest.json` that the harness reads.
+--surface-report --dump-brep`, which writes (for every leaf logical volume that converts exactly)
+a `surfaces_<VOL>_<LID>.bin` sidecar, a `facets_<VOL>_<LID>.bin` mesh and a
+`brep_<VOL>_<LID>.brep` OCCT reference solid (all in cm) into the same output directory. This
+script does not compute anything geometric itself: it only orchestrates the converter runs and
+indexes the paired artifacts (a part enters the database only when both the sidecar and the mesh
+exist; the BREP is indexed as `"brep"` when present and omitted otherwise, so a database built
+before --dump-brep existed still loads) into a single `manifest.json` that the harness reads.
 
 Usage:
   python3 makeTestPartDB.py --output <db-dir>
@@ -112,6 +114,7 @@ def _convert_model(model_path: Path, out_dir: Path, skip_existing: bool, force: 
         str(model_path),
         "--exact-surfaces", "auto",
         "--mesh",
+        "--dump-brep",
         "--surface-report", str(report_path),
         "--output-folder", str(out_dir),
         "-o", "geom.C",
@@ -146,7 +149,7 @@ def _index_parts(model_name: str, slug: str, out_dir: Path, report: dict):
         if lid is None:
             warnings.append(f"{surf_path.name}: suffix not found in surface_report.json volumes")
         n_tri, bbox_min, bbox_max = _read_facets_summary(facet_path)
-        parts.append({
+        part = {
             "id": f"{slug}/{suffix}",
             "model": model_name,
             "volume": volname,
@@ -155,7 +158,12 @@ def _index_parts(model_name: str, slug: str, out_dir: Path, report: dict):
             "facets": str(facet_path),
             "nTriangles": n_tri,
             "bbox": {"min": bbox_min, "max": bbox_max},
-        })
+        }
+        # OCCT reference solid in cm (converter --dump-brep); absent for older databases.
+        brep_path = out_dir / f"brep_{suffix}.brep"
+        if brep_path.exists():
+            part["brep"] = str(brep_path)
+        parts.append(part)
     return parts, warnings
 
 

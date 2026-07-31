@@ -92,22 +92,39 @@ struct Offender {
   double candidateValue = 0.;
   double referenceValue = 0.;
   double deviation = 0.;
-  double referenceSafety = 0.; // the value used to classify this offender as mesh-band or not
+  double referenceSafety = 0.;   // point queries: reference distance to its own surface
+  double incidenceCosine = 1.;   // ray queries: |cos| between ray and surface normal at the hit,
+                                  // i.e. how much surface uncertainty this ray amplifies
 };
 
 struct ValidationResult {
   size_t nSamples = 0;
   size_t nAgree = 0;
-  size_t nMismatchWithinBand = 0; // |referenceSafety| < opt.meshBand: explained by mesh chording
+  size_t nMismatchWithinBand = 0; // explainable by the reference's own imprecision (see below)
+  size_t nMismatchMissedSurface = 0; // one side found no crossing where the other did
   size_t nMismatchUnexplained = 0;
+  size_t nNoVerdict = 0;          // oracle mode only: the reference declined to answer
   double worstDeviation = 0.;
   std::vector<Offender> worstOffenders; // bounded by opt.maxOffenders, worst-first
 };
 
+/// `nMismatchMissedSurface` exists because the previous two-way split silently absorbed the worst
+/// failure mode there is. When the candidate returns Big and the reference hits, the old
+/// classifier probed at the *reference's own* hit point, where the reference Safety is ~0 by
+/// construction, so "candidate missed an entire wall" was always counted as "explained by mesh
+/// chording". The same held for tunneling: a candidate that skips the near wall and stops on a
+/// far one also stops *on the reference mesh*. Both are now their own category and can never be
+/// explained away. See CodeReview_Fable.md, finding S9.
 struct ValidationOptions {
   double distanceTolerance = 1.e-6; ///< absolute agreement tolerance for distances (cm)
-  double meshBand = 1.e-2;          ///< |reference Safety| below this classifies a mismatch as
-                                     ///< mesh-band rather than unexplained (cm)
+  double meshBand = 1.e-2;          ///< the reference surface's own positional uncertainty (cm).
+                                     ///< For the tessellated reference this is the chord sagitta;
+                                     ///< in oracle mode it is the model's declared tolerance.
+  /// A surface displaced by `meshBand` moves a ray's crossing by `meshBand / |cos(incidence)|`,
+  /// so a grazing ray legitimately shows a much larger distance difference than a perpendicular
+  /// one. The allowed difference is scaled by the measured incidence, floored here so a tangent
+  /// ray cannot excuse an unbounded error.
+  double minIncidenceCosine = 1.e-2;
   double stepmax = TGeoShape::Big();
   size_t maxOffenders = 10;
 };
@@ -130,6 +147,43 @@ ValidationResult validateDistFromInside(const TGeoShape* candidate, const TGeoSh
 /// (always 0) since there is no mesh-band concept for a single shape's own contract.
 ValidationResult validateSafety(const TGeoShape* shape, const std::vector<Point3D>& points,
                                 const ValidationOptions& opt = {});
+
+// ------------------------------------------------------------------------------------------
+// Validation against an external oracle (OpenCascade)
+// ------------------------------------------------------------------------------------------
+//
+// The tessellated reference above can only ever say "you differ from a chorded approximation of
+// the truth". These entry points take answers computed by scripts/geometry/occtOracle.py on the
+// *same* BREP the sidecar was extracted from, so a disagreement outside the model's declared
+// tolerance is a defect rather than a discussion. The oracle's per-point boundary distance is
+// what makes the band principled: a point closer to the boundary than the model tolerance has no
+// defined answer and is counted as `nNoVerdict` instead of being scored either way.
+
+/// `oracleState`: 1 inside, 0 outside, -1 the oracle declined (point ON the boundary).
+/// `oracleBoundaryDistance` may be shorter than `points` (the oracle caps that expensive query);
+/// points without a distance are scored, but only their -1 state can abstain.
+ValidationResult validateContainsAgainstOracle(const TGeoShape* candidate,
+                                               const std::vector<Point3D>& points,
+                                               const std::vector<int>& oracleState,
+                                               const std::vector<double>& oracleBoundaryDistance,
+                                               const ValidationOptions& opt = {});
+
+/// `oracleDistance` holds the nearest positive ray/boundary crossing, or >= TGeoShape::Big() for
+/// a miss. `wantInside` selects which TGeo entry point the candidate is asked (the oracle uses
+/// one computation for both -- see occtOracle.py).
+ValidationResult validateDistanceAgainstOracle(const TGeoShape* candidate,
+                                               const std::vector<Ray>& rays,
+                                               const std::vector<double>& oracleDistance,
+                                               bool wantInside, const ValidationOptions& opt = {});
+
+/// Safety's contract against ground truth: `0 <= safety <= trueDistance`. Unlike
+/// `validateSafety`, which can only probe six directions of the shape's own distance functions,
+/// the oracle supplies the exact distance to the boundary, so an over-estimate cannot hide
+/// between the probes.
+ValidationResult validateSafetyAgainstOracle(const TGeoShape* candidate,
+                                             const std::vector<Point3D>& points,
+                                             const std::vector<double>& oracleBoundaryDistance,
+                                             const ValidationOptions& opt = {});
 
 // ------------------------------------------------------------------------------------------
 // Timing
