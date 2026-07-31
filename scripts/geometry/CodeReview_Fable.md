@@ -969,3 +969,43 @@ that; for a B-spline trim the pcurve is an approximation of the true seam regard
 integral is done. Whether to introduce a weaker, honest predicate is a real question and is left
 open rather than decided by flipping a flag the measurements do not license.
 
+## 19. Phase 1 follow-up item 4 (2026-08-01) — scoped, and the premise did not survive
+
+Item 4 was "Phase 2 — adjacency-based exact trims", with the instruction to read
+`TolerancePolicy.md` §9.1 first: the six failing Bagger cylinder parts looked open by 0.25-0.75 cm,
+so "a face is missing or trimmed to the wrong curve, and finding out which is the real first step."
+
+**It is neither.** Full measurements in `TolerancePolicy.md` §12; the three facts are:
+
+- **No face is missing on any of the 21 parts of either corpus.** The oracle already records
+  `nFaces` and the gate already records `nSurfaces`; they are equal, every time.
+- **On `BoomCylinderInner` the two faces of the junction carry trims that are the same curve.**
+  Each lies on the other's carrier to 4e-8 cm, their Hausdorff distance is 2.4e-7 cm, both are
+  3.837 cm long — and 3.837 cm is exactly what the closure check reports as unmatched.
+- **It is not a matching tolerance.** Sweeping the rim epsilon 1e-8 → 1e-4 changes no verdict on
+  any part, and `maxGap` does not move at all — because `maxGap` has no dependence on the epsilon
+  by construction. It is the largest distance from a chord to the nearest chord of a *different
+  face*: "how isolated is the loneliest chord", not "how far apart are the two faces at the seam".
+  §9.1 read it as the latter.
+
+So a rim whose partner provably exists, in the same place, on the neighbouring face, is booked
+unmatched at every tolerance up to 1e-4 cm. **The defect is in rim extraction or pairing, not in
+the geometry**, and Phase 2 is not what these parts are waiting for.
+
+The gate now says the same thing from the other side. After items 1-3, **every part that passes is
+navigable and every part that fails is not** — fixtures 8/9 with only `tube_window` failing, Bagger
+5/12 with the seven non-navigable parts failing. The gate has collapsed onto a single question, and
+that question is the closure check's, so the closure check is where the next work is.
+
+**Next, in order** (small, and in this order for a reason):
+
+1. **Expose the rims.** Rim counts and aggregate lengths exist; nothing per rim does, so the
+   offending rim cannot be named. Face index, wire index, length, worst-chord position.
+2. **Read the pairing.** Either one of the two rims is never emitted — a wire that is a *single
+   closed curve* is the suspicious case, and both `BoomCylinderInner`'s hole and
+   `BucketCylinderOuter`'s face 9 are exactly that, which would also explain that part's 11 rims —
+   or both are emitted and the chord-midpoint probe fails to pair them.
+3. **Rename or redefine `maxGap`.** It appears in `CloseShape`'s error text, the harness line,
+   `--json` and three documents, and it has been read as a face-to-face separation in every one.
+4. **Then re-scope Phase 2**, on evidence that survives.
+

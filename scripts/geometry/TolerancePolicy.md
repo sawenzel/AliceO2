@@ -487,6 +487,12 @@ that is missing or trimmed to the wrong curve, and it is visible at the scale of
 Phase 2 does for these parts, "reconcile the shared-edge pcurves" is not it — the geometry is not
 nearly closed and then spoiled by tolerance.
 
+> **Corrected 2026-08-01 — the second sentence of that paragraph is wrong; see §12.** No face is
+> missing on any part of either corpus, and on `BoomCylinderInner` the two faces of the junction
+> carry trims that trace the *same* curve to 2.4e-7 cm. `maxGap` does not measure the separation of
+> two faces at a seam, so the "0.25 to 0.75 cm" cannot be read as one. The first sentence still
+> stands as a statement about the numbers; the inference drawn from it does not.
+
 `BucketLink1` is the one part in a different class: 1.6e-3 cm, which is *below* its own chord
 resolution of 4.1e-2 cm. That is the honest reading — for that part this measurement does not
 resolve the gap, and it is the only part where the sagitta ceiling of §9.3 actually bites.
@@ -759,3 +765,77 @@ own chart knows it — which is Phase 2, adjacency-based exact trims, and is wha
 would become the acceptance test for: on a model with exact adjacency, this flag should never fire.
 
 ---
+
+## 12. Item 4 scoped — §9.1's inference does not survive, and Phase 2's premise needs restating
+
+NEXT.md item 4 said to read §9.1 before scoping Phase 2, because the six failing Bagger cylinder
+parts looked open by 0.25-0.75 cm rather than by the ~1.3e-5 cm of pcurve disagreement the plan
+assumed, and "finding out which — a missing face or a wrong trim — is the real first step". That
+step is taken. **It is neither.**
+
+### 12.1 No face is missing, anywhere
+
+The oracle records `nFaces` per part and the gate records `nSurfaces`. Across all 21 parts of both
+corpora they are **equal, every time** — including all six failing cylinder parts and
+`tube_window`. Nothing was dropped by the converter or rejected by the loader. This is a two-line
+check against data both sides already write; it should have been the first thing anyone ran.
+
+### 12.2 The two trims at the junction are the same curve
+
+`BoomCylinderInner` is the simplest failing part: 6 faces, 11 rims, 1 unmatched of 3.837 cm out of
+58.97, `maxGap` 0.747 cm. It is a boom tube (cylinder r = 0.6, 16.5 cm long) planted on a fat tube
+(r = 1.2), and the junction is carried as a B-spline on both sides — the boom tube's end rim, and a
+hole in the fat tube's wall. Sampling both trims through their own faces' frames and mapping to 3D:
+
+| | measured |
+| --- | --- |
+| boom tube's end trim → carrier of the fat tube | **2.2e-08 cm** |
+| fat tube's hole trim → carrier of the boom tube | **3.8e-08 cm** |
+| Hausdorff between the two curves (256 samples each) | **2.4e-07 cm** |
+| length of each | **3.837 cm** and **3.837 cm** |
+| the part's unmatched rim length | **3.837 cm** |
+
+Both trims lie on both carriers, they are the same curve, they are the same length, and that length
+is exactly what the closure check reports as unmatched. The geometry is right.
+
+### 12.3 It is not a tolerance either
+
+Sweeping the rim-matching epsilon (via `SetModelTolerance`) from 1e-8 to 1e-4 cm:
+
+| part | 1e-8 | 1e-7 | 1e-6 | 1e-5 | 1e-4 |
+| --- | --- | --- | --- | --- | --- |
+| `BoomCylinderInner` open cm | 3.837 | 3.837 | 3.837 | 3.837 | 3.837 |
+| `BucketCylinderOuter` open cm | 5.881 | 5.881 | 5.881 | 4.503 | 2.384 |
+| `BucketLink1` open cm | 20.05 | 20.05 | 20.05 | 20.05 | 20.05 |
+| `tube_window` open cm | 9.944 | 9.944 | 9.944 | 9.133 | 5.717 |
+
+No verdict changes anywhere, and **`maxGap` does not move at all on any part at any epsilon** —
+which is the tell. `maxGap` is the maximum over chords of the distance to the nearest chord of a
+*different face*; it has no dependence on the matching epsilon by construction. It answers "how
+isolated is the loneliest chord", not "how far apart are the two faces at the seam". §9.1 read it
+as the latter and built its conclusion on that reading.
+
+### 12.4 What that leaves, and the next instrument
+
+A rim whose partner curve provably exists, in the same place, on the neighbouring face, is still
+booked unmatched at every epsilon up to 1e-4. So the defect is in how rims are **extracted or
+paired**, not in the geometry — and Phase 2's premise ("the faces do not meet") is not what these
+parts show. What is now needed is small and specific:
+
+1. **A per-rim dump.** The kernel exposes rim *counts* and aggregate lengths but nothing per rim, so
+   the unmatched rim cannot be named. Add face index, wire index, length, and the position of the
+   worst chord. Everything above had to be inferred from counts and lengths; this ends that.
+2. **Then read the pairing.** With the offending rim named, the question is one of: is one of the
+   two rims not emitted at all (a wire that is a *single closed curve* is the suspicious case, and
+   both `BoomCylinderInner`'s hole and `BucketCylinderOuter`'s face 9 are exactly that); or are both
+   emitted and the matcher's chord-midpoint probe failing to pair them.
+3. **Only then scope Phase 2.** Adjacency-based exact trims remain the right destination, but the
+   evidence that motivated doing it *for these parts* has evaporated, and the reason they fail may
+   be an ordinary bug two levels below it.
+
+Also worth stating: **`maxGap` should be renamed or redefined.** It is quoted in `CloseShape`'s
+error text, in the harness line, in `--json` and in this document, and it has been read as a
+face-to-face separation in every one of them. Either make it that quantity, or call it what it is.
+
+---
+
