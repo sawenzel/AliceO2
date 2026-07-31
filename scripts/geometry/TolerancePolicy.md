@@ -13,21 +13,26 @@ Read [`CodeReview_Fable.md`](CodeReview_Fable.md) Sections 5, 6 and 12 first.
 
 ---
 
-## 0. Do this before anything else in this file
+## 0. `BucketLink2` — done, and it was not the kernel
 
-Not because it blocks the work, but because it is the strongest open lead in the project and it
-will go stale:
+This section used to ask for that diagnosis. It was carried out on 2026-07-31 with three throwaway
+probes; the full account, with every measurement, is in
+[`CodeReview_Fable.md`](CodeReview_Fable.md) **Section 13**. The short form:
 
-**Diagnose `Bagger/BucketLink2_0_1_1_7`.** It is the only Bagger part that is **navigable** and
-still fails the gate: 24 *missed* crossings in `distout`, 48 disagreements in `distin`, 6.3%
-capacity drift. Every other failing part is explained by an open surface set. Nothing in Phase 1
-items 1-3 moved it, which means it is a distinct defect that no current theory covers. Suspects
-worth separating with measurement, not argument: K6 (cancellation in the naive quadratic formula,
-and the absolute cone-degeneracy / torus-quartic tolerances) and K4 (degenerate-chord recursion).
+- The **24 + 48 distance disagreements are an artifact of the gate.** OpenCascade classifies all
+  20 recorded offender ray origins *opposite* to the category the sample generator assigned, the
+  exact solid agrees with OpenCascade on 20 of 20, and where the category is right the exact
+  solid's distances match the oracle to every printed digit. The categoriser is the tessellated
+  reference, and this mesh is not watertight (its own `Check` reports hundreds of two-neighbour
+  facets) and puts the part's left plate half a centimetre off.
+- The **6.3% capacity drift is quadrature, not geometry.** A 4M-point Monte Carlo of the exact
+  solid gives 17.061 ± 0.052 cm³ against OpenCascade's 17.079, while `Capacity()` returns 16.004.
+  `integrateOverCurveTrim` is a fixed-128 midpoint rule over a characteristic function, so it
+  converges at O(1/N); the whole capacity column of the Bagger gate is this and nothing else.
 
-The project's own lesson applies — *diagnose before planning*. One throwaway probe turned the
-2026-07-26 "three-item converter refactor" into a one-line fix. See §6 for how to write one in a
-minute.
+So `BucketLink2` is **not** evidence for K4 or K6, and it is no longer a lead. Two precisely-scoped
+items replace it, both recorded in Section 13: gate ray-category soundness, and Green's-theorem
+capacity for wire-trimmed quadrics. Neither blocks the work below.
 
 ---
 
