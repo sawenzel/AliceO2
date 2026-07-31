@@ -2235,6 +2235,85 @@ BOOST_AUTO_TEST_CASE(ParametricMetricIsTheFirstFundamentalForm)
   }
 }
 
+// The join tolerance is a length, so the same parametric drift is accepted on a small cylinder
+// and refused on a large one. Today's rule cannot tell them apart, which is the whole of K3 -- and
+// it is the synthetic form of the measured ST1829909_01 loader rejection (six joins under 3e-5 rad
+// on cylinder trims, negligible in arc length, read as three times over a 1e-5 "tolerance").
+BOOST_AUTO_TEST_CASE(WireJoinToleranceIsALength)
+{
+  using surf::Curve2D;
+  std::string error;
+
+  // A rectangular (phi, h) trim whose last edge stops `drift` radians short of closing the loop.
+  const auto trimWithPhiDrift = [](double drift) {
+    return std::vector<Curve2D>{Curve2D::makeLine({0.2, -1.}, {1.2, -1.}), Curve2D::makeLine({1.2, -1.}, {1.2, 1.}),
+                                Curve2D::makeLine({1.2, 1.}, {0.2 + drift, 1.}),
+                                Curve2D::makeLine({0.2 + drift, 1.}, {0.2 + drift, -1.})};
+  };
+  const auto acceptsDrift = [&](double radius, double drift) {
+    surf::CylindricalBoundedSurface cylinder;
+    return cylinder.initialize({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, radius, -1., 1., 0., surf::kTwoPi, false,
+                               trimWithPhiDrift(drift), {}, error);
+  };
+
+  // The same 2e-5 rad drift, on two radii: 2e-7 cm of arc on the small cylinder against 2e-3 cm
+  // on the large one. One is a rounding error, the other is a real gap.
+  BOOST_CHECK(acceptsDrift(0.01, 2.e-5));  // the old rule refused this: 2e-5 > 1e-5, radius unseen
+  BOOST_CHECK(!acceptsDrift(100., 2.e-5));
+  // and the discrimination really is the radius: give the large cylinder a drift small enough to
+  // span the same 2e-7 cm and it is accepted; give the small one a gap of 2e-5 cm and it is not.
+  BOOST_CHECK(acceptsDrift(100., 2.e-9));
+  BOOST_CHECK(!acceptsDrift(0.01, 2.e-3));
+  // On a cylinder of radius 1 the two rules coincide up to the change of constant -- which is the
+  // only configuration the old one was ever right on, and then only by accident.
+  BOOST_CHECK(acceptsDrift(1., 5.e-7));
+  BOOST_CHECK(!acceptsDrift(1., 5.e-6)); // the old rule accepted this: 5e-6 < 1e-5
+}
+
+// K12: the polygon and curve wire types are fed by the same extractor with the same per-endpoint
+// precision, and now judge a join by the same rule. They used to differ by four orders of
+// magnitude -- 1e-9 for polygons against 1e-5 for curves -- and in incompatible units.
+BOOST_AUTO_TEST_CASE(PolygonAndCurveWiresShareOneJoinRule)
+{
+  using surf::SurfaceEdge;
+  using surf::Vec2;
+  using surf::WireRole;
+  using surf::WireStatus;
+
+  // A square whose last edge ends `gap` short of the first edge's start, in a domain where
+  // (u, v) are already centimetres (the default identity metric).
+  const auto polygonAcceptsGap = [](double gap) {
+    const std::vector<SurfaceEdge> edges{{{0., 0.}, {1., 0.}},
+                                         {{1., 0.}, {1., 1.}},
+                                         {{1., 1.}, {0., 1.}},
+                                         {{0., 1.}, {gap, 0.}}};
+    surf::SurfaceWire wire;
+    WireStatus status = WireStatus::Valid;
+    return wire.initializeFromEdges(edges, WireRole::Outer, status, {});
+  };
+  const auto curveAcceptsGap = [](double gap) {
+    const std::vector<surf::Curve2D> curves{surf::Curve2D::makeLine({0., 0.}, {1., 0.}),
+                                            surf::Curve2D::makeLine({1., 0.}, {1., 1.}),
+                                            surf::Curve2D::makeLine({1., 1.}, {0., 1.}),
+                                            surf::Curve2D::makeLine({0., 1.}, {gap, 0.})};
+    surf::CurveWire wire;
+    WireStatus status = WireStatus::Valid;
+    return wire.initialize(curves, WireRole::Outer, status, {});
+  };
+
+  // inside the 1e-6 cm tolerance. 1e-8 and 1e-7 are the discriminating cases: the polygon wire
+  // used to refuse them at 1e-9 while the curve wire accepted them at 1e-5.
+  for (const double gap : {0., 1.e-8, 1.e-7}) {
+    BOOST_CHECK(polygonAcceptsGap(gap));
+    BOOST_CHECK(curveAcceptsGap(gap));
+  }
+  // outside it. 1e-5 is the mirror case: the curve wire used to accept it and the polygon not.
+  for (const double gap : {1.e-5, 1.e-4}) {
+    BOOST_CHECK(!polygonAcceptsGap(gap));
+    BOOST_CHECK(!curveAcceptsGap(gap));
+  }
+}
+
 namespace
 {
 // Helpers writing the surface sidecar binary format (version 1) documented in

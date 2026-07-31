@@ -54,13 +54,22 @@ inline constexpr double kAreaTolerance = 1.e-18;         ///< degenerate (zero) 
 inline constexpr double kRayTolerance = 1.e-9;           ///< minimum positive ray parameter t
 inline constexpr double kIntersectionTolerance = 1.e-7;  ///< clustering of near-equal intersections
 inline constexpr double kClosureQuantum = 1.e-7;         ///< vertex quantization for closure matching
-/// Tolerance for accepting a wire loop as closed (consecutive edge/curve endpoints meeting). It is
-/// deliberately looser than kTolerance: a wire is imported from a CAD extractor that samples/
-/// projects each boundary curve's endpoints independently (e.g. a straight line vertex vs. the end
-/// pole of a neighbouring B-spline/arc on a quadric), so the shared vertex can differ by the
-/// extractor's ~1e-6 precision even though the loop is closed. The residual gap is negligible for
-/// winding/area/navigation, which use kTolerance for on-boundary classification.
-inline constexpr double kWireJoinTolerance = 1.e-5;
+/// Tolerance for accepting a wire loop as closed (consecutive edge/curve endpoints meeting), as a
+/// **3D length in cm**, measured through the owning surface's first fundamental form (see
+/// BoundedSurface::parametricMetric and ParametricMetric below).
+///
+/// It is deliberately looser than kTolerance: a wire is imported from a CAD extractor that
+/// samples/projects each boundary curve's endpoints independently (e.g. a straight line vertex vs.
+/// the end pole of a neighbouring B-spline/arc on a quadric), so the shared vertex can differ by
+/// the extractor's precision even though the loop is closed. The value is that precision, ~1e-6
+/// cm, and not the historical 1e-5: the old constant was compared against sqrt(du^2 + dv^2) in a
+/// domain that mixes radians with centimetres, so it silently meant 1e-5 cm of arc on a 1 cm
+/// cylinder and 1e-3 cm on a 100 cm one, while a 0.01 cm hole had to close to 1e-7 cm. Small holes
+/// were falsely open and big cylinders falsely closed, from the one missing radius factor.
+///
+/// The residual gap is negligible for winding/area/navigation, which use kTolerance for
+/// on-boundary classification.
+inline constexpr double kWireJoinTolerance = 1.e-6;
 inline constexpr double kWireJoinToleranceSq = kWireJoinTolerance * kWireJoinTolerance;
 /// Expansion of the per-surface BVH leaf AABBs (in double, before the outward float rounding).
 /// It must dominate every length tolerance used by navigation queries (kTolerance boundary
@@ -120,6 +129,53 @@ inline double parametricLengthSq(double gUU, double gUV, double gVV, const Vec2&
 {
   return gUU * delta.uCoord * delta.uCoord + 2. * gUV * delta.uCoord * delta.vCoord +
          gVV * delta.vCoord * delta.vCoord;
+}
+
+/// How a wire converts a parametric separation into a 3D length.
+///
+/// A wire is built before -- and independently of -- the surface that owns it, and both wire types
+/// are deliberately usable on their own, so the surface hands its first fundamental form in as a
+/// callback rather than the wire reaching back for it. This is the smaller of the two designs
+/// TolerancePolicy.md section 2.2 offers, and it is the one that keeps the wires testable; the
+/// alternative (moving join validation up into the six surface classes) would have needed a shared
+/// helper that amounts to the same callback anyway.
+///
+/// A default-constructed metric is the identity, which is the only honest reading without surface
+/// context: "(u, v) are already lengths in cm".
+struct ParametricMetric {
+  using Evaluate = void (*)(const void* context, const Vec2& uv, double& gUU, double& gUV, double& gVV);
+
+  Evaluate evaluate = nullptr;
+  const void* context = nullptr;
+
+  /// The 3D length squared spanned by the parametric displacement \a delta starting at \a uv.
+  double lengthSq(const Vec2& uv, const Vec2& delta) const
+  {
+    if (evaluate == nullptr) {
+      return delta.uCoord * delta.uCoord + delta.vCoord * delta.vCoord;
+    }
+    double gUU = 1.;
+    double gUV = 0.;
+    double gVV = 1.;
+    evaluate(context, uv, gUU, gUV, gVV);
+    return parametricLengthSq(gUU, gUV, gVV, delta);
+  }
+
+  /// The 3D distance squared between two parametric points. The form varies over the domain, so
+  /// it is evaluated at \a from -- for the separations this is used on (a join gap, a duplicate
+  /// vertex) the two points are within tolerance of each other and the choice does not matter.
+  double distanceSq(const Vec2& from, const Vec2& to) const { return lengthSq(from, to - from); }
+};
+
+/// A ParametricMetric that defers to \a surface, which must outlive it. Every use here is a
+/// surface building its own wires inside initialize(), so that holds by construction.
+template <typename Surface>
+inline ParametricMetric parametricMetricOf(const Surface& surface)
+{
+  return {[](const void* context, const Vec2& uv, double& gUU, double& gUV, double& gVV) {
+            static_cast<const Surface*>(context)->parametricMetric(uv, gUU, gUV, gVV);
+          },
+          &surface};
 }
 
 inline double dot(const Vec3& firstVector, const Vec3& secondVector)
@@ -231,6 +287,60 @@ inline double pointSegmentDistanceSq(const Vec3& point, const Vec3& segmentStart
   const Vec3 closestPoint = segmentStart + segmentVector * clampedProjection;
   return distanceSq(point, closestPoint);
 }
+
+/// \name First fundamental forms, by surface family
+/// The closed forms behind BoundedSurface::parametricMetric, as free functions of the parameters
+/// that define each family. The surface classes call these, and so does the sidecar reader, which
+/// has a record's parameters but no surface yet and must apply the same join rule the kernel will
+/// (finding S10). One definition, two callers -- the formulas are not to be written twice.
+/// @{
+
+/// Plane: the frame axes carry the domain's units and need be neither unit nor orthogonal, which
+/// makes this the only family with a cross term.
+inline void planeParametricMetric(const Vec3& axisU, const Vec3& axisV, double& gUU, double& gUV, double& gVV)
+{
+  gUU = dot(axisU, axisU);
+  gUV = dot(axisU, axisV);
+  gVV = dot(axisV, axisV);
+}
+
+/// Cylinder, (u, v) = (phi[rad], h[cm]).
+inline void cylinderParametricMetric(double radius, double& gUU, double& gUV, double& gVV)
+{
+  gUU = radius * radius;
+  gUV = 0.;
+  gVV = 1.;
+}
+
+/// Cone, (u, v) = (phi[rad], h[cm]). \a radiusAtHeight is r(v), which reaches zero at an apex;
+/// a step in h also walks along the slope, hence gVV > 1.
+inline void coneParametricMetric(double radiusAtHeight, double slope, double& gUU, double& gUV, double& gVV)
+{
+  gUU = radiusAtHeight * radiusAtHeight;
+  gUV = 0.;
+  gVV = 1. + slope * slope;
+}
+
+/// Sphere, (u, v) = (phi[rad], theta[rad]). The azimuthal scale is the radius of the parallel at
+/// \a theta, so it vanishes at either pole.
+inline void sphereParametricMetric(double radius, double theta, double& gUU, double& gUV, double& gVV)
+{
+  const double parallelRadius = radius * std::sin(theta);
+  gUU = parallelRadius * parallelRadius;
+  gUV = 0.;
+  gVV = radius * radius;
+}
+
+/// Torus, (u, v) = (phiRing[rad], phiTube[rad]). The ring scale runs from R - r to R + r.
+inline void torusParametricMetric(double majorRadius, double minorRadius, double phiTube, double& gUU, double& gUV,
+                                  double& gVV)
+{
+  const double ringRadius = majorRadius + minorRadius * std::cos(phiTube);
+  gUU = ringRadius * ringRadius;
+  gUV = 0.;
+  gVV = minorRadius * minorRadius;
+}
+/// @}
 
 inline bool sameIntersection(double firstDistance, double secondDistance)
 {
@@ -359,8 +469,11 @@ struct SurfaceWire {
     return {vertices[index % count], vertices[(index + 1) % count]};
   }
 
-  /// Build and validate the wire from an implicitly-closed vertex ring.
-  bool initialize(const std::vector<Vec2>& inputVertices, WireRole wireRole, WireStatus& status)
+  /// Build and validate the wire from an implicitly-closed vertex ring. \a metric converts the
+  /// parametric separations below into 3D lengths; a plane's frame axes need be neither unit
+  /// length nor orthogonal, so without it "coincident" means a different thing per surface.
+  bool initialize(const std::vector<Vec2>& inputVertices, WireRole wireRole, WireStatus& status,
+                  const ParametricMetric& metric = {})
   {
     role = wireRole;
     vertices.clear();
@@ -371,13 +484,13 @@ struct SurfaceWire {
         status = WireStatus::NonFinite;
         return false;
       }
-      if (vertices.empty() || surface::distanceSq(vertices.back(), vertex) > kToleranceSq) {
+      if (vertices.empty() || metric.distanceSq(vertices.back(), vertex) > kToleranceSq) {
         vertices.push_back(vertex);
       }
     }
 
     // drop an explicit closing duplicate (first == last)
-    if (vertices.size() > 1 && surface::distanceSq(vertices.front(), vertices.back()) <= kToleranceSq) {
+    if (vertices.size() > 1 && metric.distanceSq(vertices.front(), vertices.back()) <= kToleranceSq) {
       vertices.pop_back();
     }
 
@@ -389,7 +502,7 @@ struct SurfaceWire {
     // reject self-touching loops (non-adjacent coincident vertices)
     for (size_t firstIndex = 0; firstIndex < vertices.size(); ++firstIndex) {
       for (size_t secondIndex = firstIndex + 1; secondIndex < vertices.size(); ++secondIndex) {
-        if (surface::distanceSq(vertices[firstIndex], vertices[secondIndex]) <= kToleranceSq) {
+        if (metric.distanceSq(vertices[firstIndex], vertices[secondIndex]) <= kToleranceSq) {
           status = WireStatus::DegenerateVertex;
           return false;
         }
@@ -415,7 +528,12 @@ struct SurfaceWire {
   }
 
   /// Build and validate the wire from an explicit ordered edge list, checking loop closure.
-  bool initializeFromEdges(const std::vector<SurfaceEdge>& edges, WireRole wireRole, WireStatus& status)
+  ///
+  /// The join test is kWireJoinTolerance through \a metric, i.e. exactly the rule CurveWire uses.
+  /// The two used to differ -- 1e-9 here against 1e-5 there, in incompatible units -- although the
+  /// same extractor, with the same per-endpoint precision, feeds both (finding K12).
+  bool initializeFromEdges(const std::vector<SurfaceEdge>& edges, WireRole wireRole, WireStatus& status,
+                           const ParametricMetric& metric = {})
   {
     if (edges.size() < 3) {
       status = WireStatus::TooFewVertices;
@@ -427,7 +545,7 @@ struct SurfaceWire {
         return false;
       }
       const Vec2& nextStart = edges[(edgeIndex + 1) % edges.size()].start;
-      if (surface::distanceSq(edges[edgeIndex].end, nextStart) > kToleranceSq) {
+      if (metric.distanceSq(edges[edgeIndex].end, nextStart) > kWireJoinToleranceSq) {
         status = WireStatus::Open;
         return false;
       }
@@ -438,7 +556,7 @@ struct SurfaceWire {
     for (const auto& singleEdge : edges) {
       ringVertices.push_back(singleEdge.start);
     }
-    return initialize(ringVertices, wireRole, status);
+    return initialize(ringVertices, wireRole, status, metric);
   }
 
   double signedArea() const
@@ -1498,8 +1616,11 @@ struct CurveWire {
   std::vector<Curve2D> curves;
   WireRole role = WireRole::Outer;
 
-  /// Build and validate the wire from an ordered, closed list of curves.
-  bool initialize(const std::vector<Curve2D>& inputCurves, WireRole wireRole, WireStatus& status)
+  /// Build and validate the wire from an ordered, closed list of curves. \a metric turns the join
+  /// gaps into 3D lengths so that kWireJoinTolerance means one distance on every surface; the form
+  /// is evaluated at each join in turn, because it is not constant over the domain.
+  bool initialize(const std::vector<Curve2D>& inputCurves, WireRole wireRole, WireStatus& status,
+                  const ParametricMetric& metric = {})
   {
     role = wireRole;
     curves = inputCurves;
@@ -1515,7 +1636,7 @@ struct CurveWire {
       }
       const Vec2 currentEnd = curves[index].endPoint();
       const Vec2 nextStart = curves[(index + 1) % curves.size()].startPoint();
-      if (surface::distanceSq(currentEnd, nextStart) > kWireJoinToleranceSq) {
+      if (metric.distanceSq(currentEnd, nextStart) > kWireJoinToleranceSq) {
         status = WireStatus::Open;
         return false;
       }
@@ -1733,10 +1854,10 @@ double integrateOverCurveTrim(const CurveWire& outerWire, const std::vector<Curv
 inline bool buildCurveTrim(const std::vector<Curve2D>& outerTrim,
                            const std::vector<std::vector<Curve2D>>& innerTrims, CurveWire& outerWire,
                            std::vector<CurveWire>& innerWires, Vec2& lower, Vec2& upper,
-                           std::string& errorMessage)
+                           std::string& errorMessage, const ParametricMetric& metric = {})
 {
   WireStatus status = WireStatus::Valid;
-  if (!outerWire.initialize(outerTrim, WireRole::Outer, status)) {
+  if (!outerWire.initialize(outerTrim, WireRole::Outer, status, metric)) {
     errorMessage = std::string("quadric outer trim wire invalid: ") + wireStatusMessage(status);
     return false;
   }
@@ -1745,7 +1866,7 @@ inline bool buildCurveTrim(const std::vector<Curve2D>& outerTrim,
   for (const auto& innerLoop : innerTrims) {
     CurveWire innerWire;
     WireStatus innerStatus = WireStatus::Valid;
-    if (!innerWire.initialize(innerLoop, WireRole::Inner, innerStatus)) {
+    if (!innerWire.initialize(innerLoop, WireRole::Inner, innerStatus, metric)) {
       errorMessage = std::string("quadric inner trim wire invalid: ") + wireStatusMessage(innerStatus);
       return false;
     }
@@ -1995,7 +2116,8 @@ class PlanarBoundedSurface final : public BoundedSurface
     mInverseMetricDet = 1. / metricDet;
 
     WireStatus outerStatus = WireStatus::Valid;
-    if (!mOuterWire.initialize(outerWireVertices, WireRole::Outer, outerStatus)) {
+    const ParametricMetric metric = parametricMetricOf(*this);
+    if (!mOuterWire.initialize(outerWireVertices, WireRole::Outer, outerStatus, metric)) {
       errorMessage = std::string("outer wire invalid: ") + wireStatusMessage(outerStatus);
       return false;
     }
@@ -2007,7 +2129,7 @@ class PlanarBoundedSurface final : public BoundedSurface
     for (const auto& innerWireInput : innerWireVertices) {
       SurfaceWire innerWire;
       WireStatus innerStatus = WireStatus::Valid;
-      if (!innerWire.initialize(innerWireInput, WireRole::Inner, innerStatus)) {
+      if (!innerWire.initialize(innerWireInput, WireRole::Inner, innerStatus, metric)) {
         errorMessage = std::string("inner wire invalid: ") + wireStatusMessage(innerStatus);
         return false;
       }
@@ -2162,9 +2284,7 @@ class PlanarBoundedSurface final : public BoundedSurface
   /// numbers initialize() already computes to invert the frame.
   void parametricMetric(const Vec2&, double& gUU, double& gUV, double& gVV) const override
   {
-    gUU = mMetricUU;
-    gUV = mMetricUV;
-    gVV = mMetricVV;
+    planeParametricMetric(mAxisU, mAxisV, gUU, gUV, gVV);
   }
 
   double capacityContribution() const override { return dot(mOrigin, mNormal) * area() / 3.; }
@@ -2247,7 +2367,8 @@ class CurvedPlanarBoundedSurface final : public BoundedSurface
     mNormal = cross(mAxisU, mAxisV);
 
     WireStatus outerStatus = WireStatus::Valid;
-    if (!mOuterWire.initialize(outerCurves, WireRole::Outer, outerStatus)) {
+    const ParametricMetric metric = parametricMetricOf(*this);
+    if (!mOuterWire.initialize(outerCurves, WireRole::Outer, outerStatus, metric)) {
       errorMessage = std::string("outer wire invalid: ") + wireStatusMessage(outerStatus);
       return false;
     }
@@ -2258,7 +2379,7 @@ class CurvedPlanarBoundedSurface final : public BoundedSurface
     for (const auto& innerCurveLoop : innerCurves) {
       CurveWire innerWire;
       WireStatus innerStatus = WireStatus::Valid;
-      if (!innerWire.initialize(innerCurveLoop, WireRole::Inner, innerStatus)) {
+      if (!innerWire.initialize(innerCurveLoop, WireRole::Inner, innerStatus, metric)) {
         errorMessage = std::string("inner wire invalid: ") + wireStatusMessage(innerStatus);
         return false;
       }
@@ -2524,7 +2645,8 @@ class CylindricalBoundedSurface final : public BoundedSurface
       return false;
     }
     Vec2 lower, upper;
-    if (!buildCurveTrim(outerTrim, innerTrims, mTrimOuter, mTrimInner, lower, upper, errorMessage)) {
+    if (!buildCurveTrim(outerTrim, innerTrims, mTrimOuter, mTrimInner, lower, upper, errorMessage,
+                        parametricMetricOf(*this))) {
       return false;
     }
     mPhiStart = lower.uCoord;
@@ -2688,9 +2810,7 @@ class CylindricalBoundedSurface final : public BoundedSurface
   /// single parametric tolerance mean 1e-5 cm on a 1 cm cylinder and 1e-3 cm on a 100 cm one.
   void parametricMetric(const Vec2&, double& gUU, double& gUV, double& gVV) const override
   {
-    gUU = mRadius * mRadius;
-    gUV = 0.;
-    gVV = 1.;
+    cylinderParametricMetric(mRadius, gUU, gUV, gVV);
   }
 
   /// Exact divergence-theorem contribution over the (phi, h) rectangle; for a wire trim the same
@@ -2869,7 +2989,8 @@ class SphericalBoundedSurface final : public BoundedSurface
       return false;
     }
     Vec2 lower, upper;
-    if (!buildCurveTrim(outerTrim, innerTrims, mTrimOuter, mTrimInner, lower, upper, errorMessage)) {
+    if (!buildCurveTrim(outerTrim, innerTrims, mTrimOuter, mTrimInner, lower, upper, errorMessage,
+                        parametricMetricOf(*this))) {
       return false;
     }
     mPhiStart = lower.uCoord;
@@ -3007,10 +3128,7 @@ class SphericalBoundedSurface final : public BoundedSurface
   /// phi separation genuinely spans no distance at all.
   void parametricMetric(const Vec2& uv, double& gUU, double& gUV, double& gVV) const override
   {
-    const double parallelRadius = mRadius * std::sin(uv.vCoord);
-    gUU = parallelRadius * parallelRadius;
-    gUV = 0.;
-    gVV = mRadius * mRadius;
+    sphereParametricMetric(mRadius, uv.vCoord, gUU, gUV, gVV);
   }
 
   /// Exact divergence-theorem contribution over the (theta, phi) rectangle; for a wire trim the
@@ -3211,7 +3329,8 @@ class ConicalBoundedSurface final : public BoundedSurface
       return false;
     }
     Vec2 lower, upper;
-    if (!buildCurveTrim(outerTrim, innerTrims, mTrimOuter, mTrimInner, lower, upper, errorMessage)) {
+    if (!buildCurveTrim(outerTrim, innerTrims, mTrimOuter, mTrimInner, lower, upper, errorMessage,
+                        parametricMetricOf(*this))) {
       return false;
     }
     mPhiStart = lower.uCoord;
@@ -3387,10 +3506,7 @@ class ConicalBoundedSurface final : public BoundedSurface
   /// the slope, so it spans sqrt(1 + slope^2) rather than 1.
   void parametricMetric(const Vec2& uv, double& gUU, double& gUV, double& gVV) const override
   {
-    const double localRadius = radiusAt(uv.vCoord);
-    gUU = localRadius * localRadius;
-    gUV = 0.;
-    gVV = 1. + mSlope * mSlope;
+    coneParametricMetric(radiusAt(uv.vCoord), mSlope, gUU, gUV, gVV);
   }
 
   /// Exact divergence-theorem contribution over the (phi, h) rectangle; for a wire trim the same
@@ -3592,7 +3708,8 @@ class TorusBoundedSurface final : public BoundedSurface
       return false;
     }
     Vec2 lower, upper;
-    if (!buildCurveTrim(outerTrim, innerTrims, mTrimOuter, mTrimInner, lower, upper, errorMessage)) {
+    if (!buildCurveTrim(outerTrim, innerTrims, mTrimOuter, mTrimInner, lower, upper, errorMessage,
+                        parametricMetricOf(*this))) {
       return false;
     }
     if (upper.vCoord - lower.vCoord > kTwoPi + kTolerance) {
@@ -3776,10 +3893,7 @@ class TorusBoundedSurface final : public BoundedSurface
   /// capacity integrand already uses.
   void parametricMetric(const Vec2& uv, double& gUU, double& gUV, double& gVV) const override
   {
-    const double ringRadius = mMajorRadius + mMinorRadius * std::cos(uv.vCoord);
-    gUU = ringRadius * ringRadius;
-    gUV = 0.;
-    gVV = mMinorRadius * mMinorRadius;
+    torusParametricMetric(mMajorRadius, mMinorRadius, uv.vCoord, gUU, gUV, gVV);
   }
 
   /// Exact divergence-theorem contribution (1/3) integral X . n |X_u x X_v| over the
