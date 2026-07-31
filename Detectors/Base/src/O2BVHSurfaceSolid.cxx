@@ -562,7 +562,12 @@ struct O2BVHSurfaceSolid::Impl {
   /// Shared by Contains, Contains_Loop and the re-shoot, so that all three evaluate parity by
   /// exactly the same rule -- a re-shoot that disagreed with the primary shot for reasons other
   /// than the direction would be untestable.
-  bool parityAlong(const Vec3& point, const Vec3& direction, bool useBVH) const
+  ///
+  /// \a ambiguous, when given, reports whether any counted crossing carried RayHit::onTrimBoundary
+  /// -- that is, whether this shot's answer rests anywhere on a tie-break the data does not
+  /// support. It says nothing about whether the answer is wrong, only that this ray is one of the
+  /// rays that *can* be wrong on a solid that is otherwise sound.
+  bool parityAlong(const Vec3& point, const Vec3& direction, bool useBVH, bool* ambiguous = nullptr) const
   {
     // reused across calls so containment allocates nothing on the hot path; the capacity is paid
     // once per thread. Distinct from the distance queries' buffers, which are their own.
@@ -576,6 +581,10 @@ struct O2BVHSurfaceSolid::Impl {
       for (const auto& surface : surfaces) {
         surface->appendIntersections(point, direction, kRayTolerance, TGeoShape::Big(), parityHits);
       }
+    }
+    if (ambiguous != nullptr) {
+      *ambiguous = std::any_of(parityHits.begin(), parityHits.end(),
+                               [](const RayHit& hit) { return hit.onTrimBoundary; });
     }
     return oddCrossingParity(parityHits, direction);
   }
@@ -1551,23 +1560,40 @@ bool O2BVHSurfaceSolid::containsByParity(const Double_t* point, bool useBVH) con
   // So the fast path costs nothing where it is valid, and the vote is paid exactly where the
   // geometry has already admitted it is broken.
   //
-  // A finer, per-*shot* trigger for the re-shoot was built and measured here and is deliberately
-  // not kept: re-shooting whenever a parity cluster held more than one coincident hit -- i.e.
-  // whenever the answer came out of the cancellation rule rather than out of the geometry -- costs
-  // 0.3-2% of Contains on most parts and 16% on box_minus_cyl, and moved not one of the 143000
-  // sweep points, including the single one that disagrees. It fires where the cancellation rule is
-  // already right (grazes at convex and concave edges, rays through a shared edge) and not where
-  // the residual defect is. The instrument TolerancePolicy.md section 2.4 actually asks for is a
-  // different one -- a band around the trim curve in the parametric domain, sized through the
-  // surface metric -- and it is unbuilt; section 10.3 has the measurement that sets its priority.
+  // That single point has since been diagnosed, and it is the reason for the re-shoot below
+  // (TolerancePolicy.md section 11). It is not a root-finding defect: the ray gains a third
+  // crossing on a patch that survives 6e-6 cm past the true Boolean seam, because a hit inside
+  // CurveWire::boundaryBand is resolved as "inside the trim" and that tie-break is one-sided.
+  // So the trigger is the tie-break itself -- RayHit::onTrimBoundary -- and not, as was tried and
+  // measured before it, the coincident-hit cancellation rule. That earlier trigger cost 0.3-2% of
+  // Contains on most parts and 16% on box_minus_cyl and moved none of the 143000 sweep points,
+  // because it fires where the cancellation rule is already right (grazes at convex and concave
+  // edges, rays through a shared edge) and stays silent here. This one fires on 1 hit in 96291,
+  // which is the whole of its cost.
   const Vec3 testPoint = makeVec3(point);
   if (GetNavigationReliability() == NavigationReliability::Reliable) {
-    return fImpl->parityAlong(testPoint, kContainsTestDirection, useBVH);
+    bool ambiguous = false;
+    const bool answer = fImpl->parityAlong(testPoint, kContainsTestDirection, useBVH, &ambiguous);
+    if (!ambiguous) {
+      return answer;
+    }
+    // This shot crossed a patch within its own trim accuracy, so its parity rests on a tie-break
+    // rather than on the geometry. Re-aim: the sliver belongs to the ray, not to the point.
+    return fImpl->containsByVote(testPoint, useBVH);
   }
   return fImpl->containsByVote(testPoint, useBVH);
 }
 
 void O2BVHSurfaceSolid::DescribeContainsCrossings(const Point3D& point,
+                                                  std::vector<ContainsCrossing>& bvhCrossings,
+                                                  std::vector<ContainsCrossing>& loopCrossings) const
+{
+  const Point3D direction{kContainsTestDirection.xCoord, kContainsTestDirection.yCoord,
+                          kContainsTestDirection.zCoord};
+  DescribeContainsCrossings(point, direction, bvhCrossings, loopCrossings);
+}
+
+void O2BVHSurfaceSolid::DescribeContainsCrossings(const Point3D& point, const Point3D& direction,
                                                   std::vector<ContainsCrossing>& bvhCrossings,
                                                   std::vector<ContainsCrossing>& loopCrossings) const
 {
@@ -1577,26 +1603,27 @@ void O2BVHSurfaceSolid::DescribeContainsCrossings(const Point3D& point,
     return;
   }
   const Vec3 testPoint = makeVec3(point.data());
+  const Vec3 testDirection = normalized(makeVec3(direction.data()));
 
   auto collect = [&](std::vector<RayHit>& hits, std::vector<ContainsCrossing>& out) {
     std::sort(hits.begin(), hits.end(),
               [](const RayHit& first, const RayHit& second) { return first.distance < second.distance; });
     out.reserve(hits.size());
     for (const auto& hit : hits) {
-      out.push_back({hit.distance, dot(hit.normal, kContainsTestDirection)});
+      out.push_back({hit.distance, dot(hit.normal, testDirection), hit.onTrimBoundary});
     }
   };
 
   std::vector<RayHit> loopHits;
   for (const auto& surface : fImpl->surfaces) {
-    surface->appendIntersections(testPoint, kContainsTestDirection, kRayTolerance, TGeoShape::Big(), loopHits);
+    surface->appendIntersections(testPoint, testDirection, kRayTolerance, TGeoShape::Big(), loopHits);
   }
   collect(loopHits, loopCrossings);
 
   if (fImpl->bvh != nullptr) {
     std::vector<RayHit> bvhHits;
-    fImpl->visitRayCandidates(testPoint, kContainsTestDirection, [&](const BoundedSurface& surface) {
-      surface.appendIntersections(testPoint, kContainsTestDirection, kRayTolerance, TGeoShape::Big(), bvhHits);
+    fImpl->visitRayCandidates(testPoint, testDirection, [&](const BoundedSurface& surface) {
+      surface.appendIntersections(testPoint, testDirection, kRayTolerance, TGeoShape::Big(), bvhHits);
     });
     collect(bvhHits, bvhCrossings);
   }

@@ -392,6 +392,19 @@ inline bool sameIntersection(double firstDistance, double secondDistance)
 struct RayHit {
   double distance = 0.;
   Vec3 normal;
+  /// The hit lies within the patch's own on-boundary band (CurveWire::boundaryBand), i.e. within
+  /// the accuracy of the representation that draws the trim -- so which side of the trim it falls
+  /// on is not decided by the data, it is decided by the tie-break. The band is resolved as
+  /// "inside the trim", which is a choice and not a fact, and the choice is one-sided: a patch
+  /// keeps a sliver of width band past its true trim curve.
+  ///
+  /// This is the flag TolerancePolicy.md section 2.4 asks for. It matters because on a Boolean
+  /// seam that sliver lies in the solid's interior, where a crossing must not be counted, so a ray
+  /// through it gains a spurious crossing and flips parity. Measured on cyl_cross_cyl: every one
+  /// of 1440 sampled positions along the true crossing curve overhangs by 1.0e-5 to 1.9e-5 cm and
+  /// none undercuts, and the single direction-dependent point of the section 4.2 sweep is a ray
+  /// through that sliver (TolerancePolicy.md section 11).
+  bool onTrimBoundary = false;
 };
 
 /// One bounded curve segment of a wire, in a surface's parametric (u, v) domain.
@@ -2490,10 +2503,11 @@ class PlanarBoundedSurface final : public BoundedSurface
       return;
     }
     const Vec3 candidatePoint = rayOrigin + rayDirection * candidateDistance;
-    if (!containsLocal(toLocal(candidatePoint))) {
+    bool onTrimBoundary = false;
+    if (!containsLocal(toLocal(candidatePoint), &onTrimBoundary)) {
       return;
     }
-    hits.push_back({candidateDistance, mNormal});
+    hits.push_back({candidateDistance, mNormal, onTrimBoundary});
   }
 
   double distanceSqToEdges(const Vec3& point, const SurfaceWire& wire) const
@@ -2739,10 +2753,11 @@ class CurvedPlanarBoundedSurface final : public BoundedSurface
     if (candidateDistance < minDistance || candidateDistance > maxDistance) {
       return;
     }
-    if (!containsLocal(toLocal(rayOrigin + rayDirection * candidateDistance))) {
+    bool onTrimBoundary = false;
+    if (!containsLocal(toLocal(rayOrigin + rayDirection * candidateDistance), &onTrimBoundary)) {
       return;
     }
-    hits.push_back({candidateDistance, mNormal});
+    hits.push_back({candidateDistance, mNormal, onTrimBoundary});
   }
 
   double distanceSqToPatch(const Vec3& point) const override
@@ -2937,10 +2952,10 @@ class CylindricalBoundedSurface final : public BoundedSurface
   bool hasWireTrim() const { return mHasWireTrim; }
 
   /// True if the (phi, h) point lies in the trim wire (phi unwrapped into the wire window).
-  bool pointInTrim(double phi, double height) const
+  bool pointInTrim(double phi, double height, bool* boundary = nullptr) const
   {
     const double uCoord = unwrapAngleInto(phi, mPhiStart, mPhiStart + mPhiSweep);
-    return curveTrimContains(mTrimOuter, mTrimInner, {uCoord, height}, nullptr, parametricMetricOf(*this));
+    return curveTrimContains(mTrimOuter, mTrimInner, {uCoord, height}, boundary, parametricMetricOf(*this));
   }
 
   /// Build an orthonormal frame (U, V, W) with W along \a axis and U the projection of
@@ -3037,8 +3052,9 @@ class CylindricalBoundedSurface final : public BoundedSurface
       const double hitV = localOrigin.yCoord + candidate * localDirection.yCoord;
       const double hitHeight = localOrigin.zCoord + candidate * localDirection.zCoord;
       const double hitPhi = std::atan2(hitV, hitU);
+      bool onTrimBoundary = false;
       if (mHasWireTrim) {
-        if (!pointInTrim(hitPhi, hitHeight)) {
+        if (!pointInTrim(hitPhi, hitHeight, &onTrimBoundary)) {
           continue;
         }
       } else if (!heightInRange(hitHeight) || !phiInSweep(hitPhi)) {
@@ -3046,7 +3062,7 @@ class CylindricalBoundedSurface final : public BoundedSurface
       }
       const double radialDistance = std::hypot(hitU, hitV);
       const Vec3 hitNormal = (mAxisU * (hitU / radialDistance) + mAxisV * (hitV / radialDistance)) * mNormalSign;
-      hits.push_back({candidate, hitNormal});
+      hits.push_back({candidate, hitNormal, onTrimBoundary});
     }
   }
 
@@ -3281,10 +3297,10 @@ class SphericalBoundedSurface final : public BoundedSurface
   bool hasWireTrim() const { return mHasWireTrim; }
 
   /// True if the (phi, theta) point lies in the trim wire (phi unwrapped into the wire window).
-  bool pointInTrim(double phi, double theta) const
+  bool pointInTrim(double phi, double theta, bool* boundary = nullptr) const
   {
     const double uCoord = unwrapAngleInto(phi, mPhiStart, mPhiStart + mPhiSweep);
-    return curveTrimContains(mTrimOuter, mTrimInner, {uCoord, theta}, nullptr, parametricMetricOf(*this));
+    return curveTrimContains(mTrimOuter, mTrimInner, {uCoord, theta}, boundary, parametricMetricOf(*this));
   }
 
   bool fullSweep() const { return mPhiSweep >= kTwoPi - kTolerance; }
@@ -3301,8 +3317,11 @@ class SphericalBoundedSurface final : public BoundedSurface
     return {dot(relativePoint, mAxisU), dot(relativePoint, mAxisV), dot(relativePoint, mAxisW)};
   }
 
-  bool directionInTrim(const Vec3& localPoint) const
+  bool directionInTrim(const Vec3& localPoint, bool* boundary = nullptr) const
   {
+    if (boundary != nullptr) {
+      *boundary = false;
+    }
     const double pointRadius = norm(localPoint);
     if (pointRadius <= kTolerance) {
       return true; // the center is angle-degenerate; every patch point is equidistant
@@ -3315,7 +3334,7 @@ class SphericalBoundedSurface final : public BoundedSurface
         // on the polar axis phi is degenerate; accept by the wire's theta (v) range
         return theta >= mThetaMin - thetaTolerance && theta <= mThetaMax + thetaTolerance;
       }
-      return pointInTrim(std::atan2(localPoint.yCoord, localPoint.xCoord), theta);
+      return pointInTrim(std::atan2(localPoint.yCoord, localPoint.xCoord), theta, boundary);
     }
     if (theta < mThetaMin - thetaTolerance || theta > mThetaMax + thetaTolerance) {
       return false;
@@ -3370,11 +3389,14 @@ class SphericalBoundedSurface final : public BoundedSurface
         continue;
       }
       const Vec3 localHit = toLocal(rayOrigin + rayDirection * candidate);
-      if (!directionInTrim(localHit)) {
+      bool onTrimBoundary = false;
+      if (!directionInTrim(localHit, &onTrimBoundary)) {
         continue;
       }
-      hits.push_back({candidate, (mAxisU * localHit.xCoord + mAxisV * localHit.yCoord + mAxisW * localHit.zCoord) *
-                                   (mNormalSign / mRadius)});
+      hits.push_back({candidate,
+                      (mAxisU * localHit.xCoord + mAxisV * localHit.yCoord + mAxisW * localHit.zCoord) *
+                        (mNormalSign / mRadius),
+                      onTrimBoundary});
     }
   }
 
@@ -3621,10 +3643,10 @@ class ConicalBoundedSurface final : public BoundedSurface
   bool hasWireTrim() const { return mHasWireTrim; }
 
   /// True if the (phi, h) point lies in the trim wire (phi unwrapped into the wire window).
-  bool pointInTrim(double phi, double height) const
+  bool pointInTrim(double phi, double height, bool* boundary = nullptr) const
   {
     const double uCoord = unwrapAngleInto(phi, mPhiStart, mPhiStart + mPhiSweep);
-    return curveTrimContains(mTrimOuter, mTrimInner, {uCoord, height}, nullptr, parametricMetricOf(*this));
+    return curveTrimContains(mTrimOuter, mTrimInner, {uCoord, height}, boundary, parametricMetricOf(*this));
   }
 
   bool fullSweep() const { return mPhiSweep >= kTwoPi - kTolerance; }
@@ -3730,8 +3752,9 @@ class ConicalBoundedSurface final : public BoundedSurface
         continue; // apex hit: the normal is undefined there
       }
       const double hitPhi = std::atan2(hitV, hitU);
+      bool onTrimBoundary = false;
       if (mHasWireTrim) {
-        if (!pointInTrim(hitPhi, hitHeight)) {
+        if (!pointInTrim(hitPhi, hitHeight, &onTrimBoundary)) {
           continue;
         }
       } else if (!heightInRange(hitHeight) || !phiInSweep(hitPhi)) {
@@ -3740,7 +3763,7 @@ class ConicalBoundedSurface final : public BoundedSurface
       const double normalScale = mNormalSign / std::sqrt(1. + mSlope * mSlope);
       const Vec3 hitNormal =
         (mAxisU * (hitU / radialDistance) + mAxisV * (hitV / radialDistance) - mAxisW * mSlope) * normalScale;
-      hits.push_back({candidate, hitNormal});
+      hits.push_back({candidate, hitNormal, onTrimBoundary});
     }
   }
 
@@ -4007,11 +4030,11 @@ class TorusBoundedSurface final : public BoundedSurface
   /// torus, so each is unwrapped into its wire window (unlike the cylinder/cone/sphere, whose
   /// second parameter - height or theta - is not periodic). A trim that wraps across a full turn
   /// in either angle is rejected at construction, so the window is unambiguous here.
-  bool pointInTrim(double phiRing, double phiTube) const
+  bool pointInTrim(double phiRing, double phiTube, bool* boundary = nullptr) const
   {
     const double uCoord = unwrapAngleInto(phiRing, mPhiStart, mPhiStart + mPhiSweep);
     const double vCoord = unwrapAngleInto(phiTube, mTubeStart, mTubeStart + mTubeSweep);
-    return curveTrimContains(mTrimOuter, mTrimInner, {uCoord, vCoord}, nullptr, parametricMetricOf(*this));
+    return curveTrimContains(mTrimOuter, mTrimInner, {uCoord, vCoord}, boundary, parametricMetricOf(*this));
   }
 
   bool fullRingSweep() const { return mPhiSweep >= kTwoPi - kTolerance; }
@@ -4139,14 +4162,15 @@ class TorusBoundedSurface final : public BoundedSurface
       }
       const double phiTube = std::atan2(localHit.zCoord, rho - mMajorRadius);
       const double phiRing = std::atan2(localHit.yCoord, localHit.xCoord);
+      bool onTrimBoundary = false;
       if (mHasWireTrim) {
-        if (!pointInTrim(phiRing, phiTube)) {
+        if (!pointInTrim(phiRing, phiTube, &onTrimBoundary)) {
           continue;
         }
       } else if (!ringInSweep(phiRing) || !tubeInSweep(phiTube)) {
         continue;
       }
-      hits.push_back({candidate, localNormal(localHit)});
+      hits.push_back({candidate, localNormal(localHit), onTrimBoundary});
     }
   }
 
