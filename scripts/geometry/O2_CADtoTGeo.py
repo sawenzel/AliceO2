@@ -15,6 +15,11 @@ NEW (03/2026):
 Generates (into --output-folder):
   - geom.C (small ROOT macro)
   - facets_<VOLNAME>_<LID>.bin for each leaf logical volume (float32 triangles)
+  - surfaces_<VOLNAME>_<LID>.bin for each exactly convertible leaf logical volume
+    (with --exact-surfaces auto|required)
+  - brep_<VOLNAME>_<LID>.brep, the OCCT BREP of the same leaf solid, scaled to cm
+    (with --exact-surfaces auto|required --dump-brep); used as the reference oracle's
+    input, see scripts/geometry/CodeReview_Fable.md Section 8
 
 Facet file format (little-endian):
   uint32 nTriangles
@@ -730,6 +735,25 @@ def write_surfaces_bin(path: _Path, surfaces: List[dict]):
                     f.write(struct.pack("<II", ctype, len(cparams)))
                     if cparams:
                         f.write(struct.pack(f"<{len(cparams)}d", *cparams))
+
+
+def write_brep_cm(path: _Path, shape, scale_to_cm: float):
+    """
+    Write `shape` as an OCCT BREP file, scaled from the STEP file's own length unit to cm.
+
+    The exact-surface extractors and the facet writer both scale their coordinates by
+    `scale_to_cm` while the TopoDS shape itself stays in the STEP's units, so a BREP dumped
+    as-is would silently be in mm for a typical CAD model. Scaling here keeps the BREP, the
+    surfaces_*.bin sidecar and the facets_*.bin mesh in one common unit (cm), which is what the
+    OCCT reference oracle needs in order to answer queries about the very same solid.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if scale_to_cm != 1.0:
+        trsf = gp_Trsf()
+        trsf.SetScale(gp_Pnt(0.0, 0.0, 0.0), scale_to_cm)
+        shape = BRepBuilderAPI_Transform(shape, trsf, True).Shape()
+    if not breptools.Write(shape, str(path)):
+        raise RuntimeError(f"failed to write BREP file {path}")
 
 
 # -------------------------------
@@ -2918,6 +2942,7 @@ def emit_root_macro(
     surface_files: Optional[Dict[str, str]] = None,
     exact_surfaces: str = "off",
     recognize_surfaces: str = "exact",
+    dump_brep: bool = False,
 ):
     # surface_files: def_lid -> absolute path of an exact-surface sidecar (surfaces_*.bin).
     # Volumes listed here are emitted as O2BVHSurfaceSolid via emit_surface_solid_cpp;
@@ -2930,6 +2955,11 @@ def emit_root_macro(
     #   auto     : emit O2BVHSurfaceSolid for every leaf solid whose faces all extract
     #              exactly, tessellated fallback otherwise.
     #   required : like auto, but abort if any leaf solid cannot be represented exactly.
+    #
+    # dump_brep: with exact_surfaces auto|required, also write the OCCT BREP of every leaf solid
+    # that extracts exactly, as brep_<VOLNAME>_<LID>.brep next to its surfaces_*.bin sidecar
+    # (same name suffix, so the two pair up). The shape is scaled to cm first, so the BREP is in
+    # the same units as the sidecar and the facet mesh. See write_brep_cm().
     if (step_unit or "auto").lower() == "auto":
         detected = detect_step_length_unit(step_path)
         scale_to_cm = step_unit_scale_to_cm(detected)
@@ -2991,6 +3021,7 @@ def emit_root_macro(
         if surface_files:
             raise ValueError("surface_files cannot be combined with --exact-surfaces auto|required")
         surface_files = {}
+        brep_files: Dict[str, str] = {}  # def_lid -> absolute path of brep_*.brep (--dump-brep)
         failures: Dict[str, List[str]] = {}  # def_lid -> unsupported-face reasons
         for lid, shape in def_shapes.items():
             surfaces, reasons = extract_surfaces_for_shape(shape, scale_to_cm, recognize_surfaces=recognize_flag)
@@ -2999,9 +3030,16 @@ def emit_root_macro(
                 continue
             disp = def_names.get(lid, "")
             volname = sanitize_filename(disp) if disp else "vol"
-            fpath = (out_folder / f"surfaces_{volname}_{sanitize_filename(lid)}.bin").resolve()
+            name_suffix = f"{volname}_{sanitize_filename(lid)}"
+            fpath = (out_folder / f"surfaces_{name_suffix}.bin").resolve()
             write_surfaces_bin(fpath, surfaces)
             surface_files[lid] = str(fpath)
+            if dump_brep:
+                bpath = (out_folder / f"brep_{name_suffix}.brep").resolve()
+                write_brep_cm(bpath, shape, scale_to_cm)
+                brep_files[lid] = str(bpath)
+        if dump_brep:
+            print(f"Wrote {len(brep_files)} reference BREP file(s) (brep_*.brep, scaled to cm)")
         n_leaf = len(def_shapes)
         print(f"Exact-surface extraction ({exact_mode}): {len(surface_files)}/{n_leaf} leaf solids "
               f"represented exactly, {len(failures)} fall back to tessellation")
@@ -3226,6 +3264,7 @@ def main():
     ap.add_argument("--name-filter-case-sensitive", action="store_true", help="Make --include-name/--exclude-name matching case-sensitive (default: case-insensitive)")
     ap.add_argument("--surface-report", default=None, metavar="PATH", help="Write a JSON report classifying each face by analytic surface type and each logical volume by exact O2BVHSurfaceSolid conversion eligibility. Does not change the generated geometry output.")
     ap.add_argument("--exact-surfaces", default="off", choices=["off", "auto", "required"], help="Emit exact O2BVHSurfaceSolid shapes instead of TGeoTessellated where possible. 'off' (default): tessellated only. 'auto': exact for each leaf solid whose faces all extract exactly, tessellated fallback otherwise. 'required': fail with a report if any leaf solid cannot be represented exactly. Writes a surfaces_*.bin sidecar per exact volume.")
+    ap.add_argument("--dump-brep", action="store_true", help="With --exact-surfaces auto|required, also write brep_<VOLNAME>_<LID>.brep (OCCT BREP of the leaf solid, scaled to cm like the sidecar and the mesh) next to each surfaces_*.bin. Input for the OCCT reference oracle; changes nothing else in the output.")
     ap.add_argument("--recognize-surfaces", default="exact", choices=["exact", "off"], help="Canonical-form recognition pre-pass: recover an exact plane/sphere/cylinder/cone hiding behind a stored bspline/bezier/revolution/extrusion face (the stored STEP surface type describes the exporter, not the geometry). 'exact' (default): only accept a fit at machine precision. 'off': disable, keeping such faces on the tessellated fallback. Applies to both --surface-report and --exact-surfaces auto|required.")
 
     # NEW: BOM / material support
@@ -3302,6 +3341,7 @@ def main():
         surface_report=args.surface_report,
         exact_surfaces=args.exact_surfaces,
         recognize_surfaces=args.recognize_surfaces,
+        dump_brep=args.dump_brep,
     )
     out_macro.write_text(code)
 

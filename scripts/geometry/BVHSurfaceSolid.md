@@ -57,6 +57,34 @@ one or more trim wires, following the OpenCascade face/wire/edge idea: the surfa
 analytic kernel, wires define the finite domain, and edges/curves define each wire. Triangles remain
 only for visualization and fallback paths.
 
+## Adopted design principles (2026-07-31)
+
+Decided after the comprehensive review in [`CodeReview_Fable.md`](CodeReview_Fable.md) (read its
+Sections 3-4 for the full derivation). These principles govern all subsequent milestones:
+
+1. **Trims are adjacency, not curves (regime E2).** For an edge where both incident faces have
+   analytic carriers, the trim boundary is represented as a reference to the *neighbor surface*
+   plus one discrete side/branch bit and a parameter interval — never as a fitted 2D curve. The
+   face-adjacency graph (the shared `TopoDS_Edge` identity that STEP already carries) is the
+   authoritative object; membership tests evaluate closed-form sign/root computations against the
+   neighbor's implicit equation. Both faces then place their common boundary at the identical
+   point set, so watertightness holds *by construction* and the closure check becomes a
+   structural graph check (every edge has exactly two faces). This is the same move that made the
+   tessellated solid watertight: agreement through shared topology instead of tolerance-matched
+   independent geometry. Transcendental pcurves (tube-tube intersections) never need to be
+   stored or flattened. Fitted/sampled trim curves remain only as the fallback where a free-form
+   surface is involved (regime E3: one shared sample set per edge, pinned vertices).
+2. **Parity must be self-checking.** Point classification reports trim-boundary-ambiguous hits
+   and re-shoots along a different direction instead of silently guessing; degenerate
+   configurations cost a bounded retry, never a silent wrong answer.
+3. **Simplify to the exactly-equivalent simplest form, at every level.** Canonical recognition
+   (surfaces, curves) is one instance of a general principle: STEP delivers numeric expression
+   soup (poles/weights/knots, transforms, swept/revolved constructions), and wherever the stored
+   expression is *exactly* (machine-precision residual) a simpler analytic object, the simpler
+   form is adopted — e.g. an extrusion/revolution whose basis B-spline is an exact line/circle
+   *is* a plane/cylinder/cone/torus. Near-zero is not zero: a rewrite that would move the
+   geometry beyond machine precision is refused (the existing recognition contract).
+
 ## Data model milestones
 
 - [x] Decide final public names before creating files.
@@ -571,6 +599,20 @@ only for visualization and fallback paths.
 		- [x] do not use std::vector allocations inside navigations functions; Reuse existing members (thread-local) or stay with space on the stack — `Contains`, `Contains_Loop` and both distance queries now use `static thread_local` scratch, one buffer per entry point.
 		- [x] try to inline as much as possible
 		- [x] think in fast-math terms: Avoid divisions, square roots, etc.
+		- [ ] **AOT geometry-specific code generation** (decided 2026-07-31, do after the correctness
+		  phases): the geometry is static once converted, so the converter (or a post-pass) can emit
+		  specialized C++ per part/patch — constants (radius, frame, neighbor-trim surfaces) folded,
+		  no virtual dispatch, branchless sign tests, batchable over rays — compiled once into a
+		  shared library shipped with the geometry. This is ahead-of-time specialization in the
+		  spirit of VecGeom's specialized navigators, not runtime JIT; if in-process generation is
+		  ever wanted, ROOT's cling is already available. Prerequisite: adjacency-trims (regime E2)
+		  make the inner loops small closed-form kernels, which is the shape that specializes well.
+		  Measure against the harness before and after; template specialization over patch
+		  archetypes is the cheaper first step and may capture most of the win.
+		- [ ] If iterative surface intersection (Newton for B-spline surfaces) is ever implemented,
+		  consider automatic differentiation (e.g. clad, which is clang/cling-based and already in
+		  the ROOT ecosystem) for exact derivatives of composed/specialized kernels rather than
+		  hand-coded Jacobians.
 	- Kept open deliberately: the measurement identified the next two targets, both bigger than anything above. See "measured optimization targets" below.
 
 - [ ] **Measured optimization targets (2026-07-26).** Both come from the first full harness run; see `SolidNavigationHarness.md` for the numbers behind them.
