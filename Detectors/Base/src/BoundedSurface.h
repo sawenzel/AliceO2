@@ -71,6 +71,15 @@ inline constexpr double kClosureQuantum = 1.e-7;         ///< vertex quantizatio
 /// on-boundary classification.
 inline constexpr double kWireJoinTolerance = 1.e-6;
 inline constexpr double kWireJoinToleranceSq = kWireJoinTolerance * kWireJoinTolerance;
+/// How flat the adaptive B-spline sampler makes each chord, in the curve's own parametric units.
+/// A trim B-spline enters navigation as this polyline, so it *is* the boundary as far as winding
+/// and point-to-curve distance are concerned, and nothing downstream can be more accurate than
+/// this. The on-boundary band is set from it rather than from optimism (finding K5): a 1e-9 band
+/// around a 1e-5 approximation is not a band, it is noise, and it made the Boundary state
+/// unreachable for every B-spline trim.
+inline constexpr double kBSplineFlatness = 1.e-5;
+inline constexpr double kBSplineFlatnessSq = kBSplineFlatness * kBSplineFlatness;
+
 /// Expansion of the per-surface BVH leaf AABBs (in double, before the outward float rounding).
 /// It must dominate every length tolerance used by navigation queries (kTolerance boundary
 /// classification, kIntersectionTolerance clustering) so a point or ray hit within tolerance of
@@ -165,6 +174,26 @@ struct ParametricMetric {
   /// it is evaluated at \a from -- for the separations this is used on (a join gap, a duplicate
   /// vertex) the two points are within tolerance of each other and the choice does not matter.
   double distanceSq(const Vec2& from, const Vec2& to) const { return lengthSq(from, to - from); }
+
+  /// The largest 3D length a *unit* parametric displacement can span at \a uv, i.e. the square
+  /// root of the larger eigenvalue of the form. Use it to convert a bound whose direction is not
+  /// known -- a sampling tolerance, say -- into the length it can worst-case reach; lengthSq is
+  /// the exact answer whenever the displacement itself is known.
+  double maxScale(const Vec2& uv) const
+  {
+    if (evaluate == nullptr) {
+      return 1.;
+    }
+    double gUU = 1.;
+    double gUV = 0.;
+    double gVV = 1.;
+    evaluate(context, uv, gUU, gUV, gVV);
+    const double trace = gUU + gVV;
+    const double determinant = gUU * gVV - gUV * gUV;
+    // the eigenvalues of a symmetric 2x2 form, guarded against a slightly negative discriminant
+    const double discriminant = std::max(0., trace * trace - 4. * determinant);
+    return std::sqrt(std::max(0., 0.5 * (trace + std::sqrt(discriminant))));
+  }
 };
 
 /// A ParametricMetric that defers to \a surface, which must outlive it. Every use here is a
@@ -598,13 +627,19 @@ struct SurfaceWire {
     return samples;
   }
 
-  WireClassification classify(const Vec2& point) const
+  /// \a metric sizes the on-boundary band only. A polygon wire is held exactly, so its band is
+  /// just kTolerance -- but kTolerance is a length in cm and this domain need not be, so it is
+  /// converted through the metric's largest scale, the same rule CurveWire::boundaryBand applies.
+  WireClassification classify(const Vec2& point, const ParametricMetric& metric = {}) const
   {
+    const double scale = metric.maxScale(point);
+    const double band = scale > kTolerance ? kTolerance / scale : 0.;
+    const double bandSq = band * band;
     bool inside = false;
     for (size_t vertexIndex = 0; vertexIndex < vertices.size(); ++vertexIndex) {
       const auto& segmentStart = vertices[vertexIndex];
       const auto& segmentEnd = vertices[(vertexIndex + 1) % vertices.size()];
-      if (pointSegmentDistanceSq(point, segmentStart, segmentEnd) <= kToleranceSq) {
+      if (pointSegmentDistanceSq(point, segmentStart, segmentEnd) <= bandSq) {
         return WireClassification::Boundary;
       }
       const bool crossesScanline = (segmentStart.vCoord > point.vCoord) != (segmentEnd.vCoord > point.vCoord);
@@ -907,6 +942,32 @@ struct Curve2D {
   mutable std::vector<Vec2> bsplineCache;
   /// @}
 
+  /// \name Loop-canonical endpoints
+  /// The vertex values this curve's neighbours in a closed wire agree on. A wire's curves are
+  /// imported with independently sampled endpoints, so curve i's end and curve i+1's start differ
+  /// by up to kWireJoinTolerance; CurveWire::initialize therefore fixes one value per seam and
+  /// hands it to both sides. The flattened polyline is built with these substituted at its ends,
+  /// which is what makes winding and point-to-curve distance see the *same* boundary -- they used
+  /// to disagree by the seam drift, a defect of its own hiding inside K5.
+  /// @{
+  Vec2 canonicalStart;
+  Vec2 canonicalEnd;
+  bool hasCanonicalEndpoints = false;
+
+  void setCanonicalEndpoints(const Vec2& start, const Vec2& end)
+  {
+    canonicalStart = start;
+    canonicalEnd = end;
+    hasCanonicalEndpoints = true;
+    bsplineCache.clear(); // the polyline carries them, so it has to be rebuilt
+  }
+
+  /// Where this curve begins and ends as far as the loop is concerned: the canonical seam vertex
+  /// when a wire has fixed one, and the curve's own endpoint when it stands alone.
+  Vec2 loopStart() const { return hasCanonicalEndpoints ? canonicalStart : startPoint(); }
+  Vec2 loopEnd() const { return hasCanonicalEndpoints ? canonicalEnd : endPoint(); }
+  /// @}
+
   static Curve2D makeLine(const Vec2& start, const Vec2& end)
   {
     Curve2D curve;
@@ -1099,7 +1160,8 @@ struct Curve2D {
   /// cap is reached). Shared by winding, distance, area-independent visualization and mesh. The
   /// bounded depth keeps the sample count small even for a near-degenerate or high-curvature
   /// span; the residual chord error stays well within the navigation length tolerances.
-  void bsplineSampleInto(std::vector<Vec2>& samples, double flatnessSq = 1.e-10, int maxDepth = 16) const
+  void bsplineSampleInto(std::vector<Vec2>& samples, double flatnessSq = kBSplineFlatnessSq,
+                         int maxDepth = 16) const
   {
     const double t0 = bsplineT0();
     const double t1 = bsplineT1();
@@ -1143,6 +1205,13 @@ struct Curve2D {
   {
     if (bsplineCache.empty()) {
       bsplineSampleInto(bsplineCache);
+      // One polyline, and it is the canonical one: every query that goes through this -- winding,
+      // closest point, the numeric capacity integrand -- then sees the identical boundary. The
+      // substitution is at the ends only; the interior samples are on the curve either way.
+      if (hasCanonicalEndpoints && bsplineCache.size() >= 2) {
+        bsplineCache.front() = canonicalStart;
+        bsplineCache.back() = canonicalEnd;
+      }
     }
     return bsplineCache;
   }
@@ -1468,6 +1537,13 @@ struct Curve2D {
                   radius * radius * (endAngle - startAngle));
   }
 
+  /// How far this curve's *representation* can sit from the curve it stands for, in parametric
+  /// units. Lines and arcs are held exactly and answer both winding and distance analytically, so
+  /// they contribute nothing. A B-spline enters navigation as its flattened polyline, and is
+  /// therefore only as good as kBSplineFlatness. Anything that classifies a point against the
+  /// boundary has to widen its band by this or it is measuring noise (finding K5).
+  double representationTolerance() const { return kind == CurveKind::BSpline ? kBSplineFlatness : 0.; }
+
   /// Number of times a horizontal ray from \a point towards +u crosses this curve, using a
   /// half-open convention so that shared endpoints and tangent extrema are not double-counted.
   int rightwardCrossings(const Vec2& point) const
@@ -1517,10 +1593,10 @@ struct Curve2D {
       }
       int crossings = 0;
       for (size_t index = 0; index + 1 < polyline.size(); ++index) {
-        // substitute the caller's canonical shared endpoints at the two ends without mutating the
-        // cached polyline, so loop seams stay consistent across curves
-        const Vec2 first = (index == 0) ? canonicalStart : polyline[index];
-        const Vec2 second = (index + 2 == polyline.size()) ? canonicalEnd : polyline[index + 1];
+        // No substitution here: the polyline already ends on the loop-canonical vertices (see
+        // setCanonicalEndpoints), so this is the same boundary closestPoint measures against.
+        const Vec2 first = polyline[index];
+        const Vec2 second = polyline[index + 1];
         const bool firstAbove = first.vCoord > point.vCoord;
         const bool secondAbove = second.vCoord > point.vCoord;
         if (firstAbove == secondAbove) {
@@ -1584,6 +1660,10 @@ struct Curve2D {
   /// Reverse the curve's direction in place (start <-> end), keeping the same geometric image.
   void reverseInPlace()
   {
+    if (hasCanonicalEndpoints) {
+      std::swap(canonicalStart, canonicalEnd);
+      bsplineCache.clear();
+    }
     if (kind == CurveKind::Line) {
       std::swap(lineStart, lineEnd);
     } else if (kind == CurveKind::Arc) {
@@ -1642,6 +1722,14 @@ struct CurveWire {
       }
     }
 
+    // Fix one vertex value per seam and give it to both curves that meet there. Every curve then
+    // begins exactly where its predecessor ends, which is what lets winding and distance measure
+    // against one polyline instead of two that differ by the join drift (K5).
+    for (size_t index = 0; index < curves.size(); ++index) {
+      curves[index].setCanonicalEndpoints(curves[index].startPoint(),
+                                          curves[(index + 1) % curves.size()].startPoint());
+    }
+
     const double area = signedArea();
     if (std::abs(area) <= kAreaTolerance) {
       status = WireStatus::ZeroArea;
@@ -1656,6 +1744,18 @@ struct CurveWire {
     }
     status = WireStatus::Valid;
     return true;
+  }
+
+  /// The widest gap between this loop's representation and the boundary it stands for, in
+  /// parametric units: the largest representationTolerance() over its curves. Zero for a loop of
+  /// lines and arcs, which are exact.
+  double representationTolerance() const
+  {
+    double worst = 0.;
+    for (const auto& curve : curves) {
+      worst = std::max(worst, curve.representationTolerance());
+    }
+    return worst;
   }
 
   /// Reverse the loop orientation in place (order and per-curve direction).
@@ -1712,21 +1812,43 @@ struct CurveWire {
     }
   }
 
-  /// Classify a parametric point against the closed loop (inside / outside / on-boundary).
-  WireClassification classify(const Vec2& point) const
+  /// The half-width of the on-boundary band at \a point, in parametric units.
+  ///
+  /// A point classified Boundary is one whose side the representation cannot decide. That has to
+  /// be set from what the representation actually is, not from optimism: a B-spline trim is a
+  /// polyline flattened to kBSplineFlatness, so a 1e-9 band around it was measuring noise and the
+  /// Boundary state was effectively unreachable for every B-spline trim, with in/out flipping
+  /// arbitrarily within the flatness of the true curve (finding K5).
+  ///
+  /// The floor is kTolerance expressed as a *parametric* separation, since kTolerance is a length
+  /// in cm and this domain is not: dividing by the metric's largest scale is the conservative
+  /// direction (it widens the band where the surface is stretched). A degenerate scale -- a
+  /// sphere pole, a cone apex -- leaves only the representation term, which is correct, because
+  /// there every parametric separation spans no distance and nothing can be resolved by it.
+  double boundaryBand(const Vec2& point, const ParametricMetric& metric) const
   {
+    const double scale = metric.maxScale(point);
+    const double lengthFloor = scale > kTolerance ? kTolerance / scale : 0.;
+    return std::max(lengthFloor, representationTolerance());
+  }
+
+  /// Classify a parametric point against the closed loop (inside / outside / on-boundary).
+  /// \a metric only sizes the on-boundary band (see boundaryBand); the winding count itself is a
+  /// topological quantity and needs no metric at all.
+  WireClassification classify(const Vec2& point, const ParametricMetric& metric = {}) const
+  {
+    const double band = boundaryBand(point, metric);
+    const double bandSq = band * band;
     for (const auto& curve : curves) {
-      if (curve.distanceSq(point) <= kToleranceSq) {
+      if (curve.distanceSq(point) <= bandSq) {
         return WireClassification::Boundary;
       }
     }
-    // pass canonical shared endpoints (each curve ends exactly where the next starts) so the
-    // half-open crossing convention stays consistent across seams despite floating-point drift
+    // Each curve's polyline already ends on the loop-canonical seam vertices, so the half-open
+    // crossing convention stays consistent across seams without any substitution here.
     int crossings = 0;
-    for (size_t curveIndex = 0; curveIndex < curves.size(); ++curveIndex) {
-      const Vec2 canonicalStart = curves[curveIndex].startPoint();
-      const Vec2 canonicalEnd = curves[(curveIndex + 1) % curves.size()].startPoint();
-      crossings += curves[curveIndex].rightwardCrossings(point, canonicalStart, canonicalEnd);
+    for (const auto& curve : curves) {
+      crossings += curve.rightwardCrossings(point, curve.loopStart(), curve.loopEnd());
     }
     return (crossings % 2 == 1) ? WireClassification::Inside : WireClassification::Outside;
   }
@@ -1787,12 +1909,13 @@ inline double unwrapAngleInto(double angle, double uMin, double uMax)
 /// (hole) loops. Returns true when the point is inside or on the boundary of the outer loop and
 /// not strictly inside any hole; \a boundary (when given) reports an on-boundary hit.
 inline bool curveTrimContains(const CurveWire& outerWire, const std::vector<CurveWire>& innerWires,
-                              const Vec2& point, bool* boundary = nullptr)
+                              const Vec2& point, bool* boundary = nullptr,
+                              const ParametricMetric& metric = {})
 {
   if (boundary != nullptr) {
     *boundary = false;
   }
-  const auto outerClassification = outerWire.classify(point);
+  const auto outerClassification = outerWire.classify(point, metric);
   if (outerClassification == WireClassification::Outside) {
     return false;
   }
@@ -1803,7 +1926,7 @@ inline bool curveTrimContains(const CurveWire& outerWire, const std::vector<Curv
     return true;
   }
   for (const auto& innerWire : innerWires) {
-    const auto innerClassification = innerWire.classify(point);
+    const auto innerClassification = innerWire.classify(point, metric);
     if (innerClassification == WireClassification::Boundary) {
       if (boundary != nullptr) {
         *boundary = true;
@@ -2168,7 +2291,8 @@ class PlanarBoundedSurface final : public BoundedSurface
       *boundary = false;
     }
 
-    const auto outerClassification = mOuterWire.classify(point);
+    const ParametricMetric metric = parametricMetricOf(*this);
+    const auto outerClassification = mOuterWire.classify(point, metric);
     if (outerClassification == WireClassification::Outside) {
       return false;
     }
@@ -2180,7 +2304,7 @@ class PlanarBoundedSurface final : public BoundedSurface
     }
 
     for (const auto& innerWire : mInnerWires) {
-      const auto innerClassification = innerWire.classify(point);
+      const auto innerClassification = innerWire.classify(point, metric);
       if (innerClassification == WireClassification::Boundary) {
         if (boundary != nullptr) {
           *boundary = true;
@@ -2417,7 +2541,8 @@ class CurvedPlanarBoundedSurface final : public BoundedSurface
       *boundary = false;
     }
 
-    const auto outerClassification = mOuterWire.classify(point);
+    const ParametricMetric metric = parametricMetricOf(*this);
+    const auto outerClassification = mOuterWire.classify(point, metric);
     if (outerClassification == WireClassification::Outside) {
       return false;
     }
@@ -2429,7 +2554,7 @@ class CurvedPlanarBoundedSurface final : public BoundedSurface
     }
 
     for (const auto& innerWire : mInnerWires) {
-      const auto innerClassification = innerWire.classify(point);
+      const auto innerClassification = innerWire.classify(point, metric);
       if (innerClassification == WireClassification::Boundary) {
         if (boundary != nullptr) {
           *boundary = true;
@@ -2663,7 +2788,7 @@ class CylindricalBoundedSurface final : public BoundedSurface
   bool pointInTrim(double phi, double height) const
   {
     const double uCoord = unwrapAngleInto(phi, mPhiStart, mPhiStart + mPhiSweep);
-    return curveTrimContains(mTrimOuter, mTrimInner, {uCoord, height});
+    return curveTrimContains(mTrimOuter, mTrimInner, {uCoord, height}, nullptr, parametricMetricOf(*this));
   }
 
   /// Build an orthonormal frame (U, V, W) with W along \a axis and U the projection of
@@ -3007,7 +3132,7 @@ class SphericalBoundedSurface final : public BoundedSurface
   bool pointInTrim(double phi, double theta) const
   {
     const double uCoord = unwrapAngleInto(phi, mPhiStart, mPhiStart + mPhiSweep);
-    return curveTrimContains(mTrimOuter, mTrimInner, {uCoord, theta});
+    return curveTrimContains(mTrimOuter, mTrimInner, {uCoord, theta}, nullptr, parametricMetricOf(*this));
   }
 
   bool fullSweep() const { return mPhiSweep >= kTwoPi - kTolerance; }
@@ -3347,7 +3472,7 @@ class ConicalBoundedSurface final : public BoundedSurface
   bool pointInTrim(double phi, double height) const
   {
     const double uCoord = unwrapAngleInto(phi, mPhiStart, mPhiStart + mPhiSweep);
-    return curveTrimContains(mTrimOuter, mTrimInner, {uCoord, height});
+    return curveTrimContains(mTrimOuter, mTrimInner, {uCoord, height}, nullptr, parametricMetricOf(*this));
   }
 
   bool fullSweep() const { return mPhiSweep >= kTwoPi - kTolerance; }
@@ -3734,7 +3859,7 @@ class TorusBoundedSurface final : public BoundedSurface
   {
     const double uCoord = unwrapAngleInto(phiRing, mPhiStart, mPhiStart + mPhiSweep);
     const double vCoord = unwrapAngleInto(phiTube, mTubeStart, mTubeStart + mTubeSweep);
-    return curveTrimContains(mTrimOuter, mTrimInner, {uCoord, vCoord});
+    return curveTrimContains(mTrimOuter, mTrimInner, {uCoord, vCoord}, nullptr, parametricMetricOf(*this));
   }
 
   bool fullRingSweep() const { return mPhiSweep >= kTwoPi - kTolerance; }

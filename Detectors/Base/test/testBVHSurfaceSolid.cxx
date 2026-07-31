@@ -2681,6 +2681,90 @@ surf::Curve2D quarterCircleBSpline(double cu, double cv, double r, double a0)
 }
 } // namespace
 
+// K5: the on-boundary band has to be as wide as the representation it measures against, and
+// winding and distance have to measure against the same polyline.
+BOOST_AUTO_TEST_CASE(BoundaryBandMatchesTheRepresentation)
+{
+  using surf::Vec2;
+  using surf::WireClassification;
+  using surf::WireRole;
+  using surf::WireStatus;
+  std::string error;
+
+  // A loop of lines and arcs is held exactly and claims no width of its own...
+  surf::CurveWire exactWire;
+  WireStatus status = WireStatus::Valid;
+  BOOST_REQUIRE(exactWire.initialize({surf::Curve2D::makeCircle({0., 0.}, 1.)}, WireRole::Outer, status));
+  BOOST_CHECK_EQUAL(exactWire.representationTolerance(), 0.);
+
+  // ...while a B-spline loop is only as good as the polyline it is flattened to.
+  surf::CurveWire splineWire;
+  BOOST_REQUIRE(splineWire.initialize({fullCircleBSpline(0., 0., 1.)}, WireRole::Outer, status));
+  checkClose(splineWire.representationTolerance(), surf::kBSplineFlatness, 1.e-18);
+
+  // The Boundary state must therefore be reachable for a B-spline trim. It was not: a 1e-9 band
+  // around a 1e-5 polyline is noise, so a point this close to the curve used to come back Inside
+  // or Outside by coin flip.
+  const double justInsideTheBand = 0.5 * surf::kBSplineFlatness;
+  BOOST_CHECK(splineWire.classify({1. - justInsideTheBand, 0.}) == WireClassification::Boundary);
+  BOOST_CHECK(splineWire.classify({1. + justInsideTheBand, 0.}) == WireClassification::Boundary);
+  // and well outside the band the answer is decided again, in both directions
+  BOOST_CHECK(splineWire.classify({0.5, 0.}) == WireClassification::Inside);
+  BOOST_CHECK(splineWire.classify({2.0, 0.}) == WireClassification::Outside);
+  // the exact loop keeps its narrow band: the same offset is decidable there
+  BOOST_CHECK(exactWire.classify({1. - justInsideTheBand, 0.}) == WireClassification::Inside);
+
+  // The band is a length, so on a surface that stretches the domain it narrows in parametric
+  // terms. A 100 cm cylinder resolves 1e-9 cm at 1e-11 rad, not at 1e-9 rad.
+  surf::CylindricalBoundedSurface bigCylinder;
+  BOOST_REQUIRE(bigCylinder.initialize({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, 100., -1., 1., 0., surf::kTwoPi,
+                                       false, error));
+  const auto bigMetric = surf::parametricMetricOf(bigCylinder);
+  surf::CurveWire squareWire;
+  BOOST_REQUIRE(squareWire.initialize({surf::Curve2D::makeLine({0., -1.}, {1., -1.}),
+                                       surf::Curve2D::makeLine({1., -1.}, {1., 1.}),
+                                       surf::Curve2D::makeLine({1., 1.}, {0., 1.}),
+                                       surf::Curve2D::makeLine({0., 1.}, {0., -1.})},
+                                      WireRole::Outer, status, bigMetric));
+  // 1e-10 rad is 1e-8 cm on this cylinder -- outside a 1e-9 cm band, so the point is decidable
+  BOOST_CHECK(squareWire.classify({0.5, 1. - 1.e-10}, bigMetric) == WireClassification::Inside);
+  // 1e-12 rad is 1e-10 cm, inside it
+  BOOST_CHECK(squareWire.classify({0.5, 1. - 1.e-12}, bigMetric) == WireClassification::Boundary);
+
+  // One polyline: a wire fixes one vertex value per seam, and both the winding polyline and the
+  // point-to-curve distance are built from it. Give two quarter arcs endpoints that differ within
+  // the join tolerance and the wire must still agree with itself about where its boundary is.
+  const double seamDrift = 4.e-7;
+  surf::Curve2D first = quarterCircleBSpline(0., 0., 1., 0.);
+  surf::Curve2D second = quarterCircleBSpline(0., 0., 1., surf::kHalfPi);
+  surf::Curve2D third = quarterCircleBSpline(0., 0., 1., surf::kPi);
+  surf::Curve2D fourth = quarterCircleBSpline(0., 0., 1., 3. * surf::kHalfPi);
+  second.poles.front() = {second.poles.front().uCoord + seamDrift, second.poles.front().vCoord};
+  surf::CurveWire driftedWire;
+  BOOST_REQUIRE(driftedWire.initialize({first, second, third, fourth}, WireRole::Outer, status));
+  for (const auto& curve : driftedWire.curves) {
+    BOOST_CHECK(curve.hasCanonicalEndpoints);
+  }
+  // every curve now begins exactly where its predecessor ends -- there is one boundary, not two
+  for (size_t index = 0; index < driftedWire.curves.size(); ++index) {
+    const Vec2 thisEnd = driftedWire.curves[index].loopEnd();
+    const Vec2 nextStart = driftedWire.curves[(index + 1) % driftedWire.curves.size()].loopStart();
+    BOOST_CHECK_EQUAL(thisEnd.uCoord, nextStart.uCoord);
+    BOOST_CHECK_EQUAL(thisEnd.vCoord, nextStart.vCoord);
+  }
+  // and the polyline the winding walks is the one the distance measures against
+  for (const auto& curve : driftedWire.curves) {
+    const auto& polyline = curve.bsplineSamples();
+    BOOST_REQUIRE(polyline.size() >= 2);
+    BOOST_CHECK_EQUAL(polyline.front().uCoord, curve.loopStart().uCoord);
+    BOOST_CHECK_EQUAL(polyline.front().vCoord, curve.loopStart().vCoord);
+    BOOST_CHECK_EQUAL(polyline.back().uCoord, curve.loopEnd().uCoord);
+    BOOST_CHECK_EQUAL(polyline.back().vCoord, curve.loopEnd().vCoord);
+  }
+  BOOST_CHECK(driftedWire.classify({0., 0.}) == WireClassification::Inside);
+  BOOST_CHECK(driftedWire.classify({3., 0.}) == WireClassification::Outside);
+}
+
 BOOST_AUTO_TEST_CASE(BSplineSidecarRoundTrip)
 {
   // a closed box whose first face carries a (collinear) B-spline boundary edge round-trips through
