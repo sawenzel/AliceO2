@@ -531,7 +531,113 @@ oracle exists.
 **Gate status: G0 green** (`ctest -R BVHSurfaceSolid`, 36 cases, after every change in this
 phase). **G1 6/10, G3 4/12** — the honest starting line for Phase 1 and Phase 2.
 
-## 12. Environment notes (this machine)
+## 12. Phase 1 executed (2026-07-31) — items 1-3 of four
+
+Phase 1's first three items are implemented and measured; item 4 (tolerance policy and closure
+criterion) is not started. Everything below is measured, not projected. The gate was run before
+and after every item, so each effect is attributable.
+
+Commits, in order: `63d1d08119` (S1), `29e8322f79` (re-shoot), `f809b38dd2` (S2-S5),
+`346d4675d0` (K1/K2/K8). `ctest -R BVHSurfaceSolid` green throughout, **48 cases** (from 37).
+
+**Headline: `contains` is now clean.** Disagreements with the OpenCascade oracle outside
+tolerance, per model:
+
+| | fixtures | Bagger |
+| --- | --- | --- |
+| Phase 0 baseline | 2 | 56 |
+| after re-shoot | **0** | **2** |
+
+Gate *totals* are unchanged at **G1 6/10, G3 4/12** — every part that still fails does so on
+navigability, on the distance queries, or on capacity, none of which these items touch. That is
+the honest reading: Phase 1 removed the containment error class, and what is left is Phase 2's.
+
+### What each item did
+
+**1. Re-shoot parity (Section 4.4), `29e8322f79`.** Diagnosed before fixing. The new hook
+`ContainsAlongDirection()` evaluates parity along an explicit direction, which turns the solid
+into its own oracle — on a closed 2-manifold parity is a topological invariant, so *any*
+direction dependence is a defect, with no reference shape involved. Measured over the whole
+Phase 0 corpus (~11k points per part):
+
+- every part the closure check calls `Reliable` has **zero** disagreements between shooting
+  directions; every part that disagrees (0.12%-3.7% of its points) is one the closure check
+  already rejects. The correlation is exact on this corpus.
+- of the 55 points where the fixed direction disagrees with the oracle, **not one is wrong in
+  every direction**. This corrects the recorded picture: a gap's shadow belongs to the
+  *direction*, not to the point, so it is escapable.
+- majority vote is right on 50/55 with three spread directions, 53/55 with five, 55/55 with
+  thirteen. A hand-picked triple scored only 42/55 — two of its directions turned out correlated
+  and agreed on the wrong answer, which is why the implementation uses a golden-angle spiral.
+
+So `Reliable` solids keep the single shot and unreliable ones vote over five directions, stopping
+at three agreements. Cost: **1.0-1.5x** on Reliable parts (tens of ns absolute), **2.9-4.7x** on
+the already-unreliable ones. The closure check's own error is in the safe direction for this
+policy — it under-reports `Reliable` rather than over-reporting it (S8/K9).
+
+**2. S1-S5, `63d1d08119` + `f809b38dd2`.**
+
+- **S1** (done first, being actively harmful): the solid streamed nothing but its `TGeoBBox` base,
+  so a read-back solid was empty and — because an empty `ClosureReport` defaults to closed and
+  consistently oriented — reported itself `Reliable`. It now persists the `Add*Surface` call
+  sequence as `BVHSurfaceRecord`s and replays them on read, recomputing the closure diagnostics
+  rather than trusting them; a record that fails to rebuild discards the whole solid. `CloseShape`
+  refuses an empty surface set unconditionally and leaves the shape `Undetermined`.
+- **S2**: the bbox pre-check ran ahead of the "no BVH yet, use the loop" fallback, and before
+  `CloseShape` the box is all zeros — `Contains` was disabled on any unclosed solid. Order fixed.
+- **S3**: a point on a face was inside for `Contains` but infinitely far from the wall for
+  `DistFromInside`. Distance queries now admit hits from just behind the origin and clamp to zero
+  (ROOT's own convention); parity keeps its positive lower bound so it never re-counts the surface
+  the point sits on.
+- **S5**: parity used a bare sign test and the distance queries a tolerance band. Both now go
+  through one `crossingSense()` with `Entering`/`Exiting`/`Tangential`.
+- **S4**: a ray that only *touches* the boundary has not crossed it. `Contains` knew this; the
+  distance queries classified each hit alone and reported the touch as a crossing, handing the
+  navigator a step to a point where it then finds itself outside. Both now share one
+  `forEachCrossingCluster()` walk. Because a hit's meaning depends on its neighbours, the BVH
+  query collects hits and classifies afterwards; tmax tightening still shrinks to the nearest
+  candidate with a margin wide enough to keep its cluster partners, and if the candidate turns out
+  to be a graze the query is redone unpruned. Cost **1.00x-1.10x**.
+
+The **concave fixture the review found missing** now exists: an L-shaped prism with a genuine
+reflex edge, the only configuration where a ray can touch the boundary from inside and stay
+inside. It carries the full sweep battery.
+
+**3. K1, K2, K8, `346d4675d0`.** K1 (endpoints of an unclamped B-spline are now evaluated instead
+of read off the poles), K2 (the full-turn rejection re-measures on the curve before refusing, not
+on the conservative pole hull), K8 (cluster membership tested against the cluster's first member,
+so transitive chaining can no longer merge a thin far-away feature away). All three are latent on
+this corpus — gate columns bit-identical — because the converter's canonical recognition converts
+the offending inputs away before the kernel sees them. Each has a regression test; K2's was
+verified to fail against the pre-fix code.
+
+### Corrections to this document
+
+- **K7 does not hold.** A face that fails to build is *not* silently omitted on any production
+  path: `Add*Surface` returns false, `LoadSurfaceSolid` turns that into a whole-file rejection,
+  and the generated macro turns that into an exception. The true, weaker statement is that the
+  return value is the only signal. Pinned by a test rather than "fixed".
+- **The shadow of a gap is direction-bound.** Earlier notes describe a gap as flipping `Contains`
+  over its whole shadow, which is right, but read as though the point were lost. It is not: 55/55
+  of the affected points are recoverable by aiming elsewhere.
+
+### Still open
+
+- **Phase 1 item 4** (not started): per-domain metrics (angular <-> length via radius) in kernel
+  *and* IO (K3/S10), sidecar v2 carrying the model tolerance, and a closure criterion matched at
+  the topology level with a quantitative gap metric (K9/S8). K5 (a 1e-9 boundary band tested
+  against a ~1e-5 polyline) belongs with it — it needs the same metric.
+- **K4** (degenerate-chord recursion probes only the parametric midpoint) and **K6** (cancellation
+  in the naive quadratic formula; absolute, scale-dependent tolerances in the cone-degeneracy and
+  torus-quartic branches) are untouched.
+- **The best remaining lead is `BucketLink2`.** It is the one part that is **navigable** and still
+  has 24 *missed* crossings in `distout` (plus 48 in `distin` and 6.3% capacity drift). Everything
+  else that fails is explained by the surface set being open. Nothing fixed in Phase 1 moved it,
+  so it is a distinct defect and worth diagnosing the same way item 1 was — with a probe, before
+  any theory.
+- The distance and capacity columns are otherwise untouched by Phase 1 by construction.
+
+## 13. Environment notes (this machine)
 
 - Build tree `/home/swenzel/alisw/sw/BUILD/O2-latest/O2` builds this checkout (source symlink);
   the branch's test target `o2-test-detectorsbase-BVHSurfaceSolid` appears after a CMake re-run.

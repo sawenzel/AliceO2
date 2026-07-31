@@ -1161,3 +1161,67 @@ matching `kWireJoinTolerance = 1e-5` (both looser than the `1e-9` boundary toler
 	explanation for those disagreements is **not supported by the code** (the clusterer sorts first,
 	so it is a function of the sorted distances alone -- see S6). Measure it before fixing it. Phase 2
 	(adjacency-based exact trims, the actual fix for the tube-tube class) starts only after Phase 1.
+- 2026-07-31: **Phase 1, items 1-3 — commits `63d1d08119`, `29e8322f79`, `f809b38dd2`,
+  `346d4675d0`.** Full account, with every measurement, in
+  [`CodeReview_Fable.md`](CodeReview_Fable.md) **Section 12**; only the headlines and the handover
+  are here. Item 4 of Phase 1 is *not* started. `ctest -R BVHSurfaceSolid` green, **48 cases**
+  (from 37). The tree is clean and a new session can start from item 4.
+
+	**Headline: the containment error class is gone.** `contains` disagreements with the
+	OpenCascade oracle outside tolerance: fixtures **2 -> 0**, Bagger **56 -> 2**. Gate *totals*
+	are unchanged (**G1 6/10, G3 4/12**) because every part that still fails does so on
+	navigability, on the distance queries or on capacity — none of which these items touch. Both
+	statements are true at once and neither should be quoted without the other.
+
+	**S1 was done first**, ahead of the recommended order, because it was the one defect that was
+	actively harmful: `TGeoManager::Export/Import` silently replaced every one of these solids with
+	an empty shape that reported itself `Reliable`. The solid now persists its `Add*Surface` call
+	sequence and replays it on read.
+
+	**The re-shoot was measured before it was built**, and the measurement corrected the recorded
+	picture. A new hook `ContainsAlongDirection()` makes the solid its own oracle: on a closed
+	2-manifold parity cannot depend on where the ray is aimed, so any direction dependence *is* a
+	defect, with no reference shape involved. Over the whole Phase 0 corpus, every `Reliable` part
+	has **zero** direction disagreements in ~11k points and every part that disagrees is one the
+	closure check already rejects; and of the 55 points where the fixed direction disagrees with the
+	oracle, **not one is wrong in every direction**. A gap's shadow belongs to the *direction*, not
+	to the point. So `Reliable` solids keep the single shot (1.0-1.5x) and unreliable ones vote over
+	five golden-spiral directions (2.9-4.7x). Use `ContainsAlongDirection` for the next diagnosis
+	too — it is the cheapest oracle in the codebase.
+
+	**Two corrections to `CodeReview_Fable.md`**, both recorded there: **K7 does not hold** (a face
+	that fails to build is not silently dropped on any production path — the loader rejects the
+	whole file and the generated macro throws), and the shadow of a gap is escapable rather than
+	lost. Neither was "fixed"; both were pinned by tests, in the spirit of the review's own S6
+	correction.
+
+	**New in the test suite:** the **concave fixture the review found missing** — an L-shaped prism
+	with a genuine reflex edge, the only configuration where a ray can touch the boundary from
+	inside and stay inside — carrying the full sweep battery; a persistence round trip over every
+	surface family and both trim flavours; and regression tests for the boundary policy, edge
+	grazes, unclamped B-spline endpoints and the full-turn trim rejection.
+
+	**Where to pick up, in order.**
+	1. **Phase 1 item 4** (the only Phase 1 work left): per-domain metrics (angular <-> length via
+	   radius) in kernel *and* IO (K3/S10), sidecar v2 carrying the model tolerance, and a closure
+	   criterion matched at the topology level with a quantitative gap metric (K9/S8) so that
+	   "closed" becomes achievable and meaningful. **K5 belongs with it** — a 1e-9 boundary band
+	   tested against a ~1e-5 polyline needs exactly the same metric, and doing it separately means
+	   building the metric twice.
+	2. **Diagnose `BucketLink2` before anything else in Phase 2.** It is the one Bagger part that is
+	   **navigable** and still has 24 *missed* crossings in `distout` (48 in `distin`, 6.3% capacity
+	   drift). Every other failure is explained by an open surface set; this one is not, and nothing
+	   in Phase 1 moved it. Probe it the way item 1 was probed — evidence, then theory.
+	3. **K4 and K6** remain open and untouched (degenerate-chord recursion; cancellation in the
+	   naive quadratic formula plus absolute, scale-dependent tolerances in the cone and torus
+	   branches). K6 is still a live suspect for distance-query residue.
+	4. Only then Phase 2 (adjacency-based exact trims), which is what the remaining distance and
+	   capacity columns are actually made of.
+
+	**Traps that cost time here, worth carrying forward.** Put `$B/stage/lib:$B/stage/lib64` first
+	on `LD_LIBRARY_PATH` or `ctest` and the harness silently resolve stale installed libraries.
+	pythonOCC needs the alibuild python3.10, not the system 3.12 (`runOracleGate.py` sets this
+	itself). Never write generated artifacts into `scripts/geometry/STEP_examples/` — every run this
+	session used a scratch folder. And a ROOT macro is the wrong vehicle for a quick kernel probe on
+	this machine (cling trips over unrelated headers); compiling a 40-line `.cxx` against
+	`$B/stage/lib -lO2DetectorsBase` takes a minute and just works.
