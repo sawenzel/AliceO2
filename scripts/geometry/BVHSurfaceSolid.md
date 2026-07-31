@@ -1333,3 +1333,43 @@ matching `kWireJoinTolerance = 1e-5` (both looser than the `1e-9` boundary toler
 	estimated from the *turn angle* — a vertex's deviation from the chord joining its neighbours
 	calls a box corner 2.4 cm of noise. `maxGap` is reported next to that floor and should never
 	be quoted without it.
+- 2026-08-01 (second session of the day): **the four independent items NEXT.md offered, all four
+  done** — three landed as code, the fourth as a diagnosis that retired its own premise. Three
+  commits, each measured before and after against both oracle gates. Details in
+  [`TolerancePolicy.md`](TolerancePolicy.md) §11-§12 and
+  [`CodeReview_Fable.md`](CodeReview_Fable.md) §16-§19; headlines only here.
+	- **Item 1 — the direction-dependent point is K5, not K6.** The offending ray's third crossing
+	  sits 3.7e-6 cm inside the other cylinder, i.e. on a patch that survives past the Boolean seam;
+	  the roots are exact. Bisecting where each patch actually ends along the analytic seam of
+	  `cyl_cross_cyl`: **all 1440 sampled positions overhang, none undercuts**, worst 1.95e-5 cm,
+	  floor 1.00e-5 cm = `kBSplineFlatness` = `CurveWire::boundaryBand`, whose `Boundary` state
+	  `curveTrimContains` resolves as *inside the trim*. One-sided tie-break, one-sided sliver.
+	  Shipped §2.4's ambiguity band: `RayHit::onTrimBoundary`, set by the five `appendIntersections`
+	  that can produce a wire-trimmed hit from the `bool*` the classification already computed and
+	  every caller passed `nullptr` to; `Contains` re-shoots when a `Reliable` solid's single shot
+	  rests on one. Uniform 5e6 points: fires 48 times, changes 24, **corrects 24, breaks 0**,
+	  `Contains` 24 wrong → **0**. Aimed at the seam, 2e6 points: 453008 wrong → **0**. K6 loses its
+	  only reproducer and remains untouched.
+	- **Item 2 — capacity by Green's theorem.** For all four quadrics the divergence integrand
+	  depends on the first parameter only through `sin u`, `cos u` and `u`, so the antiderivative is
+	  elementary and the area integral collapses to a contour integral around the trim wire. Every
+	  closed part's capacity went to machine precision (`BucketLink2` 6.3e-2 → **1.0e-12**,
+	  `cyl_cross_cyl` 2.3e-4 → **1.8e-12**), and `CloseShape` got **3.7x to 14.9x** faster because
+	  16384 point-in-wire classifications per patch became a few hundred closed-form evaluations.
+	  What is left is not quadrature: the six parts still off at 1e-4 are exactly the six the closure
+	  check rejects, so capacity is now a *measure* of the closure defect.
+	- **Item 3 — the gate categorises its own rays.** `occtOracle.py` had emitted `originContains`
+	  per ray category since it was written; nobody consumed it. Now it decides, per ray, which TGeo
+	  entry point the candidate is asked. `BucketLink2` loses **all 78** of its distance
+	  disagreements — H1 confirmed from the gate side. A *gate* change; nothing in the kernel moved.
+	- **Item 4 — scoped, and the premise did not survive.** No face is missing on any of the 21
+	  parts. On `BoomCylinderInner` the two faces of the junction carry trims that are the *same
+	  curve* (Hausdorff 2.4e-7 cm, each on the other's carrier to 4e-8, both 3.837 cm — which is
+	  exactly the unmatched rim length). Sweeping the rim epsilon 1e-8 → 1e-4 changes no verdict and
+	  moves `maxGap` not at all, because `maxGap` has no dependence on it: it is the distance from a
+	  chord to the nearest chord of a *different face*, not the separation of two faces at a seam.
+	  §9.1's inference is corrected in place. The defect is in rim extraction or pairing.
+	- **Gate: fixtures 6/9 → 8/9, Bagger 4/12 → 5/12; `ctest` green at 59 cases, from 57.** And the
+	  clarifying result: **every part that now passes is navigable and every part that fails is not**,
+	  on both corpora. The gate has collapsed onto the closure question alone.
+
