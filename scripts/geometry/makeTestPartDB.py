@@ -12,10 +12,24 @@ indexes the paired artifacts (a part enters the database only when both the side
 exist; the BREP is indexed as `"brep"` when present and omitted otherwise, so a database built
 before --dump-brep existed still loads) into a single `manifest.json` that the harness reads.
 
-A fourth, optional artifact is indexed the same way: `shape_<VOL>_<LID>.root`, one ROOT-serialised
-TGeoShape under the key `"shape"`, in cm and in the part's local frame. Nothing writes it today --
-it is the hand-over format for the planned CSG emitter -- but the harness scores it side by side
-with the other two representations whenever it is present.
+A fourth artifact is indexed the same way: `shape_<VOL>_<LID>.root`, one ROOT-serialised TGeoShape
+under the key `"shape"`, in cm and in the part's local frame. The CSG emitter writes it under
+`--csg auto` (the default here), and the harness scores it side by side with the other two
+representations.
+
+The cascade decision, and why it is in the manifest
+---------------------------------------------------
+`--csg auto` makes the converter run its production cascade -- CSG, else exact surfaces, else a
+tessellated mesh -- and record the per-part choice in `csg_report.json`. This script copies that
+choice into each part's `"shipped"` block in `manifest.json`, so the gate can compute its verdict
+on the representation the part *actually ships in* without re-deriving the decision and without
+being able to choose it. It is a copy of the converter's statement, not a judgement of this
+script's own; `"decidedBy"` records which.
+
+Leaf solids with no exact sidecar (Bagger's `Bucket`) cannot enter `"parts"` -- the harness's
+sample generator hangs off the surface solid -- and used to be silently missing, so a 13-solid
+model produced a 12-part scorecard with nothing saying so. They are now listed under
+`"unscoredParts"`, which the C++ harness ignores and `runOracleGate.py` reports.
 
 Usage:
   python3 makeTestPartDB.py --output <db-dir>
@@ -97,7 +111,8 @@ def _read_facets_summary(path: Path):
     return n_tri, bbox_min, bbox_max
 
 
-def _convert_model(model_path: Path, out_dir: Path, skip_existing: bool, force: bool):
+def _convert_model(model_path: Path, out_dir: Path, skip_existing: bool, force: bool,
+                   csg_mode: str = "auto"):
     report_path = out_dir / "surface_report.json"
 
     if out_dir.exists() and any(out_dir.iterdir()):
@@ -124,12 +139,128 @@ def _convert_model(model_path: Path, out_dir: Path, skip_existing: bool, force: 
         "--output-folder", str(out_dir),
         "-o", "geom.C",
     ]
+    # The converter's production cascade is CSG -> exact surfaces -> tessellated. Until now this
+    # script ran only the last two tiers, so the database never contained the representation a
+    # CSG-carried part actually ships in and the gate could not have gated it even in principle.
+    # `--csg auto` makes the database describe what the converter would really build; `off`
+    # reproduces the pre-cascade database exactly.
+    if csg_mode != "off":
+        cmd += ["--csg", csg_mode]
     print(f"  running: {' '.join(cmd)}")
     subprocess.run(cmd, check=True)
 
     if not report_path.exists():
         raise RuntimeError(f"{model_path}: converter did not produce {report_path}")
     return json.loads(report_path.read_text()), cmd
+
+
+# The tier the converter's cascade chose, expressed as the name `gate.json` gives that
+# representation. The gate scores three representations side by side and calls them `surface`,
+# `mesh` and `shape`; `csg_report.json` calls the tiers `csg`, `surface` and `mesh`. This is the
+# only place the two vocabularies meet.
+_TIER_TO_REPRESENTATION = {"csg": "shape", "surface": "surface", "mesh": "mesh"}
+
+
+def _read_cascade(out_dir: Path):
+    """Read the converter's own cascade decision, per leaf solid, from `csg_report.json`.
+
+    This is the *converter's* record of what it dispatched each leaf solid to in `geom.C` -- not a
+    re-derivation, and deliberately not a choice made by whoever consumes it. Returning it keyed by
+    the artifact stem (`<VOLNAME>_<LID>`) lets the manifest carry it per part.
+
+    Returns `(by_suffix, by_lid, meta)`; `meta` is None when the converter ran without `--csg`, in
+    which case the cascade is the older two-tier one and is recovered from artifact presence by
+    the caller.
+    """
+    path = out_dir / "csg_report.json"
+    if not path.exists():
+        return {}, {}, None
+    doc = json.loads(path.read_text())
+    by_suffix, by_lid = {}, {}
+    for row in doc.get("parts", []):
+        entry = dict(row)
+        entry["source"] = str(path.resolve())
+        if row.get("part"):
+            by_suffix[row["part"]] = entry
+        if row.get("lid"):
+            by_lid[row["lid"]] = entry
+    meta = {"path": str(path.resolve()), "tiers": doc.get("tiers", {}),
+            "nLeafSolids": doc.get("nLeafSolids")}
+    return by_suffix, by_lid, meta
+
+
+def _shipped_entry(suffix: str, lid, cascade_by_suffix: dict, cascade_by_lid: dict,
+                   cascade_meta: dict, out_dir: Path):
+    """What representation this part ships in, and where that statement came from.
+
+    Read from the converter's cascade decision and nothing else. It is emphatically *not* derived
+    from which representation scores best against the oracle: a gate that picked the best-scoring
+    column would pass a part because some representation it does not use happens to be clean, and
+    could never report a bad conversion choice.
+    """
+    row = cascade_by_suffix.get(suffix)
+    if row is None and lid is not None:
+        row = cascade_by_lid.get(lid)
+    if row is not None:
+        tier = row.get("representation", "mesh")
+        entry = {
+            "representation": _TIER_TO_REPRESENTATION.get(tier, tier),
+            "tier": tier,
+            "decidedBy": "csg_report.json (converter cascade)",
+            "source": row.get("source"),
+            "evidence": row.get("evidence", {}),
+        }
+        if row.get("shapeDeferred"):
+            entry["shapeDeferred"] = True
+        return entry
+    # No cascade report: the converter ran without --csg, so its cascade is the older
+    # exact-surfaces -> tessellated one and a part in this database has a sidecar by construction.
+    return {
+        "representation": "surface" if (out_dir / f"surfaces_{suffix}.bin").exists() else "mesh",
+        "tier": "surface" if (out_dir / f"surfaces_{suffix}.bin").exists() else "mesh",
+        "decidedBy": "artifact presence (converter ran without --csg)",
+        "source": str((out_dir / "surface_report.json").resolve()),
+        "evidence": {},
+    }
+
+
+def _unscored_leaf_solids(slug: str, out_dir: Path, report: dict, indexed_suffixes: set,
+                          cascade_by_lid: dict):
+    """Leaf solids the model has that never enter the part database.
+
+    A leaf solid with no exact sidecar (Bagger's `Bucket`) cannot be scored by the harness, whose
+    sample generator and reference both hang off the surface solid. Until now such a part was
+    simply *absent*: the gate scored 12 parts of a 13-solid model and nothing in the output said
+    so. Recording them here makes the shortfall a reported number instead of a silence.
+    """
+    missing = []
+    for lid, info in report.get("volumes", {}).items():
+        name = info.get("name") or ""
+        volname = _sanitize_filename(name) if name else "vol"
+        suffix = f"{volname}_{_sanitize_filename(lid)}"
+        if suffix in indexed_suffixes:
+            continue
+        row = cascade_by_lid.get(lid, {})
+        tier = row.get("representation", "mesh")
+        missing.append({
+            "id": f"{slug}/{suffix}",
+            "volume": name,
+            "lid": lid,
+            "nFaces": info.get("n_faces"),
+            "eligible": info.get("eligible"),
+            "shipped": {
+                "representation": _TIER_TO_REPRESENTATION.get(tier, tier),
+                "tier": tier,
+                "decidedBy": ("csg_report.json (converter cascade)" if row
+                              else "artifact presence (no exact sidecar was written)"),
+                "source": row.get("source", str((out_dir / "surface_report.json").resolve())),
+                "evidence": row.get("evidence", {}),
+            },
+            "reason": "no surfaces_*.bin sidecar: the harness cannot score this part",
+            "facets": (str(out_dir / f"facets_{suffix}.bin")
+                       if (out_dir / f"facets_{suffix}.bin").exists() else None),
+        })
+    return missing
 
 
 def _index_parts(model_name: str, slug: str, out_dir: Path, report: dict):
@@ -142,8 +273,11 @@ def _index_parts(model_name: str, slug: str, out_dir: Path, report: dict):
         lidname = _sanitize_filename(lid)
         suffix_to_lid[f"{volname}_{lidname}"] = (lid, name)
 
+    cascade_by_suffix, cascade_by_lid, cascade_meta = _read_cascade(out_dir)
+
     parts = []
     warnings = []
+    indexed_suffixes = set()
     for surf_path in sorted(out_dir.glob("surfaces_*.bin")):
         suffix = surf_path.name[len("surfaces_"):-len(".bin")]
         facet_path = out_dir / f"facets_{suffix}.bin"
@@ -178,18 +312,32 @@ def _index_parts(model_name: str, slug: str, out_dir: Path, report: dict):
         shape_path = out_dir / f"shape_{suffix}.root"
         if shape_path.exists():
             part["shape"] = str(shape_path)
+        # Which of those representations the converter actually dispatched this part to. The gate
+        # computes its verdict on this one; see Stream_I_Verdict.md.
+        part["shipped"] = _shipped_entry(suffix, lid, cascade_by_suffix, cascade_by_lid,
+                                         cascade_meta, out_dir)
+        if part["shipped"]["representation"] == "shape" and "shape" not in part:
+            warnings.append(f"{surf_path.name}: cascade says CSG but no shape_{suffix}.root exists")
         parts.append(part)
-    return parts, warnings
+        indexed_suffixes.add(suffix)
+    unscored = _unscored_leaf_solids(slug, out_dir, report, indexed_suffixes, cascade_by_lid)
+    return parts, warnings, unscored, cascade_meta
 
 
-def build_db(models, output: Path, skip_existing: bool, force: bool):
+def build_db(models, output: Path, skip_existing: bool, force: bool, csg_mode: str = "auto"):
     output.mkdir(parents=True, exist_ok=True)
     manifest = {
         "version": 1,
         "generated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "output_dir": str(output.resolve()),
+        "csg_mode": csg_mode,
         "models": [],
         "parts": [],
+        # Leaf solids the model has that this database cannot hold, with the representation they
+        # nonetheless ship in. Ignored by the C++ harness (which reads only "parts"); read by
+        # runOracleGate.py so that "12 parts scored" is never printed for a 13-solid model without
+        # the 13 next to it.
+        "unscoredParts": [],
     }
 
     for model_arg in models:
@@ -200,13 +348,14 @@ def build_db(models, output: Path, skip_existing: bool, force: bool):
         out_dir = output / slug
         print(f"[{slug}] {model_path}")
 
-        report, cmd = _convert_model(model_path, out_dir, skip_existing, force)
-        parts, warnings = _index_parts(model_path.name, slug, out_dir, report)
+        report, cmd = _convert_model(model_path, out_dir, skip_existing, force, csg_mode)
+        parts, warnings, unscored, cascade_meta = _index_parts(
+            model_path.name, slug, out_dir, report)
         for w in warnings:
             print(f"  [warn] {w}")
 
         summary = report.get("summary", {})
-        manifest["models"].append({
+        model_entry = {
             "model": model_path.name,
             "model_path": str(model_path),
             "slug": slug,
@@ -216,11 +365,25 @@ def build_db(models, output: Path, skip_existing: bool, force: bool):
             "n_volumes": summary.get("n_volumes"),
             "n_eligible": summary.get("n_eligible"),
             "n_paired": len(parts),
+            "n_unscored": len(unscored),
             "warnings": warnings,
-        })
+        }
+        if cascade_meta:
+            model_entry["csg_report"] = cascade_meta["path"]
+            model_entry["cascade_tiers"] = cascade_meta["tiers"]
+            model_entry["n_leaf_solids"] = cascade_meta["nLeafSolids"]
+        manifest["models"].append(model_entry)
         manifest["parts"].extend(parts)
+        manifest["unscoredParts"].extend(unscored)
+        tier_counts = {}
+        for part in parts:
+            key = part["shipped"]["representation"]
+            tier_counts[key] = tier_counts.get(key, 0) + 1
         print(f"  -> {len(parts)} parts paired (of {summary.get('n_eligible')} exact-eligible / "
               f"{summary.get('n_volumes')} total volumes)")
+        print(f"     shipped representation: "
+              + ", ".join(f"{k}={v}" for k, v in sorted(tier_counts.items()))
+              + (f"; {len(unscored)} leaf solid(s) not scoreable" if unscored else ""))
 
     manifest_path = output / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=1))
@@ -239,9 +402,15 @@ def main():
                     help="Reuse a model's output directory if already converted, re-indexing only.")
     ap.add_argument("--force", action="store_true",
                     help="Delete and regenerate a model's output directory even if it exists.")
+    ap.add_argument("--csg", default="auto", choices=["off", "auto", "required"],
+                    help="Converter CSG mode (default: %(default)s). 'auto' runs the production "
+                         "cascade CSG -> exact surfaces -> tessellated and records the per-part "
+                         "choice in csg_report.json, which is what the gate reads to decide which "
+                         "representation each part's verdict is computed on. 'off' reproduces the "
+                         "pre-cascade database.")
     args = ap.parse_args()
 
-    build_db(args.models, Path(args.output), args.skip_existing, args.force)
+    build_db(args.models, Path(args.output), args.skip_existing, args.force, args.csg)
 
 
 if __name__ == "__main__":
