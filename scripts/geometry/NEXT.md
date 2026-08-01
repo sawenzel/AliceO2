@@ -17,7 +17,7 @@ what is missing"*. Start there. This file is only the hand-over on top of it.
 
 | | |
 | --- | --- |
-| `ctest -R BVHSurfaceSolid` | **86 cases**, green |
+| `ctest -R BVHSurfaceSolid` | **91 cases**, green |
 | ladder fixtures | **9/9 scored** — of **10** leaf solids; `oblique_cut_cyl` has no sidecar and never has |
 | `Bagger.step` | **12/12 shipped**, 9/12 surface, 1 unscored (`Bucket`, ships as mesh) |
 | unexplained oracle disagreements | **0/0/0/0** on `surface`, both corpora; **0/0/0/0** on `shape` |
@@ -48,25 +48,19 @@ every CSG part exact (`dV_sym = 0`) and oracle-clean. That was the MVP and it is
 
 ## Open, in the order I would take them
 
-1. **The quartic guards — now the top item, and worse than it looked.** `solveQuarticReal`
-   compares quantities of dimension **L²** and **L³** against `kTolerance`, a **length** (1e-9 cm).
-   The ALICE3 diagnosis reduced a real failure to one call on real, **unscaled** geometry:
-   `solveQuarticReal(1.0, -1501.7280000044018, 845808.25396968238, -211752288.545858,
-   19882619385.616932)` returns **0 roots** where two genuine ones exist at 375.3392298 and
-   375.5247703. A biquadratic whose `termQ` cancels to −5.96e-08 instead of 0 fails the absolute
-   guard, is misrouted to the resolvent branch, and that resolvent (7.1e-15) fails its own absolute
-   guard. **The trigger is ray-distance / feature-size — 375 cm against a 0.1 cm tube — not model
-   scale**, so it fires whenever a ray travels far relative to what it hits. That is exactly
-   assembly-level transport. Five-line reproducer ready; fix all three guards dimensionally.
-2. **A face-geometry gate column.** The ALICE3 diagnosis produced the criterion
+1. **A face-geometry gate column.** The ALICE3 diagnosis produced the criterion
    `Stream_F_EdgeIdentity.md` says edge identity lacks: **no face's outward normal may be
-   antiparallel to the source face's**. It caught a defect that closure, edge identity and
-   `Capacity()`-free sampling all missed. It is not yet a harness flag or a gate column; it should
-   be both.
+   antiparallel to the source face's**. It caught a defect that closure, edge identity and the
+   sampling gate all missed — three parts read `reliable` with nine inward-pointing faces.
+   **Closure and edge identity are sign-blind.** It is not yet a harness flag or a gate column;
+   it should be both.
+2. **`compareGateRuns.py` is broken** — `TypeError` on a null leaf (the CSG parts'
+   `capacityRelativeDeviation`), *including in its own `--self-test`*. It is the project's declared
+   instrument for "diff columns, not verdicts". Small, and it should not stay broken.
 
-   *(The ALICE3 defect itself is diagnosed and its dominant mechanism fixed — see
-   `Stream_L_ALICE3Defect.md`. LOST 418 → 14, sense 236 → 0, parity 336 → 0, 17/18 parts clean.
-   The residual 14 is item 1.)*
+   *(The ALICE3 transport defect and the quartic guards are both fixed and verified — ALICE3 is
+   **13822/13822 rays identical to OpenCascade, 18/18 parts clean**, every robustness counter zero
+   in both stepping modes. `Stream_L_ALICE3Defect.md`, `Stream_M_Quartic.md`.)*
 3. **Tier 0** — decode the NURBS-encoded quadrics. Takes ALICE3 quadric-only solids **15/55 →
    36/55**, `as1-oc-214` **0/5 → 5/5**. Helps the exact path and the CSG path equally, because it
    changes what a solid *is* before either looks at it. Highest-value coverage item.

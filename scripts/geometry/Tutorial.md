@@ -261,37 +261,40 @@ Caveat that must always be quoted with the verdict: identity certifies that the 
 *topology* survived conversion. It does **not** certify each face's geometry — a mis-trimmed face
 still reads closed.
 
-### 5.5 Scale and position robustness — measured in wave 1, one real bug
+### 5.5 Scale and position robustness — the quartic guards, found and fixed
 
 - **Position-independent: yes.** The whole ladder at (0, 0, 400) cm is column-identical.
-- **Scale-independent: no.** At ×0.1 the torus fixture starts disagreeing with the oracle.
+- **Scale-independent: now yes.** It was not: `solveQuarticReal` guarded branches of dimension
+  **L²** and **L³** with `kTolerance`, **a length** (1e-9 cm). Three guards shared the defect.
 
-Cause: `solveQuarticReal` guards its branches with `kTolerance` (**1e-9 cm, a length**) against
-quantities of dimension **L²** and **L³**. Three guards share the defect. Consequences, both
-confirmed on this branch:
-- the resolvent guard fails ⇒ **the ray silently misses** a torus it does cross;
-- the `termQ` guard misroutes an asymmetric quartic into the biquadratic branch ⇒ it returns
-  **two confidently wrong roots** instead of four right ones (worse than a miss — a miss at least
-  leaves a visible gap).
+Two failure modes, both confirmed on real geometry: the resolvent guard failed and **a ray
+silently missed a torus it does cross**; the `termQ` guard misrouted an asymmetric quartic into the
+biquadratic branch — which *assumes* `termQ = 0` — and returned **two confidently wrong roots
+instead of four right ones**, which is worse than a miss because a miss leaves a visible gap.
 
-**How much should you care? More than this section originally said.** It was written as a
-small-geometry effect. The ALICE3 diagnosis (§5.7) then reduced a real failure to a single call on
-real, **unscaled** geometry:
+**It was never only a small-geometry effect.** The sharpest case came from *unscaled* ALICE3:
+`solveQuarticReal(1.0, -1501.728…, 845808.253…, -211752288.545…, 19882619385.616…)` returned **0
+roots** where two genuine ones sit at 375.3392298 and 375.5247703. The trigger is **ray distance
+over feature size** — 375 cm against a 0.1 cm tube — not the model's scale, so it fires wherever a
+ray travels far relative to what it hits.
 
-```
-solveQuarticReal(1.0, -1501.7280000044018, 845808.25396968238,
-                 -211752288.545858, 19882619385.616932)   ->  0 roots
-```
-where two genuine roots exist at 375.3392298 and 375.5247703 (the quartic evaluates to ~1.9e-06
-there, against coefficients of order 1e10 — numerically exact). It is a biquadratic whose `termQ`
-cancels to **−5.96e-08** rather than 0, fails the **absolute** `|termQ| ≤ 1e-9` test, is misrouted
-to the resolvent branch, whose resolvent is 7.1e-15 and fails *its* absolute guard. No roots.
+**The fix removes the dimensions rather than re-choosing the constant.** Substitute `x = scale·y`
+with `scale` the Cauchy root bound **rounded up to a power of two**; every coefficient then lies in
+[−1, 1] and the guards become dimensionless. The power of two is load-bearing: scaling by 2^k is
+exact, so every intermediate is the old one with its exponent shifted and every rounding is the
+same rounding — **the normalisation cannot change an answer, only the guards can**, which makes
+inertness structural rather than argued. Two guards then needed no constant at all. See
+`Stream_M_Quartic.md` and `TolerancePolicy.md`.
 
-**The trigger is the ratio of ray distance to feature size — 375 cm to a 0.1 cm tube — not the
-model's scale.** So this is not "small parts only": it fires whenever a ray travels far relative
-to the feature it hits, which is precisely what assembly-level transport does. Bagger has 2
-toroidal faces of 288 and ALICE3 has 350. Fix the guards before assembly transport, and before
-trusting any torus at distance.
+Measured, end to end: the ×0.1 torus fixture **LOST 4 → 0, parity 2 → 0**; the ×1 ladder parity
+audit **2 → 0**; ALICE3 **LOST 14 → 0, unterminated 2 → 0, 17/18 → 18/18 parts clean**. Both
+oracle gates bit-identical on Bagger (0 of 15140 fields moved, including its 2 toroidal faces).
+
+**Still open, same defect class, in the same file:** `sameIntersection`'s `max(1., …)`, not yet
+implicated by any measurement; and `kBSplineFlatness`, whose trim-sliver family is the ×0.1
+ladder's 29 remaining direction splits. And the **depression step is the real conditioning
+ceiling**, unchanged by this work: a relative root spread of 2e-04 returns no roots at all, before
+and after.
 
 ### 5.6 Tessellated fallback — works, and is what will not scale
 
