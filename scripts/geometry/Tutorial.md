@@ -64,6 +64,8 @@ And, alongside it, the thing that makes any of this trustworthy:
 | `surfaces_<part>.bin` | converter, `--exact-surfaces` | the exact sidecar: surface records + trim wires + (v3) edge identity |
 | `facets_<part>.bin` | converter, `--mesh` | `uint32 nTriangles` then 9 × float32 per triangle |
 | `brep_<part>.brep` | converter, `--dump-brep` | the OCCT solid the sidecar was extracted from — the oracle's input, **not** used at run time |
+| `shape_<part>.root` | converter, `--csg` | one object inheriting `TGeoShape` under key `shape`, in cm, in the part's local frame → the CSG representation |
+| `csg_<part>.json`, `csg_report.json` | converter, `--csg` | the recognised description and its acceptance evidence, written whether or not the part was accepted |
 | `geom.C` | converter | ROOT macro exporting `get_builder_hook_unchecked()`; loads the binaries relative to itself |
 | `surface_report.json` | converter, `--surface-report` | per-face extraction result and why anything failed |
 | `manifest.json` | `makeTestPartDB.py` | pairs each part's sidecar with its mesh — the harness's index |
