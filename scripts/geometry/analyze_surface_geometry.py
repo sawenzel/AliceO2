@@ -37,9 +37,13 @@ no iteration is needed:
     cone     : N_i . (P_i - A) = 0 is LINEAR in the apex A; solve, then require a constant
                half-angle about the mean ruling direction
 
-Residuals are relative to the patch size, so "exact" means machine precision. This is deliberate:
-an "almost cylinder" that is really free-form must stay free-form, otherwise a converter acting on
-this classification would silently change the geometry it exists to represent exactly.
+Every candidate is scored by ONE quantity -- the largest distance from a sampled point to the
+candidate surface, relative to the patch size -- so "exact" means machine precision. This is
+deliberate: an "almost cylinder" that is really free-form must stay free-form, otherwise a
+converter acting on this classification would silently change the geometry it exists to represent
+exactly. It is also load-bearing rather than tidy: until 2026-08-02 the plane and the cone were
+scored by an *angle* instead, and on ALICE3 that accepted 184 faces as cones that miss their own
+surface by up to 79 cm (Stream_K_Tier0.md sec 3).
 
 Known limitation: there is no torus test yet, so torus patches stored as NURBS are reported as
 free-form. Every "free-form" count is therefore an UPPER bound and every analytic count a LOWER
@@ -47,6 +51,9 @@ bound.
 
 Note: OCCT's own BRepLib_CanonicalRecognition (7.7+) is not exposed in the pythonOCC v7.9.3 build
 used here (ImportError from OCC.Core.BRepLib), which is why this is a standalone numeric recognizer.
+`ShapeAnalysis_CanonicalRecognition` *is* exposed, however, and `csg/census.py` uses it; the two
+recognisers agree face for face on ALICE3's cylinders, cones and spheres once this one's acceptance
+is a measured gap (Stream_K_Tier0.md sec 3.1), which is the strongest available cross-check on both.
 
 Trim curves
 -----------
@@ -125,7 +132,10 @@ TOL_EXACT = 1e-9
 # A deliberately looser bound, reported alongside so the gap between "exact" and "close" is visible.
 TOL_LOOSE = 1e-6
 
-# Normals within this of parallel count as a plane.
+# Retired: the plane test used to be "normals within this of parallel", an ANGLE compared against
+# the same bound as the distance-valued residuals of the other models. It is now the measured
+# distance to the plane, like every other candidate (see `classify_surface`). Kept only because
+# older JSON reports quote it.
 TOL_PLANE_NORMALS = 1e-12
 # Max |N . axis| for the normal field to count as coplanar (cylinder candidate).
 TOL_CYLINDER_COPLANAR = 1e-9
@@ -156,16 +166,62 @@ def sample_surface(adaptor, n=9):
     return np.array(points), np.array(normals)
 
 
+def surface_gap(kind, model, P):
+    """The largest distance from a sampled surface point to the candidate surface, in CAD units.
+
+    ONE quantity for every candidate kind. See `classify_surface` for why that matters and
+    `scripts/geometry/Stream_K_Tier0.md` for what scoring them differently cost.
+    """
+    if kind == "plane":
+        n = np.asarray(model["normal"], dtype=float)
+        n = n / np.linalg.norm(n)
+        return float(np.abs((P - np.asarray(model["point"], dtype=float)) @ n).max())
+    if kind == "sphere":
+        return float(np.abs(np.linalg.norm(P - model["centre"], axis=1) - model["radius"]).max())
+    if kind == "cylinder":
+        a = np.asarray(model["axis"], dtype=float)
+        a = a / np.linalg.norm(a)
+        radial = P - model["origin"]
+        radial = radial - np.outer(radial @ a, a)
+        return float(np.abs(np.linalg.norm(radial, axis=1) - model["radius"]).max())
+    if kind == "cone":
+        a = np.asarray(model["axis"], dtype=float)
+        a = a / np.linalg.norm(a)
+        rel = P - model["apex"]
+        h = rel @ a
+        r = np.linalg.norm(rel - np.outer(h, a), axis=1)
+        half = model["half_angle"]
+        return float(np.abs(r * math.cos(half) - h * math.sin(half)).max())
+    return float("inf")
+
+
 def classify_surface(P, N):
-    """Return (model_name, relative_residual) for the smallest model that fits the samples."""
+    """Return (model_name, relative_gap) for the smallest model that fits the samples.
+
+    Every candidate is scored by exactly one quantity: `surface_gap` divided by the sample
+    bounding-box diagonal. The linear solves *propose* a model -- that is what they are good at,
+    and no initial guess is needed -- but none of them decides, because their own residuals are
+    not the same quantity: the sphere's and the cylinder's are distances, the plane's and the
+    cone's were angles. Measured on ALICE3, scoring the cone by an angle accepted 184 faces whose
+    recognized cone misses the real surface by up to 79 cm, at an internal residual of 6.7e-10
+    against a 1e-9 bound: on a patch whose normal field is nearly rank-2 (a swept free-form
+    profile), the least-squares apex runs off to 1e11 patch diagonals, the half-angle collapses to
+    zero, and both cone tests then pass vacuously. `Stream_K_Tier0.md` sec 3 has the anatomy;
+    `O2_CADtoTGeo.py --self-test` has the closed-form reproducer and the regression guard.
+    """
     scale = np.linalg.norm(P.max(axis=0) - P.min(axis=0))
     if scale < 1e-12:
         return "degenerate", 0.0
 
+    def score(kind, model):
+        gap = surface_gap(kind, model, P)
+        return gap / scale if math.isfinite(gap) else float(np.inf)
+
     # --- plane (3 parameters): all unit normals parallel
-    dev = np.abs(np.abs(N @ N[0]) - 1.0).max()
-    if dev < TOL_PLANE_NORMALS:
-        return "plane", float(dev)
+    plane = {"normal": N[0] / np.linalg.norm(N[0]), "point": P[0]}
+    plane_res = score("plane", plane)
+    if plane_res < TOL_EXACT:
+        return "plane", float(plane_res)
 
     best = ("freeform", float(np.inf))
 
@@ -177,8 +233,7 @@ def classify_surface(P, N):
         A[3 * i:3 * i + 3, 3] = N[i]
         b[3 * i:3 * i + 3] = P[i]
     sol, *_ = np.linalg.lstsq(A, b, rcond=None)
-    centre, radius = sol[:3], sol[3]
-    res = float(np.abs(np.linalg.norm(P - centre, axis=1) - abs(radius)).max() / scale)
+    res = score("sphere", {"centre": sol[:3], "radius": abs(sol[3])})
     if res < best[1]:
         best = ("sphere", res)
 
@@ -194,8 +249,8 @@ def classify_surface(P, N):
         cx, cy = -D / 2, -E / 2
         r2 = cx * cx + cy * cy - F
         if r2 > 0:
-            R = math.sqrt(r2)
-            res = float(np.abs(np.hypot(x - cx, y - cy) - R).max() / scale)
+            res = score("cylinder", {"axis": axis, "origin": cx * e1 + cy * e2,
+                                     "radius": math.sqrt(r2)})
             if res < best[1]:
                 best = ("cylinder", res)
 
@@ -206,14 +261,18 @@ def classify_surface(P, N):
     ok = dn > 1e-12
     if ok.sum() > 10:
         u = d[ok] / dn[ok, None]
-        res = float(np.abs(np.einsum('ij,ij->i', u, N[ok])).max())
-        _, _, Vt2 = np.linalg.svd(u - u.mean(axis=0), full_matrices=False)
+        mean_dir = u.mean(axis=0)
+        _, _, Vt2 = np.linalg.svd(u - mean_dir, full_matrices=False)
         ax2 = np.cross(Vt2[0], Vt2[1])
         n2 = np.linalg.norm(ax2)
-        if n2 > 1e-12:                       # constant half-angle about the ruling axis
-            res = max(res, float(np.abs(u @ (ax2 / n2)).std()))
-        if res < best[1]:
-            best = ("cone", res)
+        if n2 > 1e-12:                       # a ruling axis exists
+            ax2 = ax2 / n2
+            if np.dot(mean_dir, ax2) < 0.0:
+                ax2 = -ax2
+            half_angle = float(np.arccos(np.clip(np.abs(u @ ax2), -1.0, 1.0)).mean())
+            res = score("cone", {"axis": ax2, "apex": apex, "half_angle": half_angle})
+            if res < best[1]:
+                best = ("cone", res)
 
     return best
 

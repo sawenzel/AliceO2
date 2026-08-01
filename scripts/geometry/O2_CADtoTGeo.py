@@ -1613,10 +1613,22 @@ def _sample_surface_for_recognition(adaptor, umin: float, umax: float, vmin: flo
 
 def _recognize_analytic_surface(adaptor, uv_bounds) -> Optional[dict]:
     """Model-selection recognizer: plane (3 params) < sphere (4) < cylinder (5) < cone (6) <
-    free-form, trying each candidate and keeping the smallest relative residual. Accepts only a
+    free-form, trying each candidate and keeping the smallest *measured gap*. Accepts only a
     machine-precision fit (< `_RECOGNIZE_TOL_EXACT`); returns None otherwise (freeform / degenerate
     / unsampleable). All lengths in the returned frame are in *native* (unscaled) CAD units - the
     caller applies `scale_to_cm`.
+
+    **Every candidate is scored by exactly one quantity**, `_analytic_surface_gap` divided by the
+    sample bounding-box diagonal: how far the candidate surface actually is from the surface it
+    claims to be. The linear solves below still *propose* a model - that is what they are good at,
+    and no initial guess or iteration is needed - but none of them decides. This is not a style
+    choice: scoring the plane and the cone by an angle instead let 184 ALICE3 faces through as cones
+    that miss their own surface by up to 79 cm. `_analytic_surface_gap` records the measurement and
+    `Stream_K_Tier0.md` records the diagnosis; `--self-test` keeps it from coming back.
+
+    Note that a *proposal* may be numerically degenerate (a cone apex at 1e11 patch diagonals, from
+    a near-rank-2 normal field) without that being visible in the solve's own residual. The gap sees
+    it, so the degenerate proposals are simply left in and scored like any other.
     """
     umin, umax, vmin, vmax = uv_bounds
     P, N = _sample_surface_for_recognition(adaptor, umin, umax, vmin, vmax)
@@ -1626,13 +1638,25 @@ def _recognize_analytic_surface(adaptor, uv_bounds) -> Optional[dict]:
     if scale < 1e-12:
         return None
 
-    # --- plane (3): all unit normals parallel
-    dev = float(np.abs(np.abs(N @ N[0]) - 1.0).max())
-    if dev < 1e-12:
-        normal = N[0] / np.linalg.norm(N[0])
-        out = {"kind": "plane", "residual": dev, "normal": normal, "point": P[0], "P": P, "N": N}
-        out["gap"] = _analytic_surface_gap("plane", out, P)
-        out["gap_relative"] = out["gap"] / scale
+    def score(kind, model):
+        """The one criterion: the achieved gap, relative to the patch's own size."""
+        try:
+            gap = _analytic_surface_gap(kind, model, P)
+        except (ValueError, FloatingPointError):
+            return float("inf")
+        return gap / scale if math.isfinite(gap) else float("inf")
+
+    # --- plane (3): all unit normals parallel; the frame is the sampled normal itself
+    plane = {"normal": N[0] / np.linalg.norm(N[0]), "point": P[0]}
+    plane_res = score("plane", plane)
+    if plane_res < _RECOGNIZE_TOL_EXACT:
+        # Parsimony: the fewest-parameter model that is exact wins outright, as before. A patch
+        # flat to 1e-9 of its own diagonal is a plane for every purpose this converter has (a
+        # cylinder would need R > 1.2e8 x the patch size to look this flat).
+        out = {"kind": "plane", "residual": plane_res, "P": P, "N": N}
+        out.update(plane)
+        out["gap"] = plane_res * scale
+        out["gap_relative"] = plane_res
         return out
 
     best = ("freeform", float("inf"), {})
@@ -1645,10 +1669,10 @@ def _recognize_analytic_surface(adaptor, uv_bounds) -> Optional[dict]:
         A[3 * i:3 * i + 3, 3] = N[i]
         b[3 * i:3 * i + 3] = P[i]
     sol, *_ = np.linalg.lstsq(A, b, rcond=None)
-    centre, radius = sol[:3], abs(sol[3])
-    res = float(np.abs(np.linalg.norm(P - centre, axis=1) - radius).max() / scale)
+    sphere = {"centre": sol[:3], "radius": abs(sol[3])}
+    res = score("sphere", sphere)
     if res < best[1]:
-        best = ("sphere", res, {"centre": centre, "radius": radius})
+        best = ("sphere", res, sphere)
 
     # --- cylinder (5): normals coplanar; axis = smallest right singular vector of the normal field
     _, _, Vt = np.linalg.svd(N, full_matrices=False)
@@ -1662,11 +1686,11 @@ def _recognize_analytic_surface(adaptor, uv_bounds) -> Optional[dict]:
         cx, cy = -D / 2, -E / 2
         r2 = cx * cx + cy * cy - F
         if r2 > 0:
-            R = math.sqrt(r2)
-            res = float(np.abs(np.hypot(x - cx, y - cy) - R).max() / scale)
+            origin = cx * e1 + cy * e2  # a point on the axis (axial component is free)
+            cylinder = {"axis": axis, "refu": e1, "origin": origin, "radius": math.sqrt(r2)}
+            res = score("cylinder", cylinder)
             if res < best[1]:
-                origin = cx * e1 + cy * e2  # a point on the axis (axial component is free)
-                best = ("cylinder", res, {"axis": axis, "refu": e1, "origin": origin, "radius": R})
+                best = ("cylinder", res, cylinder)
 
     # --- cone (6): N_i . (P_i - A) = 0 is linear in the apex A
     apex, *_ = np.linalg.lstsq(N, np.einsum('ij,ij->i', N, P), rcond=None)
@@ -1675,30 +1699,30 @@ def _recognize_analytic_surface(adaptor, uv_bounds) -> Optional[dict]:
     ok = dn > 1e-12
     if ok.sum() > 10:
         u = d[ok] / dn[ok, None]
-        res = float(np.abs(np.einsum('ij,ij->i', u, N[ok])).max())
         mean_dir = u.mean(axis=0)
         _, _, Vt2 = np.linalg.svd(u - mean_dir, full_matrices=False)
         ax2 = np.cross(Vt2[0], Vt2[1])
         n2 = np.linalg.norm(ax2)
-        if n2 > 1e-12:  # constant half-angle about the ruling axis
+        if n2 > 1e-12:  # a ruling axis exists
             ax2 = ax2 / n2
             if np.dot(mean_dir, ax2) < 0.0:
                 ax2 = -ax2
-            res = max(res, float(np.abs(u @ ax2).std()))
-            if res < best[1]:
-                ref = u[0] - np.dot(u[0], ax2) * ax2
-                refn = np.linalg.norm(ref)
-                if refn > 1e-9:
-                    half_angle = float(np.arccos(np.clip(np.abs(u @ ax2), -1.0, 1.0)).mean())
-                    best = ("cone", res, {"axis": ax2, "apex": apex, "refu": ref / refn, "half_angle": half_angle})
+            ref = u[0] - np.dot(u[0], ax2) * ax2
+            refn = np.linalg.norm(ref)
+            if refn > 1e-9:
+                half_angle = float(np.arccos(np.clip(np.abs(u @ ax2), -1.0, 1.0)).mean())
+                cone = {"axis": ax2, "apex": apex, "refu": ref / refn, "half_angle": half_angle}
+                res = score("cone", cone)
+                if res < best[1]:
+                    best = ("cone", res, cone)
 
     kind, res, extra = best
     if res >= _RECOGNIZE_TOL_EXACT:
         return None
     out = {"kind": kind, "residual": res, "P": P, "N": N}
     out.update(extra)
-    out["gap"] = _analytic_surface_gap(kind, out, P)
-    out["gap_relative"] = out["gap"] / scale
+    out["gap"] = res * scale
+    out["gap_relative"] = res
     return out
 
 
