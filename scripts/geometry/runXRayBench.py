@@ -180,7 +180,9 @@ _ROBUST_COLUMNS = (
     ("nonAlternating", "nonAlt"),
     ("duplicateCrossings", "dupXing"),
     ("parityMismatchIntervals", "parity"),
+    ("parityMismatchNearBoundary", "parityNB"),
     ("boundaryWithoutTransition", "noTrans"),
+    ("originOutsideWorld", "outWorld"),
     ("originInside", "orgIn"),
 )
 
@@ -193,8 +195,13 @@ def print_robustness_table(report):
     print("  capHit    the iteration cap was reached          dupXing  two crossings within tolerance")
     print("  parity    Contains() at an interval midpoint contradicts the crossing list "
           "(the one check\n            independent of the stepping -- both modes alternate by "
-          "construction)")
+          "construction). parityNB\n            is the same event excused because the midpoint is "
+          "within the match tolerance of the\n            boundary, where neither side has a "
+          "defined answer.")
     print("  noTrans   mode (b): a boundary was crossed but the volume did not change")
+    print("  outWorld  mode (b): the ray origin was not in the navigator world -- a "
+          "MISCONFIGURATION of\n            this benchmark, never a geometry defect. Any non-zero "
+          "value invalidates the row.")
     head = (f"  {'part':<30} {'repr':<8} {'mode':<10} {'steps':>9} " +
             " ".join(f"{label:>8}" for _, label in _ROBUST_COLUMNS) + f" {'a-vs-b':>9}")
     print(head)
@@ -279,6 +286,19 @@ def main():
     parser.add_argument("--raster", type=int, default=48,
                         help="N x N rays per beam axis (default %(default)s)")
     parser.add_argument("--axes", default="xyz")
+    parser.add_argument("--beams", type=int, default=0,
+                        help="fire N Fibonacci-spiral beam directions instead of the axis beams. "
+                             "A parallel beam is DIRECTION-POOR -- three axes are three directions "
+                             "however many rays are fired -- and the torus quartic defect is "
+                             "invisible to them and visible to a fan. See Stream_J_XRay.md.")
+    parser.add_argument("--tilt", type=float, default=0.0,
+                        help="rotate every beam off its coordinate axis by this many degrees "
+                             "(default %(default)s). An axis-aligned beam is a very special family "
+                             "of ray/surface configurations; a tilted one is generic. Measured: "
+                             "the known torus quartic defect is INVISIBLE at tilt 0 and visible at "
+                             "tilt 12 -- see Stream_J_XRay.md.")
+    parser.add_argument("--representations", default=None,
+                        help="comma-separated subset of surface,mesh,shape")
     parser.add_argument("--margin", type=float, default=1.0e-3,
                         help="transverse padding of the raster window over the bounding box, cm")
     parser.add_argument("--parts", default=None, help="substring filter")
@@ -309,10 +329,14 @@ def main():
         parts = [p for p in parts if args.parts in p["id"] or args.parts in p.get("model", "")]
 
     extra = ["--parts", args.parts] if args.parts else []
+    if args.representations:
+        extra += ["--representations", args.representations]
     if not args.skip_oracle:
         ray_dir.mkdir(parents=True, exist_ok=True)
         run([benchmark, "--db", db_dir, "--dump-rays", ray_dir, "--raster", args.raster,
-             "--axes", args.axes, "--margin", args.margin, *extra], env=harness_env())
+             "--axes", args.axes, "--tilt", args.tilt, "--beams", args.beams,
+             "--margin", args.margin, *extra],
+            env=harness_env())
         run_oracle(parts, ray_dir)
     else:
         print(f"[2-3/4] reusing the crossing lists already in {ray_dir}")
