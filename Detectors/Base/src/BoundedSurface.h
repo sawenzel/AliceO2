@@ -882,14 +882,35 @@ inline void solveDepressedCubic(double coeffP, double coeffQ, std::vector<double
   }
 }
 
+/// Which of solveQuarticReal's branches produced the roots it returned.
+///
+/// Reported only so that a test can observe the *decision* rather than infer it from the roots:
+/// the two branches are correct on disjoint inputs, so "it returned the right roots" and "it took
+/// the right branch" are different statements and both have to be checked. Nothing in the kernel
+/// consults this, and passing a null pointer (the default) costs nothing.
+enum class QuarticBranch {
+  NotAQuartic, ///< the leading coefficient vanishes; no roots are produced
+  Biquadratic, ///< the depressed quartic's odd term is zero, so y^4 + p y^2 + r = 0 is solved directly
+  Resolvent    ///< Ferrari's general branch, through the resolvent cubic
+};
+
 /// Real roots of a4 x^4 + a3 x^3 + a2 x^2 + a1 x + a0 = 0 (requires a4 != 0), via Ferrari's
 /// method with a resolvent cubic, followed by a couple of Newton polishing steps against the
 /// original quartic. A tangential (double) root is deliberately returned as a near-equal pair so
 /// that crossing-parity callers can cluster and drop it (the same convention the quadric surfaces
 /// use with sameIntersection); a genuinely complex pair simply contributes no real root. Used by
 /// the toroidal surface, whose ray intersection is a quartic.
-inline std::vector<double> solveQuarticReal(double a4, double a3, double a2, double a1, double a0)
+///
+/// \a takenBranch, when not null, receives the branch that was taken; see QuarticBranch.
+inline std::vector<double> solveQuarticReal(double a4, double a3, double a2, double a1, double a0,
+                                            QuarticBranch* takenBranch = nullptr)
 {
+  const auto note = [takenBranch](QuarticBranch branch) {
+    if (takenBranch) {
+      *takenBranch = branch;
+    }
+  };
+  note(QuarticBranch::NotAQuartic);
   std::vector<double> roots;
   if (std::abs(a4) <= kTolerance) {
     return roots; // not a genuine quartic; the torus caller guarantees a4 = |dir|^4 > 0
@@ -914,6 +935,7 @@ inline std::vector<double> solveQuarticReal(double a4, double a3, double a2, dou
   };
 
   if (std::abs(termQ) <= kTolerance) {
+    note(QuarticBranch::Biquadratic);
     // biquadratic y^4 + p y^2 + r = 0
     const double discriminant = termP * termP - 4. * termR;
     if (discriminant >= 0.) {
@@ -927,6 +949,7 @@ inline std::vector<double> solveQuarticReal(double a4, double a3, double a2, dou
       }
     }
   } else {
+    note(QuarticBranch::Resolvent);
     // resolvent cubic m^3 + p m^2 + (p^2/4 - r) m - q^2/8 = 0; its largest real root is > 0
     const double cubicA2 = termP;
     const double cubicA1 = termP * termP / 4. - termR;
