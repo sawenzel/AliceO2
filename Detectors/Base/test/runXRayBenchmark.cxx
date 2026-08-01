@@ -1,0 +1,1526 @@
+// Copyright 2019-2026 CERN and copyright holders of ALICE O2.
+// See https://alice-o2.web.cern.ch/copyright for details of the copyright holders.
+// All rights not expressly granted are reserved.
+//
+// This software is distributed under the terms of the GNU General Public
+// License v3 (GPL Version 3), copied verbatim in the file "COPYING".
+//
+// In applying this license CERN does not waive the privileges and immunities
+// granted to it by virtue of its status as an Intergovernmental Organization
+// or submit itself to any jurisdiction.
+
+/// \file runXRayBenchmark.cxx
+/// \brief X-ray / geantino transport benchmark: ordered crossing lists, by stepping.
+///
+/// Built as `o2-bench-detectorsbase-xray`. Documented in scripts/geometry/Stream_J_XRay.md.
+///
+/// WHY THIS EXISTS, in one paragraph. Everything the oracle gate measures is a *single-shot*
+/// query: from a sampled point, how far to the surface. A transport loop is different in kind --
+/// step, land *on* the boundary, step again from there -- and that is where geometry navigation
+/// actually fails: zero-length steps, ping-ponging on a face, a particle that enters and never
+/// exits, a crossing found twice, a step that overshoots into the next volume. None of those can
+/// be expressed as a disagreement on `distout` from an interior sample, so the existing gate is
+/// structurally blind to all of them. This benchmark shoots a structured parallel-beam raster
+/// through a part and produces, per ray, the ORDERED CROSSING LIST -- the sequence of entry/exit
+/// distances -- by stepping, two independent ways, and compares the lists (not aggregates)
+/// against OpenCascade.
+///
+/// TWO STEPPING MODES, and the reason both exist:
+///   (a) `shape`  -- a direct shape-API loop: Contains() to establish the starting state, then
+///                   alternating DistFromOutside()/DistFromInside(), advancing the point, until
+///                   the ray leaves the raster window. Depends on nothing but the shape.
+///   (b) `nav`    -- the real TGeoNavigator: the part placed in a TGeoVolume inside a minimal
+///                   world, transported with FindNextBoundaryAndStep(). The production path.
+/// If (a) and (b) disagree, that isolates *the shape* from *the navigator* immediately; with only
+/// (b) one cannot tell which of the two lied. Both are always reported.
+///
+/// THREE-STAGE ROUND TRIP, mirroring the oracle gate:
+///   1. `--dump-rays D`      writes D/xrays_<part>.json: the raster window and every ray.
+///   2. `xrayOracle.py`      answers exactly those rays from the part's .brep, in OpenCascade,
+///                           into D/crossings_<part>.json.
+///   3. `--ref-crossings D`  steps both modes over the same rays and scores the lists.
+/// The rays are written and read rather than regenerated on both sides for the same reason the
+/// sample sets are: a comparison is only evidence if both sides answered the same question.
+///
+/// NOT REQUIRED: a tessellated mesh. The raster is structured and deterministic, so unlike
+/// `generateSamples()` nothing here rejection-samples through `O2Tessellated`. That is what makes
+/// this instrument runnable on a model whose meshing does not fit in memory.
+
+#include "DetectorsBase/O2SolidHarness.h"
+#include "DetectorsBase/O2BVHSurfaceSolid.h"
+#include "DetectorsBase/O2Tessellated.h"
+#include "DetectorsBase/O2SurfaceSolidIO.h"
+
+#include "TGeoBBox.h"
+#include "TGeoManager.h"
+#include "TGeoMaterial.h"
+#include "TGeoMedium.h"
+#include "TGeoNavigator.h"
+#include "TGeoNode.h"
+#include "TGeoSphere.h"
+#include "TGeoTube.h"
+#include "TGeoVolume.h"
+
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <array>
+#include <cctype>
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <fstream>
+#include <iostream>
+#include <memory>
+#include <set>
+#include <sstream>
+#include <string>
+#include <vector>
+
+using json = nlohmann::json;
+using namespace o2::base;
+using namespace o2::base::harness;
+
+namespace
+{
+
+// The xrays_/crossings_ JSON contract shared with scripts/geometry/xrayOracle.py. Bump on both
+// sides together; the oracle refuses a version it does not speak rather than guessing.
+constexpr int kXRayFormatVersion = 1;
+
+/// A single boundary crossing along a ray: the distance from the ray origin and whether the ray
+/// is entering (+1) or leaving (-1) the solid there.
+struct Crossing {
+  double t = 0.;
+  int kind = 0;
+};
+
+/// Everything a transport loop can do wrong that a single-shot distance query cannot express.
+/// Every counter here is a *count of events*, never a rate, so two runs can be added.
+struct Robustness {
+  long long rays = 0;
+  long long raysWithCrossings = 0;
+  long long crossings = 0;
+  long long steps = 0;
+  long long zeroLengthSteps = 0;      ///< a step at or below `zeroStep` (default 1e-9 cm)
+  long long nonAdvancingSteps = 0;    ///< the accumulated distance did not increase
+  long long unstickPushes = 0;        ///< a stalled step that had to be nudged to continue
+  long long iterationCapHits = 0;     ///< the loop hit `maxIter` without leaving the window
+  long long unterminated = 0;         ///< the ray ended INSIDE the solid: entered and never left
+  long long oddCrossingLists = 0;     ///< odd number of crossings (the same event, counted as the
+                                      ///< brief names it; equal to `unterminated` by construction
+                                      ///< in mode (a) and an independent number in mode (b))
+  long long nonAlternating = 0;       ///< two consecutive crossings of the same kind
+  long long duplicateCrossings = 0;   ///< two crossings closer together than the match tolerance
+  long long parityMismatchIntervals = 0; ///< Contains() at an interval midpoint contradicts the
+                                         ///< in/out state the crossing list implies. This is the
+                                         ///< one check that is INDEPENDENT of the stepping: the
+                                         ///< list alternates by construction in both modes, so
+                                         ///< without it "non-alternating" could never fire.
+  long long originInside = 0;          ///< a raster ray whose origin was not outside the solid
+  long long boundaryWithoutTransition = 0; ///< mode (b): a boundary was crossed but the volume did
+                                           ///< not change (a re-entry into the same volume)
+  double insideLength = 0.;            ///< summed inside-segment length, cm (the chord integral)
+  double seconds = 0.;
+};
+
+void addRobustness(Robustness& into, const Robustness& from)
+{
+  into.rays += from.rays;
+  into.raysWithCrossings += from.raysWithCrossings;
+  into.crossings += from.crossings;
+  into.steps += from.steps;
+  into.zeroLengthSteps += from.zeroLengthSteps;
+  into.nonAdvancingSteps += from.nonAdvancingSteps;
+  into.unstickPushes += from.unstickPushes;
+  into.iterationCapHits += from.iterationCapHits;
+  into.unterminated += from.unterminated;
+  into.oddCrossingLists += from.oddCrossingLists;
+  into.nonAlternating += from.nonAlternating;
+  into.duplicateCrossings += from.duplicateCrossings;
+  into.parityMismatchIntervals += from.parityMismatchIntervals;
+  into.originInside += from.originInside;
+  into.boundaryWithoutTransition += from.boundaryWithoutTransition;
+  into.insideLength += from.insideLength;
+  into.seconds += from.seconds;
+}
+
+json robustnessToJson(const Robustness& r)
+{
+  return json{{"rays", r.rays},
+              {"raysWithCrossings", r.raysWithCrossings},
+              {"crossings", r.crossings},
+              {"steps", r.steps},
+              {"zeroLengthSteps", r.zeroLengthSteps},
+              {"nonAdvancingSteps", r.nonAdvancingSteps},
+              {"unstickPushes", r.unstickPushes},
+              {"iterationCapHits", r.iterationCapHits},
+              {"unterminated", r.unterminated},
+              {"oddCrossingLists", r.oddCrossingLists},
+              {"nonAlternating", r.nonAlternating},
+              {"duplicateCrossings", r.duplicateCrossings},
+              {"parityMismatchIntervals", r.parityMismatchIntervals},
+              {"originInside", r.originInside},
+              {"boundaryWithoutTransition", r.boundaryWithoutTransition},
+              {"insideLengthCm", r.insideLength},
+              {"seconds", r.seconds}};
+}
+
+struct StepConfig {
+  /// Distance the point is advanced *past* a found crossing before the next query. This is the
+  /// crux of a transport loop: land exactly on a face and the next query re-finds the same
+  /// crossing at zero. Default 1e-9 cm = the kernel's own kRayTolerance, so the recorded crossing
+  /// distances carry a known bias of at most (k-1) * push over a k-crossing ray, i.e. below 1e-8
+  /// cm -- two orders under the 1e-6 cm comparison band.
+  double push = 1.e-9;
+  /// A step at or below this is a stall, not progress.
+  double zeroStep = 1.e-9;
+  /// What a stalled loop is nudged by to continue, mirroring what a navigator has to do. Every
+  /// use is counted (`unstickPushes`): it is a repair, and a repair that is not counted is a lie.
+  double unstickPush = 1.e-6;
+  int maxIter = 512;
+  /// Crossing-list match tolerance, cm. Set from the model's own declared tolerance where the
+  /// oracle supplies one, floored here.
+  double matchTolerance = 1.e-6;
+};
+
+// ------------------------------------------------------------------------------------------
+// Mode (a): the direct shape-API stepping loop
+// ------------------------------------------------------------------------------------------
+//
+// Contains() to establish the starting state, then alternating DistFromOutside/DistFromInside,
+// advancing the point along the ray, until the accumulated distance leaves the raster window.
+// `stepmax` is deliberately NOT used to bound the query: its semantics differ between shape
+// implementations (some return the crossing, some return stepmax, some return Big), and this loop
+// must be a measurement of the crossing list rather than of that convention. The window is
+// enforced on the returned crossing distance instead.
+
+std::vector<Crossing> stepWithShapeApi(const TGeoShape* shape, const Point3D& origin,
+                                       const Point3D& dir, double tMax, const StepConfig& cfg,
+                                       Robustness& stats)
+{
+  std::vector<Crossing> crossings;
+  double point[3] = {origin[0], origin[1], origin[2]};
+  bool inside = shape->Contains(point);
+  if (inside) {
+    ++stats.originInside;
+  }
+  double t = 0.;
+  int iter = 0;
+  for (; iter < cfg.maxIter; ++iter) {
+    const double step = inside ? shape->DistFromInside(point, dir.data(), 3, TGeoShape::Big(), nullptr)
+                               : shape->DistFromOutside(point, dir.data(), 3, TGeoShape::Big(), nullptr);
+    ++stats.steps;
+    if (!(step < TGeoShape::Big())) {
+      break; // no further crossing along this ray
+    }
+    const double tCross = t + step;
+    if (tCross > tMax) {
+      break; // beyond the raster window: not this ray's business
+    }
+    if (step <= cfg.zeroStep) {
+      ++stats.zeroLengthSteps;
+    }
+    crossings.push_back({tCross, inside ? -1 : +1});
+    inside = !inside;
+    double advance = step + cfg.push;
+    if (!(advance > 0.)) {
+      ++stats.nonAdvancingSteps;
+      advance = cfg.unstickPush;
+      ++stats.unstickPushes;
+    } else if (step <= cfg.zeroStep) {
+      advance = step + cfg.unstickPush;
+      ++stats.unstickPushes;
+    }
+    t += advance;
+    if (t > tMax) {
+      break;
+    }
+    for (int k = 0; k < 3; ++k) {
+      point[k] = origin[k] + t * dir[k];
+    }
+  }
+  if (iter >= cfg.maxIter) {
+    ++stats.iterationCapHits;
+  }
+  if (inside) {
+    ++stats.unterminated;
+  }
+  return crossings;
+}
+
+// ------------------------------------------------------------------------------------------
+// Mode (b): the real TGeoNavigator
+// ------------------------------------------------------------------------------------------
+
+/// One part in a minimal world, transported with FindNextBoundaryAndStep().
+///
+/// The crossing distance is taken as (projection of the point *before* the step onto the ray) +
+/// GetStep(), rather than by accumulating GetStep(): the navigator moves the point a little past
+/// each boundary, and reprojecting absorbs that push instead of letting it accumulate.
+class NavigatorTransport
+{
+ public:
+  /// Builds the world INSIDE the caller's manager, deliberately.
+  ///
+  /// Constructing a second TGeoManager here is what the first version did, and it segfaulted:
+  /// `TGeoManager`'s constructor DELETES the existing `gGeoManager`, and that manager owns the
+  /// shape being handed in (TGeoShape registers itself in `gGeoManager`'s shape list on
+  /// construction). The world therefore has to be built in the manager the shape already belongs
+  /// to, and everything created here is freed with it.
+  NavigatorTransport(TGeoManager* manager, TGeoShape* shape, const Point3D& bboxMin,
+                     const Point3D& bboxMax)
+  {
+    mManager = manager;
+    auto* material = new TGeoMaterial("Vacuum", 0., 0., 0.);
+    auto* medium = new TGeoMedium("Vacuum", 1, material);
+    double half[3];
+    double centre[3];
+    for (int k = 0; k < 3; ++k) {
+      centre[k] = 0.5 * (bboxMax[k] + bboxMin[k]);
+      half[k] = 0.75 * (bboxMax[k] - bboxMin[k]) + 1.;
+    }
+    auto* worldBox = new TGeoBBox("xrayWorld", half[0], half[1], half[2], centre);
+    mWorld = new TGeoVolume("TOP", worldBox, medium);
+    mPart = new TGeoVolume("PART", shape, medium);
+    mWorld->AddNode(mPart, 1); // identity placement: the part is already in this frame
+    mManager->SetTopVolume(mWorld);
+    mManager->CloseGeometry();
+    mManager->SetNsegments(80);
+    mNavigator = mManager->GetCurrentNavigator();
+  }
+
+  /// Owns nothing: the manager handed in outlives this object and frees the world with itself.
+  ~NavigatorTransport() = default;
+
+  NavigatorTransport(const NavigatorTransport&) = delete;
+  NavigatorTransport& operator=(const NavigatorTransport&) = delete;
+
+  bool valid() const { return mNavigator != nullptr; }
+
+  std::vector<Crossing> transport(const Point3D& origin, const Point3D& dir, double tMax,
+                                  const StepConfig& cfg, Robustness& stats)
+  {
+    std::vector<Crossing> crossings;
+    mNavigator->InitTrack(origin.data(), dir.data());
+    if (mNavigator->IsOutside()) {
+      // The raster window is inside the world by construction; if this fires the world is wrong.
+      ++stats.iterationCapHits;
+      return crossings;
+    }
+    bool inPart = (mNavigator->GetCurrentVolume() == mPart);
+    if (inPart) {
+      ++stats.originInside;
+    }
+    int iter = 0;
+    for (; iter < cfg.maxIter; ++iter) {
+      const double* before = mNavigator->GetCurrentPoint();
+      double tBefore = 0.;
+      for (int k = 0; k < 3; ++k) {
+        tBefore += (before[k] - origin[k]) * dir[k];
+      }
+      mNavigator->FindNextBoundaryAndStep(TGeoShape::Big(), kFALSE);
+      const double step = mNavigator->GetStep();
+      ++stats.steps;
+      const double tCross = tBefore + step;
+      if (step <= cfg.zeroStep) {
+        ++stats.zeroLengthSteps;
+      }
+      if (!(tCross > tBefore)) {
+        ++stats.nonAdvancingSteps;
+      }
+      if (mNavigator->IsOutside() || tCross > tMax || !(step < TGeoShape::Big())) {
+        break;
+      }
+      const bool nowIn = (mNavigator->GetCurrentVolume() == mPart);
+      if (nowIn != inPart) {
+        crossings.push_back({tCross, nowIn ? +1 : -1});
+        inPart = nowIn;
+      } else {
+        ++stats.boundaryWithoutTransition;
+      }
+    }
+    if (iter >= cfg.maxIter) {
+      ++stats.iterationCapHits;
+    }
+    if (inPart) {
+      ++stats.unterminated;
+    }
+    return crossings;
+  }
+
+ private:
+  TGeoManager* mManager = nullptr;
+  TGeoVolume* mWorld = nullptr;
+  TGeoVolume* mPart = nullptr;
+  TGeoNavigator* mNavigator = nullptr;
+};
+
+// ------------------------------------------------------------------------------------------
+// Reading a crossing list, and comparing two of them
+// ------------------------------------------------------------------------------------------
+
+/// Book the per-ray consistency properties of one crossing list. Split out because both modes and
+/// the oracle's own answer go through it, so a defect in one cannot be excused by a different
+/// bookkeeping in another.
+void auditCrossingList(const std::vector<Crossing>& crossings, const TGeoShape* shape,
+                       const Point3D& origin, const Point3D& dir, double tMax,
+                       const StepConfig& cfg, Robustness& stats)
+{
+  ++stats.rays;
+  stats.crossings += static_cast<long long>(crossings.size());
+  if (!crossings.empty()) {
+    ++stats.raysWithCrossings;
+  }
+  if (crossings.size() % 2 != 0) {
+    ++stats.oddCrossingLists;
+  }
+  for (size_t i = 1; i < crossings.size(); ++i) {
+    if (crossings[i].kind == crossings[i - 1].kind) {
+      ++stats.nonAlternating;
+    }
+    if (std::fabs(crossings[i].t - crossings[i - 1].t) <= cfg.matchTolerance) {
+      ++stats.duplicateCrossings;
+    }
+  }
+  // The inside-segment length: the chord integral's contribution from this ray.
+  for (size_t i = 0; i + 1 < crossings.size(); i += 2) {
+    if (crossings[i].kind == +1 && crossings[i + 1].kind == -1) {
+      stats.insideLength += crossings[i + 1].t - crossings[i].t;
+    }
+  }
+  // The independent check. Both stepping modes produce an alternating list *by construction*, so
+  // `nonAlternating` above can never fire on them; asking the shape's own Contains() at the
+  // midpoint of every interval is the only way this instrument can contradict itself.
+  if (shape != nullptr) {
+    std::vector<double> edges;
+    edges.push_back(0.);
+    for (const auto& c : crossings) {
+      edges.push_back(c.t);
+    }
+    edges.push_back(tMax);
+    bool expectInside = false;
+    for (size_t i = 0; i + 1 < edges.size(); ++i) {
+      const double mid = 0.5 * (edges[i] + edges[i + 1]);
+      if (edges[i + 1] - edges[i] > 8. * cfg.matchTolerance) {
+        double p[3];
+        for (int k = 0; k < 3; ++k) {
+          p[k] = origin[k] + mid * dir[k];
+        }
+        if (shape->Contains(p) != expectInside) {
+          ++stats.parityMismatchIntervals;
+        }
+      }
+      expectInside = !expectInside;
+    }
+  }
+}
+
+/// How two crossing lists differ, with LOST and DISPLACED kept apart.
+///
+/// That separation is the whole localising value of comparing lists rather than aggregates. A
+/// crossing the candidate never found is a wall a track walks through; a crossing it found half a
+/// millimetre late is a step length that is slightly wrong. Both are defects, they have completely
+/// different consequences for transport, and a single "disagreements" count merges them.
+struct ListComparison {
+  long long rays = 0;
+  long long raysIdentical = 0;   ///< the whole ordered list matched, position and sense
+  long long raysStructural = 0;  ///< the lists have different lengths or senses
+  long long matched = 0;
+  long long displaced = 0;       ///< same position in both lists, more than `tolerance` apart
+  long long missing = 0;         ///< in the reference, absent from the candidate
+  long long extra = 0;           ///< in the candidate, absent from the reference
+  long long kindMismatch = 0;
+  double worstDeltaT = 0.;       ///< max |dt| over positionally matched crossings, cm
+  Point3D worstOrigin{};
+  Point3D worstDir{};
+  std::string worstReason;
+};
+
+json comparisonToJson(const ListComparison& c)
+{
+  return json{{"rays", c.rays},
+              {"raysIdentical", c.raysIdentical},
+              {"raysStructural", c.raysStructural},
+              {"matched", c.matched},
+              {"displacedCrossings", c.displaced},
+              {"missingCrossings", c.missing},
+              {"extraCrossings", c.extra},
+              {"kindMismatch", c.kindMismatch},
+              {"worstDeltaT", c.worstDeltaT},
+              {"worstOrigin", {c.worstOrigin[0], c.worstOrigin[1], c.worstOrigin[2]}},
+              {"worstDir", {c.worstDir[0], c.worstDir[1], c.worstDir[2]}},
+              {"worstReason", c.worstReason}};
+}
+
+void compareLists(const std::vector<Crossing>& candidate, const std::vector<Crossing>& reference,
+                  const Point3D& origin, const Point3D& dir, double tolerance, ListComparison& out)
+{
+  ++out.rays;
+  bool sameShape = candidate.size() == reference.size();
+  for (size_t i = 0; sameShape && i < candidate.size(); ++i) {
+    sameShape = candidate[i].kind == reference[i].kind;
+  }
+  if (sameShape) {
+    // Same number of crossings in the same order with the same senses: every difference is a
+    // position, so report the positions and never manufacture a missing/extra pair out of one
+    // displaced crossing.
+    bool identical = true;
+    for (size_t i = 0; i < candidate.size(); ++i) {
+      const double delta = std::fabs(candidate[i].t - reference[i].t);
+      ++out.matched;
+      if (delta > tolerance) {
+        ++out.displaced;
+        identical = false;
+      }
+      if (delta > out.worstDeltaT) {
+        out.worstDeltaT = delta;
+        out.worstOrigin = origin;
+        out.worstDir = dir;
+        out.worstReason = delta > tolerance ? "displaced crossing" : "deltaT";
+      }
+    }
+    out.raysIdentical += identical;
+    return;
+  }
+
+  // Structurally different: walk both lists and attribute each unpaired crossing to the side it
+  // came from. This is the branch that names a LOST wall.
+  ++out.raysStructural;
+  size_t i = 0;
+  size_t j = 0;
+  while (i < candidate.size() && j < reference.size()) {
+    const double delta = candidate[i].t - reference[j].t;
+    if (std::fabs(delta) <= tolerance) {
+      ++out.matched;
+      if (candidate[i].kind != reference[j].kind) {
+        ++out.kindMismatch;
+      }
+      if (std::fabs(delta) > out.worstDeltaT) {
+        out.worstDeltaT = std::fabs(delta);
+      }
+      ++i;
+      ++j;
+    } else if (delta < 0.) {
+      ++out.extra;
+      ++i;
+    } else {
+      ++out.missing;
+      ++j;
+    }
+  }
+  out.extra += static_cast<long long>(candidate.size() - i);
+  out.missing += static_cast<long long>(reference.size() - j);
+  if (out.worstReason.empty() || out.worstReason == "deltaT" ||
+      out.worstReason == "displaced crossing") {
+    out.worstOrigin = origin;
+    out.worstDir = dir;
+    out.worstReason = reference.size() > candidate.size() ? "MISSING crossing" : "EXTRA crossing";
+  }
+}
+
+// ------------------------------------------------------------------------------------------
+// The raster
+// ------------------------------------------------------------------------------------------
+//
+// A structured parallel-beam raster, not Monte Carlo. Cell centres of an N x N lattice over the
+// raster window, one beam per axis. Structured wins for two independent reasons: the chord
+// integral converges far better than random sampling (boundary cells are the whole error budget
+// and their count grows as N rather than N^2), and a lattice deliberately produces the grazing,
+// edge-on and vertex-on rays a random direction essentially never generates -- which is where a
+// transport loop stalls.
+
+struct RayDef {
+  Point3D origin{};
+  Point3D dir{};
+  double tMax = 0.;
+  int axis = 0;
+};
+
+struct Raster {
+  Point3D windowMin{};
+  Point3D windowMax{};
+  int n = 0;
+  std::vector<int> axes;
+  std::vector<RayDef> rays;
+  std::array<double, 3> cellArea{}; ///< per axis; 0 where the axis is not used
+  double transverseMargin = 0.;
+  /// Fractional excess of the raster window's cross-section over the part's own bounding box,
+  /// per axis. This is not decoration: at finite N a window wider than the silhouette biases the
+  /// chord integral UPWARD by about this much, because the cells straddling the silhouette are
+  /// counted whole. It is reported next to every volume so the systematic is never invisible.
+  std::array<double, 3> windowExcess{};
+};
+
+/// The transverse window and the longitudinal start are deliberately DECOUPLED.
+///
+/// Transverse: the window is the part's own bounding box plus `transverseMargin`, and that margin
+/// wants to be as small as the bounding box's own reliability allows. Measured (see the scan in
+/// Stream_J_XRay.md): a 2 x 3 x 4 cm box rastered over a window inflated by 2 % comes out 5.1e-02
+/// too large at N = 32, while the same box over a window equal to its bounding box is EXACT at
+/// every N -- every cell centre is inside, so the quadrature is the volume. The window excess is a
+/// first-order systematic on the volume, not a second-order one.
+///
+/// Longitudinal: the ray must start strictly OUTSIDE the solid, or `Contains()` at the origin is a
+/// coin toss on the face and the whole transport starts in the wrong state. That margin is
+/// therefore generous and costs nothing -- it is along the ray, not across it.
+Raster buildRaster(const Point3D& bboxMin, const Point3D& bboxMax, int n,
+                   const std::vector<int>& axes, double transverseMargin)
+{
+  Raster raster;
+  raster.n = n;
+  raster.axes = axes;
+  raster.transverseMargin = transverseMargin;
+  for (int k = 0; k < 3; ++k) {
+    raster.windowMin[k] = bboxMin[k] - transverseMargin;
+    raster.windowMax[k] = bboxMax[k] + transverseMargin;
+  }
+  for (const int axis : axes) {
+    const int u = (axis + 1) % 3;
+    const int v = (axis + 2) % 3;
+    const double du = (raster.windowMax[u] - raster.windowMin[u]) / n;
+    const double dv = (raster.windowMax[v] - raster.windowMin[v]) / n;
+    raster.cellArea[axis] = du * dv;
+    const double bboxArea = (bboxMax[u] - bboxMin[u]) * (bboxMax[v] - bboxMin[v]);
+    raster.windowExcess[axis] =
+      bboxArea > 0. ? (du * dv * n * n) / bboxArea - 1. : 0.;
+    const double extent = bboxMax[axis] - bboxMin[axis];
+    const double lead = 0.05 * extent + 1.e-3; // strictly outside, in both directions
+    for (int i = 0; i < n; ++i) {
+      for (int j = 0; j < n; ++j) {
+        RayDef ray;
+        ray.axis = axis;
+        ray.origin[axis] = bboxMin[axis] - lead;
+        ray.origin[u] = raster.windowMin[u] + (i + 0.5) * du;
+        ray.origin[v] = raster.windowMin[v] + (j + 0.5) * dv;
+        ray.dir[axis] = 1.;
+        ray.tMax = extent + 2. * lead;
+        raster.rays.push_back(ray);
+      }
+    }
+  }
+  return raster;
+}
+
+// ------------------------------------------------------------------------------------------
+// Options, part collection, IO
+// ------------------------------------------------------------------------------------------
+
+struct Options {
+  std::string db;
+  std::string explicitSurfaces;
+  std::string explicitFacets;
+  std::string explicitShape;
+  std::string partsPattern;
+  int raster = 48;
+  std::string axesSpec = "xyz";
+  /// Transverse padding of the raster window over the part's bounding box, cm. Kept absolute and
+  /// small: it is a first-order systematic on the chord volume (see buildRaster). It exists only
+  /// to cover the fact that a tessellated bounding box is INSCRIBED -- measured at 1e-4 to 1e-3 cm
+  /// on these corpora -- so a zero margin would clip the true solid's silhouette.
+  double margin = 1.e-3;
+  std::string dumpRays;
+  std::string refCrossings;
+  std::string jsonOut;
+  std::set<std::string> representations = {"surface", "mesh", "shape"};
+  bool skipNavigator = false;
+  bool selfTest = false;
+  bool costOnly = false; ///< load, raster and step mode (a) only; no oracle, no navigator
+  StepConfig step;
+};
+
+struct Part {
+  std::string id;
+  std::string model;
+  std::string surfaces;
+  std::string facets;
+  std::string shape;
+};
+
+std::string deriveSidecarPath(const std::string& surfacesPath, const char* prefixOut,
+                              const char* suffixOut)
+{
+  const auto slash = surfacesPath.find_last_of('/');
+  const std::string dir = slash == std::string::npos ? std::string() : surfacesPath.substr(0, slash + 1);
+  std::string base = slash == std::string::npos ? surfacesPath : surfacesPath.substr(slash + 1);
+  const std::string prefix = "surfaces_";
+  const std::string suffix = ".bin";
+  if (base.rfind(prefix, 0) != 0 || base.size() <= prefix.size() + suffix.size() ||
+      base.compare(base.size() - suffix.size(), suffix.size(), suffix) != 0) {
+    return {};
+  }
+  const std::string stem = base.substr(prefix.size(), base.size() - prefix.size() - suffix.size());
+  return dir + prefixOut + stem + suffixOut;
+}
+
+bool fileExists(const std::string& path)
+{
+  if (path.empty()) {
+    return false;
+  }
+  std::ifstream probe(path);
+  return static_cast<bool>(probe);
+}
+
+/// Must match sanitizePartId() in runSolidHarness.cxx and sanitize_part_id() in the gate scripts.
+std::string sanitizePartId(const std::string& id)
+{
+  std::string out;
+  out.reserve(id.size());
+  for (const char c : id) {
+    out.push_back((std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '.') ? c : '_');
+  }
+  return out;
+}
+
+void printUsage(const char* argv0)
+{
+  std::cout <<
+    "X-ray / geantino transport benchmark -- ordered crossing lists, by stepping.\n\n"
+    "Usage: " << argv0 << " --db <dir> [--parts <substring>] [--raster N] [--axes xyz]\n"
+    "                          [--dump-rays D] [--ref-crossings D] [--json out.json]\n"
+    "   or: " << argv0 << " --surfaces <f> [--facets <f>] [--shape <f>] [options as above]\n"
+    "   or: " << argv0 << " --self-test\n\n"
+    "  --raster N        N x N parallel rays per beam axis (default 48). Structured, not random:\n"
+    "                    the chord integral converges as the boundary-cell count (~N) rather than\n"
+    "                    as sqrt of the sample count, and a lattice generates the edge-on and\n"
+    "                    vertex-on rays that stall a transport loop.\n"
+    "  --axes xyz        which beam axes to fire (subset of x,y,z; default all three)\n"
+    "  --dump-rays D     write D/xrays_<part>.json (the raster window and every ray) and exit\n"
+    "  --ref-crossings D read D/crossings_<part>.json (scripts/geometry/xrayOracle.py) and score\n"
+    "                    the crossing LISTS against it, per representation, per mode\n"
+    "  --representations surface,mesh,shape   which representations to run (default: all present)\n"
+    "  --no-navigator    skip mode (b); mode (a) depends on nothing but the shape\n"
+    "  --cost-only       load + raster + mode (a) only, and report wall clock and crossing counts.\n"
+    "                    This is the scaling probe: it needs no mesh and no oracle.\n"
+    "  --push X          distance advanced past a found crossing (cm, default 1e-9 = kRayTolerance)\n"
+    "  --unstick-push X  the nudge a stalled step is repaired with (cm, default 1e-6); every use\n"
+    "                    is counted in `unstickPushes`\n"
+    "  --max-iter N      transport iteration cap per ray (default 512)\n"
+    "  --self-test       analytic self-checks (box, tube, sphere) plus the synthetic controls that\n"
+    "                    prove the comparison can fail. Needs no database and no oracle.\n\n"
+    "Three-stage round trip:\n"
+    "  " << argv0 << " --db <db> --dump-rays /tmp/x\n"
+    "  xrayOracle.py --brep <part>.brep --rays /tmp/x/xrays_<part>.json \\\n"
+    "                --out /tmp/x/crossings_<part>.json\n"
+    "  " << argv0 << " --db <db> --ref-crossings /tmp/x --json /tmp/x/xray.json\n";
+}
+
+std::set<std::string> splitCsv(const std::string& s)
+{
+  std::set<std::string> out;
+  std::stringstream ss(s);
+  std::string tok;
+  while (std::getline(ss, tok, ',')) {
+    if (!tok.empty()) {
+      out.insert(tok);
+    }
+  }
+  return out;
+}
+
+bool parseArgs(int argc, char** argv, Options& opt)
+{
+  for (int i = 1; i < argc; ++i) {
+    const std::string a = argv[i];
+    auto next = [&](const char* flag) -> std::string {
+      if (i + 1 >= argc) {
+        throw std::runtime_error(std::string("missing value for ") + flag);
+      }
+      return argv[++i];
+    };
+    if (a == "--db") {
+      opt.db = next("--db");
+    } else if (a == "--surfaces") {
+      opt.explicitSurfaces = next("--surfaces");
+    } else if (a == "--facets") {
+      opt.explicitFacets = next("--facets");
+    } else if (a == "--shape") {
+      opt.explicitShape = next("--shape");
+    } else if (a == "--parts") {
+      opt.partsPattern = next("--parts");
+    } else if (a == "--raster") {
+      opt.raster = std::stoi(next("--raster"));
+    } else if (a == "--axes") {
+      opt.axesSpec = next("--axes");
+    } else if (a == "--margin") {
+      opt.margin = std::stod(next("--margin"));
+    } else if (a == "--dump-rays") {
+      opt.dumpRays = next("--dump-rays");
+    } else if (a == "--ref-crossings") {
+      opt.refCrossings = next("--ref-crossings");
+    } else if (a == "--json") {
+      opt.jsonOut = next("--json");
+    } else if (a == "--representations") {
+      opt.representations = splitCsv(next("--representations"));
+    } else if (a == "--no-navigator") {
+      opt.skipNavigator = true;
+    } else if (a == "--cost-only") {
+      opt.costOnly = true;
+      opt.skipNavigator = true;
+    } else if (a == "--push") {
+      opt.step.push = std::stod(next("--push"));
+    } else if (a == "--unstick-push") {
+      opt.step.unstickPush = std::stod(next("--unstick-push"));
+    } else if (a == "--zero-step") {
+      opt.step.zeroStep = std::stod(next("--zero-step"));
+    } else if (a == "--max-iter") {
+      opt.step.maxIter = std::stoi(next("--max-iter"));
+    } else if (a == "--self-test") {
+      opt.selfTest = true;
+    } else if (a == "-h" || a == "--help") {
+      printUsage(argv[0]);
+      return false;
+    } else {
+      throw std::runtime_error("unrecognized option: " + a);
+    }
+  }
+  if (!opt.selfTest && opt.db.empty() && opt.explicitSurfaces.empty()) {
+    throw std::runtime_error("either --db <dir>, --surfaces <file> or --self-test is required");
+  }
+  return true;
+}
+
+std::vector<int> parseAxes(const std::string& spec)
+{
+  std::vector<int> axes;
+  for (const char c : spec) {
+    if (c == 'x' || c == 'X') {
+      axes.push_back(0);
+    } else if (c == 'y' || c == 'Y') {
+      axes.push_back(1);
+    } else if (c == 'z' || c == 'Z') {
+      axes.push_back(2);
+    }
+  }
+  if (axes.empty()) {
+    throw std::runtime_error("no beam axis selected");
+  }
+  return axes;
+}
+
+std::vector<Part> collectParts(const Options& opt)
+{
+  std::vector<Part> parts;
+  if (!opt.explicitSurfaces.empty()) {
+    Part part{"adhoc", "adhoc", opt.explicitSurfaces, opt.explicitFacets, opt.explicitShape};
+    if (part.facets.empty()) {
+      part.facets = deriveSidecarPath(part.surfaces, "facets_", ".bin");
+    }
+    if (part.shape.empty()) {
+      part.shape = deriveSidecarPath(part.surfaces, "shape_", ".root");
+    }
+    parts.push_back(std::move(part));
+    return parts;
+  }
+  const std::string manifestPath = opt.db + "/manifest.json";
+  std::ifstream in(manifestPath);
+  if (!in) {
+    throw std::runtime_error("cannot open " + manifestPath);
+  }
+  json manifest;
+  in >> manifest;
+  for (const auto& p : manifest.at("parts")) {
+    Part part;
+    part.id = p.at("id").get<std::string>();
+    part.model = p.value("model", std::string("?"));
+    part.surfaces = p.value("surfaces", std::string());
+    part.facets = p.value("facets", std::string());
+    part.shape = p.value("shape", std::string());
+    if (part.shape.empty()) {
+      part.shape = deriveSidecarPath(part.surfaces, "shape_", ".root");
+    }
+    if (!opt.partsPattern.empty()) {
+      const bool idMatch = part.id.find(opt.partsPattern) != std::string::npos;
+      const bool modelMatch = part.model.find(opt.partsPattern) != std::string::npos;
+      if (!idMatch && !modelMatch) {
+        continue;
+      }
+    }
+    parts.push_back(std::move(part));
+  }
+  return parts;
+}
+
+void writeRays(const std::string& dir, const std::string& partId, const Raster& raster,
+               const std::string& bboxSource)
+{
+  json doc;
+  doc["version"] = kXRayFormatVersion;
+  doc["part"] = partId;
+  doc["windowMin"] = {raster.windowMin[0], raster.windowMin[1], raster.windowMin[2]};
+  doc["windowMax"] = {raster.windowMax[0], raster.windowMax[1], raster.windowMax[2]};
+  doc["raster"] = raster.n;
+  doc["axes"] = raster.axes;
+  doc["cellArea"] = {raster.cellArea[0], raster.cellArea[1], raster.cellArea[2]};
+  doc["transverseMargin"] = raster.transverseMargin;
+  doc["windowExcess"] = {raster.windowExcess[0], raster.windowExcess[1], raster.windowExcess[2]};
+  doc["bboxSource"] = bboxSource;
+  json rays = json::array();
+  for (const auto& r : raster.rays) {
+    rays.push_back({{"o", {r.origin[0], r.origin[1], r.origin[2]}},
+                    {"d", {r.dir[0], r.dir[1], r.dir[2]}},
+                    {"tmax", r.tMax},
+                    {"axis", r.axis}});
+  }
+  doc["rays"] = std::move(rays);
+  const std::string path = dir + "/xrays_" + sanitizePartId(partId) + ".json";
+  std::ofstream out(path);
+  if (!out) {
+    throw std::runtime_error("cannot write " + path);
+  }
+  out << doc.dump();
+  std::printf("  wrote %s (%zu rays)\n", path.c_str(), raster.rays.size());
+}
+
+/// The oracle's answer for one part: the ordered crossing list per ray, plus its own chord volume.
+struct OracleCrossings {
+  bool has = false;
+  double tolerance = 1.e-7;
+  double capacity = 0.;
+  double volumeChord = 0.;
+  bool valid = false;
+  std::vector<std::vector<Crossing>> perRay;
+  std::vector<bool> ambiguous;
+  long long ambiguousRays = 0;
+  Raster raster;
+};
+
+OracleCrossings loadOracleCrossings(const std::string& dir, const std::string& partId)
+{
+  OracleCrossings out;
+  const std::string path = dir + "/crossings_" + sanitizePartId(partId) + ".json";
+  std::ifstream in(path);
+  if (!in) {
+    return out;
+  }
+  json doc;
+  in >> doc;
+  if (doc.value("version", 0) != kXRayFormatVersion) {
+    throw std::runtime_error(path + ": unsupported format version");
+  }
+  out.has = true;
+  out.tolerance = doc.value("tolerance", 1.e-7);
+  out.capacity = doc.value("capacity", 0.);
+  out.volumeChord = doc.value("volumeChord", 0.);
+  out.valid = doc.value("valid", false);
+  out.ambiguousRays = doc.value("ambiguousRays", 0);
+  out.raster.n = doc.value("raster", 0);
+  out.raster.transverseMargin = doc.value("transverseMargin", 0.);
+  const auto& window0 = doc.at("windowMin");
+  const auto& window1 = doc.at("windowMax");
+  const auto& cell = doc.at("cellArea");
+  for (int k = 0; k < 3; ++k) {
+    out.raster.windowMin[k] = window0[k].get<double>();
+    out.raster.windowMax[k] = window1[k].get<double>();
+    out.raster.cellArea[k] = cell[k].get<double>();
+  }
+  if (doc.contains("windowExcess")) {
+    for (int k = 0; k < 3; ++k) {
+      out.raster.windowExcess[k] = doc.at("windowExcess")[k].get<double>();
+    }
+  }
+  for (const auto& axis : doc.at("axes")) {
+    out.raster.axes.push_back(axis.get<int>());
+  }
+  out.raster.rays.reserve(doc.at("rays").size());
+  for (const auto& r : doc.at("rays")) {
+    RayDef ray;
+    for (int k = 0; k < 3; ++k) {
+      ray.origin[k] = r.at("o")[k].get<double>();
+      ray.dir[k] = r.at("d")[k].get<double>();
+    }
+    ray.tMax = r.at("tmax").get<double>();
+    ray.axis = r.at("axis").get<int>();
+    out.raster.rays.push_back(ray);
+    std::vector<Crossing> crossings;
+    const auto& ts = r.at("t");
+    const auto& kinds = r.at("k");
+    for (size_t i = 0; i < ts.size(); ++i) {
+      crossings.push_back({ts[i].get<double>(), kinds[i].get<int>()});
+    }
+    out.perRay.push_back(std::move(crossings));
+    // A ray OCCT itself declined to classify somewhere along its length. Excluded from the
+    // comparison rather than scored either way -- the same treatment `nNoVerdict` gets in the
+    // sample gate, for the same reason: there is no ground truth to compare against there.
+    out.ambiguous.push_back(r.value("amb", false));
+  }
+  return out;
+}
+
+double chordVolume(const Raster& raster, const std::vector<double>& insideLengthPerAxis)
+{
+  // Each beam axis is an independent estimate of the same volume; the reported number is their
+  // mean, and the per-axis spread is reported alongside because it is the honest error bar.
+  double sum = 0.;
+  int used = 0;
+  for (const int axis : raster.axes) {
+    sum += insideLengthPerAxis[axis] * raster.cellArea[axis];
+    ++used;
+  }
+  return used > 0 ? sum / used : 0.;
+}
+
+/// The tightest CONTAINING bounding box available for a part, and where it came from.
+///
+/// The order is a measurement, not a preference. `O2BVHSurfaceSolid`'s box is the union of one
+/// conservative AABB per curved patch, measured at 0.13 to 16.1 cm larger than the oracle's on
+/// Bagger (`Stream_I_Verdict.md` section 6.2); as a raster window that would inflate the
+/// cross-section by more than the part itself on `Bagger/Stick`, and the window excess is a
+/// first-order systematic on the chord volume. `TGeoBBox`/`TGeoCompositeShape` compute a tight box
+/// and `O2Tessellated`'s is tight to ~1e-4 cm, though inscribed -- which is exactly what
+/// `--margin` exists to cover. So: shape, else mesh, else surface, and say which.
+bool resolveBoundingBox(const Part& part, const Options& opt, Point3D& lo, Point3D& hi,
+                        std::string& source)
+{
+  struct Candidate {
+    const char* name;
+    const std::string& path;
+  };
+  const Candidate candidates[3] = {
+    {"shape", part.shape}, {"mesh", part.facets}, {"surface", part.surfaces}};
+  for (const auto& candidate : candidates) {
+    if (!opt.representations.count(candidate.name) || !fileExists(candidate.path)) {
+      continue;
+    }
+    auto* manager = new TGeoManager("xrayBBox", "bbox probe");
+    TGeoShape* shape = nullptr;
+    if (std::string(candidate.name) == "surface") {
+      auto* solid = new O2BVHSurfaceSolid(part.id.c_str());
+      if (LoadSurfaceSolid(candidate.path, *solid)) {
+        solid->CloseShape(true);
+        shape = solid;
+      }
+    } else if (std::string(candidate.name) == "mesh") {
+      auto* solid = new O2Tessellated(part.id.c_str());
+      if (LoadFacetSolid(candidate.path, *solid)) {
+        solid->CloseShape();
+        shape = solid;
+      }
+    } else {
+      shape = loadShapeFromRootFile(candidate.path, nullptr);
+    }
+    const auto* box = dynamic_cast<const TGeoBBox*>(shape);
+    if (box != nullptr) {
+      for (int k = 0; k < 3; ++k) {
+        lo[k] = box->GetOrigin()[k] - (k == 0 ? box->GetDX() : k == 1 ? box->GetDY() : box->GetDZ());
+        hi[k] = box->GetOrigin()[k] + (k == 0 ? box->GetDX() : k == 1 ? box->GetDY() : box->GetDZ());
+      }
+      source = candidate.name;
+      delete manager;
+      gGeoManager = nullptr;
+      return true;
+    }
+    delete manager;
+    gGeoManager = nullptr;
+  }
+  return false;
+}
+
+// ------------------------------------------------------------------------------------------
+// Self-test: analytic references, and the controls that prove the comparison can fail
+// ------------------------------------------------------------------------------------------
+
+int selfTest()
+{
+  int failures = 0;
+  auto check = [&](const char* name, bool ok, const std::string& detail = {}) {
+    std::printf("  [%s] %s%s\n", ok ? "ok  " : "FAIL", name,
+                ok || detail.empty() ? "" : ("   " + detail).c_str());
+    if (!ok) {
+      ++failures;
+    }
+  };
+
+  StepConfig cfg;
+  Robustness stats;
+
+  // 1. A box: exactly two crossings, at analytically known distances.
+  {
+    TGeoBBox box("selftestBox", 1., 1.5, 2.);
+    const Point3D origin{-5., 0., 0.};
+    const Point3D dir{1., 0., 0.};
+    auto crossings = stepWithShapeApi(&box, origin, dir, 10., cfg, stats);
+    check("box: exactly two crossings along a central ray", crossings.size() == 2,
+          "got " + std::to_string(crossings.size()));
+    if (crossings.size() == 2) {
+      check("box: enter at 4.0 cm", std::fabs(crossings[0].t - 4.) < 1.e-9);
+      check("box: exit at 6.0 cm", std::fabs(crossings[1].t - 6.) < 1.e-9);
+      check("box: kinds are enter then exit", crossings[0].kind == +1 && crossings[1].kind == -1);
+    }
+  }
+
+  // 2. A hollow tube: FOUR crossings along a diameter. This is the case a single-shot `distout`
+  //    query cannot express at all -- it reports the first of the four and stops.
+  {
+    TGeoTube tube("selftestTube", 0.5, 1.0, 2.0);
+    const Point3D origin{-5., 0., 0.};
+    const Point3D dir{1., 0., 0.};
+    auto crossings = stepWithShapeApi(&tube, origin, dir, 10., cfg, stats);
+    check("hollow tube: four crossings along a diameter", crossings.size() == 4,
+          "got " + std::to_string(crossings.size()));
+    if (crossings.size() == 4) {
+      const double expect[4] = {4.0, 4.5, 5.5, 6.0};
+      bool ok = true;
+      for (int i = 0; i < 4; ++i) {
+        ok = ok && std::fabs(crossings[i].t - expect[i]) < 1.e-9;
+      }
+      check("hollow tube: crossings at 4.0 / 4.5 / 5.5 / 6.0 cm", ok);
+      check("hollow tube: in, out, in, out",
+            crossings[0].kind == +1 && crossings[1].kind == -1 && crossings[2].kind == +1 &&
+              crossings[3].kind == -1);
+    }
+  }
+
+  // 3a. A BOX's chord integral is EXACT, at every raster density, when the window is its own
+  //     bounding box. That is the sharpest available self-check on the volume instrument: no
+  //     convergence argument, no tolerance -- either the quadrature is the volume or it is not.
+  //     It is also what fixed the raster geometry: with the window inflated by 2 % instead, this
+  //     same box came out 5.1e-02 too large at N = 32 (recorded in Stream_J_XRay.md).
+  {
+    TGeoBBox box("selftestVolBox", 1., 1.5, 2.);
+    const Point3D bboxMin{-1., -1.5, -2.};
+    const Point3D bboxMax{1., 1.5, 2.};
+    for (const int n : {7, 32}) {
+      Raster raster = buildRaster(bboxMin, bboxMax, n, {0, 1, 2}, 0.);
+      Robustness s;
+      std::vector<double> byAxis(3, 0.);
+      for (const auto& ray : raster.rays) {
+        const double before = s.insideLength;
+        auto crossings = stepWithShapeApi(&box, ray.origin, ray.dir, ray.tMax, cfg, s);
+        auditCrossingList(crossings, nullptr, ray.origin, ray.dir, ray.tMax, cfg, s);
+        byAxis[ray.axis] += s.insideLength - before;
+      }
+      const double volume = chordVolume(raster, byAxis);
+      check(("box 2 x 3 x 4 cm: chord integral is EXACT at N=" + std::to_string(n)).c_str(),
+            std::fabs(volume - 24.) < 1.e-9, "got " + std::to_string(volume));
+    }
+  }
+
+  // 3b. A sphere's chord integral against its closed-form volume. A curved silhouette cannot be
+  //     exact at finite N, so this is where the ACHIEVED PRECISION of the volume instrument is
+  //     measured -- and the measurement says the convergence is NOT monotone in N (the silhouette
+  //     cells realign with the lattice at every density), so the honest statement is an envelope
+  //     at a stated density, never an extrapolation.
+  {
+    TGeoSphere sphere("selftestSphere", 0., 1.);
+    const Point3D bboxMin{-1., -1., -1.};
+    const Point3D bboxMax{1., 1., 1.};
+    const double exact = 4. / 3. * 3.14159265358979323846;
+    double worst = 0.;
+    for (const int n : {24, 48, 96, 192}) {
+      Raster raster = buildRaster(bboxMin, bboxMax, n, {2}, 0.);
+      Robustness s;
+      for (const auto& ray : raster.rays) {
+        auto crossings = stepWithShapeApi(&sphere, ray.origin, ray.dir, ray.tMax, cfg, s);
+        auditCrossingList(crossings, nullptr, ray.origin, ray.dir, ray.tMax, cfg, s);
+      }
+      const double volume = s.insideLength * raster.cellArea[2];
+      const double rel = std::fabs(volume - exact) / exact;
+      worst = std::max(worst, rel);
+      std::printf("        sphere r=1: raster %3d x %3d -> V = %.8f cm^3, exact %.8f, "
+                  "relative %.3e\n", n, n, volume, exact, rel);
+    }
+    // The bound is the MEASURED envelope over N = 24..192, not a convergence rate. If a future
+    // change makes the quadrature worse than this it is a regression; if the envelope itself has
+    // to be widened, that is a result to report rather than a constant to tune.
+    check("sphere chord integral stays inside the measured 2e-3 envelope for N = 24..192",
+          worst < 2.e-3, "worst rel=" + std::to_string(worst));
+  }
+
+  // 4. THE CONTROLS. A comparison that cannot fail is not a comparison. Take a correct crossing
+  //    list and (i) perturb one distance, (ii) drop one crossing, (iii) duplicate one, and require
+  //    the comparator to name each.
+  {
+    const std::vector<Crossing> truth{{4.0, +1}, {4.5, -1}, {5.5, +1}, {6.0, -1}};
+    const Point3D o{-5., 0., 0.};
+    const Point3D d{1., 0., 0.};
+
+    ListComparison clean;
+    compareLists(truth, truth, o, d, 1.e-6, clean);
+    check("control 0: identical lists compare clean",
+          clean.raysIdentical == 1 && clean.missing == 0 && clean.extra == 0 &&
+            clean.matched == 4);
+
+    auto perturbed = truth;
+    perturbed[2].t += 1.e-3;
+    ListComparison shifted;
+    compareLists(perturbed, truth, o, d, 1.e-6, shifted);
+    check("control 1: a crossing moved by 1e-3 cm is CAUGHT, and as DISPLACED not as lost",
+          shifted.raysIdentical == 0 && shifted.displaced == 1 && shifted.missing == 0 &&
+            shifted.extra == 0 && std::fabs(shifted.worstDeltaT - 1.e-3) < 1.e-12,
+          "displaced=" + std::to_string(shifted.displaced) + " missing=" +
+            std::to_string(shifted.missing) + " dt=" + std::to_string(shifted.worstDeltaT));
+
+    auto dropped = truth;
+    dropped.erase(dropped.begin() + 1);
+    ListComparison lost;
+    compareLists(dropped, truth, o, d, 1.e-6, lost);
+    check("control 2: a dropped crossing is CAUGHT as `missing`",
+          lost.missing == 1 && lost.extra == 0, "missing=" + std::to_string(lost.missing));
+
+    auto doubled = truth;
+    doubled.insert(doubled.begin() + 1, {4.2, -1});
+    ListComparison spurious;
+    compareLists(doubled, truth, o, d, 1.e-6, spurious);
+    check("control 3: an extra crossing is CAUGHT as `extra`",
+          spurious.extra == 1 && spurious.missing == 0, "extra=" + std::to_string(spurious.extra));
+
+    // A crossing at the right place but with the wrong sense (enter where the truth exits) is a
+    // different defect and must not be absorbed into `matched`.
+    auto flipped = truth;
+    flipped[1].kind = +1;
+    ListComparison sense;
+    compareLists(flipped, truth, o, d, 1.e-6, sense);
+    check("control 4: a crossing with the wrong sense is CAUGHT", sense.kindMismatch == 1);
+  }
+
+  // 5. The parity audit's own control: hand it a list with a crossing removed and require the
+  //    midpoint Contains() check to contradict it.
+  {
+    TGeoBBox box("selftestBox2", 1., 1., 1.);
+    const Point3D origin{-5., 0., 0.};
+    const Point3D dir{1., 0., 0.};
+    Robustness good;
+    auditCrossingList({{4.0, +1}, {6.0, -1}}, &box, origin, dir, 10., cfg, good);
+    check("parity audit: a correct list has no parity mismatch", good.parityMismatchIntervals == 0);
+    Robustness bad;
+    auditCrossingList({{4.0, +1}}, &box, origin, dir, 10., cfg, bad);
+    check("parity audit: a truncated list is CAUGHT by Contains() at the midpoints",
+          bad.parityMismatchIntervals > 0 && bad.oddCrossingLists == 1);
+  }
+
+  std::printf("\n%s: %d failure(s)\n", failures == 0 ? "SELF-TEST PASSED" : "SELF-TEST FAILED",
+              failures);
+  return failures == 0 ? 0 : 1;
+}
+
+} // namespace
+
+int main(int argc, char** argv)
+{
+  Options opt;
+  try {
+    if (!parseArgs(argc, argv, opt)) {
+      return 0;
+    }
+  } catch (const std::exception& e) {
+    std::cerr << "error: " << e.what() << "\n";
+    printUsage(argv[0]);
+    return 1;
+  }
+
+  if (opt.selfTest) {
+    return selfTest();
+  }
+
+  std::vector<int> axes;
+  std::vector<Part> parts;
+  try {
+    axes = parseAxes(opt.axesSpec);
+    parts = collectParts(opt);
+  } catch (const std::exception& e) {
+    std::cerr << "error: " << e.what() << "\n";
+    return 1;
+  }
+  if (parts.empty()) {
+    std::cerr << "no parts matched (pattern='" << opt.partsPattern << "')\n";
+    return 1;
+  }
+
+  json report = json::array();
+
+  for (const auto& part : parts) {
+    std::printf("=== %s (%s) ===\n", part.id.c_str(), part.model.c_str());
+    json partJson;
+    partJson["id"] = part.id;
+    partJson["model"] = part.model;
+
+    // ---- the raster window -------------------------------------------------------------
+    // In scoring mode it comes from the oracle's answer file, so the two sides cannot possibly be
+    // asking about different rays; otherwise it is built here from the tightest containing
+    // bounding box the part has.
+    Raster raster;
+    OracleCrossings oracle;
+    std::string bboxSource = "?";
+    if (!opt.refCrossings.empty()) {
+      try {
+        oracle = loadOracleCrossings(opt.refCrossings, part.id);
+      } catch (const std::exception& e) {
+        std::cerr << "  error reading crossings: " << e.what() << "\n";
+        continue;
+      }
+      if (!oracle.has) {
+        std::printf("  skip: no crossings file for this part in %s\n", opt.refCrossings.c_str());
+        continue;
+      }
+      raster = oracle.raster;
+      opt.step.matchTolerance = std::max(oracle.tolerance, 1.e-6);
+      std::printf("  oracle: %s tolerance=%.3g capacity=%.6g cm^3 chordVolume=%.6g cm^3 "
+                  "(%lld ambiguous ray(s))\n",
+                  oracle.valid ? "valid" : "*** NOT BRepCheck-VALID ***", oracle.tolerance,
+                  oracle.capacity, oracle.volumeChord, oracle.ambiguousRays);
+    } else {
+      Point3D lo{};
+      Point3D hi{};
+      if (!resolveBoundingBox(part, opt, lo, hi, bboxSource)) {
+        std::printf("  skip: no representation could supply a bounding box\n");
+        continue;
+      }
+      raster = buildRaster(lo, hi, opt.raster, axes, opt.margin);
+      std::printf("  raster: %d x %d x %zu axes = %zu rays; window from the '%s' bounding box "
+                  "+ %.3g cm, cross-section excess %.3g\n",
+                  raster.n, raster.n, raster.axes.size(), raster.rays.size(), bboxSource.c_str(),
+                  raster.transverseMargin, raster.windowExcess[raster.axes.front()]);
+    }
+
+    // `--dump-rays` writes the raster and stops: the oracle answers it next, and the scoring pass
+    // then reads the rays back from the oracle's file. Nothing is stepped here.
+    if (!opt.dumpRays.empty()) {
+      writeRays(opt.dumpRays, part.id, raster, bboxSource);
+      continue;
+    }
+
+    // ---- representations ---------------------------------------------------------------
+    struct RepSpec {
+      std::string name;
+      std::string source;
+    };
+    std::vector<RepSpec> specs;
+    if (opt.representations.count("surface") && fileExists(part.surfaces)) {
+      specs.push_back({"surface", part.surfaces});
+    }
+    if (opt.representations.count("mesh") && fileExists(part.facets)) {
+      specs.push_back({"mesh", part.facets});
+    }
+    if (opt.representations.count("shape") && fileExists(part.shape)) {
+      specs.push_back({"shape", part.shape});
+    }
+    if (specs.empty()) {
+      std::printf("  skip: no representation available\n");
+      continue;
+    }
+
+    json repsJson = json::array();
+
+    for (const auto& spec : specs) {
+      // A fresh TGeoManager per representation: it owns the shape (TGeoShape registers itself in
+      // gGeoManager on construction, so any other arrangement double-frees) and it carries the
+      // one-part world mode (b) transports through.
+      auto* manager = new TGeoManager(("xray_" + spec.name).c_str(), "X-ray benchmark world");
+      TGeoShape* shape = nullptr;
+      double loadSeconds = 0.;
+      int primitives = -1;
+      const char* primitiveKind = "";
+      const auto tLoad0 = std::chrono::steady_clock::now();
+      if (spec.name == "surface") {
+        auto* solid = new O2BVHSurfaceSolid(part.id.c_str());
+        if (!LoadSurfaceSolid(spec.source, *solid)) {
+          std::printf("  [skip %s] LoadSurfaceSolid failed for %s\n", spec.name.c_str(),
+                      spec.source.c_str());
+          delete manager;
+          gGeoManager = nullptr;
+          continue;
+        }
+        solid->CloseShape(true);
+        primitives = solid->GetNsurfaces();
+        primitiveKind = "patches";
+        shape = solid;
+      } else if (spec.name == "mesh") {
+        auto* solid = new O2Tessellated(part.id.c_str());
+        if (!LoadFacetSolid(spec.source, *solid)) {
+          std::printf("  [skip %s] LoadFacetSolid failed for %s\n", spec.name.c_str(),
+                      spec.source.c_str());
+          delete manager;
+          gGeoManager = nullptr;
+          continue;
+        }
+        solid->CloseShape();
+        primitives = solid->GetNfacets();
+        primitiveKind = "triangles";
+        shape = solid;
+      } else {
+        std::string error;
+        shape = loadShapeFromRootFile(spec.source, &error);
+        if (shape == nullptr) {
+          std::printf("  [skip %s] %s\n", spec.name.c_str(), error.c_str());
+          delete manager;
+          gGeoManager = nullptr;
+          continue;
+        }
+        primitiveKind = shape->ClassName();
+      }
+      loadSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - tLoad0).count();
+
+      const auto* box = dynamic_cast<const TGeoBBox*>(shape);
+
+      std::printf("  --- %-8s %-28s (%d %s, load %.3f s) ---\n", spec.name.c_str(),
+                  shape->ClassName(), primitives, primitiveKind, loadSeconds);
+
+      json repJson;
+      repJson["name"] = spec.name;
+      repJson["source"] = spec.source;
+      repJson["shapeClass"] = shape->ClassName();
+      repJson["primitives"] = primitives;
+      repJson["primitiveKind"] = primitiveKind;
+      repJson["loadSeconds"] = loadSeconds;
+      repJson["capacity"] = shape->Capacity();
+
+      // ---- mode (a): the shape API ------------------------------------------------------
+      Robustness statsA;
+      std::vector<double> insideByAxisA(3, 0.);
+      std::vector<std::vector<Crossing>> listsA(raster.rays.size());
+      ListComparison vsOracleA;
+      {
+        const auto t0 = std::chrono::steady_clock::now();
+        for (size_t i = 0; i < raster.rays.size(); ++i) {
+          const auto& ray = raster.rays[i];
+          const double before = statsA.insideLength;
+          listsA[i] = stepWithShapeApi(shape, ray.origin, ray.dir, ray.tMax, opt.step, statsA);
+          auditCrossingList(listsA[i], shape, ray.origin, ray.dir, ray.tMax, opt.step, statsA);
+          insideByAxisA[ray.axis] += statsA.insideLength - before;
+        }
+        statsA.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+      }
+      repJson["modeA"] = robustnessToJson(statsA);
+      repJson["modeA"]["volumeChordCm3"] = chordVolume(raster, insideByAxisA);
+      json perAxisA = json::object();
+      for (const int axis : raster.axes) {
+        perAxisA[std::string(1, "xyz"[axis])] = insideByAxisA[axis] * raster.cellArea[axis];
+      }
+      repJson["modeA"]["volumeChordPerAxisCm3"] = perAxisA;
+      if (oracle.has) {
+        for (size_t i = 0; i < raster.rays.size() && i < oracle.perRay.size(); ++i) {
+          if (oracle.ambiguous[i]) {
+            continue; // OCCT declined somewhere along this ray; there is no ground truth to score
+          }
+          compareLists(listsA[i], oracle.perRay[i], raster.rays[i].origin, raster.rays[i].dir,
+                       opt.step.matchTolerance, vsOracleA);
+        }
+        repJson["modeA"]["vsOracle"] = comparisonToJson(vsOracleA);
+      }
+      std::printf("    (a) shape API : %lld rays, %lld crossings, %.4f s | zero=%lld stall=%lld "
+                  "nonAdv=%lld cap=%lld unterm=%lld odd=%lld dup=%lld parity=%lld\n",
+                  statsA.rays, statsA.crossings, statsA.seconds, statsA.zeroLengthSteps,
+                  statsA.unstickPushes, statsA.nonAdvancingSteps, statsA.iterationCapHits,
+                  statsA.unterminated, statsA.oddCrossingLists, statsA.duplicateCrossings,
+                  statsA.parityMismatchIntervals);
+      if (oracle.has) {
+        std::printf("        vs OCCT : %lld/%lld rays identical, LOST=%lld extra=%lld "
+                    "displaced=%lld kind=%lld worst dt=%.3g cm\n",
+                    vsOracleA.raysIdentical, vsOracleA.rays, vsOracleA.missing, vsOracleA.extra,
+                    vsOracleA.displaced, vsOracleA.kindMismatch, vsOracleA.worstDeltaT);
+        if (!vsOracleA.worstReason.empty() && vsOracleA.worstReason != "deltaT") {
+          std::printf("        worst   : %s at o=(%.6g, %.6g, %.6g) d=(%.4g, %.4g, %.4g)\n",
+                      vsOracleA.worstReason.c_str(), vsOracleA.worstOrigin[0],
+                      vsOracleA.worstOrigin[1], vsOracleA.worstOrigin[2], vsOracleA.worstDir[0],
+                      vsOracleA.worstDir[1], vsOracleA.worstDir[2]);
+        }
+      }
+      std::printf("        volume  : chord integral %.8g cm^3 (Capacity %.8g)\n",
+                  repJson["modeA"]["volumeChordCm3"].get<double>(), shape->Capacity());
+
+      // ---- mode (b): the real navigator -------------------------------------------------
+      if (!opt.skipNavigator && box != nullptr) {
+        Robustness statsB;
+        std::vector<double> insideByAxisB(3, 0.);
+        ListComparison vsOracleB;
+        ListComparison aVsB;
+        const Point3D worldMin{box->GetOrigin()[0] - box->GetDX(), box->GetOrigin()[1] - box->GetDY(),
+                               box->GetOrigin()[2] - box->GetDZ()};
+        const Point3D worldMax{box->GetOrigin()[0] + box->GetDX(), box->GetOrigin()[1] + box->GetDY(),
+                               box->GetOrigin()[2] + box->GetDZ()};
+        // The world must contain the raster window, not just the part's own box.
+        Point3D wMin = worldMin;
+        Point3D wMax = worldMax;
+        for (int k = 0; k < 3; ++k) {
+          wMin[k] = std::min(wMin[k], raster.windowMin[k]);
+          wMax[k] = std::max(wMax[k], raster.windowMax[k]);
+        }
+        NavigatorTransport transport(manager, shape, wMin, wMax);
+        const auto t0 = std::chrono::steady_clock::now();
+        for (size_t i = 0; i < raster.rays.size(); ++i) {
+          const auto& ray = raster.rays[i];
+          const double before = statsB.insideLength;
+          auto listB = transport.transport(ray.origin, ray.dir, ray.tMax, opt.step, statsB);
+          auditCrossingList(listB, nullptr, ray.origin, ray.dir, ray.tMax, opt.step, statsB);
+          insideByAxisB[ray.axis] += statsB.insideLength - before;
+          if (oracle.has && i < oracle.perRay.size() && !oracle.ambiguous[i]) {
+            compareLists(listB, oracle.perRay[i], ray.origin, ray.dir, opt.step.matchTolerance,
+                         vsOracleB);
+          }
+          compareLists(listB, listsA[i], ray.origin, ray.dir, opt.step.matchTolerance, aVsB);
+        }
+        statsB.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        repJson["modeB"] = robustnessToJson(statsB);
+        repJson["modeB"]["volumeChordCm3"] = chordVolume(raster, insideByAxisB);
+        if (oracle.has) {
+          repJson["modeB"]["vsOracle"] = comparisonToJson(vsOracleB);
+        }
+        repJson["modeAvsB"] = comparisonToJson(aVsB);
+        std::printf("    (b) navigator: %lld rays, %lld crossings, %.4f s | zero=%lld nonAdv=%lld "
+                    "cap=%lld unterm=%lld odd=%lld dup=%lld noTransition=%lld\n",
+                    statsB.rays, statsB.crossings, statsB.seconds, statsB.zeroLengthSteps,
+                    statsB.nonAdvancingSteps, statsB.iterationCapHits, statsB.unterminated,
+                    statsB.oddCrossingLists, statsB.duplicateCrossings,
+                    statsB.boundaryWithoutTransition);
+        if (oracle.has) {
+          std::printf("        vs OCCT : %lld/%lld rays identical, LOST=%lld extra=%lld "
+                      "displaced=%lld worst dt=%.3g cm\n",
+                      vsOracleB.raysIdentical, vsOracleB.rays, vsOracleB.missing, vsOracleB.extra,
+                      vsOracleB.displaced, vsOracleB.worstDeltaT);
+        }
+        std::printf("        (a)vs(b): %lld/%lld rays identical, LOST=%lld extra=%lld "
+                    "displaced=%lld worst dt=%.3g cm\n",
+                    aVsB.raysIdentical, aVsB.rays, aVsB.missing, aVsB.extra, aVsB.displaced,
+                    aVsB.worstDeltaT);
+        std::printf("        volume  : chord integral %.8g cm^3\n",
+                    repJson["modeB"]["volumeChordCm3"].get<double>());
+      }
+
+      repsJson.push_back(std::move(repJson));
+      delete manager; // frees the shape, the world and the navigator with it
+      gGeoManager = nullptr;
+    }
+
+    partJson["raster"] = {{"n", raster.n},
+                          {"axes", raster.axes},
+                          {"rays", raster.rays.size()},
+                          {"cellArea", {raster.cellArea[0], raster.cellArea[1], raster.cellArea[2]}},
+                          {"transverseMargin", raster.transverseMargin},
+                          {"windowExcess", {raster.windowExcess[0], raster.windowExcess[1],
+                                            raster.windowExcess[2]}},
+                          {"windowMin", {raster.windowMin[0], raster.windowMin[1], raster.windowMin[2]}},
+                          {"windowMax", {raster.windowMax[0], raster.windowMax[1], raster.windowMax[2]}}};
+    if (oracle.has) {
+      // Three volume numbers, and they answer three different questions. `volumeChordCm3` is
+      // OCCT's OWN chord integral over these same rays, so comparing a candidate against it is
+      // immune to the raster's own error; `capacity` is OCCT's exact volume, so
+      // (oracle chord - capacity) IS the raster's achieved precision, measured at this density;
+      // and each representation's `capacity` is the number the sample gate already scores.
+      partJson["oracle"] = {{"tolerance", oracle.tolerance},
+                            {"capacity", oracle.capacity},
+                            {"volumeChordCm3", oracle.volumeChord},
+                            {"chordVsExactRelative",
+                             oracle.capacity != 0.
+                               ? (oracle.volumeChord - oracle.capacity) / oracle.capacity
+                               : 0.},
+                            {"ambiguousRays", oracle.ambiguousRays},
+                            {"valid", oracle.valid}};
+      std::printf("  raster precision: OCCT chord integral %.8g vs OCCT exact %.8g "
+                  "-> %.3e relative (N=%d, %zu rays)\n",
+                  oracle.volumeChord, oracle.capacity,
+                  partJson["oracle"]["chordVsExactRelative"].get<double>(), raster.n,
+                  raster.rays.size());
+    }
+    partJson["representations"] = std::move(repsJson);
+    report.push_back(std::move(partJson));
+  }
+
+  if (!opt.jsonOut.empty()) {
+    std::ofstream out(opt.jsonOut);
+    out << report.dump(1);
+    std::printf("\nreport: %s\n", opt.jsonOut.c_str());
+  }
+  return 0;
+}

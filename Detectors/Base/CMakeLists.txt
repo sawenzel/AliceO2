@@ -89,6 +89,17 @@ o2_add_executable(
   PUBLIC_LINK_LIBRARIES O2::DetectorsBase ROOT::Geom ROOT::RIO
                         nlohmann_json::nlohmann_json)
 
+# X-ray / geantino transport benchmark (scripts/geometry/Stream_J_XRay.md). Deliberately a second
+# binary rather than a mode of solid-harness: it measures a transport loop rather than single-shot
+# queries, needs no tessellated reference, and must not perturb the gate.
+o2_add_executable(
+  xray
+  COMPONENT_NAME DetectorsBase
+  SOURCES test/runXRayBenchmark.cxx
+  IS_BENCHMARK
+  PUBLIC_LINK_LIBRARIES O2::DetectorsBase ROOT::Geom ROOT::RIO
+                        nlohmann_json::nlohmann_json)
+
 if(BUILD_SIMULATION)
   if (NOT APPLE)
     o2_add_test(
