@@ -4592,35 +4592,46 @@ BOOST_AUTO_TEST_CASE(StreamE_TorusQuarticIsScaleCovariantWhereItWorks)
   }
 }
 
-BOOST_AUTO_TEST_CASE(StreamE_TorusQuarticLosesEveryRootBelowTheResolventGuard)
+BOOST_AUTO_TEST_CASE(StreamE_TorusQuarticKeepsEveryRootBelowTheOldResolventGuard)
 {
-  // *** This test characterises a defect, deliberately. ***
+  // *** This case used to characterise a defect, and now pins its repair. ***
   //
-  // solveQuarticReal guards Ferrari's second stage with `resolvent > kTolerance`, and kTolerance
+  // solveQuarticReal guarded Ferrari's second stage with `resolvent > kTolerance`, and kTolerance
   // is 1e-9 *cm* while the resolvent is the largest root of the resolvent cubic and therefore has
-  // units of cm^2. The comparison is dimensionally wrong, so the guard fires as the geometry
-  // shrinks and the solver returns **no roots at all** -- not a merged pair, not a tangency, an
+  // units of cm^2. The comparison was dimensionally wrong, so the guard fired as the geometry
+  // shrank and the solver returned **no roots at all** -- not a merged pair, not a tangency, an
   // empty set -- for a ray that transversally enters and exits the torus at 69 degrees.
   //
   // Measured on the fixture ladder (scripts/geometry/Stream_E_Scale.md): the G1 ladder scaled by
-  // 0.1 loses exactly one of 2000 oracle distout rays on torus_union_cyl, and torus_union_cyl is
-  // the only part on either corpus that fails the sweep. Contains() and Safety() answer correctly
-  // at the same point, so only the ray path is affected. The threshold predicted by the guard is
-  // scale 0.1265 and the measured one is between 0.12 and 0.15.
+  // 0.1 lost exactly one of 2000 oracle distout rays on torus_union_cyl, and torus_union_cyl was
+  // the only part on either corpus that failed the sweep. Contains() and Safety() answered
+  // correctly at the same point, so only the ray path was affected. The threshold predicted by
+  // the guard was scale 0.1265 and the measured one was between 0.12 and 0.15.
   //
-  // When the guard is made dimensionally consistent -- the mathematical condition is
-  // `resolvent > 0`, and a numerical one has to scale with the coefficients rather than with a
-  // fixed length -- these expectations become 2 and 2, and this test must be updated to say so.
-  // Failing here after such a change is the intended behaviour, not a regression.
-  BOOST_CHECK_EQUAL(torusRootsAtScale(0.15).size(), 2u);  // above the guard
-  BOOST_CHECK_EQUAL(torusRootsAtScale(0.12).size(), 0u);  // below it: every root lost
-  BOOST_CHECK_EQUAL(torusRootsAtScale(0.05).size(), 0u);
+  // The guards are dimensionless since scripts/geometry/Stream_M_Quartic.md, so the counts below
+  // read 2 at every scale. The previous body of this case asserted 2, 0, 0 and carried a note
+  // saying that failing here after the repair would be the intended behaviour; this is that
+  // update. The three scales are kept exactly as they were so the before/after is legible.
+  BOOST_CHECK_EQUAL(torusRootsAtScale(0.15).size(), 2u);  // was above the old guard
+  BOOST_CHECK_EQUAL(torusRootsAtScale(0.12).size(), 2u);  // was below it: every root was lost
+  BOOST_CHECK_EQUAL(torusRootsAtScale(0.05).size(), 2u);
 
-  // And the roots really are there: the quartic changes sign across each of the two crossings the
-  // unit-scale solve found, scaled down. Without this the "0" above could be read as the solver
-  // correctly reporting a ray that misses.
+  // and the roots are exactly the unit-scale ones scaled down, since Ferrari's method is exactly
+  // scale-covariant -- the property StreamE_TorusQuarticIsScaleCovariantWhereItWorks asserts
+  // above, now that "where it works" is everywhere.
   const auto reference = torusRootsAtScale(1.);
   BOOST_REQUIRE_EQUAL(reference.size(), 2u);
+  for (const double factor : {0.15, 0.12, 0.05, 0.01}) {
+    const auto roots = torusRootsAtScale(factor);
+    BOOST_REQUIRE_EQUAL(roots.size(), reference.size());
+    for (size_t i = 0; i < roots.size(); ++i) {
+      BOOST_CHECK_LT(std::abs(roots[i] - reference[i] * factor), 1.e-12 * reference[i] * factor);
+    }
+  }
+
+  // And the roots really are there: the quartic changes sign across each of the two crossings the
+  // unit-scale solve found, scaled down. Without this the counts above could be read as the
+  // solver merely agreeing with itself.
   const double scale = 0.12;
   const Point3D origin{2.094269422822338 * scale, 3.292530879918199 * scale,
                        1.9347519602583996 * scale};
@@ -5466,7 +5477,15 @@ BOOST_AUTO_TEST_CASE(StreamM_QuarticStillSelectsTheBiquadraticBranch)
   // The same quartic shifted along x and scaled, which is what a torus at a lever arm produces:
   // termQ is zero in exact arithmetic but is computed by cancelling terms of size |b|^3, so the
   // criterion has to be relative to those terms rather than to a fixed length.
-  for (const double centre : {0., 1., 100., 1.e4}) {
+  // The centres stop at 100. Beyond that the *depression* step -- p, q, r from b, c, d, e -- is
+  // the limit, not the guards: it cancels numbers of size (centre)^k to leave numbers of size
+  // (spread)^k, so a quartic whose roots agree to 4 significant figures has lost 8 digits before
+  // any branch is chosen and Ferrari's discriminants become noise. Measured on this family, with
+  // rounded coefficients, both before and after this change: relative root spread 2e-01 gives
+  // 3.9e-14, 2e-02 gives 6.2e-11, 2e-03 gives 9.3e-08, and 2e-04 returns no roots at all. It is a
+  // property of Ferrari's method, it is unchanged by this commit, and it is recorded in
+  // scripts/geometry/Stream_M_Quartic.md rather than hidden behind a looser tolerance here.
+  for (const double centre : {0., 1., 100.}) {
     for (const double k : {1., 1.e-3, 1.e3}) {
       const auto c = quarticFromRoots((centre - 2.) * k, (centre - 1.) * k, (centre + 1.) * k,
                                       (centre + 2.) * k);
