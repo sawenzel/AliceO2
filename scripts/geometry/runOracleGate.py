@@ -189,6 +189,94 @@ def verdict(part_report: dict):
     return not reasons, reasons
 
 
+def column_disagreements(oracle: dict, key: str):
+    column = oracle.get(key)
+    if column is None:
+        return None
+    return column.get("nMismatchUnexplained", 0) + column.get("nMismatchMissedSurface", 0)
+
+
+def print_representation_scorecard(report: list):
+    """One row per (part, representation): the tiered scorecard.
+
+    This is a *report*, not a verdict, and it deliberately does not feed the exit code. The gate
+    above scores the exact-surface representation, which is what the project has always gated;
+    the columns here say what every other representation of the same part would have scored
+    against the same oracle answers, which is the number the converter's future fallback policy
+    has to be set from.
+
+    Three things are reported for what they are rather than folded into a pass/fail:
+
+      * `closure` is blank wherever it is meaningless. Closure, rims and NavigationReliability are
+        O2BVHSurfaceSolid concepts; a TGeoCompositeShape has no rims, and a triangle mesh has a
+        different notion (`meshClosedBody`) that is not the same claim. The harness omits the keys
+        rather than reporting a default, so this prints "-".
+      * `capacity` is "n/a" wherever TGeoShape::Capacity() is Monte-Carlo sampled -- which it is
+        for every TGeoCompositeShape (ROOT throws 10000 accepted points into the bbox, i.e. ~1e-2
+        relative error against a 1e-6 band). The intended acceptance for CSG parts is OCCT
+        symmetric-difference volume, which is a later step.
+      * `bboxDev` is the frame check: the max deviation, in cm, between the representation's own
+        bounding box and the oracle's. A large number here means the two are not answering
+        questions about the same object and every other column in the row is meaningless.
+    """
+    rows = [p for p in report if p.get("representations")]
+    if not rows:
+        return
+    print("\n=== REPRESENTATION SCORECARD ===")
+    print(f"  {'part':<44} {'repr':<8} {'class':<20} {'contains':>9} {'distout':>9} "
+          f"{'distin':>9} {'safety':>9} {'capacity':>10} {'bboxDev':>9}  closure")
+    for part_report in rows:
+        for rep in part_report["representations"]:
+            oracle = rep.get("oracle", {})
+            cells = []
+            for key in ("contains", "distout", "distin", "safety"):
+                bad = column_disagreements(oracle, key)
+                cells.append("-" if bad is None else str(bad))
+            if rep.get("capacityComparable", False):
+                capacity = f"{abs(oracle.get('capacityRelativeDeviation', 0.)):.2e}"
+            else:
+                capacity = "n/a"
+            bbox = rep.get("bboxDeviationFromOracle", -1.)
+            bbox_text = "-" if bbox is None or bbox < 0. else f"{bbox:.2e}"
+            if rep.get("closureApplicable", False):
+                closure = f"{rep.get('reliability', '?')}" + ("" if rep.get("navigable") else " (NOT navigable)")
+            elif "meshClosedBody" in rep:
+                closure = f"meshClosedBody={rep['meshClosedBody']}"
+            else:
+                closure = "-  (not applicable to this representation)"
+            print(f"  {part_report['id']:<44} {rep['name']:<8} {rep.get('shapeClass', '?'):<20} "
+                  f"{cells[0]:>9} {cells[1]:>9} {cells[2]:>9} {cells[3]:>9} {capacity:>10} "
+                  f"{bbox_text:>9}  {closure}")
+
+    # The totals, because the invariant this project defends is a count of disagreements and it
+    # must never be quoted from a table the reader has to add up by hand.
+    print("\n  totals per representation (disagreements outside tolerance, summed over parts):")
+    names = []
+    for part_report in rows:
+        for rep in part_report["representations"]:
+            if rep["name"] not in names:
+                names.append(rep["name"])
+    for name in names:
+        totals = {}
+        parts_with = 0
+        clean = 0
+        for part_report in rows:
+            for rep in part_report["representations"]:
+                if rep["name"] != name:
+                    continue
+                parts_with += 1
+                bad_here = 0
+                for key in ("contains", "distout", "distin", "safety"):
+                    bad = column_disagreements(rep.get("oracle", {}), key)
+                    if bad is not None:
+                        totals[key] = totals.get(key, 0) + bad
+                        bad_here += bad
+                clean += (bad_here == 0)
+        summary = "  ".join(f"{key}={totals.get(key, 0)}"
+                            for key in ("contains", "distout", "distin", "safety"))
+        print(f"    {name:<8} {summary}   ({clean}/{parts_with} part(s) with zero disagreements)")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -253,7 +341,23 @@ def main():
             print(f"           {reason}")
     total = len(report)
     print(f"\n{passed}/{total} part(s) pass the oracle gate")
-    print(f"Full report: {args.workdir / 'gate.json'}")
+
+    # The gate total above and the disagreement count below are separate numbers and neither is
+    # ever to be quoted without the other; printing them adjacently is the cheapest way to keep
+    # that habit. The gate verdict scores the exact-surface representation only -- see
+    # print_representation_scorecard for why the other representations are reported, not gated.
+    unexplained = {key: 0 for key in ("contains", "distout", "distin", "safety")}
+    for part_report in report:
+        oracle = part_report.get("oracle") or {}
+        for key in unexplained:
+            bad = column_disagreements(oracle, key)
+            if bad is not None:
+                unexplained[key] += bad
+    print("oracle disagreements outside tolerance (surface representation): "
+          + "  ".join(f"{key}={value}" for key, value in unexplained.items()))
+
+    print_representation_scorecard(report)
+    print(f"\nFull report: {args.workdir / 'gate.json'}")
     return 0 if passed == total and total > 0 else 1
 
 

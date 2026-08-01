@@ -11,10 +11,15 @@
 
 #include "DetectorsBase/O2SolidHarness.h"
 
+#include "TClass.h"
+#include "TFile.h"
+#include "TKey.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <memory>
 #include <random>
 
 namespace o2
@@ -627,6 +632,81 @@ TimingResult timeSafety(const TGeoShape* shape, const std::vector<Point3D>& poin
   result.nsPerCall = result.nCalls > 0 ? ns / static_cast<double>(result.nCalls) : 0.;
   result.checksum = checksum;
   return result;
+}
+
+// ------------------------------------------------------------------------------------------
+// The `shape_<part>.root` sidecar
+// ------------------------------------------------------------------------------------------
+
+namespace
+{
+/// The key an emitter is required to write. Kept here rather than duplicated at both call sites
+/// so reader and writer cannot disagree about it.
+constexpr const char* kShapeKeyName = "shape";
+} // namespace
+
+TGeoShape* loadShapeFromRootFile(const std::string& path, std::string* error)
+{
+  const auto fail = [error](const std::string& why) -> TGeoShape* {
+    if (error != nullptr) {
+      *error = why;
+    }
+    return nullptr;
+  };
+  // TFile is chatty and *fatal-looking* on a missing file; check first so a part that simply has
+  // no shape sidecar (the overwhelmingly common case today) is silent rather than alarming.
+  std::unique_ptr<TFile> file(TFile::Open(path.c_str(), "READ"));
+  if (!file || file->IsZombie()) {
+    return fail(path + ": cannot be opened as a ROOT file");
+  }
+  TObject* object = file->Get<TObject>(kShapeKeyName);
+  if (object == nullptr) {
+    // Fall back to the first TGeoShape-derived key. Emitters must write "shape"; this exists so a
+    // file produced by hand (`root -e '...'`) with a different key name is still usable, which is
+    // exactly how the first fixtures for this path were made.
+    TIter next(file->GetListOfKeys());
+    while (auto* key = static_cast<TKey*>(next())) {
+      TClass* cl = TClass::GetClass(key->GetClassName());
+      if (cl != nullptr && cl->InheritsFrom(TGeoShape::Class())) {
+        object = key->ReadObj();
+        break;
+      }
+    }
+  }
+  if (object == nullptr) {
+    return fail(path + ": holds no object inheriting from TGeoShape (expected key \"" +
+                kShapeKeyName + "\")");
+  }
+  auto* shape = dynamic_cast<TGeoShape*>(object);
+  if (shape == nullptr) {
+    const std::string className = object->ClassName();
+    delete object;
+    return fail(path + ": key \"" + kShapeKeyName + "\" holds a " + className +
+                ", which does not inherit from TGeoShape");
+  }
+  // The object was read out of a TDirectory but is not a TDirectory-owned type (TGeoShape is not
+  // a histogram/tree), so we own it and it stays valid past the file's destruction.
+  return shape;
+}
+
+bool saveShapeToRootFile(const std::string& path, const TGeoShape& shape, std::string* error)
+{
+  std::unique_ptr<TFile> file(TFile::Open(path.c_str(), "RECREATE"));
+  if (!file || file->IsZombie()) {
+    if (error != nullptr) {
+      *error = path + ": cannot be opened for writing";
+    }
+    return false;
+  }
+  const int written = file->WriteTObject(&shape, kShapeKeyName);
+  file->Close();
+  if (written <= 0) {
+    if (error != nullptr) {
+      *error = path + ": WriteTObject wrote 0 bytes";
+    }
+    return false;
+  }
+  return true;
 }
 
 } // namespace harness
