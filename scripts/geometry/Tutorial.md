@@ -72,6 +72,7 @@ And, alongside it, the thing that makes any of this trustworthy:
 | `samples_<part>.json` | harness, `--dump-samples` | the seeded point/ray set; **nothing outside the harness can regenerate it** |
 | `answers_<part>.json` | `occtOracle.py` | OpenCascade's answers to exactly those samples |
 | `gate.json` | `runOracleGate.py` | the full per-part scorecard |
+| `crossings_<part>.json`, `xray.json` | `runXRayBench.py` | per-ray crossing lists from OpenCascade, and the transport scorecard |
 
 ---
 
@@ -121,6 +122,13 @@ $B/stage/bin/o2-bench-detectorsbase-solid-harness --db /tmp/gate/db --parts Boom
 `--rims` names which trim loop of which face is open and where; `--edge-identity` prints the
 sidecar-v3 topology block; `--loop-crosscheck` re-runs every query through the non-BVH twin and
 requires bit-identical answers.
+
+**Transport geantinos through it** (§5.7) — the only tool here that *steps* rather than asking
+single-shot questions, and the only one that runs on ALICE3:
+
+```bash
+O2_BUILD_DIR=$B python3 scripts/geometry/runXRayBench.py --workdir /tmp/xray --fixtures --beams 96
+```
 
 ---
 
@@ -281,6 +289,55 @@ Tessellation, not the exact path, is the scaling problem.
 
 Also still open: in `auto` mode an exact part whose reliability is not `Reliable` **ships anyway,
 with only a warning**. That is the one live production risk on the branch.
+
+### 5.7 X-ray / geantino transport — the newest instrument, and the only one that *transports*
+
+`runXRayBench.py` + `o2-bench-detectorsbase-xray`. A structured beam is fired through a part and
+each ray's **ordered crossing list** is produced by *stepping* — two independent ways — and
+compared against OpenCascade **as a list, not as a rate**, so a missing crossing localises to a
+face. Mode **(a)** is a bare shape-API loop (`Contains`, then alternating `DistFromOutside` /
+`DistFromInside`); mode **(b)** is the real `TGeoNavigator`. Everything else in this project asks
+single-shot questions from sampled points; only this composes steps, which is where navigation
+actually fails.
+
+```bash
+O2_BUILD_DIR=$B python3 scripts/geometry/runXRayBench.py --workdir /tmp/xray --fixtures
+$B/stage/bin/o2-bench-detectorsbase-xray --self-test     # 19 checks, no DB, no oracle
+```
+
+Measured: **zero stalls of any kind over 1.15M steps** on fixtures and Bagger — the feared failure
+mode (zero-length steps, ping-ponging) does not occur for the surface or CSG representations, and
+mode (a) and (b) never disagree there. The mesh is where transport breaks: 6 rays enter
+`cyl_inter_cyl`'s tessellation and **never leave**, and `O2Tessellated::Contains()` contradicts its
+own `DistFrom*` on 534 + 15 intervals.
+
+**Use `--beams N`, not the axis raster.** A parallel beam is *direction-poor* — three axis beams
+are three directions however many rays are fired — and the known torus quartic defect (§5.5) is
+invisible to them and visible to a Fibonacci fan. The benchmark's acceptance test is that it
+detects that defect: at ×0.1, 96 directions × 24² rays give **LOST = 4 (in pairs — enter *and*
+exit) and 2 parity mismatches**. The `parity` audit — `Contains()` at interval midpoints, the one
+check independent of the stepping — is the more sensitive of the two and fires even at the
+**shipped ×1 size** (2 in 262144 rays).
+
+**Volume by chord integration** is a **1e-4 to 1e-5** instrument at practical densities and is
+*non-monotone in N*, so it is quoted as an envelope at a stated density and never extrapolated. It
+**cannot** resolve the 1.3e-06 capacity residuals and the tool says so before printing. What it is
+for: gross errors, and **composites** — where it is the only independent volume a CSG part has.
+Measured: the CSG composite and the exact surface solid agree to **2.6e-14** on `cyl_cross_cyl` and
+≤1.6e-12 on all seven Bagger rams, while ROOT's Monte-Carlo `TGeoCompositeShape::Capacity()` is off
+by up to 1.45e-02.
+
+**It is the first instrument that runs on ALICE3** — 18 parts in ~32 s / 371 MB at N=48, because
+*loading* dominates and stepping is nearly free. And it immediately found what nothing else can
+see: **4 of 18 parts lose 418 crossings, invert the sense of 236, leave 70 transports
+unterminated and contradict `Contains()` on 336 intervals — while all 18 report `reliable` and
+`navigable` with zero non-manifold edges.** That is §5.4's stated caveat — identity certifies the
+*topology* survived conversion, not each face's *geometry* — measured for the first time, on real
+geometry, with a number. Three of the four are the `ST0923290` family. Reported, not diagnosed.
+
+Assembly-level transport (several parts in one world, where leaking between volumes would show) is
+**not** built; `Stream_J_XRay.md` §9 scopes what it needs, including a **leaking** counter that
+none of the current metrics can express.
 
 ---
 
