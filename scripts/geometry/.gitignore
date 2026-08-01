@@ -1,0 +1,20 @@
+# Editor and build litter that accumulates in this working folder.
+#
+# Everything listed here is untracked scratch, not deliberate content: 38 untracked entries were
+# hiding the three or four that matter in `git status`, which is a real cost the moment more than
+# one person or session works here. Nothing is deleted by this file -- it only stops the noise
+# being reported. The stale script variants (O2_TGeoToCAD*.py, O2_CADtoTGeo_with_*.py) are left
+# visible on purpose: one of them is about to be revived for the TGeo -> STEP round trip
+# (Workstreams.md, Stream E), and picking which needs a human.
+*~
+\#*\#
+._*
+*.o
+a.out
+__pycache__/
+.gdb_history
+
+# generated conversion output; never commit these, and never write them into STEP_examples/
+TGeoOutput_*/
+*.root
+log
