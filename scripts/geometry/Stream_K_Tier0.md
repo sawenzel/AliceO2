@@ -364,3 +364,195 @@ Two things this audit is not:
   `ST1829909_01` still fail at load on the fixed 1e-06 cm wire-join tolerance (mechanism 3, gaps
   4.00e-06 and 5.41e-06 cm), unchanged by this work and unchanged in count (20 emitted / 18 load,
   before and after). Nothing here touches that.
+
+---
+
+## 8. The control that says how much of this the recognition path is responsible for
+
+`--recognize-surfaces off` is the positive control for the whole coverage claim, and it is decisive
+on `as1-oc-214.stp`:
+
+```
+$ O2_CADtoTGeo.py as1-oc-214.stp --exact-surfaces auto --recognize-surfaces off
+Surface report: 0/5 logical volumes eligible for exact O2BVHSurfaceSolid conversion
+Exact-surface extraction (auto): 0/5 leaf solids represented exactly, 5 fall back to tessellation
+  emitted 0/5
+```
+
+**0/5 with the pre-pass off, 5/5 with it on.** That model has no analytic curved surface stored at
+all; every one of its five sidecars exists only because of canonical recognition. It is the
+sharpest available demonstration that the mechanism works, and it is the true reading of the
+brief's `0/5 → 5/5` — a statement about the *pre-pass*, not about this session's changes.
+
+---
+
+## 9. Acceptance: the whole board, totals and disagreement counts together
+
+### 9.1 The invariant
+
+| | baseline | after |
+| --- | --- | --- |
+| `ctest -R BVHSurfaceSolid` | 91 cases, green | **92 cases, green** (one added, §9.5) |
+| fixtures gate, shipped | 9/9 | **9/9** (9 of 10 leaf solids scored) |
+| fixtures tiers | CSG 2 / surface 7 | **CSG 2 / surface 7** |
+| Bagger gate, shipped | 12/12 | **12/12** (12 of 13 leaf solids scored) |
+| Bagger tiers | CSG 7 / surface 5 | **CSG 7 / surface 5** (+ tessellated 1, unscored) |
+| unexplained disagreements, **surface**, fixtures | 0 / 0 / 0 / 0 | **0 / 0 / 0 / 0** |
+| unexplained disagreements, **surface**, Bagger | 0 / 0 / 0 / 0 | **0 / 0 / 0 / 0** |
+| unexplained disagreements, **shape**, fixtures / Bagger | 0/0/0/0 (2 parts) / 0/0/0/0 (7 parts) | **unchanged** |
+| unexplained disagreements, **mesh**, fixtures / Bagger | 283/6936/5504/5561 / 418/6721/7973/10299 | **unchanged** |
+| `runOracleGate.py --self-test` | 17/17 | **17/17** |
+| `o2-bench-detectorsbase-xray --self-test` | 17 checks, 0 failures | **17 checks, 0 failures** |
+| `compareGateRuns.py --self-test` | 4/4 injected defects caught | **4/4** |
+| `O2_CADtoTGeo.py --self-test` | *(did not exist)* | **18 checks, 0 failures** |
+
+### 9.2 Inertness on the two gated corpora
+
+`compareGateRuns.py` on before/after `gate.json`, full field-by-field:
+
+| corpus | parts | differing fields | of which are absolute workdir `source` paths | **real changes** |
+| --- | ---: | ---: | ---: | ---: |
+| fixtures | 9 | 38 | 38 | **0** |
+| Bagger | 12 | 55 | 55 | **0** |
+
+and the stronger statement underneath it: **every `surfaces_*.bin` is byte-identical** — 9 of 9
+fixtures, 12 of 12 Bagger, 5 of 5 as1-oc-214, 20 of 20 ALICE3 (both the plain conversion and the
+X-ray DB's `--mesh --csg auto` build). *A comparison that cannot fail is not evidence*, so the
+reason it holds is stated as a measurement: **0 of 244 gated faces reach the recognition pre-pass
+at all** (`Stream_L_ALICE3Defect.md` §6), and the differ was given a positive control — it catches
+4/4 injected defects, including a 1e-8 relative nudge of a single numeric leaf.
+
+### 9.3 X-ray transport, `--beams 96` — `as1-oc-214.stp`
+
+This model is where recognition actually ships (28 of 53 faces in the emitted sidecars), so it is
+the sharpest transport test of the recognition path in the corpus. Fibonacci fan, **96 directions**,
+raster 12 → 69120 rays, both stepping modes:
+
+| | before | after |
+| --- | --- | --- |
+| rays identical to OpenCascade, mode (a) shape API | 69104 / 69120 | **69104 / 69120** |
+| rays identical to OpenCascade, mode (b) navigator | 69104 / 69120 | **69104 / 69120** |
+| **LOST** / displaced / sense (`kind`) | 0 / 0 / 0 | **0 / 0 / 0** |
+| extra | 24 | **24** |
+| zero / non-advancing / unstick / cap / unterminated / odd / duplicate / parity | all 0 | **all 0** |
+| mode (a) vs mode (b) | 0 of 69120 rays disagree | **0 of 69120** |
+| parts fully clean | 2 / 5 | **2 / 5** |
+
+The two full reports are **identical after stripping timings and workdir paths** — not "agree
+within", identical.
+
+**The 24 `extra` crossings are pre-existing and are a sampling artefact, and that is measured
+rather than assumed.** They scale linearly with the ray count at a fixed rate, which a defect
+localised to a face would not:
+
+| raster | rays | extra | rate |
+| ---: | ---: | ---: | ---: |
+| 11 | 58080 | 15 | 2.6e-04 |
+| 12 | 69120 | 24 | 3.5e-04 |
+| 13 | 81120 | 32 | 3.9e-04 |
+
+`LOST = 0` at every density, worst |Δt| 9e-12…2e-11 cm, and they are on the three parts with
+curved walls — consistent with near-tangential grazes where the kernel admits a hit OCCT drops.
+Not investigated further; flagged because it is an unexplained disagreement with the oracle on a
+shipped model, and it should not be quietly inherited.
+
+### 9.4 X-ray transport, `--beams 96` — ALICE3 `CAD_noETA.stp`
+
+Fibonacci fan, **96 directions**, raster 6 → 3456 rays per part, 18 loadable sidecars of the 20
+emitted, 62207 rays, both stepping modes:
+
+| | before | after |
+| --- | ---: | ---: |
+| rays identical to OpenCascade, mode (a) / mode (b) | 62202 / 62207 each | **62202 / 62207** each |
+| **LOST** / displaced / sense (`kind`) | 0 / 0 / 0 | **0 / 0 / 0** |
+| extra | 10 | **10** (3 parts: `ST0923290_019` 6, `ST1829909_002` 2, `ST1829909_003` 2) |
+| parts fully clean | 15 / 18 | **15 / 18** |
+| zero / non-advancing / unstick / cap / unterminated / odd / parity / parityNB | all 0 | **all 0** |
+| duplicate crossings | 2 | **2** |
+| mode (a) vs mode (b) | 0 of 62208 rays disagree | **0 of 62208** |
+| sidecars emitted / loading | 20 / 18 | **20 / 18** |
+
+The two full reports are **identical after stripping timings and workdir paths**, and underneath
+that the two X-ray DBs' 20 `surfaces_*.bin` are byte-identical, so they could not have differed.
+
+**A number that moved against the standing baseline, and it is not this work.**
+`Stream_L_ALICE3Defect.md` §2.5 records 13814/13822 rays, 18/18 parts clean and every robustness
+counter zero, measured with a **three-axis raster at N=16**. This fan sees 15/18 parts clean, 10
+`extra` crossings and 2 duplicate crossings on parts that raster calls clean — **before** the change
+as well as after. That is `Stream_J_XRay.md` §6.2's warning landing again: a parallel beam is
+direction-poor, and "clean" from it means "clean at this sampling". The 18/18 figure should be
+quoted with its raster.
+
+**`LOST = 0` here is not a claim that the torus quartic defect (`Stream_M_Quartic.md`) is gone.**
+`Stream_L_ALICE3Defect.md` §2.5 measured 14 LOST on `ST2487462_01` with a *three-axis* raster at
+N=16; this is a different and much more direction-diverse sampling at a lower transverse density,
+and it does not hit that configuration. A benchmark that does not reproduce a known defect has not
+retired it — it has failed to sample it, which is exactly the standing warning in
+`Tutorial.md` §4.5.
+
+The two sidecars that do not load are unchanged and are `Stream_L_ALICE3Defect.md`'s **mechanism 3**
+— a fixed 1e-06 cm wire-join tolerance against declared edge tolerances of 8.6e-05 and 3.1e-04 cm:
+
+```
+surfaces_ST1829909_004_...bin: surface 371:  wire edge 0 end does not join the next edge start (gap 4.00e-06 cm, tolerance 1e-06 cm)
+surfaces_ST1829909_01_...bin:  surface 1006: wire edge 1 end does not join the next edge start (gap 5.41e-06 cm, tolerance 1e-06 cm)
+```
+
+Neither part contains a single B-spline *surface*, so nothing in this stream can have caused or
+cured them. **No newly-emitted sidecar fails to load, because no sidecar is newly emitted**: the
+count is 20 before and 20 after, and the 20 files are byte-identical.
+
+### 9.5 The one C++ test
+
+The recognition work is entirely converter-side and its controls are `--self-test`. What was added
+to `Detectors/Base/test/testBVHSurfaceSolid.cxx` is the **kernel-side contract the converter
+measures against**: `_recognized_inner_wall()` decides a recognized quadric's `inner_wall` by
+comparing the face's own outward normal against "away from the axis", and that measurement is only
+correct if the kernel's convention is the one it assumes. This work multiplies the number of faces
+going through that path, so the convention is pinned for the cylinder, the cone **and the sphere** —
+`Stream_L_ALICE3Defect.md` §9 records that recognized planes and spheres are exercised by nothing,
+and this is now the one thing that exercises the sphere and cone branches' sign.
+
+---
+
+## 10. What this leaves open, in the order it is worth doing
+
+1. **The trim for recognized quadrics — the whole remaining coverage lever (§2).** 16 ALICE3 solids
+   recognize completely and are then declined by one line, and they are the entire difference
+   between `n_eligible = 36` and `emitted = 20`. It needs a B-spline **fit** in the recognized
+   (phi, other) domain with the achieved 3D deviation of the reconstructed boundary measured
+   against the source edge and recorded per edge, because the exact composition is transcendental
+   and no exact representation exists in the sidecar's trim vocabulary. Design the acceptance
+   before the fit: the natural bound is the edge's *own declared tolerance*, which ALICE3 carries
+   (2e-06 … 4e-04 cm) and which the sidecar already stores as `modelTolerance`. **Land the
+   acceptance-criterion fix (§5) first** — it is already landed — because without it
+   `ST2487458_01`'s 182 phantom cones become emittable the moment the trim can carry them.
+   1-2 days with verification.
+
+2. **The 8 planes on `ST2487195_01` (§5.2).** They are flat to 1.5e-07 of the patch diagonal and
+   are declined at 1e-09. Whether that is right is a *policy* question about a relative bound, not
+   a bug, and it should be decided by measuring what a 1.5e-07 relative surface error does to
+   transport rather than by choosing a constant. It is the only place where this converter is
+   measurably less permissive than OCCT.
+
+3. **A recognition fixture.** `Stream_L_ALICE3Defect.md` §7 asks for a ladder fixture containing a
+   NURBS-encoded cylinder, and it is still missing: the gated corpora reach the recognition
+   pre-pass **zero** times, so every statement in this document about the shipped gates is a
+   statement about a path they do not exercise. `make_boolean_fixtures.py` builds canonical quadrics
+   only; `--self-test`'s controls (built with `BRepBuilderAPI_NurbsConvert`) are exactly the
+   ingredients a fixture would need, so this is now a small job rather than a half-day one.
+
+4. **The face-normal criterion as a gate column.** §7 is a hand-run audit over 2180 faces with two
+   probes. `Stream_L_ALICE3Defect.md` §9 already asks for `--face-normals` in the harness and a
+   gate column; this stream is the second consumer of it, and the second time it had to be run by
+   hand.
+
+5. **The `extra` crossings (§9.3, §9.4).** 24 on as1-oc-214 and 10 on ALICE3, `LOST = 0`
+   everywhere, scaling linearly with the ray count. Almost certainly near-tangential grazes, but
+   "almost certainly" is not this project's standard and they are unexplained disagreements with
+   the oracle on shipped models. The per-face attribution probe (`probes/faceAttrib.cxx`) would
+   name them in an hour.
+
+6. **Not touched, by instruction and by scope:** the loader's fixed 1e-06 cm wire-join tolerance
+   (`Stream_L_ALICE3Defect.md` mechanism 3, still 20 emitted / 18 loading on ALICE3), the torus
+   quartic (`Stream_M_Quartic.md`), and anything under `Detectors/Base/src/**`.
