@@ -60,6 +60,7 @@ struct Options {
   std::set<std::string> only = {"contains", "distout", "distin", "safety"};
   bool loopCrosscheck = false;
   bool pruningAb = false;
+  bool allRims = false; ///< print every rim, not only the ones that are not cleanly matched
   std::string jsonOut;
   int warmup = 1;
   int repeat = 3;
@@ -85,6 +86,8 @@ void printUsage(const char* argv0)
     "                     agreement; this is the correctness guard that does not involve the mesh\n"
     "  --pruning-ab       re-run the distance kernels with ray tmax pruning disabled, reporting\n"
     "                     the BVH candidate counts and ns/call both ways (prices the optimization)\n"
+    "  --rims             list every trim loop, not only the ones that are not cleanly matched;\n"
+    "                     the same records go into --json unconditionally\n"
     "  --dump-samples D   write each part's sample set to D/samples_<part>.json\n"
     "  --ref-answers D    validate against D/answers_<part>.json instead of the mesh; those are\n"
     "                     produced by scripts/geometry/occtOracle.py from the part's .brep, so a\n"
@@ -141,6 +144,8 @@ bool parseArgs(int argc, char** argv, Options& opt)
       opt.loopCrosscheck = true;
     } else if (a == "--pruning-ab") {
       opt.pruningAb = true;
+    } else if (a == "--rims") {
+      opt.allRims = true;
     } else if (a == "--json") {
       opt.jsonOut = next("--json");
     } else if (a == "--warmup") {
@@ -491,14 +496,40 @@ int main(int argc, char** argv)
     std::printf("  navigation: %s%s  (boundary=%d non-manifold=%d reversed=%d)\n", reliabilityName,
                navigable ? "" : "  *** UNRELIABLE: results below are not a measurement of accuracy ***",
                surf.GetBoundaryEdgeCount(), surf.GetNonManifoldEdgeCount(), surf.GetReversedEdgeCount());
-    // The same boundary measured as curves, in cm. Nothing above derives from it yet; it is here
-    // to answer "how far apart are the faces", which a chord count cannot. Always with the chord
-    // resolution next to it -- a gap below that is how the rims were sampled, not a real gap.
-    std::printf("  rim gap: max %.3g cm (chord resolution %.3g cm, matched at %.3g cm); rims %d "
+    // The same boundary measured as curves, in cm. The isolation is how alone the loneliest chord
+    // is, *not* a seam width; the chord resolution is next to it because it is what widens the
+    // band each chord is matched in, over the declared tolerance.
+    std::printf("  rim isolation: max %.3g cm (chord resolution %.3g cm, declared tolerance %.3g cm); rims %d "
                 "(matched=%d boundary=%d non-manifold=%d reversed=%d), open %.3g of %.3g cm\n",
-                surf.GetMaxRimGap(), surf.GetRimChordResolution(), surf.GetRimMatchTolerance(), surf.GetRimCount(),
+                surf.GetMaxRimIsolation(), surf.GetRimChordResolution(), surf.GetRimMatchTolerance(), surf.GetRimCount(),
                 surf.GetMatchedRimCount(), surf.GetBoundaryRimCount(), surf.GetNonManifoldRimCount(),
                 surf.GetReversedRimCount(), surf.GetUnmatchedRimLength(), surf.GetTotalRimLength());
+    // Name the offending rims. The line above says how many are open and how much length that is;
+    // without this one, which rim it is has to be reconstructed from counts and totals by hand,
+    // which is how TolerancePolicy.md section 12 had to be written.
+    json rimsJson = json::array();
+    for (const auto& rim : surf.GetRimReports()) {
+      const char* stateName = O2BVHSurfaceSolid::GetNavigationReliabilityName(rim.state);
+      const bool clean = rim.state == O2BVHSurfaceSolid::NavigationReliability::Reliable;
+      if (opt.allRims || !clean) {
+        std::printf("    rim face=%d loop=%d %s %s: %d chords, %.4g cm (%d chords / %.4g cm unmatched); "
+                    "loneliest chord %.3g cm from face %d at (%.4g, %.4g, %.4g)\n",
+                    rim.surface, rim.rimOnSurface, rim.closed ? "closed" : "OPEN-CHAIN", stateName, rim.chords,
+                    rim.length, rim.unmatchedChords, rim.unmatchedLength, rim.maxIsolation, rim.maxIsolationFace,
+                    rim.maxIsolationPoint[0], rim.maxIsolationPoint[1], rim.maxIsolationPoint[2]);
+      }
+      rimsJson.push_back({{"face", rim.surface},
+                          {"loop", rim.rimOnSurface},
+                          {"state", stateName},
+                          {"closed", rim.closed},
+                          {"chords", rim.chords},
+                          {"unmatchedChords", rim.unmatchedChords},
+                          {"length", rim.length},
+                          {"unmatchedLength", rim.unmatchedLength},
+                          {"maxIsolation", rim.maxIsolation},
+                          {"maxIsolationFace", rim.maxIsolationFace},
+                          {"maxIsolationPoint", rim.maxIsolationPoint}});
+    }
     if (!navigable) {
       unreliableParts.push_back(part.id + " (" + reliabilityName + ")");
     }
@@ -537,7 +568,7 @@ int main(int argc, char** argv)
                               {"boundaryEdges", surf.GetBoundaryEdgeCount()},
                               {"nonManifoldEdges", surf.GetNonManifoldEdgeCount()},
                               {"reversedEdges", surf.GetReversedEdgeCount()},
-                              {"maxRimGap", surf.GetMaxRimGap()},
+                              {"maxRimIsolation", surf.GetMaxRimIsolation()},
                               {"rimChordResolution", surf.GetRimChordResolution()},
                               {"rimMatchTolerance", surf.GetRimMatchTolerance()},
                               {"totalRimLength", surf.GetTotalRimLength()},
@@ -546,7 +577,8 @@ int main(int argc, char** argv)
                               {"matchedRims", surf.GetMatchedRimCount()},
                               {"boundaryRims", surf.GetBoundaryRimCount()},
                               {"nonManifoldRims", surf.GetNonManifoldRimCount()},
-                              {"reversedRims", surf.GetReversedRimCount()}};
+                              {"reversedRims", surf.GetReversedRimCount()},
+                              {"rimDetail", rimsJson}};
 
     std::vector<Point3D> allPoints = samples.bulkPoints;
     allPoints.insert(allPoints.end(), samples.boundaryPoints.begin(), samples.boundaryPoints.end());
