@@ -4035,3 +4035,97 @@ BOOST_AUTO_TEST_CASE(RimMatchToleranceComesFromTheModel)
   stated.CloseShape(false);
   BOOST_CHECK_CLOSE(stated.GetRimMatchTolerance(), 2.5e-7, 1.e-9);
 }
+
+// --- Stream C (wave 0): CodeReview_Fable_v2.md findings N1, N2, N4 ---
+
+/// N1. contourIntegralAlongCurve sized its quadrature from the difference between a curve's
+/// endpoints. A closed trim loop -- every hole -- has identical endpoints, so it reported zero
+/// travel in u and was handed a single interval, and because max(1, ceil(0 / x)) is 1 the interval
+/// cap could not reach it at any value. Curve2D::uVariation measures the travel instead.
+BOOST_AUTO_TEST_CASE(ClosedCurveReportsItsTravelNotItsEndpointGap)
+{
+  // a full circle in the (u, v) chart, written as an arc: the endpoints coincide exactly
+  const surf::Curve2D circle = surf::Curve2D::makeArc({0., 0.}, 2., 0., 2. * surf::kPi);
+  BOOST_CHECK_SMALL(std::abs(circle.endPoint().uCoord - circle.startPoint().uCoord), 1.e-12);
+  // u = 2 cos(angle) travels from +2 down to -2 and back: total variation 8, not 0
+  BOOST_CHECK_CLOSE(circle.uVariation(0., 1.), 8., 1.e-9);
+
+  // and the same for a closed B-spline, whose poles bound the travel from above
+  std::vector<surf::Vec2> poles{{0., 0.}, {1., 1.}, {2., 0.}, {1., -1.}, {0., 0.}};
+  std::vector<double> knots{0., 0., 0., 0.25, 0.5, 0.75, 1., 1., 1.};
+  const surf::Curve2D loop = surf::Curve2D::makeBSpline(2, poles, {}, knots);
+  BOOST_CHECK_SMALL(std::abs(loop.endPoint().uCoord - loop.startPoint().uCoord), 1.e-9);
+  BOOST_CHECK_GT(loop.uVariation(0., 1.), 0.5);
+}
+
+/// N1, the defect itself: the contour integrator spent one 20-node Gauss-Legendre rule across a
+/// B-spline's whole knot domain, and Gauss-Legendre's geometric convergence needs the integrand
+/// analytic on the interval it covers -- a B-spline is one polynomial only within a span. The hole
+/// here is an exact circle written the way a CAD kernel writes one, a closed rational quadratic
+/// over four knot spans. Verified to fail (by 8e-4 absolute) with the knot subdivision removed.
+///
+/// The endpoint-based interval count is the *second* defect, and it is why this one hid: a closed
+/// loop has coincident endpoints, so it reported zero travel in u, and max(1, ceil(0 / x)) is 1 at
+/// every x -- a sweep of kContourMaxSpanU moved nothing while the defect sat behind it. That half
+/// is pinned by ClosedCurveReportsItsTravelNotItsEndpointGap; on this corpus it is worth 4e-5 cm^3
+/// on Bagger/BoomCylinderInner against the knot subdivision's 1.1e-2, so it is a correctness fix
+/// rather than the cause.
+BOOST_AUTO_TEST_CASE(HoleInWireTrimIntegratesToTheAnalyticCapacity)
+{
+  const double radius = 1.2;
+  const double height = 1.5;
+  const double holeRadius = 0.3;
+  const double centreU = surf::kPi;
+  const double centreV = 0.5 * height;
+
+  std::vector<o2::base::O2BVHSurfaceSolid::PlanarBoundaryCurve> outer{
+    o2::base::O2BVHSurfaceSolid::PlanarBoundaryCurve::makeLine({0., 0.}, {2. * surf::kPi, 0.}),
+    o2::base::O2BVHSurfaceSolid::PlanarBoundaryCurve::makeLine({2. * surf::kPi, 0.}, {2. * surf::kPi, height}),
+    o2::base::O2BVHSurfaceSolid::PlanarBoundaryCurve::makeLine({2. * surf::kPi, height}, {0., height}),
+    o2::base::O2BVHSurfaceSolid::PlanarBoundaryCurve::makeLine({0., height}, {0., 0.})};
+
+  // the textbook exact NURBS circle: nine poles on the circumscribed square's corners and edge
+  // midpoints, corner weights sqrt(2)/2, four double interior knots
+  const double corner = std::sqrt(2.) / 2.;
+  const std::array<std::array<double, 2>, 9> unit{{{1., 0.}, {1., 1.}, {0., 1.}, {-1., 1.}, {-1., 0.},
+                                                   {-1., -1.}, {0., -1.}, {1., -1.}, {1., 0.}}};
+  std::vector<o2::base::O2BVHSurfaceSolid::Point2D> poles;
+  for (const auto& pole : unit) {
+    poles.push_back({centreU + holeRadius * pole[0], centreV + holeRadius * pole[1]});
+  }
+  const std::vector<double> weights{1., corner, 1., corner, 1., corner, 1., corner, 1.};
+  const std::vector<double> knots{0., 0., 0., 0.25, 0.25, 0.5, 0.5, 0.75, 0.75, 1., 1., 1.};
+  std::vector<std::vector<o2::base::O2BVHSurfaceSolid::PlanarBoundaryCurve>> holes{
+    {o2::base::O2BVHSurfaceSolid::PlanarBoundaryCurve::makeBSpline(2, poles, weights, knots)}};
+
+  o2::base::O2BVHSurfaceSolid withHole("withHole");
+  BOOST_REQUIRE(withHole.AddCylindricalSurface({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, radius, 0., height, 0.,
+                                               2. * surf::kPi, false, outer, holes));
+  std::vector<double> contributions;
+  withHole.GetSurfaceCapacityContributions(contributions);
+  BOOST_REQUIRE_EQUAL(contributions.size(), 1u);
+
+  // f = (r/3)(C.U cos phi + C.V sin phi + r) with the axis through the origin reduces to r^2/3, so
+  // the contribution is r^2/3 times the trimmed chart area: 2 pi h minus the hole's pi rho^2.
+  const double chartArea = 2. * surf::kPi * height - surf::kPi * holeRadius * holeRadius;
+  BOOST_CHECK_CLOSE(contributions[0], radius * radius * chartArea / 3., 1.e-6);
+}
+
+/// N2. The loader read a B-spline edge's endpoints off its first and last poles, which are the
+/// endpoints only for a clamped knot vector. On an unclamped one the kernel (since K1) evaluates
+/// and the loader did not, so the two measured the same wire join between different points.
+BOOST_AUTO_TEST_CASE(UnclampedBSplineEndpointsAreEvaluatedNotReadOffThePoles)
+{
+  // uniform (unclamped) knots: the curve starts well inside the pole polygon
+  std::vector<surf::Vec2> poles{{0., 0.}, {1., 2.}, {2., 2.}, {3., 0.}};
+  std::vector<double> knots{0., 1., 2., 3., 4., 5., 6., 7.};
+  const surf::Curve2D unclamped = surf::Curve2D::makeBSpline(3, poles, {}, knots);
+  const surf::Vec2 start = unclamped.startPoint();
+  const surf::Vec2 end = unclamped.endPoint();
+  // the whole point: neither endpoint is a pole
+  BOOST_CHECK_GT(std::abs(start.uCoord - poles.front().uCoord) + std::abs(start.vCoord - poles.front().vCoord), 1.e-3);
+  BOOST_CHECK_GT(std::abs(end.uCoord - poles.back().uCoord) + std::abs(end.vCoord - poles.back().vCoord), 1.e-3);
+  // and they are on the curve
+  BOOST_CHECK_SMALL(std::abs(unclamped.pointAt(0.).uCoord - start.uCoord), 1.e-12);
+  BOOST_CHECK_SMALL(std::abs(unclamped.pointAt(1.).vCoord - end.vCoord), 1.e-12);
+}

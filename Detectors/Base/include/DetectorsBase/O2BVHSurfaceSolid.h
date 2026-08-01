@@ -431,6 +431,20 @@ class O2BVHSurfaceSolid : public TGeoBBox
   /// Every rim of the last CloseShape(), in the order the faces were visited; empty before it has
   /// run. GetRimCount() is its size.
   const std::vector<RimReport>& GetRimReports() const;
+
+  /// Each face's own divergence-theorem contribution to Capacity(), in the order of
+  /// GetSurfaceRecords(); that is, (1/3) times the integral of X.n over the trimmed face. Their
+  /// sum is exactly what Capacity() returns on a closed shell.
+  ///
+  /// This is a diagnostic, and it exists because Capacity() is one number for a whole solid and so
+  /// can say only *that* a solid's volume is wrong, never *where*. The residual on the Bagger
+  /// cylinders survived the elimination of the quadrature, the chart cut, the seam bridge, the
+  /// flattened polyline and the open surface set precisely because no measurement could localise
+  /// it to a face (CodeReview_Fable_v2.md section 3, finding N1). OpenCascade answers the same
+  /// question per face with BRepGProp::VolumeProperties -- for curved faces; on a planar face it
+  /// returns zero, so the comparison is meaningful on the quadrics and the planes are checked by
+  /// difference against the total.
+  void GetSurfaceCapacityContributions(std::vector<double>& contributions) const;
   /// @}
 
   void ComputeBBox() override;

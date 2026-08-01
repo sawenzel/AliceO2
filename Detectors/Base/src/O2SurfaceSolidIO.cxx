@@ -147,13 +147,28 @@ bool edgeEndpoints(const SidecarEdge& edge, O2BVHSurfaceSolid::Point2D& start, O
     return true;
   }
   if (edge.curveType == kBSpline2D) {
-    // for a clamped B-spline the first/last poles are the curve endpoints
     O2BVHSurfaceSolid::PlanarBoundaryCurve curve;
     if (!parseBSplineEdge(edge.params, curve)) {
       return false;
     }
-    start = curve.poles.front();
-    end = curve.poles.back();
+    // Evaluate the curve rather than read its first and last poles. Those coincide with the
+    // endpoints only for a *clamped* knot vector, and nothing here or in Curve2D::valid() checks
+    // clamping -- a periodic or unclamped spline (what OCC writes for a tube-tube seam before
+    // SetNotPeriodic) has off-curve poles. The kernel stopped assuming this when K1 was fixed; the
+    // loader did not, so the two layers measured the same wire join between different points and
+    // could disagree in both directions: a sound wire rejected at load, or an open one accepted
+    // (CodeReview_Fable_v2.md, N2).
+    std::vector<surface::Vec2> poles;
+    poles.reserve(curve.poles.size());
+    for (const auto& pole : curve.poles) {
+      poles.push_back({pole[0], pole[1]});
+    }
+    const surface::Curve2D evaluated =
+      surface::Curve2D::makeBSpline(curve.degree, std::move(poles), curve.weights, curve.knots);
+    const surface::Vec2 first = evaluated.startPoint();
+    const surface::Vec2 last = evaluated.endPoint();
+    start = {first.uCoord, first.vCoord};
+    end = {last.uCoord, last.vCoord};
     return true;
   }
   return false;
