@@ -93,6 +93,18 @@ inline constexpr double kRimMatchTolerance = 1.e-6;
 /// classification, kIntersectionTolerance clustering) so a point or ray hit within tolerance of
 /// a patch is never pruned away by the BVH traversal.
 inline constexpr double kBVHBoxTolerance = 1.e-3;
+/// How many double-precision roundings a quantity may be away from zero and still be called zero,
+/// **relative to the terms that produced it**. Used only by solveQuarticReal, whose branch tests
+/// ask "did this cancellation land on zero?" about numbers that are not lengths, and where a
+/// tolerance in centimetres is therefore not merely badly chosen but meaningless.
+///
+/// 32 is a running-error allowance, not a tuned value: the quantities it guards are each a sum of
+/// three or four products of coefficients that solveQuarticReal has first normalised into
+/// [-1, 1], so their evaluation error is a small multiple of the machine epsilon times the sum of
+/// the term magnitudes, and 32 covers that multiple with room to spare. The criterion is
+/// dimensionless, so it means the same thing for a torus 400 cm away and one 0.1 cm across --
+/// which is the property the previous absolute guard did not have.
+inline constexpr double kQuarticEpsilon = 32. * 2.220446049250313e-16;
 /// @}
 
 /// A 2D point/vector in a surface's parametric (u, v) domain.
@@ -861,15 +873,19 @@ inline void gaussLegendre(int n, std::vector<double>& nodes, std::vector<double>
 /// there is a single real root and the trigonometric (casus irreducibilis) form when there are
 /// three, both numerically stable for the small, well-scaled resolvent cubics of the quartic
 /// solver below.
+///
+/// The two branches are separated by an *exact structural* condition rather than by a tolerance.
+/// P >= 0 forces the discriminant Q^2/4 + P^3/27 >= 0, so Cardano always applies there; P < 0
+/// makes the trigonometric form's magnitude strictly positive, so it is always well defined here.
+/// The pair covers every input with no gap and no threshold. (It used to open with
+/// `|P| <= kTolerance && |Q| <= kTolerance -> root 0`, whose only real job was to keep P = Q = 0
+/// out of the 0/0 in the trigonometric branch; that case now lands in Cardano and returns the
+/// same 0, and P and Q are no longer compared against a length.)
 inline void solveDepressedCubic(double coeffP, double coeffQ, std::vector<double>& roots)
 {
-  if (std::abs(coeffP) <= kTolerance && std::abs(coeffQ) <= kTolerance) {
-    roots.push_back(0.);
-    return;
-  }
   const double discriminant = coeffQ * coeffQ / 4. + coeffP * coeffP * coeffP / 27.;
-  if (discriminant > 0.) {
-    const double sqrtDiscriminant = std::sqrt(discriminant);
+  if (!(coeffP < 0.) || discriminant > 0.) {
+    const double sqrtDiscriminant = std::sqrt(std::max(0., discriminant));
     roots.push_back(std::cbrt(-0.5 * coeffQ + sqrtDiscriminant) + std::cbrt(-0.5 * coeffQ - sqrtDiscriminant));
     return;
   }
@@ -902,6 +918,28 @@ enum class QuarticBranch {
 /// the toroidal surface, whose ray intersection is a quartic.
 ///
 /// \a takenBranch, when not null, receives the branch that was taken; see QuarticBranch.
+///
+/// **Why the root variable is rescaled first.** Every decision this function makes is about a
+/// cancellation landing on zero: is the depressed quartic's odd term q zero (the biquadratic
+/// branch), is the resolvent zero (Ferrari's second stage), is the derivative zero (the Newton
+/// polish). None of those three quantities is a length -- with x in cm they carry cm^3, cm^2 and
+/// cm^3 -- so no length can answer any of the three questions, and comparing them against
+/// kTolerance = 1e-9 cm made all three decisions depend on the size of the geometry. Measured
+/// consequences: a ray silently missing a torus it does cross (the resolvent test failing, no
+/// roots returned at all), and an asymmetric quartic routed into the biquadratic branch, which
+/// *assumes* q = 0 and forces its roots symmetric about -b/4, so it answers confidently and
+/// wrongly. The trigger is the ratio of the ray's lever arm to the feature it hits, not the
+/// model's scale: it fires on unscaled ALICE3 geometry for a ray 375 cm from a 0.1 cm tube.
+///
+/// The repair is to remove the dimensions rather than to re-choose the constant. The monic
+/// coefficients give a Cauchy bound on the roots, `max(|b|, |c|^1/2, |d|^1/3, |e|^1/4)`; rounding
+/// that **up to a power of two** and substituting x = scale * y leaves every coefficient in
+/// [-1, 1], so p, q, r, the resolvent and the derivative are dimensionless O(1) numbers and a
+/// threshold in units of the machine epsilon is a statement about arithmetic rather than about
+/// centimetres. Rounding to a power of two is what makes the substitution *free*: every scaling
+/// below is then exact, so on any input where the old code was already right this computes the
+/// same quantities with the same roundings, only with their exponents shifted -- the guards are
+/// the only thing that can change. See scripts/geometry/TolerancePolicy.md section 14.
 inline std::vector<double> solveQuarticReal(double a4, double a3, double a2, double a1, double a0,
                                             QuarticBranch* takenBranch = nullptr)
 {
@@ -912,12 +950,30 @@ inline std::vector<double> solveQuarticReal(double a4, double a3, double a2, dou
   };
   note(QuarticBranch::NotAQuartic);
   std::vector<double> roots;
-  if (std::abs(a4) <= kTolerance) {
-    return roots; // not a genuine quartic; the torus caller guarantees a4 = |dir|^4 > 0
+  // A genuine quartic needs only a non-zero leading coefficient. There is no scale to compare it
+  // against -- the normalisation below handles any coefficient ratio -- so the test is exact.
+  if (!(std::abs(a4) > 0.)) {
+    return roots; // the torus caller guarantees a4 = |dir|^4 > 0
   }
   // monic x^4 + b x^3 + c x^2 + d x + e
-  const double coeffB = a3 / a4, coeffC = a2 / a4, coeffD = a1 / a4, coeffE = a0 / a4;
-  // depress with x = y - b/4: y^4 + p y^2 + q y + r
+  double coeffB = a3 / a4, coeffC = a2 / a4, coeffD = a1 / a4, coeffE = a0 / a4;
+  if (!std::isfinite(coeffB) || !std::isfinite(coeffC) || !std::isfinite(coeffD) || !std::isfinite(coeffE)) {
+    return roots; // a4 is denormal-small next to the rest, or an input was not finite
+  }
+  // Cauchy root bound, rounded up to a power of two so that the substitution x = scale * y is
+  // exact. frexp of 0 yields exponent 0, so an all-zero lower coefficient set (x^4 = 0) simply
+  // keeps scale = 1 and falls through the biquadratic branch to the quadruple root at 0.
+  const double rootBound = std::max({std::abs(coeffB), std::sqrt(std::abs(coeffC)),
+                                     std::cbrt(std::abs(coeffD)), std::sqrt(std::sqrt(std::abs(coeffE)))});
+  int boundExponent = 0;
+  std::frexp(rootBound, &boundExponent);
+  const double scale = std::ldexp(1., boundExponent);
+  coeffB /= scale;
+  coeffC /= scale * scale;
+  coeffD /= scale * scale * scale;
+  coeffE /= scale * scale * scale * scale;
+
+  // depress with y = z - b/4: z^4 + p z^2 + q z + r
   const double termP = coeffC - 3. * coeffB * coeffB / 8.;
   const double termQ = coeffD - coeffB * coeffC / 2. + coeffB * coeffB * coeffB / 8.;
   const double termR =
@@ -934,21 +990,35 @@ inline std::vector<double> solveQuarticReal(double a4, double a3, double a2, dou
     roots.push_back(shift + 0.5 * (-quadB + sqrtDiscriminant));
   };
 
-  if (std::abs(termQ) <= kTolerance) {
-    note(QuarticBranch::Biquadratic);
-    // biquadratic y^4 + p y^2 + r = 0
+  auto addBiquadraticRoots = [&]() {
+    // biquadratic z^4 + p z^2 + r = 0
     const double discriminant = termP * termP - 4. * termR;
-    if (discriminant >= 0.) {
-      const double sqrtDiscriminant = std::sqrt(discriminant);
-      for (const double ySquared : {0.5 * (-termP + sqrtDiscriminant), 0.5 * (-termP - sqrtDiscriminant)}) {
-        if (ySquared >= 0.) {
-          const double y = std::sqrt(ySquared);
-          roots.push_back(shift + y);
-          roots.push_back(shift - y);
-        }
+    if (discriminant < 0.) {
+      return;
+    }
+    const double sqrtDiscriminant = std::sqrt(discriminant);
+    for (const double zSquared : {0.5 * (-termP + sqrtDiscriminant), 0.5 * (-termP - sqrtDiscriminant)}) {
+      if (zSquared >= 0.) {
+        const double z = std::sqrt(zSquared);
+        roots.push_back(shift + z);
+        roots.push_back(shift - z);
       }
     }
-  } else {
+  };
+
+  // q is zero exactly when it is zero to the precision with which it can be computed. Its three
+  // terms are d, b*c/2 and b^3/8, and normalisation has put |b|, |c|, |d| in [0, 1], so their sum
+  // is at most 1.625 and the running-error bound of the cancellation is kQuarticEpsilon with no
+  // further factor: after the substitution, 1 *is* the unit of this quartic. That is what the
+  // absolute 1e-9 cm was standing in for, and it is why the ALICE3 reproducer -- a true
+  // biquadratic whose q cancels to -6.0e-08 out of terms of size 1e+08 -- was misrouted.
+  //
+  // The bound must be taken over the whole quartic and not over q's own terms: when b = 0 those
+  // terms reduce to d alone, and d is then itself the residual of a cancellation the caller
+  // performed, so a floor proportional to |d| is proportional to the very noise it must dominate.
+  // Measured: {-2, -1, 1, 2} * 1e-3 has |d| = 2.9e-18 and would never be recognised.
+  bool biquadratic = std::abs(termQ) <= kQuarticEpsilon;
+  if (!biquadratic) {
     note(QuarticBranch::Resolvent);
     // resolvent cubic m^3 + p m^2 + (p^2/4 - r) m - q^2/8 = 0; its largest real root is > 0
     const double cubicA2 = termP;
@@ -962,25 +1032,47 @@ inline std::vector<double> solveQuarticReal(double a4, double a3, double a2, dou
     for (const double cubicRoot : cubicRoots) {
       resolvent = std::max(resolvent, cubicRoot - cubicA2 / 3.);
     }
-    if (resolvent > kTolerance) {
+    // Mathematically the resolvent is strictly positive whenever q != 0 (the cubic is negative at
+    // m = 0 and grows), so this test is not about admissibility but about resolution: the Cauchy
+    // bound of the resolvent cubic is the scale at which its own roots are resolved, and below a
+    // few ulps of that the computed resolvent is noise. When it is, q is at the same noise level
+    // and the biquadratic branch is not a fallback but the correct, better-conditioned answer for
+    // this input -- which is the second half of the repair. Returning nothing, as the absolute
+    // guard did, is never right: it turns an ill-conditioned crossing into a missing wall.
+    const double resolventScale = std::max({std::abs(cubicA2), std::sqrt(std::abs(cubicA1)),
+                                            std::cbrt(std::abs(cubicA0))});
+    if (resolvent > kQuarticEpsilon * resolventScale) {
       const double sqrtTwoResolvent = std::sqrt(2. * resolvent);
       const double linearTerm = sqrtTwoResolvent * termQ / (4. * resolvent);
       addQuadraticRoots(-sqrtTwoResolvent, termP / 2. + resolvent + linearTerm);
       addQuadraticRoots(sqrtTwoResolvent, termP / 2. + resolvent - linearTerm);
+    } else {
+      biquadratic = true;
     }
+  }
+  if (biquadratic) {
+    note(QuarticBranch::Biquadratic);
+    addBiquadraticRoots();
   }
 
   // Newton polishing against the monic quartic tightens Ferrari's roots (and pulls a near-double
-  // pair together so the parity clustering recognises it as a tangency)
+  // pair together so the parity clustering recognises it as a tangency). Every root of the
+  // normalised quartic satisfies |z| <= 2 by the Cauchy bound, so a step longer than that is
+  // meaningless whatever produced it, and a zero derivative makes the step non-finite and is
+  // rejected by the same test. No tolerance is involved: the bound replaces the old
+  // |derivative| > kTolerance, which compared a cm^3 quantity against a length.
   auto quartic = [&](double x) { return (((x + coeffB) * x + coeffC) * x + coeffD) * x + coeffE; };
   auto quarticDerivative = [&](double x) { return ((4. * x + 3. * coeffB) * x + 2. * coeffC) * x + coeffD; };
   for (double& root : roots) {
     for (int iteration = 0; iteration < 2; ++iteration) {
-      const double derivative = quarticDerivative(root);
-      if (std::abs(derivative) > kTolerance) {
-        root -= quartic(root) / derivative;
+      const double step = quartic(root) / quarticDerivative(root);
+      if (std::isfinite(step) && std::abs(step) <= 2.) {
+        root -= step;
       }
     }
+  }
+  for (double& root : roots) {
+    root *= scale; // exact: scale is a power of two
   }
   return roots;
 }
