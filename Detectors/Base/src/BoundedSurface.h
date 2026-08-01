@@ -1216,6 +1216,85 @@ struct Curve2D {
     return firstAbove != end && *firstAbove < highT;
   }
 
+  /// Append the knot values strictly inside (\a from, \a to) -- expressed in this curve's own
+  /// [0, 1] parameter -- to \a breakpoints. Nothing is appended for a line or an arc.
+  ///
+  /// A B-spline is a single polynomial only within one knot span, so a quadrature interval that
+  /// straddles a knot integrates a function its own smoothness argument does not describe.
+  void appendInteriorKnots(double from, double to, std::vector<double>& breakpoints) const
+  {
+    if (kind != CurveKind::BSpline) {
+      return;
+    }
+    const double t0 = bsplineT0();
+    const double span = bsplineT1() - t0;
+    if (!(span > 0.)) {
+      return;
+    }
+    const size_t firstInterior = static_cast<size_t>(degree) + 1;
+    const size_t endInterior = std::min(poles.size(), knots.size());
+    for (size_t index = firstInterior; index < endInterior; ++index) {
+      const double parameter = (knots[index] - t0) / span;
+      if (parameter > from && parameter < to) {
+        breakpoints.push_back(parameter);
+      }
+    }
+  }
+
+  /// How far u actually *travels* along the curve between \a from and \a to, as an upper bound --
+  /// not how far apart the two endpoints are.
+  ///
+  /// contourIntegralAlongCurve sizes its quadrature intervals from this, and the endpoint
+  /// difference is the wrong measure. It is silently catastrophic on the one curve shape that
+  /// matters most: a *closed* trim loop -- a hole -- has identical endpoints, so it reported zero
+  /// travel and was given a single 20-node interval for the whole loop. Worse, it was immune to
+  /// the interval cap: max(1, ceil(0 / anything)) is 1, so shrinking kContourMaxSpanU could not
+  /// reach it, and a sweep of that constant measured nothing while the defect sat behind it. On
+  /// Bagger/BoomCylinderInner that turned the wall hole's contour term from about -0.47 into
+  /// +15.8, which was the entire capacity error of that part (CodeReview_Fable_v2.md, N1).
+  double uVariation(double from, double to) const
+  {
+    if (kind == CurveKind::Line) {
+      return std::abs(lineEnd.uCoord - lineStart.uCoord) * std::abs(to - from);
+    }
+    if (kind == CurveKind::BSpline) {
+      // Within one knot span de Boor's curve lies in the convex hull of the degree + 1 poles that
+      // support that span, so their u spread bounds the travel there. Callers split at the interior
+      // knots first, so asking about the span containing the midpoint is asking about the whole
+      // interval; taking the hull of *all* poles instead would be equally correct and, on a
+      // 179-pole seam, an order of magnitude more quadrature.
+      const double knotStart = bsplineT0();
+      const double knotSpan = bsplineT1() - knotStart;
+      const double knotMid = knotStart + 0.5 * (from + to) * knotSpan;
+      size_t spanIndex = static_cast<size_t>(degree);
+      while (spanIndex + 1 < poles.size() && spanIndex + 1 < knots.size() && knots[spanIndex + 1] <= knotMid) {
+        ++spanIndex;
+      }
+      const size_t firstPole = spanIndex - static_cast<size_t>(degree);
+      double lowU = std::numeric_limits<double>::infinity();
+      double highU = -std::numeric_limits<double>::infinity();
+      for (size_t index = firstPole; index <= spanIndex && index < poles.size(); ++index) {
+        lowU = std::min(lowU, poles[index].uCoord);
+        highU = std::max(highU, poles[index].uCoord);
+      }
+      return (highU >= lowU) ? (highU - lowU) : 0.;
+    }
+    // arc: u(angle) = center.u + radius cos(angle), so u turns exactly at angle = 0 and pi (mod
+    // 2 pi). Sum the monotone runs between those turning points and the interval's own ends.
+    const double angleFrom = startAngle + from * sweep();
+    const double angleTo = startAngle + to * sweep();
+    const double low = std::min(angleFrom, angleTo);
+    const double high = std::max(angleFrom, angleTo);
+    double variation = 0.;
+    double previous = low;
+    const double firstTurn = std::ceil(low / kPi) * kPi;
+    for (double turn = firstTurn; turn < high; turn += kPi) {
+      variation += std::abs(radius * (std::cos(turn) - std::cos(previous)));
+      previous = turn;
+    }
+    return variation + std::abs(radius * (std::cos(high) - std::cos(previous)));
+  }
+
   void bsplineSampleRecursive(double t0, double t1, const Vec2& p0, const Vec2& p1, double flatnessSq,
                               int depth, std::vector<Vec2>& samples) const
   {
@@ -2037,20 +2116,40 @@ double contourIntegralAlongCurve(const Curve2D& curve, const Antiderivative& ant
   if (static_cast<int>(nodes.size()) != kContourQuadratureOrder) {
     gaussLegendre(kContourQuadratureOrder, nodes, weights);
   }
-  // split so no piece spans more than a quarter turn in u
-  const double spanU = std::abs(curve.pointAt(to).uCoord - curve.pointAt(from).uCoord);
-  const int pieces = std::max(1, static_cast<int>(std::ceil(spanU / kContourMaxSpanU)));
+  // Two subdivisions, and both are needed. First at the curve's own interior knots, because
+  // Gauss-Legendre's geometric convergence assumes the integrand is analytic across the interval
+  // it covers, and a B-spline is one polynomial only within a span. Then, inside each of those,
+  // so that no piece covers more than a quarter turn of u -- measured by how far u *travels*, not
+  // by where its endpoints are (see Curve2D::uVariation; the endpoint form reported zero for
+  // every closed hole loop and gave it a single interval).
+  static thread_local std::vector<double> breakpoints;
+  breakpoints.clear();
+  breakpoints.push_back(from);
+  curve.appendInteriorKnots(std::min(from, to), std::max(from, to), breakpoints);
+  std::sort(breakpoints.begin() + 1, breakpoints.end(),
+            [forward = (to >= from)](double first, double second) { return forward ? first < second : first > second; });
+  breakpoints.push_back(to);
+
   double total = 0.;
-  for (int piece = 0; piece < pieces; ++piece) {
-    const double low = from + (to - from) * piece / pieces;
-    const double high = from + (to - from) * (piece + 1) / pieces;
-    const double half = 0.5 * (high - low);
-    const double mid = 0.5 * (high + low);
-    for (int nodeIndex = 0; nodeIndex < kContourQuadratureOrder; ++nodeIndex) {
-      const double parameter = mid + half * nodes[nodeIndex];
-      const Vec2 point = curve.pointAt(parameter);
-      const Vec2 derivative = curve.derivativeAt(parameter);
-      total += weights[nodeIndex] * half * antiderivative(point.uCoord, point.vCoord) * derivative.vCoord;
+  for (size_t segment = 0; segment + 1 < breakpoints.size(); ++segment) {
+    const double segmentFrom = breakpoints[segment];
+    const double segmentTo = breakpoints[segment + 1];
+    if (segmentFrom == segmentTo) {
+      continue;
+    }
+    const double travelU = curve.uVariation(std::min(segmentFrom, segmentTo), std::max(segmentFrom, segmentTo));
+    const int pieces = std::max(1, static_cast<int>(std::ceil(travelU / kContourMaxSpanU)));
+    for (int piece = 0; piece < pieces; ++piece) {
+      const double low = segmentFrom + (segmentTo - segmentFrom) * piece / pieces;
+      const double high = segmentFrom + (segmentTo - segmentFrom) * (piece + 1) / pieces;
+      const double half = 0.5 * (high - low);
+      const double mid = 0.5 * (high + low);
+      for (int nodeIndex = 0; nodeIndex < kContourQuadratureOrder; ++nodeIndex) {
+        const double parameter = mid + half * nodes[nodeIndex];
+        const Vec2 point = curve.pointAt(parameter);
+        const Vec2 derivative = curve.derivativeAt(parameter);
+        total += weights[nodeIndex] * half * antiderivative(point.uCoord, point.vCoord) * derivative.vCoord;
+      }
     }
   }
   return total;

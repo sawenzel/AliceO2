@@ -624,22 +624,40 @@ struct O2BVHSurfaceSolid::Impl {
   /// that IsNavigable() reports; what changes is that a single unlucky aim no longer decides it.
   /// Stops as soon as a majority is settled, so a point all directions agree on costs three shots
   /// rather than five.
-  bool containsByVote(const Vec3& point, bool useBVH) const
+  /// \a allTiedOnBoundary, when given, reports that the vote never found a direction whose parity
+  /// rested on the geometry alone -- see below.
+  bool containsByVote(const Vec3& point, bool useBVH, bool* allTiedOnBoundary = nullptr) const
   {
     constexpr int kMajority = 3; // of the five directions
-    int inside = 0;
+    int inside = 0;              // shots whose parity rests on no trim-boundary tie-break
     int outside = 0;
+    int insideOnBoundary = 0; // and shots that do, counted apart
+    int outsideOnBoundary = 0;
     for (const auto& direction : reshootDirections()) {
-      if (parityAlong(point, direction, useBVH)) {
-        ++inside;
+      bool ambiguous = false;
+      const bool answer = parityAlong(point, direction, useBVH, &ambiguous);
+      if (ambiguous) {
+        answer ? ++insideOnBoundary : ++outsideOnBoundary;
       } else {
-        ++outside;
+        answer ? ++inside : ++outside;
       }
       if (inside >= kMajority || outside >= kMajority) {
         break;
       }
     }
-    return inside > outside;
+    if (allTiedOnBoundary != nullptr) {
+      *allTiedOnBoundary = (inside == outside);
+    }
+    // A shot whose parity rests on a tie-break the data does not support is not evidence of the
+    // same quality as one that does not, and the vote used to count the two alike -- so a point
+    // could be decided three to two by three coin flips, and report nothing. Decide among the
+    // shots that stand on the geometry whenever they are not themselves tied; only a genuine tie
+    // (which includes the case where every direction was ambiguous) falls back to counting all
+    // five, because then there is nothing better to count.
+    if (inside != outside) {
+      return inside > outside;
+    }
+    return (inside + insideOnBoundary) > (outside + outsideOnBoundary);
   }
 
   /// Visit every surface whose BVH leaf box contains the point; stops early (returning true)
@@ -1363,6 +1381,18 @@ const std::vector<O2BVHSurfaceSolid::RimReport>& O2BVHSurfaceSolid::GetRimReport
 {
   static const std::vector<RimReport> empty;
   return fImpl == nullptr ? empty : fImpl->rimReports;
+}
+
+void O2BVHSurfaceSolid::GetSurfaceCapacityContributions(std::vector<double>& contributions) const
+{
+  contributions.clear();
+  if (fImpl == nullptr) {
+    return;
+  }
+  contributions.reserve(fImpl->surfaces.size());
+  for (const auto& surface : fImpl->surfaces) {
+    contributions.push_back(surface == nullptr ? 0. : surface->capacityContribution());
+  }
 }
 
 void O2BVHSurfaceSolid::ComputeBBox()
