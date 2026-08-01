@@ -1174,7 +1174,18 @@ void O2BVHSurfaceSolid::CloseShape(bool check)
     // read as one: this defect went unnoticed for two sessions because "699 boundary edge(s)"
     // looked like a cosmetic mesh remark while the solid was answering Contains wrongly by
     // centimetres. See scripts/geometry/ExactTrimTopology.md.
-    if (closure.boundaryRims > 0) {
+    if (closure.edgeIdentityAvailable && closure.boundaryRims > 0) {
+      // Identity, not proximity: this counts source edges with only one face on them, so it says
+      // a face is missing rather than that two polylines drifted apart.
+      Error("CloseShape",
+            "Shape %s is NOT a closed surface: %d of its %d source edge(s) are used by only one face and %d by more "
+            "than two, leaving %d of %d trim loop(s) without a neighbour. This is a count of edge identities, not a "
+            "proximity test, so no tolerance can make it go away. NAVIGATION IS UNRELIABLE: parity containment is "
+            "undefined in the shadow of every gap, so Contains()/DistFrom*() can be wrong arbitrarily far from any "
+            "surface. Check IsNavigable()/GetNavigationReliability(); GetRimReports() names the offending loops.",
+            GetName(), closure.edgeBoundaryCount, closure.edgeIncidences, closure.edgeNonManifoldCount,
+            closure.boundaryRims, closure.rims);
+    } else if (closure.boundaryRims > 0) {
       Error("CloseShape",
             "Shape %s is NOT a closed surface: %d of %d trim loop(s) run out of neighbouring face (declared "
             "tolerance %g cm, widened per chord by the rim sampling), leaving %g cm of its %g cm of boundary open; "
@@ -1278,6 +1289,22 @@ O2BVHSurfaceSolid::NavigationReliability O2BVHSurfaceSolid::GetNavigationReliabi
   // ask whether two faces emitted the same vertices along a shared edge, which they have no
   // reason to and, on real CAD, do not.
   const auto& closure = fImpl->closure;
+  // When the faces state their edge identities, the question is decided by counting them and not
+  // by any geometric test at all. Read those counters directly rather than the per-rim projection
+  // of them: a face with no trim loop of its own (a full sphere, say) contributes no rim record,
+  // so a defect on its edges would have nowhere to be reported.
+  if (closure.edgeIdentityAvailable) {
+    if (closure.edgeNonManifoldCount > 0) {
+      return NavigationReliability::NonManifold;
+    }
+    if (closure.edgeBoundaryCount > 0) {
+      return NavigationReliability::OpenSurfaceSet;
+    }
+    if (closure.edgeReversedCount > 0) {
+      return NavigationReliability::ReversedFaces;
+    }
+    return NavigationReliability::Reliable;
+  }
   if (closure.nonManifoldRims > 0) {
     return NavigationReliability::NonManifold;
   }
@@ -1330,6 +1357,86 @@ int O2BVHSurfaceSolid::GetReversedEdgeCount() const
 double O2BVHSurfaceSolid::GetMaxRimIsolation() const
 {
   return fImpl == nullptr ? 0. : fImpl->closure.maxRimIsolation;
+}
+
+bool O2BVHSurfaceSolid::SetSurfaceBoundaryEdges(int surfaceIndex, const std::vector<unsigned int>& edgeIds,
+                                                const std::vector<unsigned char>& edgeFlags)
+{
+  if (fImpl == nullptr || surfaceIndex < 0 || surfaceIndex >= static_cast<int>(fImpl->surfaces.size()) ||
+      surfaceIndex >= static_cast<int>(fRecords.size())) {
+    Error("SetSurfaceBoundaryEdges", "Shape %s: surface index %d is out of range (%d surface(s))", GetName(),
+          surfaceIndex, GetNsurfaces());
+    return false;
+  }
+  if (edgeIds.size() != edgeFlags.size()) {
+    Error("SetSurfaceBoundaryEdges", "Shape %s: surface %d was given %d edge id(s) and %d flag(s)", GetName(),
+          surfaceIndex, static_cast<int>(edgeIds.size()), static_cast<int>(edgeFlags.size()));
+    return false;
+  }
+  std::vector<BoundedSurface::BoundaryEdgeRef> refs;
+  refs.reserve(edgeIds.size());
+  for (size_t index = 0; index < edgeIds.size(); ++index) {
+    BoundedSurface::BoundaryEdgeRef ref;
+    ref.edgeId = edgeIds[index];
+    ref.reversed = (edgeFlags[index] & kEdgeReversed) != 0;
+    ref.degenerate = (edgeFlags[index] & kEdgeDegenerate) != 0;
+    ref.anchored = (edgeFlags[index] & kEdgeAnchored) != 0;
+    refs.push_back(ref);
+  }
+  fImpl->surfaces[static_cast<size_t>(surfaceIndex)]->setBoundaryEdges(std::move(refs));
+  fRecords[static_cast<size_t>(surfaceIndex)].boundaryEdgeIds = edgeIds;
+  fRecords[static_cast<size_t>(surfaceIndex)].boundaryEdgeFlags = edgeFlags;
+  return true;
+}
+
+bool O2BVHSurfaceSolid::HasEdgeIdentity() const
+{
+  return fImpl != nullptr && fImpl->closure.edgeIdentityAvailable;
+}
+
+int O2BVHSurfaceSolid::GetSourceEdgeCount() const
+{
+  return fImpl == nullptr ? 0 : fImpl->closure.edgeIncidences;
+}
+
+int O2BVHSurfaceSolid::GetSharedSourceEdgeCount() const
+{
+  return fImpl == nullptr ? 0 : fImpl->closure.edgeSharedCount;
+}
+
+int O2BVHSurfaceSolid::GetBoundarySourceEdgeCount() const
+{
+  return fImpl == nullptr ? 0 : fImpl->closure.edgeBoundaryCount;
+}
+
+int O2BVHSurfaceSolid::GetNonManifoldSourceEdgeCount() const
+{
+  return fImpl == nullptr ? 0 : fImpl->closure.edgeNonManifoldCount;
+}
+
+int O2BVHSurfaceSolid::GetReversedSourceEdgeCount() const
+{
+  return fImpl == nullptr ? 0 : fImpl->closure.edgeReversedCount;
+}
+
+int O2BVHSurfaceSolid::GetDegenerateSourceEdgeCount() const
+{
+  return fImpl == nullptr ? 0 : fImpl->closure.edgeDegenerateCount;
+}
+
+double O2BVHSurfaceSolid::GetMaxSharedEdgeDeviation() const
+{
+  return fImpl == nullptr ? 0. : fImpl->closure.maxSharedEdgeDeviation;
+}
+
+int O2BVHSurfaceSolid::GetMeasuredSharedEdgeCount() const
+{
+  return fImpl == nullptr ? 0 : fImpl->closure.sharedEdgesMeasured;
+}
+
+int O2BVHSurfaceSolid::GetUnmeasuredSharedEdgeCount() const
+{
+  return fImpl == nullptr ? 0 : fImpl->closure.sharedEdgesUnmeasured;
 }
 
 double O2BVHSurfaceSolid::GetRimChordResolution() const
@@ -1464,6 +1571,20 @@ void O2BVHSurfaceSolid::Print(Option_t*) const
     std::cout << fModelTolerance << " cm (from the source model)";
   } else {
     std::cout << "not stated";
+  }
+  // The identity counts first, because when they are present they are the verdict and the rim
+  // numbers below are measurement. maxSharedEdgeDeviation is the one number that does mean "how
+  // far apart are these two faces", and it is printed next to the model's own tolerance so the
+  // reader can see at once whether the surfaces meet as well as the CAD system claims they do.
+  if (HasEdgeIdentity()) {
+    std::cout << "\n    edge identity: " << GetSourceEdgeCount() << " source edge(s), shared=" << GetSharedSourceEdgeCount()
+              << " boundary=" << GetBoundarySourceEdgeCount() << " non-manifold=" << GetNonManifoldSourceEdgeCount()
+              << " reversed=" << GetReversedSourceEdgeCount() << " degenerate=" << GetDegenerateSourceEdgeCount()
+              << "\n    shared edge deviation: max " << GetMaxSharedEdgeDeviation() << " cm over "
+              << GetMeasuredSharedEdgeCount() << " measured edge(s)";
+    if (GetUnmeasuredSharedEdgeCount() > 0) {
+      std::cout << " (" << GetUnmeasuredSharedEdgeCount() << " not measurable: parametric-rectangle trim)";
+    }
   }
   // The isolation, and the resolution that widened the band it was judged in, always together: the
   // number is how alone the loneliest chord is, not how far apart two faces are.
@@ -1951,6 +2072,13 @@ bool O2BVHSurfaceSolid::RebuildFromRecords()
       delete fImpl;
       fImpl = new Impl;
       return false;
+    }
+
+    // The edge identities are part of the record, not derived state: replay them too, or a
+    // read-back solid would silently fall back on the geometric rim verdict and could disagree
+    // with the solid that was written about whether it is closed.
+    if (!record.boundaryEdgeIds.empty()) {
+      SetSurfaceBoundaryEdges(static_cast<int>(recordIndex), record.boundaryEdgeIds, record.boundaryEdgeFlags);
     }
   }
 

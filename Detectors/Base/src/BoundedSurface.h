@@ -511,7 +511,28 @@ struct SurfaceWire {
   std::vector<Vec2> vertices;
   WireRole role = WireRole::Outer;
 
+  /// For each stored segment, which segment of the *input* ring it is -- or -1 when that cannot
+  /// be said. initialize() may drop coincident vertices and may reverse the whole ring to fix its
+  /// winding, so segment i of the storage is in general not segment i of what the caller passed
+  /// in. Nothing in the trimming machinery cares, but sidecar v3 keys an edge identity on the
+  /// input position (see BoundedSurface::boundaryEdges), and a silent off-by-reversal there would
+  /// pair up the wrong two curves and report a plausible-looking wrong deviation. So the mapping
+  /// is recorded rather than assumed, and it is -1 -- "unmeasurable" -- whenever a vertex was
+  /// dropped and the correspondence stopped being one-to-one.
+  std::vector<int> sourceEdge;
+
   int edgeCount() const { return static_cast<int>(vertices.size()); }
+
+  /// The stored segment that came from input segment \a inputIndex, or -1 if there is none.
+  int storedIndexOfSource(int inputIndex) const
+  {
+    for (size_t index = 0; index < sourceEdge.size(); ++index) {
+      if (sourceEdge[index] == inputIndex) {
+        return static_cast<int>(index);
+      }
+    }
+    return -1;
+  }
 
   SurfaceEdge edge(int index) const
   {
@@ -528,6 +549,7 @@ struct SurfaceWire {
     role = wireRole;
     vertices.clear();
     vertices.reserve(inputVertices.size());
+    bool droppedAVertex = false;
 
     for (const auto& vertex : inputVertices) {
       if (!finite(vertex)) {
@@ -536,12 +558,15 @@ struct SurfaceWire {
       }
       if (vertices.empty() || metric.distanceSq(vertices.back(), vertex) > kToleranceSq) {
         vertices.push_back(vertex);
+      } else {
+        droppedAVertex = true;
       }
     }
 
     // drop an explicit closing duplicate (first == last)
     if (vertices.size() > 1 && metric.distanceSq(vertices.front(), vertices.back()) <= kToleranceSq) {
       vertices.pop_back();
+      droppedAVertex = true;
     }
 
     if (vertices.size() < 3) {
@@ -565,10 +590,29 @@ struct SurfaceWire {
       return false;
     }
 
+    // Segment i of the storage is input segment i as long as nothing was dropped; when something
+    // was, the correspondence is no longer one-to-one and is recorded as unknown rather than
+    // guessed (see sourceEdge).
+    const int storedCount = static_cast<int>(vertices.size());
+    sourceEdge.assign(static_cast<size_t>(storedCount), -1);
+    if (!droppedAVertex) {
+      for (int index = 0; index < storedCount; ++index) {
+        sourceEdge[static_cast<size_t>(index)] = index;
+      }
+    }
+
     // outer wires must wind CCW (positive area), inner wires CW (negative area)
     const bool wantPositiveArea = (role == WireRole::Outer);
     if ((area > 0.) != wantPositiveArea) {
       std::reverse(vertices.begin(), vertices.end());
+      // reversing the ring maps old vertex k to new index n-1-k, so new segment j spans old
+      // vertices n-1-j and n-2-j, i.e. it is old segment n-2-j traversed backwards
+      std::vector<int> reversedSource(static_cast<size_t>(storedCount), -1);
+      for (int index = 0; index < storedCount; ++index) {
+        reversedSource[static_cast<size_t>(index)] =
+          sourceEdge[static_cast<size_t>((storedCount - 2 - index % storedCount + 2 * storedCount) % storedCount)];
+      }
+      sourceEdge.swap(reversedSource);
       status = WireStatus::Reversed;
       return true;
     }
@@ -1849,6 +1893,25 @@ struct CurveWire {
   std::vector<Curve2D> curves;
   WireRole role = WireRole::Outer;
 
+  /// For each stored curve, its index in the list initialize() was given. The only reordering
+  /// this wire ever does is the whole-loop reverse() that fixes its winding, so this is either
+  /// the identity or its reflection -- but sidecar v3 keys an edge identity on the input position
+  /// (see BoundedSurface::boundaryEdges), and pairing curve i of one face with curve i of another
+  /// after one of them was reversed would compare two different edges and report a plausible
+  /// wrong number. Recorded, not assumed.
+  std::vector<int> sourceCurve;
+
+  /// The stored curve that came from input curve \a inputIndex, or -1 if there is none.
+  int storedIndexOfSource(int inputIndex) const
+  {
+    for (size_t index = 0; index < sourceCurve.size(); ++index) {
+      if (sourceCurve[index] == inputIndex) {
+        return static_cast<int>(index);
+      }
+    }
+    return -1;
+  }
+
   /// Build and validate the wire from an ordered, closed list of curves. \a metric turns the join
   /// gaps into 3D lengths so that kWireJoinTolerance means one distance on every surface; the form
   /// is evaluated at each join in turn, because it is not constant over the domain.
@@ -1857,6 +1920,10 @@ struct CurveWire {
   {
     role = wireRole;
     curves = inputCurves;
+    sourceCurve.resize(curves.size());
+    for (size_t index = 0; index < curves.size(); ++index) {
+      sourceCurve[index] = static_cast<int>(index);
+    }
 
     if (curves.empty()) {
       status = WireStatus::TooFewVertices;
@@ -1915,6 +1982,7 @@ struct CurveWire {
   void reverse()
   {
     std::reverse(curves.begin(), curves.end());
+    std::reverse(sourceCurve.begin(), sourceCurve.end());
     for (auto& curve : curves) {
       curve.reverseInPlace();
     }
@@ -2381,6 +2449,87 @@ void appendCurveTrimEdges(const CurveWire& outerWire, const std::vector<CurveWir
     appendLoop(innerWire);
   }
 }
+
+/// Number of points a single trim curve is sampled into when its 3D realisation is measured
+/// against another face's realisation of the *same* edge (see measureSharedEdgeDeviation). This
+/// sampling never enters a verdict -- the verdict is a count of edge identities -- so its only
+/// job is to resolve the shape of a curve well enough for a Hausdorff distance to mean something.
+inline constexpr int kSharedEdgeSamples = 33;
+
+/// Sample the \a index-th curve of a curve-wire trim into 3D through \a mapUV.
+///
+/// The index runs over the *input* curves in the order the surface was given them: the outer
+/// wire's, then each inner wire's. That is deliberately not the storage order -- CurveWire may
+/// reverse a loop to fix its winding -- and it is the order sidecar v3's edge identities are
+/// written in, which is the only reason this function exists. Returns false when the index is out
+/// of range or the wire could not say where that input curve went.
+template <typename MapUV>
+bool sampleTrimCurveOfCurveWires(const CurveWire& outerWire, const std::vector<CurveWire>& innerWires,
+                                 size_t index, const MapUV& mapUV, std::vector<Vec3>& samples)
+{
+  const CurveWire* wire = nullptr;
+  size_t local = index;
+  if (local < outerWire.curves.size()) {
+    wire = &outerWire;
+  } else {
+    local -= outerWire.curves.size();
+    for (const auto& innerWire : innerWires) {
+      if (local < innerWire.curves.size()) {
+        wire = &innerWire;
+        break;
+      }
+      local -= innerWire.curves.size();
+    }
+  }
+  if (wire == nullptr) {
+    return false;
+  }
+  const int stored = wire->storedIndexOfSource(static_cast<int>(local));
+  if (stored < 0) {
+    return false;
+  }
+  const Curve2D& curve = wire->curves[static_cast<size_t>(stored)];
+  samples.clear();
+  samples.reserve(kSharedEdgeSamples);
+  for (int step = 0; step < kSharedEdgeSamples; ++step) {
+    const Vec2 uv = curve.pointAt(static_cast<double>(step) / (kSharedEdgeSamples - 1));
+    samples.push_back(mapUV(uv.uCoord, uv.vCoord));
+  }
+  return true;
+}
+
+/// The same for a polygon (vertex-ring) trim, whose curves are all straight segments.
+template <typename MapUV>
+bool sampleTrimCurveOfSurfaceWires(const SurfaceWire& outerWire, const std::vector<SurfaceWire>& innerWires,
+                                   size_t index, const MapUV& mapUV, std::vector<Vec3>& samples)
+{
+  const SurfaceWire* wire = nullptr;
+  size_t local = index;
+  if (local < outerWire.vertices.size()) {
+    wire = &outerWire;
+  } else {
+    local -= outerWire.vertices.size();
+    for (const auto& innerWire : innerWires) {
+      if (local < innerWire.vertices.size()) {
+        wire = &innerWire;
+        break;
+      }
+      local -= innerWire.vertices.size();
+    }
+  }
+  if (wire == nullptr) {
+    return false;
+  }
+  const int stored = wire->storedIndexOfSource(static_cast<int>(local));
+  if (stored < 0) {
+    return false;
+  }
+  const SurfaceEdge segment = wire->edge(stored);
+  samples.clear();
+  samples.push_back(mapUV(segment.start.uCoord, segment.start.vCoord));
+  samples.push_back(mapUV(segment.end.uCoord, segment.end.vCoord));
+  return true;
+}
 /// @}
 
 /// One trim loop of one face, sampled as an ordered 3D polyline.
@@ -2524,6 +2673,45 @@ class BoundedSurface
  public:
   virtual ~BoundedSurface() = default;
 
+  /// \name Boundary edge identity (sidecar v3)
+  /// Which edges of the source solid this face is bounded by, and which way it runs along each.
+  ///
+  /// This is the answer to the question the rim measurement was being asked to guess. Whether two
+  /// faces share an edge is topology; a proximity search over sampled chords can only ever
+  /// approximate it, and the quantity it thresholds (how far apart two independent polylines of
+  /// one curve are) is not the quantity it decides. The converter already walks the source
+  /// `TopoDS_Edge`s and has both faces of every one of them; v3 simply stops throwing that away
+  /// (5 bytes per trim curve, nothing at run time). See scripts/geometry/Stream_F_EdgeIdentity.md.
+  ///
+  /// Empty means "not stated" -- a v1/v2 sidecar, or a solid built through the Add*Surface API --
+  /// and validateClosure then falls back on the geometric rim measurement exactly as before.
+  /// @{
+  struct BoundaryEdgeRef {
+    uint32_t edgeId = 0;     ///< index into the model's edge table; identity, not a coordinate
+    bool reversed = false;   ///< this face runs against the edge's own direction
+    bool degenerate = false; ///< a cone apex / sphere pole: one point, no length, no partner
+    /// Entry \a i is trim curve \a i of this face, so its 3D realisation can be sampled and
+    /// compared against the partner face's realisation of the same edge. False for a face whose
+    /// trim is the scalar parametric rectangle: it still names its edges (which is all the
+    /// verdict needs) but carries no per-edge curve to measure.
+    bool anchored = false;
+  };
+
+  void setBoundaryEdges(std::vector<BoundaryEdgeRef> refs) { mBoundaryEdges = std::move(refs); }
+  const std::vector<BoundaryEdgeRef>& boundaryEdges() const { return mBoundaryEdges; }
+
+  /// Sample the \a index-th trim curve of this face into 3D, \a index counting the curves in the
+  /// order the surface was constructed with them (outer wire first, then the inner wires) -- the
+  /// same order boundaryEdges() is written in. False when this face has no such curve, which is
+  /// the honest answer for a parametric-rectangle trim and for the fallback surface.
+  virtual bool sampleTrimCurve(size_t index, std::vector<Vec3>& samples) const
+  {
+    (void)index;
+    (void)samples;
+    return false;
+  }
+  /// @}
+
   /// Accumulate a conservative axis-aligned bounding box of the trimmed patch.
   virtual void conservativeBounds(Vec3& lower, Vec3& upper) const = 0;
 
@@ -2615,6 +2803,9 @@ class BoundedSurface
     appendDirectedEdges(edges);
     assembleRims(edges, rims);
   }
+
+ protected:
+  std::vector<BoundaryEdgeRef> mBoundaryEdges;
 };
 
 /// A bounded planar surface: an infinite plane frame trimmed by one outer wire and optional
@@ -2857,6 +3048,13 @@ class PlanarBoundedSurface final : public BoundedSurface
     for (const auto& innerWire : mInnerWires) {
       appendWire(innerWire);
     }
+  }
+
+  bool sampleTrimCurve(size_t index, std::vector<Vec3>& samples) const override
+  {
+    return sampleTrimCurveOfSurfaceWires(
+      mOuterWire, mInnerWires, index,
+      [this](double u, double v) { return toGlobal(Vec2{u, v}); }, samples);
   }
 
  private:
@@ -3110,6 +3308,13 @@ class CurvedPlanarBoundedSurface final : public BoundedSurface
     for (const auto& innerWire : mInnerWires) {
       appendWire(innerWire);
     }
+  }
+
+  bool sampleTrimCurve(size_t index, std::vector<Vec3>& samples) const override
+  {
+    return sampleTrimCurveOfCurveWires(
+      mOuterWire, mInnerWires, index,
+      [this](double u, double v) { return toGlobal(Vec2{u, v}); }, samples);
   }
 
  private:
@@ -3470,6 +3675,16 @@ class CylindricalBoundedSurface final : public BoundedSurface
     }
   }
 
+  bool sampleTrimCurve(size_t index, std::vector<Vec3>& samples) const override
+  {
+    if (!mHasWireTrim) {
+      return false; // a parametric-rectangle trim carries no per-edge curve to sample
+    }
+    return sampleTrimCurveOfCurveWires(mTrimOuter, mTrimInner, index,
+                                       [this](double phi, double height) { return pointAt(phi, height); },
+                                       samples);
+  }
+
  private:
   Vec3 mCenter;
   Vec3 mAxisU;
@@ -3825,6 +4040,16 @@ class SphericalBoundedSurface final : public BoundedSurface
         emitEdge(pointAt(nextTheta, endPhi), pointAt(theta, endPhi));        // -theta at phiEnd
       }
     }
+  }
+
+  bool sampleTrimCurve(size_t index, std::vector<Vec3>& samples) const override
+  {
+    if (!mHasWireTrim) {
+      return false; // a parametric-rectangle trim carries no per-edge curve to sample
+    }
+    return sampleTrimCurveOfCurveWires(mTrimOuter, mTrimInner, index,
+                                       [this](double phi, double theta) { return pointAt(theta, phi); },
+                                       samples);
   }
 
  private:
@@ -4209,6 +4434,16 @@ class ConicalBoundedSurface final : public BoundedSurface
       emitEdge(pointAt(endPhi, mHeightMin), pointAt(endPhi, mHeightMax));
       emitEdge(pointAt(mPhiStart, mHeightMax), pointAt(mPhiStart, mHeightMin));
     }
+  }
+
+  bool sampleTrimCurve(size_t index, std::vector<Vec3>& samples) const override
+  {
+    if (!mHasWireTrim) {
+      return false; // a parametric-rectangle trim carries no per-edge curve to sample
+    }
+    return sampleTrimCurveOfCurveWires(mTrimOuter, mTrimInner, index,
+                                       [this](double phi, double height) { return pointAt(phi, height); },
+                                       samples);
   }
 
  private:
@@ -4644,6 +4879,16 @@ class TorusBoundedSurface final : public BoundedSurface
     }
   }
 
+  bool sampleTrimCurve(size_t index, std::vector<Vec3>& samples) const override
+  {
+    if (!mHasWireTrim) {
+      return false; // a parametric-rectangle trim carries no per-edge curve to sample
+    }
+    return sampleTrimCurveOfCurveWires(mTrimOuter, mTrimInner, index,
+                                       [this](double phiRing, double phiTube) { return pointAt(phiRing, phiTube); },
+                                       samples);
+  }
+
  private:
   Vec3 mCenter;
   Vec3 mAxisU;
@@ -4816,7 +5061,116 @@ struct ClosureReport {
   /// The counters say how many rims are open; these say which, and where.
   std::vector<RimRecord> rimRecords;
   /// @}
+
+  /// \name Closure by edge identity (sidecar v3)
+  /// Everything above measures a *topological* question -- do these two faces share an edge --
+  /// with a proximity query, and the quantity it thresholds is not the quantity it decides. The
+  /// fields below decide it by counting instead: an edge of the source solid is shared when its
+  /// identifier appears exactly twice, once each way. Zero tolerance, zero sampling, zero band.
+  ///
+  /// Available only when every surface states its boundary edges (sidecar v3). When they do,
+  /// `closed`, `orientationConsistent` and the four rim counters above are derived from *these*
+  /// numbers and the geometric measurement becomes what it always was -- a measurement.
+  /// @{
+  /// True when every surface carried a boundary edge list, so the counters below are a complete
+  /// statement about the solid rather than a statement about part of it.
+  bool edgeIdentityAvailable = false;
+  int edgeIncidences = 0;      ///< distinct edge identifiers seen over all faces
+  int edgeSharedCount = 0;     ///< appearing exactly twice, opposite sense: a properly shared edge
+  int edgeBoundaryCount = 0;   ///< appearing once: a face is missing on the other side
+  int edgeNonManifoldCount = 0;///< appearing three or more times
+  int edgeReversedCount = 0;   ///< appearing exactly twice, but with the same sense
+  int edgeDegenerateCount = 0; ///< flagged degenerate (cone apex, sphere pole): excluded from the
+                               ///< counts above, because a point has no second face to meet
+
+  /// How far apart the two faces of a shared edge really are, in cm: the largest symmetric
+  /// Hausdorff distance between the two faces' own 3D realisations of one shared edge, over every
+  /// shared edge both of whose faces carry a trim curve for it.
+  ///
+  /// **This is a measurement, not a verdict.** Nothing is accepted or rejected on it. It is the
+  /// first defensible answer this project has had to "how far apart are these two faces", which
+  /// `maxRimIsolation` was read as for two sessions and never was (it is how alone the loneliest
+  /// chord is, and it has no dependence on any tolerance at all).
+  double maxSharedEdgeDeviation = 0.;
+  uint32_t maxSharedEdgeDeviationEdge = 0;      ///< which edge that was
+  Vec3 maxSharedEdgeDeviationPoint{};           ///< and where on it
+  int maxSharedEdgeDeviationFaces[2] = {-1, -1};///< between which two faces
+  int sharedEdgesMeasured = 0;   ///< shared edges both of whose faces could be sampled
+  int sharedEdgesUnmeasured = 0; ///< the rest: a parametric-rectangle face names its edges but
+                                 ///< carries no curve for them, so there is nothing to compare
+  /// @}
 };
+
+/// Measure how far apart the two faces of each shared edge actually are, filling the
+/// maxSharedEdgeDeviation fields of \a report. Call after the identity counts are in.
+///
+/// Both faces' realisations of one edge are sampled into 3D polylines and compared by symmetric
+/// Hausdorff distance -- point to *polyline*, both ways, so the two parametrisations need not run
+/// the same way and no correspondence between their samples is assumed. Nothing here decides
+/// anything; see ClosureReport::maxSharedEdgeDeviation.
+inline void measureSharedEdgeDeviation(const std::vector<std::unique_ptr<BoundedSurface>>& surfaces,
+                                       ClosureReport& report)
+{
+  // edgeId -> the (surface, slot) pairs claiming it
+  std::map<uint32_t, std::vector<std::pair<int, size_t>>> claims;
+  for (size_t surfaceIndex = 0; surfaceIndex < surfaces.size(); ++surfaceIndex) {
+    if (surfaces[surfaceIndex] == nullptr) {
+      continue;
+    }
+    const auto& refs = surfaces[surfaceIndex]->boundaryEdges();
+    for (size_t slot = 0; slot < refs.size(); ++slot) {
+      if (refs[slot].degenerate) {
+        continue; // a point has no partner and no length to disagree over
+      }
+      // unanchored claims are collected too, so that an edge whose other side is a
+      // parametric-rectangle face is counted as *unmeasured* rather than silently dropped
+      claims[refs[slot].edgeId].emplace_back(static_cast<int>(surfaceIndex), slot);
+    }
+  }
+
+  std::vector<Vec3> first;
+  std::vector<Vec3> second;
+  for (const auto& [edgeId, holders] : claims) {
+    if (holders.size() != 2) {
+      continue;
+    }
+    const auto& [firstSurface, firstSlot] = holders[0];
+    const auto& [secondSurface, secondSlot] = holders[1];
+    if (!surfaces[static_cast<size_t>(firstSurface)]->sampleTrimCurve(firstSlot, first) ||
+        !surfaces[static_cast<size_t>(secondSurface)]->sampleTrimCurve(secondSlot, second) || first.size() < 2 ||
+        second.size() < 2) {
+      ++report.sharedEdgesUnmeasured;
+      continue;
+    }
+    ++report.sharedEdgesMeasured;
+    auto worstAgainst = [](const std::vector<Vec3>& probes, const std::vector<Vec3>& polyline, Vec3& where) {
+      double worst = 0.;
+      for (const Vec3& probe : probes) {
+        double nearest = std::numeric_limits<double>::infinity();
+        for (size_t segment = 0; segment + 1 < polyline.size(); ++segment) {
+          nearest = std::min(nearest, pointSegmentDistanceSq(probe, polyline[segment], polyline[segment + 1]));
+        }
+        if (nearest > worst) {
+          worst = nearest;
+          where = probe;
+        }
+      }
+      return std::sqrt(worst);
+    };
+    Vec3 forwardPoint{};
+    Vec3 backwardPoint{};
+    const double forwardWorst = worstAgainst(first, second, forwardPoint);
+    const double backwardWorst = worstAgainst(second, first, backwardPoint);
+    const double deviation = std::max(forwardWorst, backwardWorst);
+    if (deviation > report.maxSharedEdgeDeviation) {
+      report.maxSharedEdgeDeviation = deviation;
+      report.maxSharedEdgeDeviationEdge = edgeId;
+      report.maxSharedEdgeDeviationPoint = forwardWorst >= backwardWorst ? forwardPoint : backwardPoint;
+      report.maxSharedEdgeDeviationFaces[0] = firstSurface;
+      report.maxSharedEdgeDeviationFaces[1] = secondSurface;
+    }
+  }
+}
 
 /// Measure the face-to-face gaps of \a surfaces as curves, filling the rim fields of \a report.
 ///
@@ -5102,6 +5456,149 @@ inline void measureRimClosure(const std::vector<std::unique_ptr<BoundedSurface>>
   }
 }
 
+/// Decide closure by edge identity when the surfaces carry it, overwriting the rim verdict.
+///
+/// Does nothing at all unless *every* surface states its boundary edges: a partial edge table
+/// would let a face that named no edges look like a face with no missing neighbours, which is
+/// precisely the failure mode this replaces. When it does apply, the rules are counts:
+///
+///   - an edge identifier seen exactly twice with opposite sense is shared (a seam edge is the
+///     two visits of one face, and needs no special case -- it is still twice, still opposite);
+///   - seen once, a face is missing on the other side: the solid is open;
+///   - seen three or more times, it is not a 2-manifold;
+///   - seen twice with the same sense, the two faces disagree about which way is out;
+///   - flagged degenerate (a cone apex, a sphere pole) it is a point, and is excluded.
+///
+/// The four rim counters are then re-derived per face so that the per-rim reports stay consistent
+/// with the verdict; every *measured* rim quantity (isolation, lengths, chord resolution) is left
+/// exactly as measured, because it is still the honest description of how the two faces' sampled
+/// polylines relate -- it just no longer decides anything.
+inline void applyEdgeIdentityClosure(const std::vector<std::unique_ptr<BoundedSurface>>& surfaces,
+                                     ClosureReport& report)
+{
+  size_t surfacesPresent = 0;
+  size_t surfacesStatingEdges = 0;
+  for (const auto& surface : surfaces) {
+    if (surface == nullptr) {
+      continue;
+    }
+    ++surfacesPresent;
+    if (!surface->boundaryEdges().empty()) {
+      ++surfacesStatingEdges;
+    }
+  }
+  if (surfacesPresent == 0 || surfacesStatingEdges != surfacesPresent) {
+    return; // no edge identity, or only some of it: leave the geometric verdict alone
+  }
+  report.edgeIdentityAvailable = true;
+
+  struct Incidence {
+    int forward = 0;
+    int reversed = 0;
+    int degenerate = 0;
+  };
+  std::map<uint32_t, Incidence> incidences;
+  // which faces own each edge, so a defect can be attributed back to a rim
+  std::map<uint32_t, std::vector<int>> owners;
+  for (size_t surfaceIndex = 0; surfaceIndex < surfaces.size(); ++surfaceIndex) {
+    if (surfaces[surfaceIndex] == nullptr) {
+      continue;
+    }
+    for (const auto& ref : surfaces[surfaceIndex]->boundaryEdges()) {
+      Incidence& incidence = incidences[ref.edgeId];
+      if (ref.degenerate) {
+        ++incidence.degenerate;
+      } else if (ref.reversed) {
+        ++incidence.reversed;
+      } else {
+        ++incidence.forward;
+      }
+      owners[ref.edgeId].push_back(static_cast<int>(surfaceIndex));
+    }
+  }
+
+  // per face, the worst identity defect any of its edges carries
+  std::vector<RimState> faceState(surfaces.size(), RimState::Matched);
+  auto worsen = [](RimState& state, RimState candidate) {
+    // the enum is not ordered by severity, so spell the precedence out
+    auto rank = [](RimState value) {
+      switch (value) {
+        case RimState::Matched:
+          return 0;
+        case RimState::Reversed:
+          return 1;
+        case RimState::Boundary:
+          return 2;
+        case RimState::NonManifold:
+          return 3;
+      }
+      return 0;
+    };
+    if (rank(candidate) > rank(state)) {
+      state = candidate;
+    }
+  };
+
+  for (const auto& [edgeId, incidence] : incidences) {
+    ++report.edgeIncidences;
+    if (incidence.degenerate > 0 && incidence.forward + incidence.reversed == 0) {
+      ++report.edgeDegenerateCount;
+      continue;
+    }
+    const int total = incidence.forward + incidence.reversed;
+    RimState state = RimState::Matched;
+    if (total == 1) {
+      ++report.edgeBoundaryCount;
+      state = RimState::Boundary;
+    } else if (total == 2) {
+      if (incidence.forward == 1 && incidence.reversed == 1) {
+        ++report.edgeSharedCount;
+      } else {
+        ++report.edgeReversedCount;
+        state = RimState::Reversed;
+      }
+    } else {
+      ++report.edgeNonManifoldCount;
+      state = RimState::NonManifold;
+    }
+    if (state != RimState::Matched) {
+      for (const int owner : owners[edgeId]) {
+        worsen(faceState[static_cast<size_t>(owner)], state);
+      }
+    }
+  }
+
+  report.closed = (report.edgeBoundaryCount == 0) && (report.edgeNonManifoldCount == 0);
+  report.orientationConsistent = (report.edgeReversedCount == 0);
+
+  report.matchedRims = 0;
+  report.boundaryRims = 0;
+  report.nonManifoldRims = 0;
+  report.reversedRims = 0;
+  for (RimRecord& record : report.rimRecords) {
+    const RimState state = record.surfaceIndex >= 0 && record.surfaceIndex < static_cast<int>(faceState.size())
+                             ? faceState[static_cast<size_t>(record.surfaceIndex)]
+                             : RimState::Matched;
+    record.state = state;
+    switch (state) {
+      case RimState::NonManifold:
+        ++report.nonManifoldRims;
+        break;
+      case RimState::Boundary:
+        ++report.boundaryRims;
+        break;
+      case RimState::Reversed:
+        ++report.reversedRims;
+        break;
+      case RimState::Matched:
+        ++report.matchedRims;
+        break;
+    }
+  }
+
+  measureSharedEdgeDeviation(surfaces, report);
+}
+
 /// Validate closure and orientation of a set of bounded surfaces using a directed half-edge map,
 /// and measure the same boundary as curves (see measureRimClosure).
 ///
@@ -5167,6 +5664,16 @@ inline ClosureReport validateClosure(const std::vector<std::unique_ptr<BoundedSu
   // that cannot say "closed" tells you nothing when it says "open".
   report.closed = (report.boundaryRims == 0) && (report.nonManifoldRims == 0);
   report.orientationConsistent = (report.reversedRims == 0);
+
+  // ... unless the surfaces state their edge identities, in which case none of the above is a
+  // verdict any more. See ClosureReport's "Closure by edge identity" section: the rim measurement
+  // answers a topological question with a proximity query, and the band it thresholds bounds each
+  // polyline against its *own* curve, never against the other face's, which is the term that
+  // dominates. Counting identities answers the question that was actually being asked, and it
+  // does so with no tolerance, no sampling and no band -- so it cannot be made better or worse by
+  // tightening kBSplineFlatness, which under the old criterion made the verdict *worse*
+  // (TolerancePolicy.md section 13.8).
+  applyEdgeIdentityClosure(surfaces, report);
   return report;
 }
 
