@@ -16,16 +16,20 @@
 
 #include "DetectorsBase/O2BVHSurfaceSolid.h"
 #include "DetectorsBase/O2SurfaceSolidIO.h"
+#include "DetectorsBase/O2SolidHarness.h"
 
 #include "../src/BoundedSurface.h"
 
 #include "TFile.h"
 #include "TGeoBBox.h"
+#include "TGeoBoolNode.h"
+#include "TGeoCompositeShape.h"
 #include "TGeoCone.h"
 #include "TGeoShape.h"
 #include "TGeoSphere.h"
 #include "TGeoTorus.h"
 #include "TGeoTube.h"
+#include "TNamed.h"
 
 #include <array>
 #include <cmath>
@@ -33,6 +37,7 @@
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
+#include <string>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -4631,3 +4636,192 @@ BOOST_AUTO_TEST_CASE(StreamE_TorusQuarticLosesEveryRootBelowTheResolventGuard)
 }
 
 // --- Stream E: position and scale independence ---
+
+// --- Stream G: gating any TGeoShape (scripts/geometry/Stream_G_AnyShape.md) ---
+//
+// The oracle gate could score exactly one thing: an O2BVHSurfaceSolid loaded from a
+// surfaces_<part>.bin sidecar. The four scored queries are TGeoShape virtuals, so the scoring
+// loop was never actually specific to that class -- only the loading was. These cases pin the
+// two halves of removing that restriction:
+//
+//   1. the `shape_<part>.root` sidecar convention itself (one TGeoShape-derived object under the
+//      key "shape"), through the same save/load pair the harness and the fixture generator use,
+//      so producer and consumer cannot drift;
+//   2. that the oracle validators really are representation-agnostic -- with a *negative
+//      control*, because a validator that reports "0 disagreements" for every input would pass a
+//      positive-only test while being structurally incapable of failing.
+
+BOOST_AUTO_TEST_CASE(ShapeSidecarRoundTripsAnyTGeoShape)
+{
+  namespace harness = o2::base::harness;
+  const auto dir = std::filesystem::temp_directory_path();
+
+  // A TGeoBBox that is *not* centred on the origin. The offset is the point: it is the cheapest
+  // way for a frame convention to be silently wrong, so it has to survive the round trip.
+  double origin[3] = {1.0, 1.5, 2.0};
+  TGeoBBox box("shape", 1.0, 1.5, 2.0, origin);
+
+  // A TGeoCompositeShape, which is what the CSG emitter will actually hand over: a 4 cm cube with
+  // an r = 0.8 cm axial through-hole. Built from a TGeoBoolNode rather than from a string
+  // expression, so no TGeoManager is needed on either side.
+  auto* cube = new TGeoBBox("cube", 2.0, 2.0, 2.0);
+  auto* drill = new TGeoTube("drill", 0.0, 0.8, 2.5);
+  TGeoCompositeShape composite("shape", new TGeoSubtraction(cube, drill, nullptr, nullptr));
+
+  const std::vector<Point3D> probes{{0.5, 0.5, 0.5},   {1.0, 1.5, 2.0},   {3.0, 1.5, 2.0},
+                                    {0.0, 0.0, 0.0},   {1.9, 0.0, 0.0},   {0.0, 0.0, 1.9},
+                                    {-1.5, -1.5, 1.0}, {0.79, 0.0, 0.0},  {0.81, 0.0, 0.0}};
+  const std::vector<Point3D> directions{{1., 0., 0.}, {0., 1., 0.}, {0., 0., 1.},
+                                        {-1., 0., 0.}, {0.6, 0.8, 0.}};
+
+  for (const TGeoShape* original : {static_cast<const TGeoShape*>(&box),
+                                    static_cast<const TGeoShape*>(&composite)}) {
+    const std::string path = (dir / (std::string("o2_shape_sidecar_") + original->ClassName() + ".root")).string();
+    std::string error;
+    BOOST_REQUIRE_MESSAGE(harness::saveShapeToRootFile(path, *original, &error), error);
+
+    std::unique_ptr<TGeoShape> loaded(harness::loadShapeFromRootFile(path, &error));
+    BOOST_REQUIRE_MESSAGE(loaded != nullptr, error);
+    BOOST_CHECK_EQUAL(std::string(loaded->ClassName()), std::string(original->ClassName()));
+    // TGeoCompositeShape::Capacity() is Monte-Carlo sampled, so this is a loose check by
+    // necessity -- which is precisely why the gate does not treat capacity as a column for
+    // composites. 5% is far outside the ~1% MC spread and far inside any real error.
+    BOOST_CHECK_CLOSE(loaded->Capacity(), original->Capacity(), 5.0);
+
+    // The queries the gate actually scores must be bit-identical across the round trip.
+    for (const auto& p : probes) {
+      BOOST_CHECK_EQUAL(loaded->Contains(p.data()), original->Contains(p.data()));
+      BOOST_CHECK_EQUAL(loaded->Safety(p.data(), original->Contains(p.data())),
+                        original->Safety(p.data(), original->Contains(p.data())));
+      for (const auto& d : directions) {
+        BOOST_CHECK_EQUAL(loaded->DistFromOutside(p.data(), d.data(), 3),
+                          original->DistFromOutside(p.data(), d.data(), 3));
+        BOOST_CHECK_EQUAL(loaded->DistFromInside(p.data(), d.data(), 3),
+                          original->DistFromInside(p.data(), d.data(), 3));
+      }
+    }
+    std::filesystem::remove(path);
+  }
+}
+
+BOOST_AUTO_TEST_CASE(ShapeSidecarRefusesWhatIsNotAShape)
+{
+  namespace harness = o2::base::harness;
+  const auto dir = std::filesystem::temp_directory_path();
+  std::string error;
+
+  BOOST_CHECK(harness::loadShapeFromRootFile((dir / "o2_shape_absent.root").string(), &error) == nullptr);
+  BOOST_CHECK(!error.empty());
+
+  // A well-formed ROOT file whose "shape" key holds something else must be refused rather than
+  // silently ignored: an emitter that writes the wrong object would otherwise look like an
+  // emitter that wrote nothing, and the part would quietly lose its column.
+  const std::string path = (dir / "o2_shape_not_a_shape.root").string();
+  {
+    TFile out(path.c_str(), "RECREATE");
+    TNamed impostor("shape", "not a shape");
+    out.WriteTObject(&impostor, "shape");
+    out.Close();
+  }
+  error.clear();
+  BOOST_CHECK(harness::loadShapeFromRootFile(path, &error) == nullptr);
+  BOOST_CHECK(!error.empty());
+  std::filesystem::remove(path);
+}
+
+BOOST_AUTO_TEST_CASE(OracleValidatorsScoreAPlainRootShape)
+{
+  namespace harness = o2::base::harness;
+
+  // A ROOT primitive with no connection to O2BVHSurfaceSolid at all, and a *wrong* copy of it:
+  // same shape, radius 0.05 cm too large. Everything below is asserted twice, once for each, so
+  // no "0 disagreements" here can come from a validator that is unable to report anything else.
+  constexpr double kR = 1.5;
+  constexpr double kZ = 2.0;
+  constexpr double kError = 0.05;
+  const TGeoTube truth("truth", 0., kR, kZ);
+  const TGeoTube wrong("wrong", 0., kR + kError, kZ);
+
+  // The oracle columns, built analytically from the tube's own closed form rather than from
+  // either shape's methods, so `contains` and `safety` are genuinely independent of what is being
+  // scored. (The two distance columns below are taken from `truth`, which is independent of
+  // `wrong` -- the case that has to be able to fail.)
+  const auto trueContains = [](const Point3D& p) {
+    return (std::hypot(p[0], p[1]) <= kR && std::fabs(p[2]) <= kZ) ? 1 : 0;
+  };
+  const auto trueBoundaryDistance = [](const Point3D& p) {
+    const double r = std::hypot(p[0], p[1]);
+    const double dr = kR - r;
+    const double dz = kZ - std::fabs(p[2]);
+    if (dr > 0. && dz > 0.) {
+      return std::min(dr, dz);
+    }
+    return std::hypot(std::max(r - kR, 0.), std::max(std::fabs(p[2]) - kZ, 0.));
+  };
+
+  std::vector<Point3D> points;
+  std::vector<int> containsState;
+  std::vector<double> boundaryDistance;
+  for (int ix = -6; ix <= 6; ++ix) {
+    for (int iy = -6; iy <= 6; ++iy) {
+      for (int iz = -4; iz <= 4; ++iz) {
+        const Point3D p{0.31 * ix, 0.29 * iy, 0.53 * iz};
+        // Points nearer the wall than the wrong shape's error would be legitimately ambiguous
+        // for it, so they are dropped: the negative control has to fail on geometry, not on the
+        // band. Points in the annulus the two shapes disagree about are deliberately kept.
+        if (std::fabs(trueBoundaryDistance(p)) < 1.e-3) {
+          continue;
+        }
+        points.push_back(p);
+        containsState.push_back(trueContains(p));
+        boundaryDistance.push_back(trueBoundaryDistance(p));
+      }
+    }
+  }
+  BOOST_REQUIRE_GT(points.size(), 500u);
+
+  harness::ValidationOptions opt;
+  opt.meshBand = 1.e-6;        // a synthetic shape has no modelling tolerance to hide behind
+  opt.distanceTolerance = 1.e-9;
+
+  auto containsTruth = harness::validateContainsAgainstOracle(&truth, points, containsState,
+                                                              boundaryDistance, opt);
+  auto containsWrong = harness::validateContainsAgainstOracle(&wrong, points, containsState,
+                                                              boundaryDistance, opt);
+  BOOST_CHECK_EQUAL(containsTruth.nMismatchUnexplained + containsTruth.nMismatchMissedSurface, 0u);
+  BOOST_CHECK_GT(containsWrong.nMismatchUnexplained + containsWrong.nMismatchMissedSurface, 0u);
+
+  auto safetyTruth = harness::validateSafetyAgainstOracle(&truth, points, boundaryDistance, opt);
+  auto safetyWrong = harness::validateSafetyAgainstOracle(&wrong, points, boundaryDistance, opt);
+  BOOST_CHECK_EQUAL(safetyTruth.nMismatchUnexplained + safetyTruth.nMismatchMissedSurface, 0u);
+  BOOST_CHECK_GT(safetyWrong.nMismatchUnexplained + safetyWrong.nMismatchMissedSurface, 0u);
+
+  // Rays from well outside, aimed at points spread through the tube, so the hit rate is not
+  // degenerate; the oracle distance is the nearest positive crossing, exactly as occtOracle.py
+  // defines it, and the origin classification decides which TGeo entry point is asked.
+  std::vector<harness::Ray> rays;
+  std::vector<double> rayDistance;
+  std::vector<int> originState;
+  for (int i = 0; i < 400; ++i) {
+    const double phi = 0.0173 * i;
+    const double z = -1.9 + 0.0095 * i;
+    const Point3D target{0.9 * kR * std::cos(2.1 * phi), 0.9 * kR * std::sin(2.1 * phi), z};
+    const Point3D origin{5.0 * std::cos(phi), 5.0 * std::sin(phi), 3.0 - 0.01 * i};
+    Point3D dir{target[0] - origin[0], target[1] - origin[1], target[2] - origin[2]};
+    const double norm = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+    for (auto& component : dir) {
+      component /= norm;
+    }
+    rays.push_back(harness::Ray{origin, dir});
+    rayDistance.push_back(truth.DistFromOutside(origin.data(), dir.data(), 3));
+    originState.push_back(trueContains(origin));
+  }
+
+  auto distTruth = harness::validateDistanceAgainstOracle(&truth, rays, rayDistance,
+                                                          /*wantInside=*/false, opt, originState);
+  auto distWrong = harness::validateDistanceAgainstOracle(&wrong, rays, rayDistance,
+                                                          /*wantInside=*/false, opt, originState);
+  BOOST_CHECK_EQUAL(distTruth.nMismatchUnexplained + distTruth.nMismatchMissedSurface, 0u);
+  BOOST_CHECK_GT(distWrong.nMismatchUnexplained + distWrong.nMismatchMissedSurface, 0u);
+}
+// --- Stream G: gating any TGeoShape ---
