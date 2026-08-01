@@ -1680,7 +1680,7 @@ def _recognize_analytic_surface(adaptor, uv_bounds) -> Optional[dict]:
             return float("inf")
         return gap / scale if math.isfinite(gap) else float("inf")
 
-    # --- plane (3): all unit normals parallel; the frame is the sampled normal itself
+    # --- plane (3): the samples lie in one plane; the frame is the sampled normal itself
     plane = {"normal": N[0] / np.linalg.norm(N[0]), "point": P[0]}
     plane_res = score("plane", plane)
     if plane_res < _RECOGNIZE_TOL_EXACT:
