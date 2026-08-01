@@ -949,6 +949,67 @@ BOOST_AUTO_TEST_CASE(BSplineTrimCurveKernels)
   checkClose(reversed.pointAt(0.25).vCoord, spline.pointAt(0.75).vCoord, 1.e-9);
 }
 
+// The adaptive sampler must not be fooled by a curve that meets its own chord where it is probed
+// (TolerancePolicy.md section 13, finding K4). Both halves of the criterion get their own case,
+// because each defeats the other's reproducer on its own.
+BOOST_AUTO_TEST_CASE(BSplineSamplingIsNotFooledBySymmetry)
+{
+  using surf::Curve2D;
+  using surf::Vec2;
+
+  // --- symmetry about the parameter midpoint, within a single Bezier span ----------------------
+  // A cubic Bezier is (P0 + 3 P1 + 3 P2 + P3) / 8 at t = 1/2, so this S-curve passes through
+  // (1, 0) -- exactly on its own chord from (0, 0) to (2, 0) -- while bulging by about 0.3 either
+  // side of it. A single midpoint probe therefore calls it flat at the very first step and
+  // replaces the whole curve with a straight line. That is what happened to the tube-tube junction
+  // curve of six Bagger parts, whose rim vanished entirely as a result.
+  const Curve2D sCurve =
+    Curve2D::makeBSpline(3, {{0., 0.}, {0.5, 1.}, {1.5, -1.}, {2., 0.}}, {}, {0., 0., 0., 0., 1., 1., 1., 1.});
+  BOOST_REQUIRE(sCurve.valid());
+  checkClose(sCurve.pointAt(0.5).uCoord, 1., 1.e-12);
+  checkClose(sCurve.pointAt(0.5).vCoord, 0., 1.e-12); // the trap: the midpoint is on the chord
+  double worstOffChord = 0.;
+  for (int step = 0; step <= 64; ++step) {
+    worstOffChord = std::max(worstOffChord, std::abs(sCurve.pointAt(static_cast<double>(step) / 64).vCoord));
+  }
+  BOOST_CHECK(worstOffChord > 0.2); // and the curve really does leave it, by a lot
+
+  std::vector<Vec2> samples;
+  sCurve.bsplineSampleInto(samples);
+  BOOST_CHECK(samples.size() > 2); // not flattened to its chord
+  double worstSampleError = 0.;
+  for (int step = 0; step <= 64; ++step) {
+    const Vec2 onCurve = sCurve.pointAt(static_cast<double>(step) / 64);
+    double nearest = 1.e30;
+    for (size_t index = 0; index + 1 < samples.size(); ++index) {
+      nearest = std::min(nearest, surf::pointSegmentDistanceSq(onCurve, samples[index], samples[index + 1]));
+    }
+    worstSampleError = std::max(worstSampleError, std::sqrt(nearest));
+  }
+  BOOST_CHECK(worstSampleError < 1.e-4); // and the polyline now follows it
+
+  // --- every knot span gets sampled, however flat the curve looks ------------------------------
+  // A B-spline is one polynomial piece only *within* a span, so a flatness verdict that straddles
+  // a knot is a verdict about a curve the test's own model does not describe. This one is exactly
+  // straight, so no probe anywhere can distinguish it from its chord -- and it must still be
+  // resolved span by span, because that is the only thing the curve's own structure guarantees.
+  std::vector<Vec2> straightPoles;
+  std::vector<double> uniformKnots{0., 0., 0., 0.};
+  constexpr int spanCount = 8;
+  for (int index = 0; index < spanCount + 3; ++index) {
+    straightPoles.push_back({static_cast<double>(index), 0.});
+  }
+  for (int index = 1; index < spanCount; ++index) {
+    uniformKnots.push_back(static_cast<double>(index) / spanCount);
+  }
+  uniformKnots.insert(uniformKnots.end(), {1., 1., 1., 1.});
+  const Curve2D straight = Curve2D::makeBSpline(3, straightPoles, {}, uniformKnots);
+  BOOST_REQUIRE(straight.valid());
+  std::vector<Vec2> straightSamples;
+  straight.bsplineSampleInto(straightSamples);
+  BOOST_CHECK(static_cast<int>(straightSamples.size()) >= spanCount + 1);
+}
+
 BOOST_AUTO_TEST_CASE(CurvedPlanarDiskKernels)
 {
   using surf::Curve2D;
@@ -3803,15 +3864,16 @@ BOOST_AUTO_TEST_CASE(RimClosureMeasuresTheGapInCentimetres)
   BOOST_CHECK_EQUAL(closedBox.GetRimCount(), 6);
   BOOST_CHECK_EQUAL(closedBox.GetMatchedRimCount(), 6);
   BOOST_CHECK_EQUAL(closedBox.GetBoundaryRimCount(), 0);
-  BOOST_CHECK_SMALL(closedBox.GetMaxRimGap(), 1.e-12);
+  BOOST_CHECK_SMALL(closedBox.GetMaxRimIsolation(), 1.e-12);
   BOOST_CHECK_SMALL(closedBox.GetUnmatchedRimLength(), 1.e-12);
   // a box has no curved rim, so its polylines are exact and the measurement has no noise floor
   BOOST_CHECK_SMALL(closedBox.GetRimChordResolution(), 1.e-12);
   // the summed perimeter of the six faces, which is what "how much boundary" is measured in
   BOOST_CHECK_CLOSE(closedBox.GetTotalRimLength(), 16. * (halfX + halfY + halfZ), 1.e-9);
 
-  // the same box with the +z face lifted by a known delta: maxGap must *be* that delta, which is
-  // the whole point of the item -- "how far apart are the faces, in cm"
+  // the same box with the +z face lifted by a known delta. A box's rims are straight, so their
+  // sampling resolution is zero and the match band is the declared tolerance alone; the lifted
+  // face's rim is then alone by exactly delta, and that is what the isolation reports.
   constexpr double delta = 1.e-3;
   SurfaceSolid shiftedBox("rimShiftedBox");
   for (int faceIndex = 0; faceIndex < 6; ++faceIndex) {
@@ -3819,9 +3881,9 @@ BOOST_AUTO_TEST_CASE(RimClosureMeasuresTheGapInCentimetres)
     BOOST_REQUIRE(addBoxFace(shiftedBox, faceIndex, halfX, halfY, halfZ, false, center));
   }
   shiftedBox.CloseShape(false);
-  BOOST_CHECK_CLOSE(shiftedBox.GetMaxRimGap(), delta, 1.e-6);
+  BOOST_CHECK_CLOSE(shiftedBox.GetMaxRimIsolation(), delta, 1.e-6);
   // and the shift is far above the sampling noise floor, so the number means what it says
-  BOOST_CHECK(shiftedBox.GetMaxRimGap() > shiftedBox.GetRimChordResolution());
+  BOOST_CHECK(shiftedBox.GetMaxRimIsolation() > shiftedBox.GetRimChordResolution());
 }
 
 // The structural failure the rim criterion exists to fix, pinned: two faces that sample one
@@ -3865,8 +3927,62 @@ BOOST_AUTO_TEST_CASE(RimClosureSurvivesUnequalChordCounts)
   BOOST_CHECK_EQUAL(resampled.GetRimCount(), 6);
   BOOST_CHECK_EQUAL(resampled.GetMatchedRimCount(), 6);
   BOOST_CHECK_EQUAL(resampled.GetBoundaryRimCount(), 0);
-  BOOST_CHECK_SMALL(resampled.GetMaxRimGap(), 1.e-12);
+  BOOST_CHECK_SMALL(resampled.GetMaxRimIsolation(), 1.e-12);
   BOOST_CHECK_SMALL(resampled.GetUnmatchedRimLength(), 1.e-12);
+}
+
+// The per-rim records. The counters say how many loops are open; until these existed, *which* loop
+// had to be reconstructed from counts and totals by hand every time (TolerancePolicy.md section
+// 12 is entirely such a reconstruction). A rim's state is on the same scale the solid reports, so
+// the solid's verdict must be exactly the worst state present -- which is a self-check, not a
+// restatement: the two are accumulated independently.
+BOOST_AUTO_TEST_CASE(RimReportsNameTheOffendingLoop)
+{
+  constexpr double halfX = 1.;
+  constexpr double halfY = 1.5;
+  constexpr double halfZ = 2.;
+  constexpr double delta = 1.e-3;
+
+  SurfaceSolid shiftedBox("rimReportBox");
+  for (int faceIndex = 0; faceIndex < 6; ++faceIndex) {
+    const Point3D center = faceIndex == 4 ? Point3D{0., 0., delta} : Point3D{0., 0., 0.};
+    BOOST_REQUIRE(addBoxFace(shiftedBox, faceIndex, halfX, halfY, halfZ, false, center));
+  }
+  shiftedBox.CloseShape(false);
+
+  const auto& rims = shiftedBox.GetRimReports();
+  BOOST_REQUIRE_EQUAL(static_cast<int>(rims.size()), shiftedBox.GetRimCount());
+
+  int boundaryRims = 0;
+  auto worst = SurfaceSolid::NavigationReliability::Reliable;
+  double openLength = 0.;
+  for (const auto& rim : rims) {
+    BOOST_CHECK(rim.surface >= 0 && rim.surface < shiftedBox.GetNsurfaces());
+    BOOST_CHECK(rim.rimOnSurface >= 0);
+    BOOST_CHECK(rim.closed); // a box face's boundary is one closed loop
+    BOOST_CHECK(rim.length > 0.);
+    openLength += rim.unmatchedLength;
+    if (rim.state == SurfaceSolid::NavigationReliability::OpenSurfaceSet) {
+      ++boundaryRims;
+      BOOST_CHECK(rim.unmatchedChords > 0);
+      BOOST_CHECK(rim.unmatchedLength > 0.);
+    } else {
+      BOOST_CHECK_EQUAL(rim.unmatchedChords, 0);
+    }
+    worst = std::max(worst, rim.state);
+  }
+  BOOST_CHECK_EQUAL(boundaryRims, shiftedBox.GetBoundaryRimCount());
+  BOOST_CHECK(worst == shiftedBox.GetNavigationReliability());
+  BOOST_CHECK_CLOSE(openLength, shiftedBox.GetUnmatchedRimLength(), 1.e-9);
+
+  // the lifted face's own rim is the one that is alone, and it is alone by the lift
+  const auto lifted = std::find_if(rims.begin(), rims.end(), [](const auto& rim) { return rim.surface == 4; });
+  BOOST_REQUIRE(lifted != rims.end());
+  BOOST_CHECK(lifted->state == SurfaceSolid::NavigationReliability::OpenSurfaceSet);
+  BOOST_CHECK_CLOSE(lifted->maxIsolation, delta, 1.e-6);
+  BOOST_CHECK(lifted->maxIsolationFace >= 0 && lifted->maxIsolationFace != 4);
+  // and the worst chord is named where it is: on the +z face, which sits at halfZ + delta
+  BOOST_CHECK_CLOSE(lifted->maxIsolationPoint[2], halfZ + delta, 1.e-6);
 }
 
 // Rims are counted per boundary loop and measured in centimetres, not counted per chord. A bare
