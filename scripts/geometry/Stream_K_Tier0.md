@@ -221,3 +221,79 @@ infinity. It reproduces the defect at every combination tried.
 
 Every positive control passes, at gaps of 8e-17 to 6e-16 of the patch diagonal, which is what makes
 the failures mean something: the recogniser is not broken, its *acceptance* is.
+
+---
+
+## 5. The fix, and what it moves
+
+One change, in both the shipping recognizer (`O2_CADtoTGeo.py::_recognize_analytic_surface`) and
+the reference implementation it was ported from (`analyze_surface_geometry.py::classify_surface`):
+
+> **Every candidate is scored by exactly one quantity** — `_analytic_surface_gap` (the largest
+> distance from a recognition sample to the candidate surface) divided by the sample bounding-box
+> diagonal — and that same number is the acceptance test against `_RECOGNIZE_TOL_EXACT = 1e-9`.
+
+The linear solves still *propose* the models; none of them decides any more. A degenerate proposal
+(the apex at 1e11 diagonals) is left in and simply scored like any other — the gap sees what the
+solve's own residual cannot.
+
+`--self-test`: **18 checks, 0 failures** (was 18 checks, 7 failures). The invariant line now reads
+`worst cylinder at 5.60e-16 against 1e-09`.
+
+### 5.1 Effect on the three corpora — totals and disagreements together
+
+| | before | after |
+| --- | --- | --- |
+| `as1-oc-214.stp` sidecars emitted / leaf solids | 5 / 5 | **5 / 5** |
+| `as1-oc-214.stp` faces recognized | 28 cylinder | **28 cylinder** |
+| `as1-oc-214.stp` sidecar bytes changed | — | **0 of 5 files** |
+| `Bagger.step` sidecars emitted / leaf solids | 12 / 13 | **12 / 13** |
+| `Bagger.step` faces reaching recognition | 0 of 191 | **0 of 191** |
+| `Bagger.step` sidecar bytes changed | — | **0 of 12 files** |
+| ALICE3 `n_eligible` (surface report) | 36 / 55 | **36 / 55** |
+| ALICE3 sidecars emitted | 20 / 55 | **20 / 55** |
+| ALICE3 sidecar bytes changed | — | **0 of 20 files** |
+| ALICE3 faces recognized | 1180 | **998** |
+| — cylinder | 786 | **786** |
+| — cone | **358** | **176** |
+| — sphere | 36 | **36** |
+| ALICE3 recognized faces with measured relative gap > 1e-9 | **182** | **0** |
+
+Every emitted sidecar on every corpus is **byte-identical**. The only thing that moved is that 182
+faces which no longer claim to be cones — and every one of them is on `ST2487458_01`, which emits
+no sidecar either way, so no representation changed anywhere. That is the intended shape of this
+change: it removes a wrong answer that was not yet being used, before the §2 work makes it usable.
+
+*A comparison that cannot fail is not evidence*, so: the byte-identity is backed by the reason it
+holds (Bagger and the fixtures reach recognition 0 times; ALICE3's changed faces are all on a solid
+that fails for 742 other reasons), and the self-test's positive controls all still pass at
+8e-17…6e-16 relative, which is what shows the recogniser itself was not weakened.
+
+### 5.2 Converter vs OCCT after the fix — and why they now differ by exactly ten faces
+
+| converter | OCCT `ShapeAnalysis_CanonicalRecognition` | faces |
+| --- | --- | ---: |
+| cylinder | cylinder | 786 |
+| cone | cone | 174 |
+| sphere | sphere | 36 |
+| cone | *declines* | 2 |
+| *declines* | plane | 8 |
+| declines | declines | 1456 |
+
+**Zero disagreements of the dangerous kind remain** — there is no face left where the converter
+claims a quadric that OCCT rejects *and* the measured gap is large. The two residual classes are
+both explained, and both are the converter being **stricter**, which is the direction this project
+wants:
+
+- the **8 planes** are all on `ST2487195_01` and are flat to only **1.5e-07 of the patch diagonal**
+  (3.4e-08 mm absolute — they are, exactly, the source of `Stream_A_CSG.md`'s headline
+  `maxCanonicalGap = 3.4e-8 mm`). OCCT accepts them against its own *absolute* 1e-07 mm tolerance;
+  this converter declines them at 150× its *relative* bound. A declined face costs coverage —
+  `ST2487195_01` has 138 genuinely free-form faces of 182 and never emits — and a wrongly-accepted
+  one costs correctness.
+- the **2 cones** are geometrically sound (measured relative gap ≤ 1e-09) and are declined by OCCT
+  under its absolute-tolerance criterion.
+
+So the honest statement of the census's "1004 quadrics in disguise" for *this* converter is
+**996 + 2 = 998 at a relative gap below 1e-9**, with the remaining 8 sitting between 1e-9 and
+1.6e-7 and reported rather than taken.
