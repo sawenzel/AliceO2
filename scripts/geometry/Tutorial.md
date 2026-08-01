@@ -21,9 +21,12 @@ There are three representations, and they are complementary rather than competin
 | 2 | **`O2BVHSurfaceSolid`** | the part's real B-rep faces (trimmed analytic surfaces) carried into TGeo, with a BVH for ray queries | yes, per face | anything whose faces are plane/cylinder/cone/sphere/torus, however trimmed |
 | 3 | **`O2Tessellated`** | a triangle mesh | no | everything, as the fallback |
 
-The intended production behaviour is a **cascade**: try 1, else 2, else 3, and record per part
-which one accepted it. Today the converter implements *2 else 3* (`--exact-surfaces auto`).
-**Representation 1 does not exist yet as an emitter** — see §5.
+The production behaviour is a **cascade**: try 1, else 2, else 3, and record per part which one
+accepted it. All three now exist: `--csg auto --exact-surfaces auto --mesh` gives the full
+cascade, and `csg_report.json` records the choice and its evidence per part.
+
+Measured on `Bagger.step` — **CSG 7, exact surfaces 5, tessellated 1** of 13 leaf solids, with
+every CSG part exact (`dV_sym = 0`) and oracle-clean on all four columns.
 
 ---
 
@@ -166,10 +169,20 @@ both corpora `reliable` and navigable; **zero unexplained oracle disagreements**
 - **A real correctness bug in the quartic solver** (torus intersections only) — §5.5.
 - Never exercised at ALICE3 scale (9266 faces, metre coordinates).
 
-### 5.2 B-rep → CSG — **measured, not built**
+### 5.2 B-rep → CSG — census **and** a working Bagger-scope emitter
 
-Status: **a census exists; there is no emitter.** Nothing in this direction is wired into the
-converter yet. The measurement is complete and it changed the plan substantially:
+Status: **recogniser, emitter and acceptance all exist and are wired into the converter**
+(`--csg auto|required|off`, default `off`). Scope is deliberately narrow: whole-part primitive
+templates plus the two-coaxial-cluster `tube ∪ tube`. General decomposition (Tier 3) is *not*
+built and remains gated on a cell-count table that does not exist.
+
+Each candidate must pass **two independent tests**: OCCT symmetric-difference volume
+(`BRepAlgoAPI_Cut` both ways) inside the model tolerance, *and* the ordinary oracle gate on the
+emitted shape. They have never disagreed; the volume test twice rejected a greedy union proposal
+(`cyl_inter_cyl`, `tube_window`) that no heuristic would have caught — both are single cells, not
+unions.
+
+The census that scoped all of this is complete and it changed the plan substantially:
 
 - **1004 of ALICE3's 2377 "B-spline" surfaces are quadrics in disguise** — cylinders, cones,
   spheres, planes written as NURBS by the exporter — recoverable at a max gap of 3.4e-8 mm.
@@ -180,9 +193,21 @@ converter yet. The measurement is complete and it changed the plan substantially
 - The property that matters for decomposition is **single-cell**, not convexity — a through hole
   has zero concave edges and is not convex.
 
-**Missing for completeness:** everything downstream of the census — the recogniser, the emitter,
-the acceptance test (symmetric-difference volume against OCCT), and the converter dispatch.
-Full design in `CSG_Pipeline.md`; measured evidence in `Stream_A_CSG.md`.
+**Missing for completeness:** Tier 0 (decoding NURBS-encoded quadrics — the highest-value item on
+the board, and it helps representation 2 as much as CSG); Tier 3 for the parts that decline
+(`Base`, `Boom`, `Stick`, `BucketLink1/2` — 2 to 7 axis clusters each); and coverage beyond
+Bagger. Design in `CSG_Pipeline.md`, census in `Stream_A_CSG.md`, emitter in
+`Stream_H_CSGEmitter.md`.
+
+**Two things anyone touching this must know.** (i) The alibuild python3.10 that pythonOCC needs
+*is* the O2 interpreter, so one process can import both `OCC` and `ROOT` — but only if
+`PYTHONPATH`/`LD_LIBRARY_PATH` are **prepended** to. `runOracleGate.py` *replaces* them, and
+PyROOT then dies on `libffi.so.6`; that is why the hook always writes `csg_<part>.json` and
+completes deferred shapes via `emit.py --from-json`. (ii) **No `TGeoShape` in ROOT 6.36 can carry
+a rigid transform** — `TGeoBBox` has `fOrigin`, nothing else has anything, and only
+`TGeoCompositeShape` holds a matrix. A *placed* primitive is therefore emitted as its union with
+an identical copy under the same matrix, which is why a recognised plain tube can appear as a
+`TGeoCompositeShape` in `gate.json`.
 
 **Important:** for Bagger-class geometry the emitter needs **no new O2 class**. `TGeoTube`,
 `TGeoBBox`, `TGeoCone` and `TGeoCompositeShape` already exist in ROOT. A dedicated `O2CSGSolid`
@@ -196,11 +221,18 @@ later, gated decision, not a prerequisite.
 `runOracleGate.py` chains the four stages and scores per part, per column, with explicit
 mismatch classes (`withinBand`, `missedSurface`, `unexplained`).
 
+It scores **every representation a part has, side by side, against one oracle answer set** —
+`surface`, `mesh` and `shape` columns in `gate.json`, each with its own disagreement counts, plus
+a `bboxDeviationFromOracle` frame check per representation.
+
 **Missing for completeness:**
-- It can only score an **`O2BVHSurfaceSolid`**. To gate a CSG or tessellated part it must be able
-  to score **any `TGeoShape`**. This is the single blocking gap for the MVP in §6.
+- **The pass/fail verdict is still computed on the surface representation alone.** A part now
+  shipping as exact CSG can therefore be reported as failing on a column belonging to a
+  representation it no longer uses — see §6.
 - No parallelism and no sample budget → an ALICE3-sized model is not yet gateable in bounded time.
-- No tiered coverage scorecard (which representation accepted each part).
+- `makeTestPartDB.py` writes **absolute** paths into `manifest.json`, so copying a finished
+  workdir and re-running with `--skip-convert` silently reads the *original* directory. It does
+  not error; it quietly scores the wrong files. Rewrite the paths, or reconvert.
 
 ### 5.4 Sidecar v3 / edge identity — landed in wave 1
 
@@ -250,7 +282,32 @@ with only a warning**. That is the one live production risk on the branch.
 
 ---
 
-## 6. The MVP: Bagger as CSG + BVHSurfaceSolid + Tessellated
+## 6. The MVP: Bagger as CSG + BVHSurfaceSolid + Tessellated — **done**
+
+```bash
+python3 scripts/geometry/O2_CADtoTGeo.py scripts/geometry/STEP_examples/Bagger.step \
+    --csg auto --exact-surfaces auto --mesh --dump-brep --output-folder out -o geom.C
+# -> tiers: CSG 7, exact surfaces 5, tessellated 1  (of 13 leaf solids)
+```
+
+| carried by | parts | evidence |
+| --- | --- | --- |
+| **CSG** | `BasePin`, and the six rams (`Boom`/`Stick`/`BucketCylinder` × `Inner`/`Outer`) | `dV_sym = 0` exactly; oracle 0/0/0/0 |
+| **exact surfaces** | `Base`, `Boom`, `Stick`, `BucketLink1`, `BucketLink2` | oracle 0/0/0/0 |
+| **tessellated** | `Bucket` (97 faces, 4 spherical + 2 toroidal) | no exact sidecar |
+
+The six rams are `TGeoTube ∪ TGeoTube` — **unions**. Parts decline CSG for measured reasons: 2 to
+7 axis clusters (Tier-3 bodies), one plane that is neither cap nor wedge, one toroidal face.
+
+**The one prediction in this document that failed.** It said converting the rams as booleans would
+retire the three capacity failures. They *are* exact now — `dV_sym = 0` is far stronger than any
+capacity band — but the Bagger gate still reads 9/12, because the verdict is computed on the
+**surface** representation. Those three parts are exact in the representation they now ship in,
+while the number calling them failures describes one they no longer use. Closing that is a policy
+decision in `runOracleGate.py`: make the verdict representation-aware. It is the natural next step
+and it is not a geometry problem.
+
+### The original scoping, kept for reference
 
 This is the right next target, and Bagger is the right specimen: 13 prototypes, all quadric-only,
 6 of them the tube-pair rams that CSG represents exactly and that are *precisely* the three parts
@@ -295,5 +352,5 @@ ALICE3 scale-up, the quartic fix, revolved/extruded profile solids. Each has its
 | `CSG_Pipeline.md` | the B-rep → CSG design: prior art, the four tiers, acceptance |
 | `Workstreams.md` | the six parallel streams, the contract, file ownership |
 | `CodeReview_Fable.md`, `_v2.md` | the two deep reviews; the register of findings |
-| `Stream_A_CSG.md`, `Stream_E_Scale.md`, `Stream_F_EdgeIdentity.md`, `Stream_C_Hygiene.md` | wave 0/1 investigation records |
+| `Stream_A_CSG.md`, `Stream_C_Hygiene.md`, `Stream_E_Scale.md`, `Stream_F_EdgeIdentity.md`, `Stream_G_AnyShape.md`, `Stream_H_CSGEmitter.md` | wave 0/1 and MVP investigation records |
 | `NEXT.md` | the session-to-session hand-over; rewritten by whoever finishes |
