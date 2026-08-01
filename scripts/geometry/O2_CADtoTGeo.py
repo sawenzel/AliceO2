@@ -1584,7 +1584,7 @@ def _recognize_analytic_surface(adaptor, uv_bounds) -> Optional[dict]:
     dev = float(np.abs(np.abs(N @ N[0]) - 1.0).max())
     if dev < 1e-12:
         normal = N[0] / np.linalg.norm(N[0])
-        return {"kind": "plane", "residual": dev, "normal": normal, "point": P[0], "P": P}
+        return {"kind": "plane", "residual": dev, "normal": normal, "point": P[0], "P": P, "N": N}
 
     best = ("freeform", float("inf"), {})
 
@@ -1646,9 +1646,68 @@ def _recognize_analytic_surface(adaptor, uv_bounds) -> Optional[dict]:
     kind, res, extra = best
     if res >= _RECOGNIZE_TOL_EXACT:
         return None
-    out = {"kind": kind, "residual": res, "P": P}
+    out = {"kind": kind, "residual": res, "P": P, "N": N}
     out.update(extra)
     return out
+
+
+def _recognized_inner_wall(face, rec) -> Optional[bool]:
+    """Decide, by measurement, which side of a RECOGNIZED quadric is outside the solid.
+
+    The sidecar's `inner_wall` flag says whether the patch's outward normal points *towards* the
+    axis/centre rather than away from it. For a face whose *stored* surface is an OCC canonical
+    quadric, `face.Orientation()` answers that on its own: OCC's canonical quadric normal already
+    points away from the axis, so FORWARD means "away" and REVERSED means "towards".
+
+    For a NURBS-encoded quadric it does not. The stored surface is a B-spline whose du x dv may
+    point either way -- that is a choice the exporter made when it wrote the parametrisation --
+    and FORWARD/REVERSED is relative to *that* normal, not to the axis. The orientation flag
+    therefore carries no information about which side is outside, and reading it as if it did
+    inverts the outward normal of an arbitrary subset of the recognized faces.
+
+    Measured on ALICE3/`CAD_noETA.stp`: 21 of the 87 NURBS-cylinder faces of `ST0923290_013`,
+    `_018` and `_019` came out with an exactly antiparallel outward normal, which
+    `DistFromOutside`/`DistFromInside` select hits by and which closure and edge identity are both
+    blind to (a global sign cancels in every count they make). See
+    `scripts/geometry/Stream_L_ALICE3Defect.md`.
+
+    So: take the face's own outward normal -- OCC's rule, (du x dv) flipped for a REVERSED face --
+    at every recognition sample, and compare it with the recognized quadric's canonical outward
+    direction there. Returns None when the samples do not decide (the caller then keeps the
+    orientation-flag answer).
+    """
+    samples = rec.get("P")
+    normals = rec.get("N")
+    if samples is None or normals is None or len(samples) == 0:
+        return None
+    sign = -1.0 if face.Orientation() == TopAbs_REVERSED else 1.0
+    kind = rec["kind"]
+    votes = 0
+    for point, normal in zip(samples, normals):
+        outward = np.asarray(normal, dtype=float) * sign
+        if kind == "cylinder":
+            axis = np.asarray(rec["axis"], dtype=float)
+            axis = axis / np.linalg.norm(axis)
+            radial = point - rec["origin"]
+            radial = radial - np.dot(radial, axis) * axis
+        elif kind == "sphere":
+            radial = point - rec["centre"]
+        elif kind == "cone":
+            axis = np.asarray(rec["axis"], dtype=float)
+            axis = axis / np.linalg.norm(axis)
+            relative = point - rec["apex"]
+            radial = relative - np.dot(relative, axis) * axis
+            # The cone's outward normal tilts out of the radial direction by the half angle; only
+            # its sign relative to the radial direction matters here, and that tilt cannot flip it.
+        else:
+            return None
+        length = np.linalg.norm(radial)
+        if length < 1e-12:
+            continue  # on the axis: this sample says nothing
+        votes += 1 if float(np.dot(outward, radial / length)) > 0.0 else -1
+    if votes == 0:
+        return None
+    return votes < 0
 
 
 def _arbitrary_orthonormal_frame(axis):
@@ -1805,9 +1864,18 @@ def recognize_and_extract_face(face, scale_to_cm: float) -> Tuple[Optional[dict]
         return None, None
     kind = rec["kind"]
     s = scale_to_cm
-    inner_wall = face.Orientation() == TopAbs_REVERSED  # same convention as the native extractors:
-    # the recognized surface's canonical normal is always "away from the axis/center", exactly
-    # like OCC's own canonical quadric normal, regardless of the recognized frame's axis/refu sign.
+    # Which side of the recognized quadric is outside. The orientation flag alone answers this
+    # only when the *stored* surface is an OCC canonical quadric; on a NURBS-encoded one it is
+    # relative to the exporter's parametrisation and says nothing, so it is measured against the
+    # face's own outward normal instead. `_recognized_inner_wall` documents why, and returns None
+    # when the samples do not decide -- the orientation flag is then all there is.
+    #
+    # The plane branch below does not use `inner_wall` for its normal: it builds the frame from
+    # the sampled normal itself, so it already carries the measurement.
+    inner_wall = face.Orientation() == TopAbs_REVERSED
+    measured_inner_wall = _recognized_inner_wall(face, rec)
+    if measured_inner_wall is not None:
+        inner_wall = measured_inner_wall
 
     if kind == "plane":
         normal = rec["normal"]
