@@ -24,6 +24,10 @@
 #include "DetectorsBase/O2Tessellated.h"
 #include "DetectorsBase/O2SurfaceSolidIO.h"
 
+#include "TGeoBBox.h"
+#include "TGeoCompositeShape.h"
+#include "TGeoScaledShape.h"
+
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -35,6 +39,7 @@
 #include <cstring>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <iostream>
 #include <optional>
 #include <set>
@@ -68,6 +73,7 @@ struct Options {
   std::string refAnswers;  ///< directory holding the oracle's answers for those sample sets
   std::string loadSamples; ///< directory to read per-part sample sets from, instead of generating
   bool edgeIdentity = false; ///< report the sidecar-v3 edge-identity block (Stream F's numbers)
+  std::string explicitShape; ///< ad-hoc mode: the shape_<part>.root sidecar to score alongside
 };
 
 struct Part {
@@ -75,7 +81,40 @@ struct Part {
   std::string model;
   std::string surfaces;
   std::string facets;
+  /// The `shape_<VOL>_<LID>.root` sidecar, when the part has one. Optional by construction: it is
+  /// the future CSG emitter's output and no part has one today.
+  std::string shape;
 };
+
+/// `surfaces_<suffix>.bin` -> `shape_<suffix>.root` in the same directory.
+///
+/// Derived rather than only read from the manifest so that a shape sidecar dropped next to the
+/// other artifacts is picked up by a `--skip-convert` re-score, which is the loop anyone
+/// developing an emitter will actually run. `makeTestPartDB.py` records the same path under the
+/// manifest's `"shape"` key when it indexes the database, and that entry wins when present.
+std::string deriveShapeSidecarPath(const std::string& surfacesPath)
+{
+  const auto slash = surfacesPath.find_last_of('/');
+  const std::string dir = slash == std::string::npos ? std::string() : surfacesPath.substr(0, slash + 1);
+  std::string base = slash == std::string::npos ? surfacesPath : surfacesPath.substr(slash + 1);
+  const std::string prefix = "surfaces_";
+  const std::string suffix = ".bin";
+  if (base.rfind(prefix, 0) != 0 || base.size() <= prefix.size() + suffix.size() ||
+      base.compare(base.size() - suffix.size(), suffix.size(), suffix) != 0) {
+    return {};
+  }
+  const std::string stem = base.substr(prefix.size(), base.size() - prefix.size() - suffix.size());
+  return dir + "shape_" + stem + ".root";
+}
+
+bool fileExists(const std::string& path)
+{
+  if (path.empty()) {
+    return false;
+  }
+  std::ifstream probe(path);
+  return static_cast<bool>(probe);
+}
 
 void printUsage(const char* argv0)
 {
@@ -83,7 +122,13 @@ void printUsage(const char* argv0)
     "Usage: " << argv0 << " --db <dir> [--parts <substring>] [--points N] [--rays N] [--seed N]\n"
     "                              [--only contains,distout,distin,safety] [--loop-crosscheck]\n"
     "                              [--pruning-ab] [--json <out.json>] [--warmup N] [--repeat N]\n"
-    "   or: " << argv0 << " --surfaces <file> --facets <file> [options as above]\n\n"
+    "   or: " << argv0 << " --surfaces <file> --facets <file> [--shape <file>] [options as above]\n\n"
+    "  Every representation a part has is scored side by side against the same oracle answers:\n"
+    "    surface  surfaces_<part>.bin  -> O2BVHSurfaceSolid   (the historical candidate)\n"
+    "    mesh     facets_<part>.bin    -> O2Tessellated       (also the sampling reference)\n"
+    "    shape    shape_<part>.root    -> any TGeoShape       (the CSG emitter's hand-over)\n"
+    "  The `shape` sidecar is one ROOT file holding one TGeoShape-derived object under the key\n"
+    "  \"shape\", in cm, in the part's local frame; see DetectorsBase/O2SolidHarness.h.\n\n"
     "  --loop-crosscheck  also run the surface solid's non-BVH _Loop twins and require exact\n"
     "                     agreement; this is the correctness guard that does not involve the mesh\n"
     "  --pruning-ab       re-run the distance kernels with ray tmax pruning disabled, reporting\n"
@@ -140,6 +185,8 @@ bool parseArgs(int argc, char** argv, Options& opt)
       opt.explicitSurfaces = next("--surfaces");
     } else if (a == "--facets") {
       opt.explicitFacets = next("--facets");
+    } else if (a == "--shape") {
+      opt.explicitShape = next("--shape");
     } else if (a == "--parts") {
       opt.partsPattern = next("--parts");
     } else if (a == "--points") {
@@ -187,7 +234,11 @@ std::vector<Part> collectParts(const Options& opt)
 {
   std::vector<Part> parts;
   if (!opt.explicitSurfaces.empty()) {
-    parts.push_back({"adhoc", "adhoc", opt.explicitSurfaces, opt.explicitFacets});
+    Part part{"adhoc", "adhoc", opt.explicitSurfaces, opt.explicitFacets, opt.explicitShape};
+    if (part.shape.empty()) {
+      part.shape = deriveShapeSidecarPath(part.surfaces);
+    }
+    parts.push_back(std::move(part));
     return parts;
   }
   const std::string manifestPath = opt.db + "/manifest.json";
@@ -203,6 +254,10 @@ std::vector<Part> collectParts(const Options& opt)
     part.model = p.at("model").get<std::string>();
     part.surfaces = p.at("surfaces").get<std::string>();
     part.facets = p.at("facets").get<std::string>();
+    part.shape = p.value("shape", std::string());
+    if (part.shape.empty()) {
+      part.shape = deriveShapeSidecarPath(part.surfaces);
+    }
     if (!opt.partsPattern.empty()) {
       const bool idMatch = part.id.find(opt.partsPattern) != std::string::npos;
       const bool modelMatch = part.model.find(opt.partsPattern) != std::string::npos;
@@ -365,6 +420,11 @@ struct OracleAnswers {
   double tolerance = 0.;
   double capacity = 0.;
   bool valid = false;
+  /// The BREP's own bounding box, in the frame the oracle answered in. Every candidate must live
+  /// in that same frame; this is what makes that checkable instead of assumed.
+  bool hasBbox = false;
+  Point3D bboxMin{};
+  Point3D bboxMax{};
   std::map<std::string, std::vector<int>> containsState;
   /// Per ray category, the oracle's classification of each ray *origin* (1/0/-1). This is what
   /// makes the distance columns soundly categorised rather than categorised by the reference mesh.
@@ -407,6 +467,13 @@ OracleAnswers loadOracleAnswers(const std::string& dir, const std::string& partI
   answers.tolerance = doc.value("tolerance", 0.);
   answers.capacity = doc.value("capacity", 0.);
   answers.valid = doc.value("valid", false);
+  if (doc.contains("bboxMin") && doc.contains("bboxMax")) {
+    answers.hasBbox = true;
+    for (int i = 0; i < 3; ++i) {
+      answers.bboxMin[i] = doc.at("bboxMin").at(i).get<double>();
+      answers.bboxMax[i] = doc.at("bboxMax").at(i).get<double>();
+    }
+  }
   answers.containsState = readColumns<int>(doc, "contains");
   answers.originContains = readColumns<int>(doc, "originContains");
   answers.boundaryDistance = readColumns<double>(doc, "safetyUpperBound");
@@ -496,6 +563,179 @@ double toSeconds(std::chrono::steady_clock::time_point t0, std::chrono::steady_c
   return std::chrono::duration<double>(t1 - t0).count();
 }
 
+// ------------------------------------------------------------------------------------------
+// Representations: the same part, scored several ways against one set of oracle answers
+// ------------------------------------------------------------------------------------------
+//
+// The four scored queries are TGeoShape virtuals, so the scoring loop below has no business
+// knowing what it is scoring. Everything that is specific to O2BVHSurfaceSolid -- closure, rims,
+// NavigationReliability, the _Loop twins, the BVH candidate counters -- hangs off `surfaceSolid`,
+// which is null for every other representation, and is reported only where it means something.
+// A TGeoCompositeShape has no rims and no closure; reporting "reliable" or "not navigable" for it
+// would be a category error, so those keys are simply absent from its entry and a
+// `closureApplicable: false` says why.
+
+struct Representation {
+  std::string name;   ///< "surface" | "mesh" | "shape"
+  std::string source; ///< the file it was loaded from
+  const TGeoShape* shape = nullptr;
+  const O2BVHSurfaceSolid* surfaceSolid = nullptr; ///< non-null only for "surface"
+  int primitives = 0;                              ///< patches / triangles / -1 when not countable
+  const char* primitiveKind = "";
+};
+
+/// How the shape computes Capacity(), and therefore whether comparing it against the OCCT volume
+/// is a measurement or noise.
+///
+/// `TGeoCompositeShape::Capacity()` throws 10000 accepted Monte-Carlo points into the bounding
+/// box (TGeoCompositeShape.cxx:282), so its relative error is ~1e-2 -- four orders of magnitude
+/// above the 1e-6 gate band. It is reported, and explicitly marked not comparable, rather than
+/// silently producing a failure that means nothing. Every other ROOT shape in this version
+/// computes Capacity in closed form (checked: TGeoCompositeShape is the only Capacity() in
+/// geom/geom/src that touches gRandom).
+struct CapacityKind {
+  const char* method = "root-analytic";
+  bool comparable = true;
+};
+
+bool usesMonteCarloCapacity(const TGeoShape* shape)
+{
+  if (shape == nullptr) {
+    return false;
+  }
+  if (shape->InheritsFrom(TGeoCompositeShape::Class())) {
+    return true;
+  }
+  // TGeoScaledShape::Capacity() forwards to the shape it wraps, so a scaled composite is just as
+  // sampled as a bare one.
+  if (const auto* scaled = dynamic_cast<const TGeoScaledShape*>(shape)) {
+    return usesMonteCarloCapacity(scaled->GetShape());
+  }
+  return false;
+}
+
+CapacityKind capacityKindOf(const Representation& rep)
+{
+  if (rep.surfaceSolid != nullptr) {
+    // Divergence theorem in closed form over the analytic faces.
+    return {"exact-divergence", true};
+  }
+  if (dynamic_cast<const O2Tessellated*>(rep.shape) != nullptr) {
+    // Exact for the mesh (signed tetrahedra over its own triangles), deterministic, and therefore
+    // a real measurement -- of the chording deficit, not of a bug.
+    return {"mesh-divergence", true};
+  }
+  if (usesMonteCarloCapacity(rep.shape)) {
+    return {"root-montecarlo", false};
+  }
+  return {"root-analytic", true};
+}
+
+/// Max deviation, in cm, between a shape's own bounding box and the oracle's, over all six faces.
+///
+/// This is the frame check. A TGeoShape answers in its own local frame and the oracle answers in
+/// the .brep's; if an emitter writes a shape in the assembly frame instead of the part frame,
+/// every column below fills with plausible-looking nonsense and nothing else would notice.
+/// Returns -1 when the shape does not derive from TGeoBBox (nothing in ROOT's shape library that
+/// matters here fails that) or when the answer file predates the bbox fields.
+double bboxDeviationFromOracle(const TGeoShape* shape, const OracleAnswers& oracle)
+{
+  if (!oracle.hasBbox) {
+    return -1.;
+  }
+  const auto* box = dynamic_cast<const TGeoBBox*>(shape);
+  if (box == nullptr) {
+    return -1.;
+  }
+  const double half[3] = {box->GetDX(), box->GetDY(), box->GetDZ()};
+  double worst = 0.;
+  for (int i = 0; i < 3; ++i) {
+    const double lo = box->GetOrigin()[i] - half[i];
+    const double hi = box->GetOrigin()[i] + half[i];
+    worst = std::max(worst, std::fabs(lo - oracle.bboxMin[i]));
+    worst = std::max(worst, std::fabs(hi - oracle.bboxMax[i]));
+  }
+  return worst;
+}
+
+/// Everything the gate reads out of one (candidate, oracle answers) pair. Deliberately typed on
+/// TGeoShape*: this is the whole point of the abstraction.
+///
+/// The returned object is exactly the historical `partJson["oracle"]` block, so the surface
+/// representation's columns are produced by the same code that produced them before and the
+/// existing path stays inert.
+json scoreAgainstOracle(const TGeoShape* candidate, const OracleAnswers& oracle,
+                        const ValidationOptions& oracleOpt, const std::vector<Point3D>& allPoints,
+                        const std::vector<int>& containsState,
+                        const std::vector<double>& boundaryDistance, const SampleSet& samples,
+                        const std::set<std::string>& only, const std::string& label,
+                        const std::string& capacityLabel)
+{
+  json oracleJson;
+  oracleJson["tolerance"] = oracle.tolerance;
+  oracleJson["capacity"] = oracle.capacity;
+  oracleJson["valid"] = oracle.valid;
+  const double capacity = candidate->Capacity();
+  oracleJson["capacityCandidate"] = capacity;
+  oracleJson["capacityRelativeDeviation"] =
+    oracle.capacity != 0. ? (capacity - oracle.capacity) / oracle.capacity : 0.;
+  std::printf("  %s: capacity candidate=%.6g reference=%.6g relDev=%.3g\n", capacityLabel.c_str(),
+              capacity, oracle.capacity, oracleJson["capacityRelativeDeviation"].get<double>());
+
+  if (only.count("contains")) {
+    auto v = validateContainsAgainstOracle(candidate, allPoints, containsState, boundaryDistance,
+                                           oracleOpt);
+    printValidation(label + ":contains", v);
+    oracleJson["contains"] = validationToJson(v);
+  }
+  const auto originStateFor = [&oracle](const char* category) {
+    const auto it = oracle.originContains.find(category);
+    return it == oracle.originContains.end() ? std::vector<int>{} : it->second;
+  };
+  if (only.count("distout")) {
+    const auto it = oracle.distOutside.find("outside");
+    if (it != oracle.distOutside.end()) {
+      auto v = validateDistanceAgainstOracle(candidate, samples.outsideRays, it->second,
+                                             /*wantInside=*/false, oracleOpt,
+                                             originStateFor("outside"));
+      printValidation(label + ":distout", v);
+      oracleJson["distout"] = validationToJson(v);
+    }
+  }
+  if (only.count("distin")) {
+    const auto it = oracle.distInside.find("inside");
+    if (it != oracle.distInside.end()) {
+      auto v = validateDistanceAgainstOracle(candidate, samples.insideRays, it->second,
+                                             /*wantInside=*/true, oracleOpt, originStateFor("inside"));
+      printValidation(label + ":distin", v);
+      oracleJson["distin"] = validationToJson(v);
+    }
+  }
+  if (only.count("safety")) {
+    auto v = validateSafetyAgainstOracle(candidate, allPoints, boundaryDistance, oracleOpt);
+    printValidation(label + ":safety", v);
+    oracleJson["safety"] = validationToJson(v);
+  }
+  return oracleJson;
+}
+
+/// Disagreements outside tolerance, summed over the four columns. This is the invariant the
+/// project defends and it is a *different* number from the gate total, so it is computed once
+/// here and reported next to every representation rather than reconstructed by each consumer.
+size_t countDisagreements(const json& oracleJson)
+{
+  size_t bad = 0;
+  for (const char* key : {"contains", "distout", "distin", "safety"}) {
+    if (!oracleJson.contains(key)) {
+      continue;
+    }
+    const auto& column = oracleJson.at(key);
+    bad += column.value("nMismatchUnexplained", size_t{0});
+    bad += column.value("nMismatchMissedSurface", size_t{0});
+  }
+  return bad;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -551,6 +791,27 @@ int main(int argc, char** argv)
 
     const TGeoShape* candidate = &surf;
     const TGeoShape* reference = &mesh;
+
+    // Every representation this part has, in the order they are reported. `surface` first so the
+    // historical candidate keeps its place; `mesh` second because it is also the sampling
+    // reference; `shape` last because it is optional and does not exist yet for any converted
+    // part -- it is the slot the CSG emitter writes into.
+    std::vector<Representation> representations;
+    representations.push_back({"surface", part.surfaces, &surf, &surf, surf.GetNsurfaces(), "patches"});
+    representations.push_back({"mesh", part.facets, &mesh, nullptr, mesh.GetNfacets(), "triangles"});
+    std::unique_ptr<TGeoShape> rootShape;
+    if (fileExists(part.shape)) {
+      std::string shapeError;
+      rootShape.reset(loadShapeFromRootFile(part.shape, &shapeError));
+      if (rootShape) {
+        std::printf("  shape sidecar: %s -> %s \"%s\"\n", part.shape.c_str(), rootShape->ClassName(),
+                    rootShape->GetName());
+        representations.push_back(
+          {"shape", part.shape, rootShape.get(), nullptr, -1, rootShape->ClassName()});
+      } else {
+        std::printf("  shape sidecar: *** %s\n", shapeError.c_str());
+      }
+    }
 
     const Point3D bboxMin{mesh.GetOrigin()[0] - mesh.GetDX(), mesh.GetOrigin()[1] - mesh.GetDY(),
                           mesh.GetOrigin()[2] - mesh.GetDZ()};
@@ -707,53 +968,68 @@ int main(int argc, char** argv)
         std::printf("  oracle: %s tolerance=%.3g capacity=%.6g cm^3 (band=%.3g)\n",
                    oracle.valid ? "valid" : "*** NOT BRepCheck-VALID ***", oracle.tolerance,
                    oracle.capacity, oracleOpt.meshBand);
-        json oracleJson;
-        oracleJson["tolerance"] = oracle.tolerance;
-        oracleJson["capacity"] = oracle.capacity;
-        oracleJson["valid"] = oracle.valid;
-        const double capacity = surf.Capacity();
-        oracleJson["capacityCandidate"] = capacity;
-        oracleJson["capacityRelativeDeviation"] =
-          oracle.capacity != 0. ? (capacity - oracle.capacity) / oracle.capacity : 0.;
-        std::printf("  oracle: capacity candidate=%.6g reference=%.6g relDev=%.3g\n", capacity,
-                   oracle.capacity, oracleJson["capacityRelativeDeviation"].get<double>());
 
-        if (opt.only.count("contains")) {
-          auto v = validateContainsAgainstOracle(candidate, allPoints, containsState,
-                                                 boundaryDistance, oracleOpt);
-          printValidation("O:contains", v);
-          oracleJson["contains"] = validationToJson(v);
-        }
-        const auto originStateFor = [&oracle](const char* category) {
-          const auto it = oracle.originContains.find(category);
-          return it == oracle.originContains.end() ? std::vector<int>{} : it->second;
-        };
-        if (opt.only.count("distout")) {
-          const auto it = oracle.distOutside.find("outside");
-          if (it != oracle.distOutside.end()) {
-            auto v = validateDistanceAgainstOracle(candidate, samples.outsideRays, it->second,
-                                                   /*wantInside=*/false, oracleOpt,
-                                                   originStateFor("outside"));
-            printValidation("O:distout", v);
-            oracleJson["distout"] = validationToJson(v);
-          }
-        }
-        if (opt.only.count("distin")) {
-          const auto it = oracle.distInside.find("inside");
-          if (it != oracle.distInside.end()) {
-            auto v = validateDistanceAgainstOracle(candidate, samples.insideRays, it->second,
-                                                   /*wantInside=*/true, oracleOpt,
-                                                   originStateFor("inside"));
-            printValidation("O:distin", v);
-            oracleJson["distin"] = validationToJson(v);
-          }
-        }
-        if (opt.only.count("safety")) {
-          auto v = validateSafetyAgainstOracle(candidate, allPoints, boundaryDistance, oracleOpt);
-          printValidation("O:safety", v);
-          oracleJson["safety"] = validationToJson(v);
-        }
+        // The historical block, unchanged in content: the exact-surface representation's columns
+        // under `oracle`, printed with the same "O:" labels. Everything written here before this
+        // refactor is still written here, by the same code, so the existing path is inert.
+        json oracleJson = scoreAgainstOracle(candidate, oracle, oracleOpt, allPoints, containsState,
+                                             boundaryDistance, samples, opt.only, "O", "oracle");
         partJson["oracle"] = oracleJson;
+
+        // New: the same four columns for every other representation the part has, against the
+        // same answers. This is what makes a CSG-emitted or tessellated part scoreable at all,
+        // and it is the shape the tiered coverage scorecard needs -- parallel columns, not
+        // alternatives behind a flag.
+        json representationsJson = json::array();
+        for (const auto& rep : representations) {
+          const bool isSurface = rep.surfaceSolid != nullptr;
+          json repJson;
+          repJson["name"] = rep.name;
+          repJson["source"] = rep.source;
+          repJson["shapeClass"] = rep.shape->ClassName();
+          if (rep.primitives >= 0) {
+            repJson["primitives"] = rep.primitives;
+            repJson["primitiveKind"] = rep.primitiveKind;
+          }
+          const auto capacityKind = capacityKindOf(rep);
+          repJson["capacityMethod"] = capacityKind.method;
+          repJson["capacityComparable"] = capacityKind.comparable;
+          // The frame check, per representation: a candidate whose box does not sit where the
+          // oracle's box sits is not being asked the same questions the oracle answered.
+          repJson["bboxDeviationFromOracle"] = bboxDeviationFromOracle(rep.shape, oracle);
+
+          // Closure / rims / NavigationReliability are O2BVHSurfaceSolid concepts. A
+          // TGeoCompositeShape has neither, and a triangle mesh has a different notion entirely,
+          // so those keys exist only where the question has an answer. `closureApplicable`
+          // records the decision explicitly instead of leaving a reader to infer it from an
+          // absent field.
+          repJson["closureApplicable"] = isSurface;
+          if (isSurface) {
+            repJson["reliability"] = reliabilityName;
+            repJson["navigable"] = navigable;
+          } else if (rep.name == "mesh") {
+            // O2Tessellated's own, differently-named watertightness statement. Deliberately not
+            // called `navigable`: it is a property of the triangle soup, decided by half-edge
+            // counting over chords, and it is not the same claim.
+            repJson["meshClosedBody"] = mesh.IsClosedBody();
+          }
+
+          if (isSurface) {
+            // Already computed above; scoring the same shape twice would only cost time and
+            // invite the two copies to drift.
+            repJson["oracle"] = oracleJson;
+          } else {
+            std::printf("  --- representation '%s' (%s) against the same oracle answers ---\n",
+                        rep.name.c_str(), rep.shape->ClassName());
+            repJson["oracle"] = scoreAgainstOracle(rep.shape, oracle, oracleOpt, allPoints,
+                                                   containsState, boundaryDistance, samples,
+                                                   opt.only, "R:" + rep.name,
+                                                   "oracle[" + rep.name + "]");
+          }
+          repJson["disagreements"] = countDisagreements(repJson["oracle"]);
+          representationsJson.push_back(std::move(repJson));
+        }
+        partJson["representations"] = std::move(representationsJson);
       }
     }
 
@@ -957,6 +1233,38 @@ int main(int argc, char** argv)
   } else {
     std::printf("\nAll %zu part(s) closed consistently oriented manifolds: navigation results are meaningful.\n",
                parts.size());
+  }
+
+  // The tiered scorecard, in its most compact form: how many disagreements outside tolerance each
+  // representation of each part has. Printed here because the per-part blocks scroll away, and
+  // because "which representation would have accepted this part" is the question the converter's
+  // dispatch policy will be written against.
+  bool anyRepresentations = false;
+  for (const auto& partJson : jsonReport) {
+    anyRepresentations = anyRepresentations || partJson.contains("representations");
+  }
+  if (anyRepresentations) {
+    std::printf("\n=== REPRESENTATION SCORECARD (disagreements outside tolerance, all four columns) ===\n");
+    for (const auto& partJson : jsonReport) {
+      if (!partJson.contains("representations")) {
+        continue;
+      }
+      std::printf("  %-46s", partJson.at("id").get<std::string>().c_str());
+      for (const auto& rep : partJson.at("representations")) {
+        const double capacityDeviation =
+          rep.at("oracle").value("capacityRelativeDeviation", 0.);
+        const bool capacityComparable = rep.value("capacityComparable", false);
+        char capacityText[32];
+        if (capacityComparable) {
+          std::snprintf(capacityText, sizeof(capacityText), "%.2g", std::fabs(capacityDeviation));
+        } else {
+          std::snprintf(capacityText, sizeof(capacityText), "n/a");
+        }
+        std::printf("  %s=%zu (cap %s)", rep.at("name").get<std::string>().c_str(),
+                   rep.value("disagreements", size_t{0}), capacityText);
+      }
+      std::printf("\n");
+    }
   }
 
   if (!opt.jsonOut.empty()) {

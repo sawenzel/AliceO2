@@ -99,7 +99,8 @@ o2_add_executable(
   COMPONENT_NAME DetectorsBase
   SOURCES test/runSolidHarness.cxx
   IS_BENCHMARK
-  PUBLIC_LINK_LIBRARIES O2::DetectorsBase ROOT::Geom nlohmann_json::nlohmann_json)
+  PUBLIC_LINK_LIBRARIES O2::DetectorsBase ROOT::Geom ROOT::RIO
+                        nlohmann_json::nlohmann_json)
 
 if(BUILD_SIMULATION)
   if (NOT APPLE)

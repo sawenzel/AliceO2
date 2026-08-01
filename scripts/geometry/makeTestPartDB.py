@@ -12,6 +12,11 @@ indexes the paired artifacts (a part enters the database only when both the side
 exist; the BREP is indexed as `"brep"` when present and omitted otherwise, so a database built
 before --dump-brep existed still loads) into a single `manifest.json` that the harness reads.
 
+A fourth, optional artifact is indexed the same way: `shape_<VOL>_<LID>.root`, one ROOT-serialised
+TGeoShape under the key `"shape"`, in cm and in the part's local frame. Nothing writes it today --
+it is the hand-over format for the planned CSG emitter -- but the harness scores it side by side
+with the other two representations whenever it is present.
+
 Usage:
   python3 makeTestPartDB.py --output <db-dir>
   python3 makeTestPartDB.py --models Bagger.step as1-oc-214.stp --output <db-dir> --force
@@ -163,6 +168,16 @@ def _index_parts(model_name: str, slug: str, out_dir: Path, report: dict):
         brep_path = out_dir / f"brep_{suffix}.brep"
         if brep_path.exists():
             part["brep"] = str(brep_path)
+        # A third representation of the same part: one ROOT-serialised TGeoShape, under the key
+        # "shape", in cm and in the part's own local frame -- the same frame as the sidecar, the
+        # mesh and the .brep. This is the hand-over format for the CSG emitter (TGeoTube /
+        # TGeoBBox / TGeoCompositeShape trees); nothing writes it today, so it is optional and a
+        # part without one is indexed exactly as before. The harness also derives the same path
+        # from the sidecar's, so dropping the file in after the fact and re-scoring with
+        # --skip-convert works without re-indexing. See scripts/geometry/Stream_G_AnyShape.md.
+        shape_path = out_dir / f"shape_{suffix}.root"
+        if shape_path.exists():
+            part["shape"] = str(shape_path)
         parts.append(part)
     return parts, warnings
 
