@@ -143,7 +143,15 @@ def write_report(records, path, surface_lids, facet_lids):
             tier = "mesh"
             evidence = {"declinedCsgBecause": record["reason"]}
         tiers[tier] += 1
-        rows.append({"lid": lid, "volume": record["volume"], "representation": tier,
+        # `part` is the artifact stem -- `<VOLNAME>_<LID>`, the same suffix that names
+        # surfaces_/facets_/brep_/shape_ -- and it is written here so that a consumer can join
+        # this row to `manifest.json` and to `gate.json` without re-implementing the converter's
+        # filename sanitiser. `runOracleGate.py` reads the cascade decision from exactly this
+        # field to decide which representation a part's verdict is computed on
+        # (scripts/geometry/Stream_I_Verdict.md).
+        rows.append({"lid": lid, "part": record.get("part"), "volume": record["volume"],
+                     "representation": tier, "shapeFile": record.get("shape"),
+                     "shapeDeferred": bool(record.get("shapeDeferred", False)),
                      "evidence": evidence})
     report = {"tiers": tiers, "nLeafSolids": len(records), "parts": rows}
     Path(path).write_text(json.dumps(report, indent=1))
