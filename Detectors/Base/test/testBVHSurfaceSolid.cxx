@@ -25,6 +25,7 @@
 #include "TGeoBoolNode.h"
 #include "TGeoCompositeShape.h"
 #include "TGeoCone.h"
+#include "TGeoMatrix.h"
 #include "TGeoShape.h"
 #include "TGeoSphere.h"
 #include "TGeoTorus.h"
@@ -4825,3 +4826,207 @@ BOOST_AUTO_TEST_CASE(OracleValidatorsScoreAPlainRootShape)
   BOOST_CHECK_GT(distWrong.nMismatchUnexplained + distWrong.nMismatchMissedSurface, 0u);
 }
 // --- Stream G: gating any TGeoShape ---
+
+// --- Stream H: the CSG emitter's two ROOT-side load-bearing claims
+//     (scripts/geometry/Stream_H_CSGEmitter.md) ---------------------------------------------
+//
+// The emitter itself is Python (scripts/geometry/csg), and its own self-tests live there. What
+// belongs here are the two properties of *ROOT* that the emitted file silently depends on. If a
+// future ROOT changes either, every CSG part written by this project becomes wrong geometry that
+// still loads, and nothing else in the suite would notice.
+
+namespace
+{
+// Build the emitter's `placed(primitive, M)` idiom: no TGeoShape in ROOT 6.36 can carry a rigid
+// transform (TGeoBBox has fOrigin and nothing else does), and TGeoCompositeShape is the only
+// shape that holds a TGeoMatrix at all -- through its TGeoBoolNode, which needs two operands. So
+// a recognised tube that is not already on the z axis is written as the union of the primitive
+// with an identical copy of itself under the same matrix.
+TGeoCompositeShape* makePlacedTube(const char* name, double rmin, double rmax, double dz,
+                                   TGeoMatrix* matrixA, TGeoMatrix* matrixB)
+{
+  auto* left = new TGeoTube(Form("%s_l", name), rmin, rmax, dz);
+  auto* right = new TGeoTube(Form("%s_r", name), rmin, rmax, dz);
+  auto* node = new TGeoUnion(left, right, matrixA, matrixB);
+  return new TGeoCompositeShape(name, node);
+}
+} // namespace
+
+BOOST_AUTO_TEST_CASE(CsgSelfUnionCarriesARigidTransformExactly)
+{
+  // A tube on an axis that is neither a coordinate axis nor through the origin -- i.e. the
+  // Bagger case. Every query on the composite must equal the same query on the bare primitive
+  // asked in the primitive's own frame, exactly, not within a band.
+  constexpr double kRmin = 0.4;
+  constexpr double kRmax = 1.0;
+  constexpr double kDz = 5.0;
+  const TGeoTube reference("reference", kRmin, kRmax, kDz);
+
+  auto* rotation = new TGeoRotation("csgRot", 0., 0., 0.);
+  rotation->RotateX(30.);
+  rotation->RotateZ(17.);
+  auto* matrixA = new TGeoCombiTrans(0.3, 5.916, 2.0, rotation);
+  auto* matrixB = new TGeoCombiTrans(0.3, 5.916, 2.0, rotation);
+  const TGeoCombiTrans placement(0.3, 5.916, 2.0, rotation);
+  std::unique_ptr<TGeoCompositeShape> placed(
+    makePlacedTube("csgPlaced", kRmin, kRmax, kDz, matrixA, matrixB));
+
+  std::size_t probes = 0;
+  std::size_t inside = 0;
+  std::size_t outside = 0;
+  for (int ix = -8; ix <= 8; ++ix) {
+    for (int iy = -8; iy <= 8; ++iy) {
+      for (int iz = -8; iz <= 8; ++iz) {
+        const Point3D master{0.3 + 0.37 * ix, 5.916 + 0.41 * iy, 2.0 + 0.43 * iz};
+        Point3D local{};
+        placement.MasterToLocal(master.data(), local.data());
+        // A point on the wall is decided by floating-point luck on either side; skip a thin
+        // shell so the check tests geometry rather than tie-breaking.
+        const double r = std::hypot(local[0], local[1]);
+        if (std::fabs(r - kRmin) < 1.e-9 || std::fabs(r - kRmax) < 1.e-9 ||
+            std::fabs(std::fabs(local[2]) - kDz) < 1.e-9) {
+          continue;
+        }
+        ++probes;
+        const bool wanted = reference.Contains(local.data());
+        BOOST_REQUIRE_EQUAL(placed->Contains(master.data()), wanted);
+        BOOST_REQUIRE_CLOSE_FRACTION(placed->Safety(master.data(), wanted),
+                                     reference.Safety(local.data(), wanted), 1.e-12);
+        wanted ? ++inside : ++outside;
+
+        for (const auto& dir : {Point3D{1., 0., 0.}, Point3D{0., 1., 0.}, Point3D{0., 0., 1.},
+                                Point3D{0.5773502691896258, 0.5773502691896258, 0.5773502691896258}}) {
+          Point3D localDir{};
+          placement.MasterToLocalVect(dir.data(), localDir.data());
+          if (wanted) {
+            BOOST_REQUIRE_CLOSE_FRACTION(placed->DistFromInside(master.data(), dir.data(), 3),
+                                         reference.DistFromInside(local.data(), localDir.data(), 3),
+                                         1.e-12);
+          } else {
+            const double got = placed->DistFromOutside(master.data(), dir.data(), 3);
+            const double want = reference.DistFromOutside(local.data(), localDir.data(), 3);
+            if (want > 1.e20) {
+              BOOST_REQUIRE_GT(got, 1.e20);
+            } else {
+              BOOST_REQUIRE_CLOSE_FRACTION(got, want, 1.e-12);
+            }
+          }
+        }
+      }
+    }
+  }
+  // A check that cannot fail is not a check: both classes must actually be populated.
+  BOOST_CHECK_GT(probes, 2000u);
+  BOOST_CHECK_GT(inside, 100u);
+  BOOST_CHECK_GT(outside, 100u);
+
+  // The negative half. The same comparison against a primitive 0.05 cm too wide must disagree,
+  // otherwise the loop above proves nothing about the transform.
+  // The probes are placed *in the shell the two disagree about* and then mapped out to the
+  // master frame, rather than being taken from a lattice that might miss a 0.05 cm shell
+  // entirely -- which it did, at first writing: a coarse grid gave 0 disagreements and would
+  // have advertised a negative control that could not fire.
+  const TGeoTube wrong("wrongReference", kRmin, kRmax + 0.05, kDz);
+  std::size_t disagreements = 0;
+  std::size_t shellProbes = 0;
+  for (int iphi = 0; iphi < 24; ++iphi) {
+    const double phi = 2. * M_PI * iphi / 24.;
+    for (int iz = -3; iz <= 3; ++iz) {
+      const double radius = kRmax + 0.025;
+      const Point3D local{radius * std::cos(phi), radius * std::sin(phi), 1.3 * iz};
+      Point3D master{};
+      placement.LocalToMaster(local.data(), master.data());
+      ++shellProbes;
+      disagreements += (placed->Contains(master.data()) != wrong.Contains(local.data())) ? 1 : 0;
+    }
+  }
+  BOOST_CHECK_EQUAL(disagreements, shellProbes);
+}
+
+BOOST_AUTO_TEST_CASE(CsgTwoLeafUnionRoundTripsAndMatchesTheClosedForm)
+{
+  // The Bagger ram, in miniature and in closed form: an eye (a tube on x) plus a rod (a solid
+  // cylinder on z), which is what `tier2-tube-union` emits. The union is checked against the
+  // membership function of the two cylinders written out by hand, which depends on neither ROOT
+  // shape, and then the whole composite is pushed through the shape sidecar and checked again --
+  // so a streaming defect that dropped a bool node's matrix would be caught here rather than in
+  // a gate run three steps later.
+  constexpr double kEyeRmin = 0.7;
+  constexpr double kEyeRmax = 1.2;
+  constexpr double kEyeDz = 0.75;
+  constexpr double kRodR = 0.6;
+  constexpr double kRodDz = 3.5;
+  constexpr double kRodCentre = 3.5; // rod spans z in [0, 7]
+
+  auto* eyeRotation = new TGeoRotation("csgEyeRot", 90., 90., 0.); // local z -> global x
+  auto* eyeMatrix = new TGeoCombiTrans(0., 0., 0., eyeRotation);
+  auto* rodMatrix = new TGeoTranslation(0., 0., kRodCentre);
+  auto* eye = new TGeoTube("csgEye", kEyeRmin, kEyeRmax, kEyeDz);
+  auto* rod = new TGeoTube("csgRod", 0., kRodR, kRodDz);
+  auto* node = new TGeoUnion(eye, rod, eyeMatrix, rodMatrix);
+  std::unique_ptr<TGeoCompositeShape> ram(new TGeoCompositeShape("csgRam", node));
+
+  const auto closedForm = [&](const Point3D& p) {
+    const double rEye = std::hypot(p[1], p[2]);
+    const bool inEye = rEye >= kEyeRmin && rEye <= kEyeRmax && std::fabs(p[0]) <= kEyeDz;
+    const double rRod = std::hypot(p[0], p[1]);
+    const bool inRod = rRod <= kRodR && p[2] >= 0. && p[2] <= 2. * kRodDz;
+    return inEye || inRod;
+  };
+  const auto nearWall = [&](const Point3D& p) {
+    const double rEye = std::hypot(p[1], p[2]);
+    const double rRod = std::hypot(p[0], p[1]);
+    return std::fabs(rEye - kEyeRmin) < 1.e-9 || std::fabs(rEye - kEyeRmax) < 1.e-9 ||
+           std::fabs(std::fabs(p[0]) - kEyeDz) < 1.e-9 || std::fabs(rRod - kRodR) < 1.e-9 ||
+           std::fabs(p[2]) < 1.e-9 || std::fabs(p[2] - 2. * kRodDz) < 1.e-9;
+  };
+
+  const std::filesystem::path path =
+    std::filesystem::temp_directory_path() / "o2_csg_ram_shape.root";
+  namespace harness = o2::base::harness;
+  std::string error;
+  BOOST_REQUIRE_MESSAGE(harness::saveShapeToRootFile(path.string(), *ram, &error), error);
+  std::unique_ptr<TGeoShape> loaded(harness::loadShapeFromRootFile(path.string(), &error));
+  BOOST_REQUIRE_MESSAGE(loaded != nullptr, error);
+  BOOST_CHECK_EQUAL(std::string(loaded->ClassName()), std::string("TGeoCompositeShape"));
+
+  std::size_t inside = 0;
+  std::size_t outside = 0;
+  for (int ix = -6; ix <= 6; ++ix) {
+    for (int iy = -6; iy <= 6; ++iy) {
+      for (int iz = -4; iz <= 20; ++iz) {
+        const Point3D p{0.23 * ix, 0.27 * iy, 0.41 * iz};
+        if (nearWall(p)) {
+          continue;
+        }
+        const bool wanted = closedForm(p);
+        BOOST_REQUIRE_EQUAL(ram->Contains(p.data()), wanted);
+        BOOST_REQUIRE_EQUAL(loaded->Contains(p.data()), wanted);
+        wanted ? ++inside : ++outside;
+      }
+    }
+  }
+  BOOST_CHECK_GT(inside, 50u);
+  BOOST_CHECK_GT(outside, 500u);
+
+  // Capacity is Monte-Carlo for a composite (Stream G §2), so it is *reported* and never gated.
+  // The assertion is stated as scatter rather than as accuracy, because scatter needs no exact
+  // volume and is the sharper statement: repeated calls returning *different* answers prove the
+  // method is sampled, and a spread four orders of magnitude above the gate's 1e-6 band proves
+  // that no capacity criterion could ever be applied to a shape written this way. If a future
+  // ROOT made TGeoCompositeShape::Capacity() analytic this test would fail, which is the right
+  // outcome: the emitter's acceptance policy would then be worth revisiting.
+  double minCapacity = ram->Capacity();
+  double maxCapacity = minCapacity;
+  for (int i = 0; i < 5; ++i) {
+    const double sampled = ram->Capacity();
+    minCapacity = std::min(minCapacity, sampled);
+    maxCapacity = std::max(maxCapacity, sampled);
+  }
+  BOOST_CHECK_GT(minCapacity, 0.);
+  const double spread = (maxCapacity - minCapacity) / (0.5 * (maxCapacity + minCapacity));
+  BOOST_CHECK_GT(spread, 1.e-4);
+
+  std::filesystem::remove(path);
+}
+// --- Stream H: the CSG emitter's ROOT-side claims ---

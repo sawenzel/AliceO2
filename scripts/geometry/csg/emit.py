@@ -438,6 +438,20 @@ def self_test(verbose=True, with_root=True):
         check("the OCCT and ROOT realisations agree on the bounding box", dev < 1.0e-9,
               f"max deviation {dev:.3g} cm")
 
+        # An axis-aligned box must come out as a *bare* TGeoBBox carrying its own origin, not as
+        # the self-union a rotated primitive needs. This is the only path on which ROOT reports
+        # an analytic Capacity(), and it is the common case in mechanical CAD (the census counts
+        # 62560 placed six-plane boxes in oTOF), so it is worth asserting rather than assuming.
+        box_record = process_solid(BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 2.0, 3.0, 4.0).Shape(),
+                                   "box-emission")
+        box_shape = prim.build_root(box_record["candidate"], "boxprobe")
+        origin = [box_shape.GetOrigin()[i] for i in range(3)]
+        check("an axis-aligned box emits a bare TGeoBBox with its own origin",
+              box_shape.ClassName() == "TGeoBBox"
+              and max(abs(origin[0] - 1.0), abs(origin[1] - 1.5), abs(origin[2] - 2.0)) < 1e-12
+              and abs(box_shape.Capacity() - 24.0) < 1e-12,
+              f"{box_shape.ClassName()}, origin {origin}, capacity {box_shape.Capacity():.6f}")
+
     n_ok = sum(1 for _n, ok, _d in checks if ok)
     if verbose:
         print(f"  {n_ok}/{len(checks)} recognise/emit self-checks passed")
