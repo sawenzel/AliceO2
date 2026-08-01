@@ -373,9 +373,74 @@ def write_step_mm(shape, path: _Path, product_name: str):
     path.write_text(text, encoding="latin-1")
 
 
-def generate(fixture, outdir: _Path):
+# -------------------------------
+# the --transform sweep (Stream E)
+# -------------------------------
+#
+# Every measurement recorded on this branch was taken on a part a few centimetres across, sitting
+# on the origin, against kernel constants that are *absolute*: kBVHBoxTolerance 1e-3 cm,
+# kWireJoinTolerance 1e-5 cm, kRayTolerance 1e-9. A number produced under those conditions is a
+# statement about geometry near the origin at that size unless someone shows otherwise, and the
+# cheapest way to show otherwise is to move the ladder and re-measure it. Transforming here rather
+# than anywhere downstream is what makes the experiment honest: the STEP is the single source the
+# converter, the sidecar, the mesh and the oracle's .brep are all derived from, so there is exactly
+# one shape in the pipeline and both the kernel and the oracle see the transformed one. See
+# scripts/geometry/Stream_E_Scale.md.
+
+
+def parse_transform(spec: str):
+    """Parse a transform spec into (gp_Trsf, volume scale factor, canonical description).
+
+    Accepted forms (lengths in mm, i.e. STEP model units):
+      translate:<dx>,<dy>,<dz>
+      scale:<factor>                     uniform scaling about the origin
+      <op>;<op>;...                      composition, applied left to right
+
+    The composition exists for the one case the sweep is really aimed at: a metre-scale model with
+    sub-millimetre features, i.e. `scale:0.1;translate:0,0,4000`. Shrinking and moving separately
+    each probe one absolute constant; doing both at once is the combination a real ALICE geometry
+    presents, and nothing else on the ladder reproduces it.
+    """
+    if ";" in spec:
+        total = gp_Trsf()
+        volume_scale = 1.0
+        descriptions = []
+        for part in spec.split(";"):
+            if not part.strip():
+                continue
+            trsf, part_scale, description = parse_transform(part)
+            total = trsf.Multiplied(total)  # applied after everything parsed so far
+            volume_scale *= part_scale
+            descriptions.append(description)
+        return total, volume_scale, ";".join(descriptions)
+    kind, _, rest = spec.partition(":")
+    kind = kind.strip().lower()
+    trsf = gp_Trsf()
+    if kind == "translate":
+        parts = [float(v) for v in rest.split(",")]
+        if len(parts) != 3:
+            raise ValueError(f"translate needs three components, got {rest!r}")
+        trsf.SetTranslation(gp_Pnt(0.0, 0.0, 0.0), gp_Pnt(*parts))
+        return trsf, 1.0, f"translate:{parts[0]:g},{parts[1]:g},{parts[2]:g}"
+    if kind == "scale":
+        factor = float(rest)
+        if factor <= 0.0:
+            raise ValueError(f"scale factor must be positive, got {factor}")
+        trsf.SetScale(gp_Pnt(0.0, 0.0, 0.0), factor)
+        return trsf, factor ** 3, f"scale:{factor:g}"
+    raise ValueError(f"unknown transform {spec!r}; expected 'translate:x,y,z' or 'scale:f'")
+
+
+def generate(fixture, outdir: _Path, transform=None):
     name = fixture["name"]
     shape = fixture["build"]()
+    volume_scale = 1.0
+    transform_desc = None
+    if transform is not None:
+        trsf, volume_scale, transform_desc = transform
+        # copy=True: a scaling gp_Trsf is not a gp_Trsf the topology can share geometry through,
+        # and sharing it would leave the untransformed poles in place on the copies.
+        shape = BRepBuilderAPI_Transform(shape, trsf, True).Shape()
     step_path = (outdir / f"{name}.step").resolve()
     write_step_mm(shape, step_path, name)
 
@@ -383,11 +448,12 @@ def generate(fixture, outdir: _Path):
     valid = bool(BRepCheck_Analyzer(shape).IsValid())
     occt_volume = shape_volume_cm3(shape)
     expected = fixture["volume_mm3"]
-    expected_cm3 = None if expected is None else expected * MM3_TO_CM3
+    expected_cm3 = None if expected is None else expected * MM3_TO_CM3 * volume_scale
 
     entry = {
         "name": name,
         "step": str(step_path),
+        "transform": transform_desc,
         "description": fixture["description"],
         "feature": fixture["feature"],
         "units": "mm (STEP) / cm^3 (volumes)",
@@ -437,6 +503,11 @@ def main():
                          "with any previously generated entries.")
     ap.add_argument("--list", action="store_true",
                     help="Print the fixture ladder and exit without generating anything.")
+    ap.add_argument("--transform", default=None,
+                    help="Apply a transform to every fixture before export, for the Stream E "
+                         "position/scale sweep: 'translate:dx,dy,dz' (mm) or 'scale:f' (uniform, "
+                         "about the origin). Omitted, nothing is applied and the output is "
+                         "byte-identical to an untransformed run.")
     args = ap.parse_args()
 
     if args.list:
@@ -465,10 +536,12 @@ def main():
         except (ValueError, KeyError):
             previous = {}
 
-    print(f"Generating {len(selected)} fixture(s) into {outdir} (STEP unit: MM)")
+    transform = parse_transform(args.transform) if args.transform else None
+    suffix = "" if transform is None else f", transform: {transform[2]}"
+    print(f"Generating {len(selected)} fixture(s) into {outdir} (STEP unit: MM{suffix})")
     entries = {}
     for fixture in selected:
-        entry = generate(fixture, outdir)
+        entry = generate(fixture, outdir, transform)
         entries[fixture["name"]] = entry
         print_summary_line(entry)
 
@@ -486,6 +559,7 @@ def main():
         "generator": str(_Path(__file__).resolve()),
         "step_length_unit": "mm",
         "volume_unit": "cm^3",
+        "transform": None if transform is None else transform[2],
         "outdir": str(outdir),
         "fixtures": merged,
     }
