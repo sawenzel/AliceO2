@@ -5554,3 +5554,80 @@ BOOST_AUTO_TEST_CASE(StreamM_QuarticHasNoCliffAsAQuarticApproachesBiquadratic)
   }
 }
 // --- Stream M: dimensionally consistent guards in the quartic root solver ---
+
+// --- Stream K: Tier 0, canonical recognition of NURBS-encoded quadrics
+//     (scripts/geometry/Stream_K_Tier0.md)
+//
+// The recognition work itself is entirely converter-side and its own controls live in
+// `O2_CADtoTGeo.py --self-test` (18 checks: a NurbsConvert-ed quadric of each kind must be
+// recovered, a genuine free-form patch must not, and every accepted face's MEASURED gap must be
+// inside the acceptance tolerance).  Nothing of that can be asserted from C++.
+//
+// What *can* be asserted here, and matters more than it looks, is the kernel-side contract the
+// converter measures against.  `_recognized_inner_wall()` decides a recognized quadric's
+// `inner_wall` flag by comparing the face's own outward normal with "away from the axis", because
+// on a NURBS-encoded quadric `TopoDS` orientation says nothing (Stream_L_ALICE3Defect.md: nine
+// ALICE3 faces with an exactly antiparallel outward normal, 404 lost crossings, and every closure
+// and edge-identity check blind to it because they are all sign-blind).  That measurement is only
+// correct if the kernel's own convention is the one it assumes.  This work multiplies the number
+// of faces going through that path, so the convention is pinned rather than assumed: if it were
+// ever inverted, every recognized face would silently flip and no existing test would notice.
+BOOST_AUTO_TEST_CASE(StreamK_InnerWallIsExactlyTheSignOfTheOutwardNormal)
+{
+  const Point3D centre{0.3, -0.7, 1.1};
+  const Point3D axis{0., 0., 1.};
+  const Point3D refU{1., 0., 0.};
+  constexpr double radius = 2.5;
+  constexpr double phi = 0.9;
+
+  // A point on each surface, and the direction "away from the axis / centre" there.
+  const double cx = centre[0] + radius * std::cos(phi);
+  const double cy = centre[1] + radius * std::sin(phi);
+  const Double_t onCylinder[3] = {cx, cy, centre[2] + 0.4};
+  const Double_t awayFromAxis[3] = {std::cos(phi), std::sin(phi), 0.};
+
+  for (const bool innerWall : {false, true}) {
+    SurfaceSolid solid(innerWall ? "streamK_innerCyl" : "streamK_outerCyl");
+    BOOST_REQUIRE(solid.AddCylindricalSurface(centre, axis, refU, radius, -1., 1., 0., surf::kTwoPi, innerWall));
+    Double_t n[3] = {0., 0., 0.};
+    solid.ComputeNormal(onCylinder, nullptr, n);
+    const double alignment = n[0] * awayFromAxis[0] + n[1] * awayFromAxis[1] + n[2] * awayFromAxis[2];
+    // Exactly +1 or exactly -1: this is a sign, not a tolerance.
+    BOOST_CHECK_CLOSE(alignment, innerWall ? -1. : 1., 1.e-9);
+  }
+
+  // The same convention on the cone and on the sphere. All three go through the converter's one
+  // `_recognized_inner_wall` measurement, and ALICE3 exercises only the cylinder branch today
+  // (Stream_L_ALICE3Defect.md section 9: "recognized planes and spheres are untested"), so the
+  // other two are pinned here rather than left to the first model that uses them.
+  for (const bool innerWall : {false, true}) {
+    SurfaceSolid solid(innerWall ? "streamK_innerCone" : "streamK_outerCone");
+    // r(h) = 1 + h over h in [0, 2]: half-angle 45 degrees, apex at h = -1.
+    BOOST_REQUIRE(solid.AddConicalSurface(centre, axis, refU, 1., 3., 0., 2., 0., surf::kTwoPi, innerWall));
+    const double h = 1.0;
+    const double r = 2.0;
+    const Double_t onCone[3] = {centre[0] + r * std::cos(phi), centre[1] + r * std::sin(phi), centre[2] + h};
+    Double_t n[3] = {0., 0., 0.};
+    solid.ComputeNormal(onCone, nullptr, n);
+    // The cone's outward normal tilts out of the radial direction by the half angle, so the
+    // radial component is what carries the sign -- which is exactly the reasoning
+    // `_recognized_inner_wall` relies on, and the reason it can use the radial direction alone.
+    const double radial = n[0] * std::cos(phi) + n[1] * std::sin(phi);
+    BOOST_CHECK_GT(innerWall ? -radial : radial, 0.5);
+  }
+
+  for (const bool innerWall : {false, true}) {
+    SurfaceSolid solid(innerWall ? "streamK_innerSph" : "streamK_outerSph");
+    BOOST_REQUIRE(solid.AddSphericalSurface(centre, axis, refU, radius, 0., surf::kPi, 0., surf::kTwoPi, innerWall));
+    const double theta = 1.1;
+    const Double_t onSphere[3] = {centre[0] + radius * std::sin(theta) * std::cos(phi),
+                                  centre[1] + radius * std::sin(theta) * std::sin(phi),
+                                  centre[2] + radius * std::cos(theta)};
+    const double outward[3] = {std::sin(theta) * std::cos(phi), std::sin(theta) * std::sin(phi), std::cos(theta)};
+    Double_t n[3] = {0., 0., 0.};
+    solid.ComputeNormal(onSphere, nullptr, n);
+    const double alignment = n[0] * outward[0] + n[1] * outward[1] + n[2] * outward[2];
+    BOOST_CHECK_CLOSE(alignment, innerWall ? -1. : 1., 1.e-9);
+  }
+}
+// --- Stream K: Tier 0, canonical recognition of NURBS-encoded quadrics ---
