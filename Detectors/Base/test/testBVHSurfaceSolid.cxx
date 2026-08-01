@@ -5301,3 +5301,237 @@ BOOST_AUTO_TEST_CASE(XRayRasterRaysStartOutsideAndFansAreDirectionDiverse)
   BOOST_CHECK_LT(worstFanAlignment, 0.999);
 }
 // --- Stream J: X-ray / geantino transport benchmark ---
+
+// --- Stream M: dimensionally consistent guards in the quartic root solver
+//     (scripts/geometry/Stream_M_Quartic.md) ---
+//
+// solveQuarticReal used to decide all three of its branches with kTolerance -- 1e-9 *cm*, a
+// length -- applied to quantities that are not lengths:
+//
+//   |termQ|      <= kTolerance   selects the biquadratic branch;  termQ scales as L^3
+//   resolvent    >  kTolerance   licenses Ferrari's second stage; resolvent scales as L^2
+//   |derivative| >  kTolerance   licenses a Newton polishing step; the derivative scales as L^3
+//
+// Two consequences, both measured on real geometry rather than argued:
+//
+//   * the resolvent guard fails and the function returns the EMPTY root set, so a ray silently
+//     misses a torus it does cross;
+//   * the termQ guard misroutes an asymmetric quartic into the biquadratic branch -- which
+//     *assumes* termQ = 0 and forces the roots to be symmetric about -b/4 -- so it returns
+//     confidently wrong roots instead of the right ones. That is worse than a miss, because a
+//     miss at least leaves a visible gap.
+//
+// The trigger is the ratio of the ray's lever arm to the feature it hits, not the model's scale:
+// the reproducer below is real, *unscaled* ALICE3 geometry, a ray 375 cm from a 0.1 cm tube.
+//
+// These cases pin the repair from both sides. It is not enough that the previously-failing case
+// now works: the branches exist for real reasons, so the biquadratic branch must still be
+// *selected* for a true biquadratic, and both branches must still *decline* a configuration that
+// genuinely has no real roots. A guard that always passes would satisfy neither.
+
+namespace
+{
+/// The relative backward error of \a x as a root of a4 x^4 + ... + a0: |p(x)| divided by the sum
+/// of the magnitudes of the terms that produced it. Scale-free, so it means the same thing for a
+/// torus 400 cm away and one 0.1 cm across, which is the whole point of this block.
+double quarticBackwardError(const std::array<double, 5>& coefficients, double x)
+{
+  double value = 0., magnitude = 0., power = 1.;
+  for (int i = 0; i < 5; ++i) {
+    const double term = coefficients[4 - i] * power;
+    value += term;
+    magnitude += std::abs(term);
+    power *= x;
+  }
+  return magnitude > 0. ? std::abs(value) / magnitude : std::abs(value);
+}
+
+/// The monic quartic with exactly these four real roots, from the elementary symmetric functions.
+std::array<double, 5> quarticFromRoots(double r1, double r2, double r3, double r4)
+{
+  return {1., -(r1 + r2 + r3 + r4),
+          r1 * r2 + r1 * r3 + r1 * r4 + r2 * r3 + r2 * r4 + r3 * r4,
+          -(r1 * r2 * r3 + r1 * r2 * r4 + r1 * r3 * r4 + r2 * r3 * r4), r1 * r2 * r3 * r4};
+}
+
+std::vector<double> sortedRoots(const std::array<double, 5>& c, surf::QuarticBranch* branch = nullptr)
+{
+  auto roots = surf::solveQuarticReal(c[0], c[1], c[2], c[3], c[4], branch);
+  std::sort(roots.begin(), roots.end());
+  return roots;
+}
+
+/// Every returned root must actually be a root, to the precision of the coefficients themselves.
+void checkRootsAreRoots(const std::array<double, 5>& c, const std::vector<double>& roots)
+{
+  for (const double root : roots) {
+    BOOST_CHECK_LT(quarticBackwardError(c, root), 1.e-12);
+  }
+}
+} // namespace
+
+BOOST_AUTO_TEST_CASE(StreamM_QuarticFindsTheALICE3ProductionScaleRoots)
+{
+  // Stream_L_ALICE3Defect.md section 3.3: ST2487462_01, face 47, a torus of R = 5.3 cm and
+  // r = 0.1 cm, hit by a ray whose origin is 375 cm away. The crossing lies on the untrimmed
+  // surface to 1.7e-14 cm and inside both parameter windows -- the patch is there and the trim
+  // admits it -- and the solver returned nothing.
+  //
+  // It is a *biquadratic* (the ray is perpendicular to the torus axis, so the true termQ is 0),
+  // but termQ is evaluated as d - b*c/2 + b^3/8 from terms of magnitude ~1e8 and cancels to
+  // -5.96e-08 rather than to 0. That is above the absolute 1e-9 test, so the quartic was routed
+  // into the resolvent branch, whose resolvent is 7.1e-15 and fails its own absolute test.
+  const std::array<double, 5> c{1.0, -1501.7280000044018, 845808.25396968238, -211752288.545858,
+                                19882619385.616932};
+
+  // The reference roots are Newton's method run to convergence on the *exact* binary values of
+  // those five coefficients in 60-digit decimal arithmetic, so they are the truth for this input
+  // and not another double-precision solve.
+  const double firstRoot = 375.3392295779947145;
+  const double secondRoot = 375.5247704240909448;
+
+  // The tolerance is not arbitrary. p'(firstRoot) = -14.47, so one ulp of a0 (3.8e-06 at 1.99e10)
+  // moves this root by 2.6e-07 cm: the input coefficients do not determine the roots better than
+  // that. 1e-06 cm is a few times the conditioning limit and four orders below the 0.1 cm tube
+  // whose crossing this is.
+  surf::QuarticBranch branch = surf::QuarticBranch::NotAQuartic;
+  const auto roots = sortedRoots(c, &branch);
+  BOOST_REQUIRE_EQUAL(roots.size(), 2u);
+  checkClose(roots[0], firstRoot, 1.e-6);
+  checkClose(roots[1], secondRoot, 1.e-6);
+  checkRootsAreRoots(c, roots);
+
+  // and it must get there by recognising the biquadratic, not by luck in the resolvent branch
+  BOOST_CHECK(branch == surf::QuarticBranch::Biquadratic);
+}
+
+BOOST_AUTO_TEST_CASE(StreamM_QuarticIsScaleInvariantOnAnAsymmetricQuartic)
+{
+  // A thoroughly well-conditioned quartic with four simple real roots {1, 2, 3, 7}, uniformly
+  // scaled. Ferrari's method is exactly scale-covariant, so every one of these must return four
+  // roots at k times the reference ones -- there is no numerical excuse anywhere in this sweep.
+  //
+  // Before the repair this collapsed at k = 1e-04, where |termQ| = 5.6e-10 falls under the
+  // absolute 1e-09 test: the solver takes the biquadratic branch on a quartic that is not
+  // biquadratic and returns *two* roots, 6.5093e-04 and -9.3257e-07, instead of four.
+  for (const double k : {1.e6, 1.e3, 1., 1.e-1, 1.e-2, 1.e-3, 1.e-4, 1.e-5, 1.e-6, 1.e-8}) {
+    const auto c = quarticFromRoots(1. * k, 2. * k, 3. * k, 7. * k);
+    surf::QuarticBranch branch = surf::QuarticBranch::NotAQuartic;
+    const auto roots = sortedRoots(c, &branch);
+    BOOST_REQUIRE_EQUAL(roots.size(), 4u);
+    const double expected[4] = {1. * k, 2. * k, 3. * k, 7. * k};
+    for (int i = 0; i < 4; ++i) {
+      BOOST_CHECK_LT(std::abs(roots[i] - expected[i]), 1.e-9 * std::abs(expected[i]));
+    }
+    checkRootsAreRoots(c, roots);
+    // The other half of the positive control: an asymmetric quartic must NOT be routed into the
+    // biquadratic branch at any scale. A termQ test that always passed would fail here.
+    BOOST_CHECK(branch == surf::QuarticBranch::Resolvent);
+  }
+
+  // The same statement made about accuracy rather than about the branch, on the family that
+  // produced "two confidently wrong roots": at k = 1e-04 the shipped code returns four roots for
+  // {-2, -1, 1, 2.1} * k that are wrong by 1.3 % (relative backward error 1.6e-02), because the
+  // biquadratic branch forces them to be symmetric about -b/4 and they are not.
+  for (const double k : {1., 1.e-2, 1.e-4, 1.e-6}) {
+    const auto c = quarticFromRoots(-2. * k, -1. * k, 1. * k, 2.1 * k);
+    const auto roots = sortedRoots(c);
+    BOOST_REQUIRE_EQUAL(roots.size(), 4u);
+    const double expected[4] = {-2. * k, -1. * k, 1. * k, 2.1 * k};
+    for (int i = 0; i < 4; ++i) {
+      BOOST_CHECK_LT(std::abs(roots[i] - expected[i]), 1.e-9 * std::abs(expected[i]));
+    }
+    checkRootsAreRoots(c, roots);
+  }
+}
+
+BOOST_AUTO_TEST_CASE(StreamM_QuarticStillSelectsTheBiquadraticBranch)
+{
+  // Positive control, first direction. The biquadratic branch is not a fallback: it is the
+  // correct, better-conditioned answer whenever the depressed quartic really has no odd term, and
+  // a repair that simply widened its guard into irrelevance would be caught by the previous case
+  // while a repair that narrowed it away would be caught here.
+  {
+    // y^4 - 5 y^2 + 4, roots +-1, +-2; termQ is exactly zero
+    const std::array<double, 5> c{1., 0., -5., 0., 4.};
+    surf::QuarticBranch branch = surf::QuarticBranch::NotAQuartic;
+    const auto roots = sortedRoots(c, &branch);
+    BOOST_CHECK(branch == surf::QuarticBranch::Biquadratic);
+    BOOST_REQUIRE_EQUAL(roots.size(), 4u);
+    const double expected[4] = {-2., -1., 1., 2.};
+    for (int i = 0; i < 4; ++i) {
+      checkClose(roots[i], expected[i], 1.e-12);
+    }
+  }
+  // The same quartic shifted along x and scaled, which is what a torus at a lever arm produces:
+  // termQ is zero in exact arithmetic but is computed by cancelling terms of size |b|^3, so the
+  // criterion has to be relative to those terms rather than to a fixed length.
+  for (const double centre : {0., 1., 100., 1.e4}) {
+    for (const double k : {1., 1.e-3, 1.e3}) {
+      const auto c = quarticFromRoots((centre - 2.) * k, (centre - 1.) * k, (centre + 1.) * k,
+                                      (centre + 2.) * k);
+      surf::QuarticBranch branch = surf::QuarticBranch::NotAQuartic;
+      const auto roots = sortedRoots(c, &branch);
+      BOOST_CHECK(branch == surf::QuarticBranch::Biquadratic);
+      BOOST_REQUIRE_EQUAL(roots.size(), 4u);
+      const double expected[4] = {(centre - 2.) * k, (centre - 1.) * k, (centre + 1.) * k,
+                                 (centre + 2.) * k};
+      for (int i = 0; i < 4; ++i) {
+        BOOST_CHECK_LT(std::abs(roots[i] - expected[i]), 1.e-9 * std::max(1.e-30, std::abs(expected[i])));
+      }
+      checkRootsAreRoots(c, roots);
+    }
+  }
+}
+
+BOOST_AUTO_TEST_CASE(StreamM_QuarticStillDeclinesDegenerateConfigurations)
+{
+  // Positive control, second direction. A guard that always passes is not a fix. Each of these
+  // must still produce no roots, in both branches, at every scale -- "declines" has to survive
+  // the repair as surely as "accepts" does.
+  {
+    // not a genuine quartic at all
+    surf::QuarticBranch branch = surf::QuarticBranch::Biquadratic;
+    const auto roots = surf::solveQuarticReal(0., 1., 2., 3., 4., &branch);
+    BOOST_CHECK_EQUAL(roots.size(), 0u);
+    BOOST_CHECK(branch == surf::QuarticBranch::NotAQuartic);
+  }
+  for (const double k : {1.e4, 1., 1.e-4, 1.e-8}) {
+    // (x^2 + k^2)(x^2 + 4 k^2): no real roots, termQ = 0 -> the biquadratic branch must decline
+    const double k2 = k * k;
+    const std::array<double, 5> biquadratic{1., 0., 5. * k2, 0., 4. * k2 * k2};
+    surf::QuarticBranch branch = surf::QuarticBranch::NotAQuartic;
+    BOOST_CHECK_EQUAL(sortedRoots(biquadratic, &branch).size(), 0u);
+    BOOST_CHECK(branch == surf::QuarticBranch::Biquadratic);
+
+    // (x^2 + k^2)((x + k)^2 + 4 k^2): no real roots, termQ != 0 -> the resolvent branch must
+    // decline, by finding both of Ferrari's quadratics complex rather than by refusing to run
+    const std::array<double, 5> asymmetric{1., 2. * k, 6. * k2, 2. * k2 * k, 5. * k2 * k2};
+    BOOST_CHECK_EQUAL(sortedRoots(asymmetric, &branch).size(), 0u);
+    BOOST_CHECK(branch == surf::QuarticBranch::Resolvent);
+  }
+}
+
+BOOST_AUTO_TEST_CASE(StreamM_QuarticHasNoCliffAsAQuarticApproachesBiquadratic)
+{
+  // The defect is a *cliff*: an absolute threshold crossed by a quantity that carries units, so
+  // the answer changes discontinuously with the size of the geometry. The repair has to be
+  // continuous instead -- as termQ is driven to zero the two branches must agree, because they
+  // are the two sides of one limit.
+  //
+  // {-2, -1, 1, 2 + delta} scaled by k: at delta = 0 the quartic is exactly biquadratic, and
+  // delta walks it away from that continuously. Every point must give four correct roots.
+  for (const double k : {1., 1.e-2, 1.e-4, 1.e-6}) {
+    for (const double delta : {1.e-1, 1.e-3, 1.e-6, 1.e-9, 1.e-12, 0.}) {
+      const auto c = quarticFromRoots(-2. * k, -1. * k, 1. * k, (2. + delta) * k);
+      const auto roots = sortedRoots(c);
+      BOOST_REQUIRE_EQUAL(roots.size(), 4u);
+      const double expected[4] = {-2. * k, -1. * k, 1. * k, (2. + delta) * k};
+      for (int i = 0; i < 4; ++i) {
+        BOOST_CHECK_LT(std::abs(roots[i] - expected[i]), 1.e-8 * std::abs(expected[i]));
+      }
+      checkRootsAreRoots(c, roots);
+    }
+  }
+}
+// --- Stream M: dimensionally consistent guards in the quartic root solver ---
