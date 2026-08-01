@@ -1,157 +1,121 @@
 # NEXT — session-start instruction for the BVHSurfaceSolid work
 
 This file is the current hand-over. Whoever finishes a session should **rewrite it** for the next
-one. Last updated 2026-08-01, after items 1-3 of the previous hand-over.
+one. Last updated 2026-08-01, after a review session plus wave 0 of the new plan.
 
-Branch `swenzel/bvhsurfacesolid`. The tree is clean; everything below is committed.
+Branch `swenzel/bvhsurfacesolid`. The tree is clean; everything below is committed (`ccb919a877`).
 
-**Items 1-3 are done, and item 4 (re-scope Phase 2) is done as a scoping, below.** Item 2 turned
-out not to be a pairing bug at all: the rim was never emitted, because the B-spline sampler
-replaced a 179-pole curve with a straight line. That is finding **K4**, which the last hand-over
-recorded as having no reproducer.
+**The plan changed this session.** Read [`Workstreams.md`](Workstreams.md) first — the work is now
+six streams meant to run in parallel, and v1's Phase 2 (adjacency trims) is superseded. Wave 0
+(Stream C) is done. Waves 1-3 are open.
 
 ## The one result that matters
 
-**Every oracle disagreement outside tolerance, on both corpora, on every column, is now zero — 35
-→ 0.** Including on the seven parts that still fail. `contains` 2 → 0, `distin` 17 → 0, `distout`
-16 → 0. Those parts fail on two things now and neither is a wrong navigation answer:
+**The capacity column is solved, and it was quadrature after all.** The residual on the six Bagger
+cylinders had survived five sessions and was recorded as "unexplained". It is Gauss-Legendre
+spanning a B-spline's knots, and it hid because a *second* defect — the interval count taken from
+the curve's endpoints, which is zero for every closed hole loop — made the obvious experiment
+incapable of detecting it. Full record: [`Stream_C_Hygiene.md`](Stream_C_Hygiene.md).
 
-1. their closure check, on a residual open boundary of 0.3-0.9 cm per part;
-2. their capacity, off by 1e-4 to 7e-4 relative.
+Capacity relative to OpenCascade: `BoomCylinderInner` 4.88e-04 → **2.8e-07**; `StickCylinderInner`,
+`BucketCylinderOuter` and the `tube_window` fixture now **pass outright**; the other three
+1.1e-04…3.8e-04 → **1.3e-06**. Raising the quadrature order to 40 leaves those bit-identical, so
+what is left is the trim data, not the integration.
 
-And **the capacity column did not move by a single bit** through all of this, while those parts'
-faces went from 0.75 cm apart to 5e-05 cm and their navigation became exact. So the baseline's
-attribution of the capacity error to "the surface set is open" is void. It is the only numeric
-column still failing anywhere, and it is now unexplained.
+**Every part that now fails, on either corpus, fails on navigability and nothing else.** The gate
+has collapsed onto one question and it is the closure check's.
 
 ## Read first, in this order
 
-1. [`TolerancePolicy.md`](TolerancePolicy.md) **§13** — this session's measurements, including
-   §13.3 (why the rim vanished), §13.4 (why the fix looked like a regression), and §13.7 (the two
-   premises that died).
-2. [`CodeReview_Fable.md`](CodeReview_Fable.md) **§20** — the same, with the next steps.
-3. The last handoff note at the end of [`BVHSurfaceSolid.md`](BVHSurfaceSolid.md).
+1. [`Workstreams.md`](Workstreams.md) — the six streams, the contract every stream obeys, the
+   file-ownership matrix, the launch order. §1 is not optional.
+2. [`CodeReview_Fable_v2.md`](CodeReview_Fable_v2.md) — the second deep review: findings N1-N6,
+   the feasibility re-scoring, and §5 on the CSG direction.
+3. [`CSG_Pipeline.md`](CSG_Pipeline.md) — B-rep → CSG: prior art, the four tiers, the acceptance
+   test, and §6's measurement of what ALICE3 actually contains.
+4. [`Stream_C_Hygiene.md`](Stream_C_Hygiene.md) — what wave 0 did and the two traps it left.
 
-Note that §12's *conclusion* (the defect is in rim extraction, not the geometry) survived and was
-right; its *inference about which rim* did not. §9.1 is still corrected by §12.3.
+`CodeReview_Fable.md` (v1) remains the register of record for the K/S/C findings. **Its §9-10 plan
+is superseded** — do not execute it.
 
-## Do — the two threads, in either order
+## Do — wave 1, three streams, near-zero overlap
 
-**1. Phase 2 — adjacency-based exact trims. It finally has its evidence, and it is now the only
-thing that can close the remaining 0.3-0.9 cm.**
+Run them in parallel, in separate worktrees. Briefs are in `Workstreams.md`.
 
-§13.8 swept `kBSplineFlatness` on `BoomCylinderInner` and the answer is not what it looks like.
-The disagreement between the two faces *is* mostly chording — the isolation falls from 4.8e-05 to
-2.6e-06 cm as the flattening tolerance goes 1e-5 → 1e-8 — but **the open length gets worse, from
-0.325 cm to 0.984 cm**, because the match band is built from the sagitta and shrinks faster than
-the disagreement does.
+- **Stream A — the CSG / simplification pipeline.** New Python package. Start with the *census*
+  (`CSG_Pipeline.md` §8 step 1): which parts are quadric-only, how many faces, how many concave
+  edges, which match a `TGeoTube`/`TGeoBox`/`TGeoPcon` template. **Do not build the emitter before
+  that table exists** — it decides how much of tiers 1-3 is worth building.
+- **Stream E — scale and the gate at ALICE3 size.** First item is the translate/scale sweep, and it
+  is the cheapest experiment on the board with the largest possible consequence: every measurement
+  on this branch was taken a few centimetres from the origin, against absolute constants
+  (`kBVHBoxTolerance` 1e-3 cm, `kWireJoinTolerance` 1e-5 cm). If the ladder is not
+  column-identical at (0,0,400), a lot of recorded numbers need re-qualifying.
+- **Stream F — sidecar v3 edge identity.** The closure check decides a topological question with a
+  proximity query, and the previous hand-over reached the end of that road honestly. The converter
+  has the `TopoDS_Edge` identity and throws it away. This is what makes "watertight" checkable
+  rather than tuned, and it is what the six remaining failing parts are waiting for.
 
-So tightening the flattening is not the lever, and the honest reading of §13.4's band is that it
-under-estimates the polyline-to-polyline disagreement by about an order of magnitude: the sagitta
-bounds each polyline against *its own* curve and says nothing about the other face's curve, which
-is the term that dominates. It works at the shipped tolerance because the two happen to be within
-an order of magnitude — a coincidence of scale, not a criterion. Do not paper over that with a
-fudge factor on the band.
-
-What removes the term is the two faces deriving their trims from one shared object. Phase 2
-(`CodeReview_Fable.md` §4.2) does that by construction: both faces reference the *same* neighbour
-surface, so their trims agree identically. Every Bagger seam is cylinder∩cylinder, which §4.2 lists
-as exactly solvable. The floor the sweep does not go below — about 2.6e-06 cm — is a candidate for
-the genuine difference between the two pcurves, and is the part no amount of sampling would ever
-have removed.
-
-`RayHit::onTrimBoundary` remains its ready-made acceptance test: on a model with exact adjacency
-that flag should never fire. And there is now a second one — on a Phase 2 model the closure check
-should pass at the *declared* tolerance without any sagitta widening at all.
-
-**2. The capacity of the six cylinders — the last failing number, and now unattributed.**
-
-+4.9e-4 on `BoomCylinderInner`, +6.9e-4 on `StickCylinderInner`, -3.8e-4 on `StickCylinderOuter`,
-and -3.0e-5 on `tube_window`; ≤1e-11 on every part that passes. `integrateOverCurveTrimByParts`
-runs Gauss-Legendre on the curves themselves and never touches the flattened polyline, which is
-why nothing this session moved it — and also why the sampler bug cannot have caused it. Candidates
-worth measuring before theorising, in cost order:
-
-- The **seam bridges**. `integrateOverCurveTrimByParts` bridges each join with a straight segment
-  only when `deltaV != 0`. Face 0 of `BoomCylinderInner` is a wire whose curves meet across a full
-  turn in u; check whether a join with `deltaV == 0` but a non-zero **u** jump is being skipped.
-- The **contour of a wire that wraps the whole periodic domain**. Face 0's junction B-spline runs
-  u = 0 → 2pi. Green's theorem on a periodic chart needs the loop to close in the chart, not just
-  in 3D.
-- Compare against `integrateOverCurveTrim` (the midpoint-rule integrator kept precisely as the
-  independent check) on these six parts at high N. If the two agree, the defect is in the trim
-  region, not the integrator.
-
-`GetSurfaceRecords()` is public, so a standalone probe can rebuild a wire and integrate it both
-ways without touching the kernel — that is how §13.2-13.3 were measured (§6 recipe, and add
-`-I$HOME/alisw/O2/Detectors/Base/src` to reach the kernel header directly).
+Wave 2 (Streams B and D) starts after A's census and E's sweep, because both can change what is
+worth building.
 
 ## Baseline to beat
 
-- `ctest -R BVHSurfaceSolid` green, **61 cases**.
-- Oracle gate: fixtures **8/9** (`tube_window` fails), Bagger **6/12**.
-- **Oracle disagreements outside tolerance: 0 on every column of both corpora.** This is the number
+- `ctest -R BVHSurfaceSolid` green, **64 cases**.
+- Oracle gate: fixtures **8/9** (`tube_window`), Bagger **6/12**.
+- **Oracle disagreements outside tolerance: 0 on every column of both corpora.** Still the number
   to defend; a change that improves a gate total while breaking this is a regression.
-- Capacity: **≤1e-11 relative on every navigable part**; 1e-4 to 7e-4 on the six open Bagger
-  cylinders and 3e-5 on `tube_window`.
-- Open boundary: `BoomCylinderInner` 0.325 of 62.8 cm; `tube_window` 0.276 of 58.1 cm; worst rim
-  isolation on any failing part **6.9e-05 cm**.
+- Capacity: ≤1e-11 on every part without a B-spline trim; ≤2.8e-07 on three of the six cylinders
+  and 1.3e-06 on the other three.
+- Open boundary and rim isolation unchanged from the previous hand-over — wave 0 did not touch them.
 - BVH == `_Loop` bit-identical everywhere.
-- Direction-independence sweep: **0** direction-split points in 154000 over the 14 `Reliable` parts,
-  and 0 points where `Contains` differs from a single fixed-direction shot.
 
 Gate totals and disagreement counts are separate numbers. Do not quote one without the other.
 
-## Six things that will not be obvious
+## Things that will not be obvious
 
-**A bit-identical numeric column can accompany a real change, and did.** The sampler fix moved
-`cyl_cross_cyl` and `cyl_inter_cyl` from closed to open while every checksum, every `contains`,
-every distance and the capacity stayed bit-identical. Reading the gate totals alone would have
-called that a regression and reverted the session's main result. Diff the *columns*, not the
-verdicts.
+**A refuted experiment is not a refuted hypothesis.** The `kContourMaxSpanU` sweep said "no" to the
+right answer, and a whole section of the review was rewritten around that "no" before the localiser
+showed the knob could never have reached the curve. When an experiment fails to move a number,
+check that it was *capable* of moving it.
 
-**The match band is no longer the declared tolerance, and `SetModelTolerance` is now nearly
-inert on curved seams.** A chord is matched within `rimEpsilon + own sagitta + partner sagitta`.
-On a 24-sample arc the sagitta is ~8.6e-3·r cm, which dwarfs any declared tolerance. That is
-deliberate (§13.4) and it is also the reason §12.3's epsilon sweep saw nothing move.
+**`BRepGProp::VolumeProperties` on a single planar face returns 0.** Not documented in OCCT. Any
+per-face comparison must restrict itself to curved faces and account for planes by difference —
+`BasePin` is the self-check (20.943951 curved + 10.471976 caps = 31.415927).
 
-**The non-manifold test is deliberately on a different, stricter band.** Do not "unify" them.
-Widening it to the sagitta turned `Base`, `Boom`, `Stick` and `BucketLink2` non-manifold, because a
-corner is where a third face's rim legitimately comes within a chord's length. Neither corpus has
-a coincident-face part, so the test has no measured true positive to calibrate against.
+**A bit-identical numeric column can accompany a real change, and has, twice.** Diff the columns,
+not the verdicts. Strip `timing*`, `*Seconds` and `nsPerCall` from `gate.json` and everything else
+must match when a change is meant to be inert.
 
-**`maxRimIsolation` is not a seam width, and never was.** It is how alone the loneliest chord is.
-It was called `maxGap` and read as a separation in four places for two sessions. Renamed
-everywhere, including the `--json` key; nothing else in the report changed.
+**The match band is not the declared tolerance**, and `SetModelTolerance` is nearly inert on curved
+seams — a chord is matched within `rimEpsilon + own sagitta + partner sagitta`. Deliberate; see the
+previous hand-over and `TolerancePolicy.md` §13.4.
 
-**The gate's timing column cannot resolve anything below a few per cent**, and safety timings moved
-by 3x between runs of identical code this session. Never quote it for a micro-optimisation; write a
-dedicated loop with a fixed point set instead.
+**The non-manifold test is on a different, stricter band. Do not "unify" them.**
 
-**Any change to the closure criterion must re-run the §4.2 sweep**, because a criterion that
-succeeds more often moves solids onto `Contains`'s single-shot fast path — `BucketLink1` moved onto
-it this session. The probe is a hundred lines against the built library (§6 recipe); rewrite it
-rather than hunt for it.
+**Any change to the closure criterion must re-run the §4.2 direction-independence sweep**, because
+a criterion that succeeds more often moves solids onto `Contains`'s single-shot fast path.
+
+**The gate's timing column cannot resolve anything below a few per cent** and moved 3x between runs
+of identical code. Write a dedicated fixed-point loop instead.
 
 ## Traps, each of which cost time before
 
 - **The gate needs the O2 environment in the same shell.** `runOracleGate.py` sets the OCC python
-  itself but not `LD_LIBRARY_PATH` for the harness; run `eval "$(alienv printenv ...)"` and export
+  itself but not `LD_LIBRARY_PATH` for the harness; `eval "$(alienv printenv ...)"` and export
   `LD_LIBRARY_PATH` in the *same* command, or step 2 dies on `libarrow_acero.so`.
 - Put `$B/stage/lib:$B/stage/lib64` **first** on `LD_LIBRARY_PATH`, or `ctest` and the harness
   silently use stale installed libraries.
-- The test binary is at `$B/stage/tests/`, not `$B/stage/bin/`; the harness is at `$B/stage/bin/`.
-- pythonOCC needs the alibuild **python3.10**, not the system 3.12.
+- The test binary is at `$B/stage/tests/`, the harness at `$B/stage/bin/`.
+- pythonOCC needs the alibuild **python3.10**; OCCT and pythonOCC live under
+  `$ALIBUILD_WORK_DIR/ubuntu2404_aarch64/{OCCT,pythonOCC}/latest`.
 - **Never** write generated artifacts into `scripts/geometry/STEP_examples/`; use a scratch folder.
-- For a quick kernel probe, compile a standalone `.cxx` against `$B/stage/lib -lO2DetectorsBase`
-  (recipe in `TolerancePolicy.md` §6, and add `-lGeom`). Add
-  `-I$HOME/alisw/O2/Detectors/Base/src` and the probe can build `Curve2D`/`CurveWire` objects
-  directly and call the samplers — that is how §13.3 was measured.
-- `--skip-convert` reuses `<workdir>/db`, which saves minutes — but only when the *converter* did
-  not change. Copy a finished workdir and re-run with `--skip-convert` to re-measure a kernel
-  change; that is the whole before/after loop.
-- The gate exits non-zero whenever any part fails, which is the normal state. Read the counts, not
-  the exit code.
+- `--skip-convert` reuses `<workdir>/db` — valid only when the *converter* did not change. Copy a
+  finished workdir and re-run with it; that is the whole before/after loop for a kernel change.
+- The gate exits non-zero whenever any part fails, which is the normal state. Read the counts.
+- For a kernel probe, compile a standalone `.cxx` against `$B/stage/lib -lO2DetectorsBase -lGeom`
+  plus `-I$HOME/alisw/O2/Detectors/Base/src` (`TolerancePolicy.md` §6). Wave 0's per-face and
+  Monte-Carlo probes were both written that way in a few minutes each.
 
 ## Commands
 
@@ -168,11 +132,6 @@ O2_BUILD_DIR=$B python3 scripts/geometry/runOracleGate.py --workdir /tmp/gate --
 O2_BUILD_DIR=$B python3 scripts/geometry/runOracleGate.py --workdir /tmp/gate2 \
     --model scripts/geometry/STEP_examples/Bagger.step
 ```
-
-To compare two gate runs, diff `<workdir>/gate.json` with the timing fields (`timing*`,
-`*Seconds` — including `closeShapeSecondsMesh`/`closeShapeSecondsSurface`, which are easy to miss)
-stripped: everything else, including the offender lists, the query checksums and
-`navigation.rimDetail`, is deterministic and must match when a change is meant to be inert.
 
 To name a part's rims — which loop of which face is open, and where its worst chord is:
 
