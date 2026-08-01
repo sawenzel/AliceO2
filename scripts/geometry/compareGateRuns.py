@@ -144,15 +144,33 @@ def compare_part(base: dict, cand: dict, factor: float, gate_only: bool = False)
     return differences, len(set(flat_base) | set(flat_cand))
 
 
-def report_key(part):
-    """Parts are keyed by the fixture name, which survives a transform; the full id does not have
-    to, since the converter is free to renumber logical volumes."""
-    return part["id"].split("/", 1)[0]
+def key_reports(baseline, candidate):
+    """Pair the two reports' parts up, and say how.
+
+    The obvious key is the full part id, and it is the right one whenever the converter assigned
+    the same logical-volume numbers on both sides -- which it does for a transformed fixture ladder.
+    The fallback is the id's leading component, which for the fixture corpus is the fixture name
+    and survives renumbering.
+
+    It must *not* be the leading component unconditionally: every part of a single CAD model shares
+    it (`Bagger/BasePin...`, `Bagger/Base...`), so keying on it silently collapses a 12-part report
+    to one part and compares only whichever survived the dict. That is a comparison that cannot
+    fail, and this file exists to not be one of those.
+    """
+    by_id = ({p["id"]: p for p in baseline}, {p["id"]: p for p in candidate})
+    if set(by_id[0]) == set(by_id[1]):
+        return by_id[0], by_id[1], "part id"
+    by_stem = ({p["id"].split("/", 1)[0]: p for p in baseline},
+               {p["id"].split("/", 1)[0]: p for p in candidate})
+    collapsed = len(by_stem[0]) < len(baseline) or len(by_stem[1]) < len(candidate)
+    if collapsed:
+        return by_id[0], by_id[1], "part id (ids differ and the leading component is not unique)"
+    return by_stem[0], by_stem[1], "leading id component"
 
 
 def compare(baseline, candidate, factor, label, gate_only=False):
-    base_by_key = {report_key(p): p for p in baseline}
-    cand_by_key = {report_key(p): p for p in candidate}
+    base_by_key, cand_by_key, keying = key_reports(baseline, candidate)
+    print(f"(paired by {keying})")
     print(f"=== {label} : {len(cand_by_key)} part(s) vs baseline's {len(base_by_key)}, "
           f"length factor {factor:g} ===")
     missing = sorted(set(base_by_key) - set(cand_by_key))
