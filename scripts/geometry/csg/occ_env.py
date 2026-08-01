@@ -24,6 +24,15 @@ OCC_ENV = {
     "LD_LIBRARY_PATH": f"{_SW}/OCCT/latest/lib:{_SW}/Python/latest/lib",
 }
 
+# The paths above are *prepended* to whatever is already set rather than replacing it (Stream H).
+# The reason is measured: the alibuild Python 3.10 that pythonOCC needs is the same interpreter
+# the O2 environment provides, so a process launched from an O2 shell can import both `OCC` and
+# `ROOT` -- which is what lets the CSG emitter write a TGeoShape in the same process that
+# recognised the solid. Replacing PYTHONPATH/LD_LIBRARY_PATH outright, as `runOracleGate.py`
+# does, drops ROOT and PyROOT then fails on `libffi.so.6`. Prepending keeps OCCT's own libraries
+# winning any conflict while leaving the rest of the environment intact.
+_PREPEND_KEYS = ("PYTHONPATH", "LD_LIBRARY_PATH")
+
 _GUARD = "O2_CSG_OCC_REEXEC"
 
 
@@ -45,7 +54,9 @@ def ensure_occ() -> None:
     if not OCC_PYTHON.exists():
         raise SystemExit(f"pythonOCC interpreter not found: {OCC_PYTHON}")
     env = dict(os.environ)
-    env.update(OCC_ENV)
+    for key in _PREPEND_KEYS:
+        existing = env.get(key, "")
+        env[key] = OCC_ENV[key] + (":" + existing if existing else "")
     env[_GUARD] = "1"
     script = Path(sys.argv[0]).resolve()
     os.execve(str(OCC_PYTHON), [str(OCC_PYTHON), str(script)] + sys.argv[1:], env)
