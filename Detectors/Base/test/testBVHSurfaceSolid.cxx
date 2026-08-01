@@ -5030,3 +5030,274 @@ BOOST_AUTO_TEST_CASE(CsgTwoLeafUnionRoundTripsAndMatchesTheClosedForm)
   std::filesystem::remove(path);
 }
 // --- Stream H: the CSG emitter's ROOT-side claims ---
+
+// ============================================================================================
+// Stream J: X-ray / geantino transport -- ordered crossing lists
+// ============================================================================================
+//
+// Everything above this block, and everything the oracle gate measures, is a SINGLE-SHOT query:
+// from a point, how far to the surface. A transport loop is different in kind -- step, land on
+// the boundary, step again from there -- and its failure modes (a zero-length step, a particle
+// that enters and never leaves, a crossing found twice, a step that overshoots) cannot be
+// expressed as a disagreement on DistFromOutside from an interior sample. These cases pin the
+// properties the X-ray benchmark rests on.
+//
+// They include XRayTransport.h, which is the SAME header the benchmark binary steps with. That
+// is deliberate: a test written against a second implementation of the same idea tests neither.
+
+#include "XRayTransport.h"
+
+using namespace o2::base::xray;
+using XRayPoint = o2::base::harness::Point3D;
+
+/// A box has exactly two crossings and a hollow tube has four -- and the second fact is the one
+/// no single-shot query can express, because DistFromOutside reports the first of the four and
+/// stops. Both distances are known in closed form, so this needs no oracle and no fixture.
+BOOST_AUTO_TEST_CASE(XRayCrossingListsMatchClosedFormOnPrimitives)
+{
+  StepConfig cfg;
+  Robustness stats;
+  const XRayPoint origin{-5., 0., 0.};
+  const XRayPoint dir{1., 0., 0.};
+
+  TGeoBBox box("xrayBox", 1., 1.5, 2.);
+  const auto boxCrossings = stepWithShapeApi(&box, origin, dir, 10., cfg, stats);
+  BOOST_REQUIRE_EQUAL(boxCrossings.size(), 2u);
+  BOOST_CHECK_SMALL(boxCrossings[0].t - 4., 1.e-12);
+  BOOST_CHECK_SMALL(boxCrossings[1].t - 6., 1.e-12);
+  BOOST_CHECK_EQUAL(boxCrossings[0].kind, +1);
+  BOOST_CHECK_EQUAL(boxCrossings[1].kind, -1);
+
+  TGeoTube tube("xrayTube", 0.5, 1.0, 2.0);
+  const auto tubeCrossings = stepWithShapeApi(&tube, origin, dir, 10., cfg, stats);
+  BOOST_REQUIRE_EQUAL(tubeCrossings.size(), 4u);
+  const double expected[4] = {4.0, 4.5, 5.5, 6.0};
+  const int senses[4] = {+1, -1, +1, -1};
+  for (int i = 0; i < 4; ++i) {
+    BOOST_CHECK_SMALL(tubeCrossings[i].t - expected[i], 1.e-12);
+    BOOST_CHECK_EQUAL(tubeCrossings[i].kind, senses[i]);
+  }
+  BOOST_CHECK_EQUAL(stats.zeroLengthSteps, 0);
+  BOOST_CHECK_EQUAL(stats.nonAdvancingSteps, 0);
+  BOOST_CHECK_EQUAL(stats.unstickPushes, 0);
+}
+
+/// The transport-level BVH == _Loop guard.
+///
+/// `DistanceBVHMatchesLoopOnAllFixtures` above compares the twins one query at a time from
+/// generated points. This compares whole ORDERED CROSSING LISTS produced by stepping, where every
+/// query after the first starts from a point the previous query put on a boundary. That is a
+/// harder condition and a different one: a traversal-order difference that is invisible on an
+/// isolated query can still send the two loops down different sequences of states.
+BOOST_AUTO_TEST_CASE(XRayCrossingListsAgreeBetweenBVHAndLoopOnAllFixtures)
+{
+  StepConfig cfg;
+  std::array<std::pair<std::unique_ptr<SurfaceSolid>, double>, 7> fixtures{{
+    {makeBoxSolid("xrayLoopBox", 1., 2., 3.), 4.},
+    {makeTubeSolid("xrayLoopTube", 0., 2., 3.), 4.},
+    {makeTubeSolid("xrayLoopHollowTube", 1., 2., 3.), 4.},
+    {makeConeSolid("xrayLoopCone", 2., 1., 3.), 4.},
+    {makeSphereSolid("xrayLoopSphere", 2.5), 3.5},
+    {makeTorusSolid("xrayLoopTorus", 3., 1.), 4.5},
+    {makeCapsuleSolid("xrayLoopCapsule", 1., 1.5), 3.},
+  }};
+  size_t comparedRays = 0;
+  size_t comparedCrossings = 0;
+  for (const auto& [solid, extent] : fixtures) {
+    BOOST_TEST_CONTEXT("fixture = " << solid->GetName())
+    {
+      BOOST_REQUIRE(solid->HasBVH());
+      const XRayPoint lo{-extent, -extent, -extent};
+      const XRayPoint hi{extent, extent, extent};
+      // A fan rather than the three axes: a parallel beam is direction-poor, and the point of this
+      // case is to exercise many ray/surface configurations per fixture.
+      const Raster raster = buildRaster(lo, hi, 9, buildFanBeams(11), 0.);
+      for (const auto& ray : raster.rays) {
+        Robustness bvhStats;
+        Robustness loopStats;
+        const auto viaBVH =
+          stepWithShapeApi(solid.get(), ray.origin, ray.dir, ray.tMax, cfg, bvhStats);
+        // The non-BVH twins, stepped through the identical loop: only the traversal differs.
+        const auto viaLoop = stepCrossingsWithKernels(
+          ray.origin, ray.dir, ray.tMax, cfg, loopStats,
+          [&solid](const double* p) { return solid->Contains_Loop(p); },
+          [&solid](const double* p, const double* d) { return solid->DistFromOutside_Loop(p, d); },
+          [&solid](const double* p, const double* d) { return solid->DistFromInside_Loop(p, d); });
+        BOOST_REQUIRE_EQUAL(viaBVH.size(), viaLoop.size());
+        for (size_t i = 0; i < viaBVH.size(); ++i) {
+          BOOST_CHECK_EQUAL(viaBVH[i].kind, viaLoop[i].kind);
+          // Bit-identical is the contract: both minimise over the same hits from the same kernels.
+          BOOST_CHECK_EQUAL(viaBVH[i].t, viaLoop[i].t);
+        }
+        comparedRays += 1;
+        comparedCrossings += viaBVH.size();
+      }
+    }
+  }
+  BOOST_CHECK_GT(comparedRays, 2000u);
+  BOOST_CHECK_GT(comparedCrossings, 2000u);
+}
+
+/// The comparator's own positive AND negative controls. A comparison that cannot fail is not a
+/// comparison, and the distinction this one has to preserve is LOST (a wall a track walks
+/// through) against DISPLACED (a wrong step length) -- merging them was the first version's bug.
+BOOST_AUTO_TEST_CASE(XRayCrossingComparatorCatchesInjectedDefects)
+{
+  const std::vector<Crossing> truth{{4.0, +1}, {4.5, -1}, {5.5, +1}, {6.0, -1}};
+  const double tolerance = 1.e-6;
+
+  ListComparison clean;
+  compareLists(truth, truth, {}, {}, tolerance, clean);
+  BOOST_CHECK_EQUAL(clean.raysIdentical, 1);
+  BOOST_CHECK_EQUAL(clean.matched, 4);
+  BOOST_CHECK_EQUAL(clean.missing, 0);
+  BOOST_CHECK_EQUAL(clean.extra, 0);
+  BOOST_CHECK_EQUAL(clean.displaced, 0);
+
+  auto perturbed = truth;
+  perturbed[2].t += 1.e-3;
+  ListComparison displaced;
+  compareLists(perturbed, truth, {}, {}, tolerance, displaced);
+  BOOST_CHECK_EQUAL(displaced.raysIdentical, 0);
+  BOOST_CHECK_EQUAL(displaced.displaced, 1);
+  BOOST_CHECK_EQUAL(displaced.missing, 0); // a moved crossing is NOT a lost one
+  BOOST_CHECK_EQUAL(displaced.extra, 0);
+  BOOST_CHECK_SMALL(displaced.worstDeltaT - 1.e-3, 1.e-12);
+
+  auto dropped = truth;
+  dropped.erase(dropped.begin() + 1);
+  ListComparison lost;
+  compareLists(dropped, truth, {}, {}, tolerance, lost);
+  BOOST_CHECK_EQUAL(lost.missing, 1);
+  BOOST_CHECK_EQUAL(lost.extra, 0);
+
+  auto doubled = truth;
+  doubled.insert(doubled.begin() + 1, {4.2, -1});
+  ListComparison spurious;
+  compareLists(doubled, truth, {}, {}, tolerance, spurious);
+  BOOST_CHECK_EQUAL(spurious.extra, 1);
+  BOOST_CHECK_EQUAL(spurious.missing, 0);
+
+  auto flipped = truth;
+  flipped[1].kind = +1;
+  ListComparison sense;
+  compareLists(flipped, truth, {}, {}, tolerance, sense);
+  BOOST_CHECK_EQUAL(sense.kindMismatch, 1);
+
+  // A crossing moved by LESS than the tolerance must not be reported at all, or every run would
+  // drown in last-digit noise.
+  auto nudged = truth;
+  nudged[0].t += 1.e-9;
+  ListComparison quiet;
+  compareLists(nudged, truth, {}, {}, tolerance, quiet);
+  BOOST_CHECK_EQUAL(quiet.raysIdentical, 1);
+  BOOST_CHECK_EQUAL(quiet.displaced, 0);
+}
+
+/// The parity audit is the only check in the benchmark that is independent of the stepping: both
+/// modes produce an alternating list by construction, so `nonAlternating` can never fire on them.
+/// Asking Contains() at the midpoint of every interval is what can contradict a list.
+BOOST_AUTO_TEST_CASE(XRayParityAuditContradictsATruncatedList)
+{
+  StepConfig cfg;
+  TGeoBBox box("xrayParityBox", 1., 1., 1.);
+  const XRayPoint origin{-5., 0., 0.};
+  const XRayPoint dir{1., 0., 0.};
+
+  Robustness good;
+  auditCrossingList({{4.0, +1}, {6.0, -1}}, &box, origin, dir, 10., cfg, good);
+  BOOST_CHECK_EQUAL(good.parityMismatchIntervals, 0);
+  BOOST_CHECK_EQUAL(good.oddCrossingLists, 0);
+  BOOST_CHECK_SMALL(good.insideLength - 2., 1.e-12);
+
+  Robustness truncated;
+  auditCrossingList({{4.0, +1}}, &box, origin, dir, 10., cfg, truncated);
+  BOOST_CHECK_GT(truncated.parityMismatchIntervals, 0);
+  BOOST_CHECK_EQUAL(truncated.oddCrossingLists, 1);
+
+  Robustness invented;
+  auditCrossingList({{1.0, +1}, {2.0, -1}, {4.0, +1}, {6.0, -1}}, &box, origin, dir, 10., cfg,
+                    invented);
+  BOOST_CHECK_GT(invented.parityMismatchIntervals, 0);
+}
+
+/// The chord integral is EXACT for an axis-aligned box whose raster window is its own bounding
+/// box, at every raster density. No convergence argument and no tolerance: either the quadrature
+/// is the volume or it is not. This is what fixed the raster geometry -- with the window inflated
+/// by 2 % instead, the same box came out 5.1e-02 too large at N = 32.
+BOOST_AUTO_TEST_CASE(XRayChordIntegralIsExactForABoxAndConvergesForASphere)
+{
+  StepConfig cfg;
+  TGeoBBox box("xrayVolBox", 1., 1.5, 2.);
+  for (const int n : {5, 16, 41}) {
+    const Raster raster = buildRaster({-1., -1.5, -2.}, {1., 1.5, 2.}, n, buildBeams("xyz", 0.), 0.);
+    Robustness stats;
+    std::vector<double> byBeam(raster.beams.size(), 0.);
+    for (const auto& ray : raster.rays) {
+      const double before = stats.insideLength;
+      const auto crossings = stepWithShapeApi(&box, ray.origin, ray.dir, ray.tMax, cfg, stats);
+      auditCrossingList(crossings, nullptr, ray.origin, ray.dir, ray.tMax, cfg, stats);
+      byBeam[ray.beam] += stats.insideLength - before;
+    }
+    BOOST_CHECK_SMALL(chordVolume(raster, byBeam) - 24., 1.e-9);
+  }
+
+  // A curved silhouette cannot be exact at finite N. The bound below is the MEASURED envelope
+  // over N = 24..192 (2e-3), not a convergence rate -- the convergence is NOT monotone in N,
+  // because the silhouette cells realign with the lattice at every density. That is the reason
+  // this benchmark's volume is quoted with its raster density and never extrapolated.
+  TGeoSphere sphere("xrayVolSphere", 0., 1.);
+  const double exact = 4. / 3. * 3.14159265358979323846;
+  for (const int n : {24, 96}) {
+    const Raster raster = buildRaster({-1., -1., -1.}, {1., 1., 1.}, n, buildBeams("z", 0.), 0.);
+    Robustness stats;
+    for (const auto& ray : raster.rays) {
+      const auto crossings = stepWithShapeApi(&sphere, ray.origin, ray.dir, ray.tMax, cfg, stats);
+      auditCrossingList(crossings, nullptr, ray.origin, ray.dir, ray.tMax, cfg, stats);
+    }
+    const double volume = stats.insideLength * raster.cellArea[0];
+    BOOST_CHECK_LT(std::fabs(volume - exact) / exact, 2.e-3);
+  }
+}
+
+/// The raster's own contract, because every number above depends on it: the rays start strictly
+/// outside the solid, the lattice covers the bounding box, and a fan is direction-diverse where
+/// the axis beams are not. The last property is not cosmetic -- it is why the fan finds the torus
+/// quartic defect at x0.1 and the three axis beams do not (Stream_J_XRay.md).
+BOOST_AUTO_TEST_CASE(XRayRasterRaysStartOutsideAndFansAreDirectionDiverse)
+{
+  TGeoBBox box("xrayRasterBox", 1., 1.5, 2.);
+  const Raster raster = buildRaster({-1., -1.5, -2.}, {1., 1.5, 2.}, 8, buildBeams("xyz", 0.), 0.);
+  BOOST_CHECK_EQUAL(raster.rays.size(), 3u * 8u * 8u);
+  for (const auto& ray : raster.rays) {
+    BOOST_REQUIRE(!box.Contains(ray.origin.data()));
+    // and the far end must be outside too, so the window really does bracket the solid
+    const double end[3] = {ray.origin[0] + ray.tMax * ray.dir[0],
+                           ray.origin[1] + ray.tMax * ray.dir[1],
+                           ray.origin[2] + ray.tMax * ray.dir[2]};
+    BOOST_REQUIRE(!box.Contains(end));
+  }
+
+  const auto axes = buildBeams("xyz", 0.);
+  const auto fan = buildFanBeams(64);
+  BOOST_CHECK_EQUAL(axes.size(), 3u);
+  BOOST_CHECK_EQUAL(fan.size(), 64u);
+  for (const auto& beams : {axes, fan}) {
+    for (const auto& beam : beams) {
+      BOOST_CHECK_SMALL(dot3(beam.dir, beam.dir) - 1., 1.e-12);
+      BOOST_CHECK_SMALL(dot3(beam.u, beam.v), 1.e-12);
+      BOOST_CHECK_SMALL(dot3(beam.u, beam.dir), 1.e-12);
+      BOOST_CHECK_SMALL(dot3(beam.v, beam.dir), 1.e-12);
+    }
+  }
+  // Direction diversity, stated as a number: the axis beams are mutually orthogonal and nothing
+  // else, while no two fan beams are closer than a few degrees and they span the sphere.
+  double worstFanAlignment = -1.;
+  for (size_t i = 0; i < fan.size(); ++i) {
+    for (size_t j = i + 1; j < fan.size(); ++j) {
+      worstFanAlignment = std::max(worstFanAlignment, std::fabs(dot3(fan[i].dir, fan[j].dir)));
+    }
+  }
+  BOOST_CHECK_LT(worstFanAlignment, 0.999);
+}
+// --- Stream J: X-ray / geantino transport benchmark ---

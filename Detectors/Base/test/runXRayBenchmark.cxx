@@ -46,6 +46,8 @@
 /// `generateSamples()` nothing here rejection-samples through `O2Tessellated`. That is what makes
 /// this instrument runnable on a model whose meshing does not fit in memory.
 
+#include "XRayTransport.h"
+
 #include "DetectorsBase/O2SolidHarness.h"
 #include "DetectorsBase/O2BVHSurfaceSolid.h"
 #include "DetectorsBase/O2Tessellated.h"
@@ -80,69 +82,29 @@
 using json = nlohmann::json;
 using namespace o2::base;
 using namespace o2::base::harness;
+using namespace o2::base::xray;
 
 namespace
 {
 
 // The xrays_/crossings_ JSON contract shared with scripts/geometry/xrayOracle.py. Bump on both
 // sides together; the oracle refuses a version it does not speak rather than guessing.
-constexpr int kXRayFormatVersion = 1;
+constexpr int kXRayFormatVersion = 2;
 
-/// A single boundary crossing along a ray: the distance from the ray origin and whether the ray
-/// is entering (+1) or leaving (-1) the solid there.
-struct Crossing {
-  double t = 0.;
-  int kind = 0;
-};
-
-/// Everything a transport loop can do wrong that a single-shot distance query cannot express.
-/// Every counter here is a *count of events*, never a rate, so two runs can be added.
-struct Robustness {
-  long long rays = 0;
-  long long raysWithCrossings = 0;
-  long long crossings = 0;
-  long long steps = 0;
-  long long zeroLengthSteps = 0;      ///< a step at or below `zeroStep` (default 1e-9 cm)
-  long long nonAdvancingSteps = 0;    ///< the accumulated distance did not increase
-  long long unstickPushes = 0;        ///< a stalled step that had to be nudged to continue
-  long long iterationCapHits = 0;     ///< the loop hit `maxIter` without leaving the window
-  long long unterminated = 0;         ///< the ray ended INSIDE the solid: entered and never left
-  long long oddCrossingLists = 0;     ///< odd number of crossings (the same event, counted as the
-                                      ///< brief names it; equal to `unterminated` by construction
-                                      ///< in mode (a) and an independent number in mode (b))
-  long long nonAlternating = 0;       ///< two consecutive crossings of the same kind
-  long long duplicateCrossings = 0;   ///< two crossings closer together than the match tolerance
-  long long parityMismatchIntervals = 0; ///< Contains() at an interval midpoint contradicts the
-                                         ///< in/out state the crossing list implies. This is the
-                                         ///< one check that is INDEPENDENT of the stepping: the
-                                         ///< list alternates by construction in both modes, so
-                                         ///< without it "non-alternating" could never fire.
-  long long originInside = 0;          ///< a raster ray whose origin was not outside the solid
-  long long boundaryWithoutTransition = 0; ///< mode (b): a boundary was crossed but the volume did
-                                           ///< not change (a re-entry into the same volume)
-  double insideLength = 0.;            ///< summed inside-segment length, cm (the chord integral)
-  double seconds = 0.;
-};
-
-void addRobustness(Robustness& into, const Robustness& from)
+json comparisonToJson(const ListComparison& c)
 {
-  into.rays += from.rays;
-  into.raysWithCrossings += from.raysWithCrossings;
-  into.crossings += from.crossings;
-  into.steps += from.steps;
-  into.zeroLengthSteps += from.zeroLengthSteps;
-  into.nonAdvancingSteps += from.nonAdvancingSteps;
-  into.unstickPushes += from.unstickPushes;
-  into.iterationCapHits += from.iterationCapHits;
-  into.unterminated += from.unterminated;
-  into.oddCrossingLists += from.oddCrossingLists;
-  into.nonAlternating += from.nonAlternating;
-  into.duplicateCrossings += from.duplicateCrossings;
-  into.parityMismatchIntervals += from.parityMismatchIntervals;
-  into.originInside += from.originInside;
-  into.boundaryWithoutTransition += from.boundaryWithoutTransition;
-  into.insideLength += from.insideLength;
-  into.seconds += from.seconds;
+  return json{{"rays", c.rays},
+              {"raysIdentical", c.raysIdentical},
+              {"raysStructural", c.raysStructural},
+              {"matched", c.matched},
+              {"displacedCrossings", c.displaced},
+              {"missingCrossings", c.missing},
+              {"extraCrossings", c.extra},
+              {"kindMismatch", c.kindMismatch},
+              {"worstDeltaT", c.worstDeltaT},
+              {"worstOrigin", {c.worstOrigin[0], c.worstOrigin[1], c.worstOrigin[2]}},
+              {"worstDir", {c.worstDir[0], c.worstDir[1], c.worstDir[2]}},
+              {"worstReason", c.worstReason}};
 }
 
 json robustnessToJson(const Robustness& r)
@@ -160,93 +122,12 @@ json robustnessToJson(const Robustness& r)
               {"nonAlternating", r.nonAlternating},
               {"duplicateCrossings", r.duplicateCrossings},
               {"parityMismatchIntervals", r.parityMismatchIntervals},
+              {"parityMismatchNearBoundary", r.parityMismatchNearBoundary},
               {"originInside", r.originInside},
               {"boundaryWithoutTransition", r.boundaryWithoutTransition},
+              {"originOutsideWorld", r.originOutsideWorld},
               {"insideLengthCm", r.insideLength},
               {"seconds", r.seconds}};
-}
-
-struct StepConfig {
-  /// Distance the point is advanced *past* a found crossing before the next query. This is the
-  /// crux of a transport loop: land exactly on a face and the next query re-finds the same
-  /// crossing at zero. Default 1e-9 cm = the kernel's own kRayTolerance, so the recorded crossing
-  /// distances carry a known bias of at most (k-1) * push over a k-crossing ray, i.e. below 1e-8
-  /// cm -- two orders under the 1e-6 cm comparison band.
-  double push = 1.e-9;
-  /// A step at or below this is a stall, not progress.
-  double zeroStep = 1.e-9;
-  /// What a stalled loop is nudged by to continue, mirroring what a navigator has to do. Every
-  /// use is counted (`unstickPushes`): it is a repair, and a repair that is not counted is a lie.
-  double unstickPush = 1.e-6;
-  int maxIter = 512;
-  /// Crossing-list match tolerance, cm. Set from the model's own declared tolerance where the
-  /// oracle supplies one, floored here.
-  double matchTolerance = 1.e-6;
-};
-
-// ------------------------------------------------------------------------------------------
-// Mode (a): the direct shape-API stepping loop
-// ------------------------------------------------------------------------------------------
-//
-// Contains() to establish the starting state, then alternating DistFromOutside/DistFromInside,
-// advancing the point along the ray, until the accumulated distance leaves the raster window.
-// `stepmax` is deliberately NOT used to bound the query: its semantics differ between shape
-// implementations (some return the crossing, some return stepmax, some return Big), and this loop
-// must be a measurement of the crossing list rather than of that convention. The window is
-// enforced on the returned crossing distance instead.
-
-std::vector<Crossing> stepWithShapeApi(const TGeoShape* shape, const Point3D& origin,
-                                       const Point3D& dir, double tMax, const StepConfig& cfg,
-                                       Robustness& stats)
-{
-  std::vector<Crossing> crossings;
-  double point[3] = {origin[0], origin[1], origin[2]};
-  bool inside = shape->Contains(point);
-  if (inside) {
-    ++stats.originInside;
-  }
-  double t = 0.;
-  int iter = 0;
-  for (; iter < cfg.maxIter; ++iter) {
-    const double step = inside ? shape->DistFromInside(point, dir.data(), 3, TGeoShape::Big(), nullptr)
-                               : shape->DistFromOutside(point, dir.data(), 3, TGeoShape::Big(), nullptr);
-    ++stats.steps;
-    if (!(step < TGeoShape::Big())) {
-      break; // no further crossing along this ray
-    }
-    const double tCross = t + step;
-    if (tCross > tMax) {
-      break; // beyond the raster window: not this ray's business
-    }
-    if (step <= cfg.zeroStep) {
-      ++stats.zeroLengthSteps;
-    }
-    crossings.push_back({tCross, inside ? -1 : +1});
-    inside = !inside;
-    double advance = step + cfg.push;
-    if (!(advance > 0.)) {
-      ++stats.nonAdvancingSteps;
-      advance = cfg.unstickPush;
-      ++stats.unstickPushes;
-    } else if (step <= cfg.zeroStep) {
-      advance = step + cfg.unstickPush;
-      ++stats.unstickPushes;
-    }
-    t += advance;
-    if (t > tMax) {
-      break;
-    }
-    for (int k = 0; k < 3; ++k) {
-      point[k] = origin[k] + t * dir[k];
-    }
-  }
-  if (iter >= cfg.maxIter) {
-    ++stats.iterationCapHits;
-  }
-  if (inside) {
-    ++stats.unterminated;
-  }
-  return crossings;
 }
 
 // ------------------------------------------------------------------------------------------
@@ -278,7 +159,7 @@ class NavigatorTransport
     double centre[3];
     for (int k = 0; k < 3; ++k) {
       centre[k] = 0.5 * (bboxMax[k] + bboxMin[k]);
-      half[k] = 0.75 * (bboxMax[k] - bboxMin[k]) + 1.;
+      half[k] = 0.5 * (bboxMax[k] - bboxMin[k]) + 0.05 * (bboxMax[k] - bboxMin[k]) + 0.1;
     }
     auto* worldBox = new TGeoBBox("xrayWorld", half[0], half[1], half[2], centre);
     mWorld = new TGeoVolume("TOP", worldBox, medium);
@@ -304,8 +185,10 @@ class NavigatorTransport
     std::vector<Crossing> crossings;
     mNavigator->InitTrack(origin.data(), dir.data());
     if (mNavigator->IsOutside()) {
-      // The raster window is inside the world by construction; if this fires the world is wrong.
-      ++stats.iterationCapHits;
+      // The world is built to contain every ray of the raster, so this cannot fire on a correct
+      // configuration -- and it gets its own counter precisely so that a wrong one is never
+      // mistaken for a geometry defect.
+      ++stats.originOutsideWorld;
       return crossings;
     }
     bool inPart = (mNavigator->GetCurrentVolume() == mPart);
@@ -360,165 +243,6 @@ class NavigatorTransport
 // Reading a crossing list, and comparing two of them
 // ------------------------------------------------------------------------------------------
 
-/// Book the per-ray consistency properties of one crossing list. Split out because both modes and
-/// the oracle's own answer go through it, so a defect in one cannot be excused by a different
-/// bookkeeping in another.
-void auditCrossingList(const std::vector<Crossing>& crossings, const TGeoShape* shape,
-                       const Point3D& origin, const Point3D& dir, double tMax,
-                       const StepConfig& cfg, Robustness& stats)
-{
-  ++stats.rays;
-  stats.crossings += static_cast<long long>(crossings.size());
-  if (!crossings.empty()) {
-    ++stats.raysWithCrossings;
-  }
-  if (crossings.size() % 2 != 0) {
-    ++stats.oddCrossingLists;
-  }
-  for (size_t i = 1; i < crossings.size(); ++i) {
-    if (crossings[i].kind == crossings[i - 1].kind) {
-      ++stats.nonAlternating;
-    }
-    if (std::fabs(crossings[i].t - crossings[i - 1].t) <= cfg.matchTolerance) {
-      ++stats.duplicateCrossings;
-    }
-  }
-  // The inside-segment length: the chord integral's contribution from this ray.
-  for (size_t i = 0; i + 1 < crossings.size(); i += 2) {
-    if (crossings[i].kind == +1 && crossings[i + 1].kind == -1) {
-      stats.insideLength += crossings[i + 1].t - crossings[i].t;
-    }
-  }
-  // The independent check. Both stepping modes produce an alternating list *by construction*, so
-  // `nonAlternating` above can never fire on them; asking the shape's own Contains() at the
-  // midpoint of every interval is the only way this instrument can contradict itself.
-  if (shape != nullptr) {
-    std::vector<double> edges;
-    edges.push_back(0.);
-    for (const auto& c : crossings) {
-      edges.push_back(c.t);
-    }
-    edges.push_back(tMax);
-    bool expectInside = false;
-    for (size_t i = 0; i + 1 < edges.size(); ++i) {
-      const double mid = 0.5 * (edges[i] + edges[i + 1]);
-      if (edges[i + 1] - edges[i] > 8. * cfg.matchTolerance) {
-        double p[3];
-        for (int k = 0; k < 3; ++k) {
-          p[k] = origin[k] + mid * dir[k];
-        }
-        if (shape->Contains(p) != expectInside) {
-          ++stats.parityMismatchIntervals;
-        }
-      }
-      expectInside = !expectInside;
-    }
-  }
-}
-
-/// How two crossing lists differ, with LOST and DISPLACED kept apart.
-///
-/// That separation is the whole localising value of comparing lists rather than aggregates. A
-/// crossing the candidate never found is a wall a track walks through; a crossing it found half a
-/// millimetre late is a step length that is slightly wrong. Both are defects, they have completely
-/// different consequences for transport, and a single "disagreements" count merges them.
-struct ListComparison {
-  long long rays = 0;
-  long long raysIdentical = 0;   ///< the whole ordered list matched, position and sense
-  long long raysStructural = 0;  ///< the lists have different lengths or senses
-  long long matched = 0;
-  long long displaced = 0;       ///< same position in both lists, more than `tolerance` apart
-  long long missing = 0;         ///< in the reference, absent from the candidate
-  long long extra = 0;           ///< in the candidate, absent from the reference
-  long long kindMismatch = 0;
-  double worstDeltaT = 0.;       ///< max |dt| over positionally matched crossings, cm
-  Point3D worstOrigin{};
-  Point3D worstDir{};
-  std::string worstReason;
-};
-
-json comparisonToJson(const ListComparison& c)
-{
-  return json{{"rays", c.rays},
-              {"raysIdentical", c.raysIdentical},
-              {"raysStructural", c.raysStructural},
-              {"matched", c.matched},
-              {"displacedCrossings", c.displaced},
-              {"missingCrossings", c.missing},
-              {"extraCrossings", c.extra},
-              {"kindMismatch", c.kindMismatch},
-              {"worstDeltaT", c.worstDeltaT},
-              {"worstOrigin", {c.worstOrigin[0], c.worstOrigin[1], c.worstOrigin[2]}},
-              {"worstDir", {c.worstDir[0], c.worstDir[1], c.worstDir[2]}},
-              {"worstReason", c.worstReason}};
-}
-
-void compareLists(const std::vector<Crossing>& candidate, const std::vector<Crossing>& reference,
-                  const Point3D& origin, const Point3D& dir, double tolerance, ListComparison& out)
-{
-  ++out.rays;
-  bool sameShape = candidate.size() == reference.size();
-  for (size_t i = 0; sameShape && i < candidate.size(); ++i) {
-    sameShape = candidate[i].kind == reference[i].kind;
-  }
-  if (sameShape) {
-    // Same number of crossings in the same order with the same senses: every difference is a
-    // position, so report the positions and never manufacture a missing/extra pair out of one
-    // displaced crossing.
-    bool identical = true;
-    for (size_t i = 0; i < candidate.size(); ++i) {
-      const double delta = std::fabs(candidate[i].t - reference[i].t);
-      ++out.matched;
-      if (delta > tolerance) {
-        ++out.displaced;
-        identical = false;
-      }
-      if (delta > out.worstDeltaT) {
-        out.worstDeltaT = delta;
-        out.worstOrigin = origin;
-        out.worstDir = dir;
-        out.worstReason = delta > tolerance ? "displaced crossing" : "deltaT";
-      }
-    }
-    out.raysIdentical += identical;
-    return;
-  }
-
-  // Structurally different: walk both lists and attribute each unpaired crossing to the side it
-  // came from. This is the branch that names a LOST wall.
-  ++out.raysStructural;
-  size_t i = 0;
-  size_t j = 0;
-  while (i < candidate.size() && j < reference.size()) {
-    const double delta = candidate[i].t - reference[j].t;
-    if (std::fabs(delta) <= tolerance) {
-      ++out.matched;
-      if (candidate[i].kind != reference[j].kind) {
-        ++out.kindMismatch;
-      }
-      if (std::fabs(delta) > out.worstDeltaT) {
-        out.worstDeltaT = std::fabs(delta);
-      }
-      ++i;
-      ++j;
-    } else if (delta < 0.) {
-      ++out.extra;
-      ++i;
-    } else {
-      ++out.missing;
-      ++j;
-    }
-  }
-  out.extra += static_cast<long long>(candidate.size() - i);
-  out.missing += static_cast<long long>(reference.size() - j);
-  if (out.worstReason.empty() || out.worstReason == "deltaT" ||
-      out.worstReason == "displaced crossing") {
-    out.worstOrigin = origin;
-    out.worstDir = dir;
-    out.worstReason = reference.size() > candidate.size() ? "MISSING crossing" : "EXTRA crossing";
-  }
-}
-
 // ------------------------------------------------------------------------------------------
 // The raster
 // ------------------------------------------------------------------------------------------
@@ -529,78 +253,6 @@ void compareLists(const std::vector<Crossing>& candidate, const std::vector<Cros
 // and their count grows as N rather than N^2), and a lattice deliberately produces the grazing,
 // edge-on and vertex-on rays a random direction essentially never generates -- which is where a
 // transport loop stalls.
-
-struct RayDef {
-  Point3D origin{};
-  Point3D dir{};
-  double tMax = 0.;
-  int axis = 0;
-};
-
-struct Raster {
-  Point3D windowMin{};
-  Point3D windowMax{};
-  int n = 0;
-  std::vector<int> axes;
-  std::vector<RayDef> rays;
-  std::array<double, 3> cellArea{}; ///< per axis; 0 where the axis is not used
-  double transverseMargin = 0.;
-  /// Fractional excess of the raster window's cross-section over the part's own bounding box,
-  /// per axis. This is not decoration: at finite N a window wider than the silhouette biases the
-  /// chord integral UPWARD by about this much, because the cells straddling the silhouette are
-  /// counted whole. It is reported next to every volume so the systematic is never invisible.
-  std::array<double, 3> windowExcess{};
-};
-
-/// The transverse window and the longitudinal start are deliberately DECOUPLED.
-///
-/// Transverse: the window is the part's own bounding box plus `transverseMargin`, and that margin
-/// wants to be as small as the bounding box's own reliability allows. Measured (see the scan in
-/// Stream_J_XRay.md): a 2 x 3 x 4 cm box rastered over a window inflated by 2 % comes out 5.1e-02
-/// too large at N = 32, while the same box over a window equal to its bounding box is EXACT at
-/// every N -- every cell centre is inside, so the quadrature is the volume. The window excess is a
-/// first-order systematic on the volume, not a second-order one.
-///
-/// Longitudinal: the ray must start strictly OUTSIDE the solid, or `Contains()` at the origin is a
-/// coin toss on the face and the whole transport starts in the wrong state. That margin is
-/// therefore generous and costs nothing -- it is along the ray, not across it.
-Raster buildRaster(const Point3D& bboxMin, const Point3D& bboxMax, int n,
-                   const std::vector<int>& axes, double transverseMargin)
-{
-  Raster raster;
-  raster.n = n;
-  raster.axes = axes;
-  raster.transverseMargin = transverseMargin;
-  for (int k = 0; k < 3; ++k) {
-    raster.windowMin[k] = bboxMin[k] - transverseMargin;
-    raster.windowMax[k] = bboxMax[k] + transverseMargin;
-  }
-  for (const int axis : axes) {
-    const int u = (axis + 1) % 3;
-    const int v = (axis + 2) % 3;
-    const double du = (raster.windowMax[u] - raster.windowMin[u]) / n;
-    const double dv = (raster.windowMax[v] - raster.windowMin[v]) / n;
-    raster.cellArea[axis] = du * dv;
-    const double bboxArea = (bboxMax[u] - bboxMin[u]) * (bboxMax[v] - bboxMin[v]);
-    raster.windowExcess[axis] =
-      bboxArea > 0. ? (du * dv * n * n) / bboxArea - 1. : 0.;
-    const double extent = bboxMax[axis] - bboxMin[axis];
-    const double lead = 0.05 * extent + 1.e-3; // strictly outside, in both directions
-    for (int i = 0; i < n; ++i) {
-      for (int j = 0; j < n; ++j) {
-        RayDef ray;
-        ray.axis = axis;
-        ray.origin[axis] = bboxMin[axis] - lead;
-        ray.origin[u] = raster.windowMin[u] + (i + 0.5) * du;
-        ray.origin[v] = raster.windowMin[v] + (j + 0.5) * dv;
-        ray.dir[axis] = 1.;
-        ray.tMax = extent + 2. * lead;
-        raster.rays.push_back(ray);
-      }
-    }
-  }
-  return raster;
-}
 
 // ------------------------------------------------------------------------------------------
 // Options, part collection, IO
@@ -619,6 +271,16 @@ struct Options {
   /// to cover the fact that a tessellated bounding box is INSCRIBED -- measured at 1e-4 to 1e-3 cm
   /// on these corpora -- so a zero margin would clip the true solid's silhouette.
   double margin = 1.e-3;
+  /// Rotate every beam off its coordinate axis by this many degrees. At 0 the beams are exactly
+  /// axis-aligned, which keeps a box's chord integral exact but samples a very special family of
+  /// ray/surface configurations; a non-zero tilt makes them generic. Measured consequence: the
+  /// x0.1 torus fixture is clean under an axis-aligned raster and is NOT clean under a tilted one
+  /// (Stream_J_XRay.md).
+  double tiltDegrees = 0.;
+  /// When > 0, replace the axis beams by this many Fibonacci-spiral directions. A parallel-beam
+  /// raster is direction-poor and a direction-dependent defect is invisible to it; see
+  /// buildFanBeams and Stream_J_XRay.md.
+  int fanBeams = 0;
   std::string dumpRays;
   std::string refCrossings;
   std::string jsonOut;
@@ -686,6 +348,13 @@ void printUsage(const char* argv0)
     "                    as sqrt of the sample count, and a lattice generates the edge-on and\n"
     "                    vertex-on rays that stall a transport loop.\n"
     "  --axes xyz        which beam axes to fire (subset of x,y,z; default all three)\n"
+    "  --beams N         fire N Fibonacci-spiral directions instead of the axis beams. A parallel\n"
+    "                    beam is DIRECTION-POOR: three axes are three directions however many rays\n"
+    "                    are fired, and a direction-dependent defect (the torus quartic) is\n"
+    "                    invisible to them. Use this whenever hunting one.\n"
+    "  --tilt DEG        rotate every beam off its axis by DEG (default 0). An axis-aligned beam\n"
+    "                    is a special family of configurations; a tilted one is generic. The known\n"
+    "                    torus quartic defect is invisible at tilt 0 and visible at tilt 12.\n"
     "  --dump-rays D     write D/xrays_<part>.json (the raster window and every ray) and exit\n"
     "  --ref-crossings D read D/crossings_<part>.json (scripts/geometry/xrayOracle.py) and score\n"
     "                    the crossing LISTS against it, per representation, per mode\n"
@@ -743,6 +412,10 @@ bool parseArgs(int argc, char** argv, Options& opt)
       opt.raster = std::stoi(next("--raster"));
     } else if (a == "--axes") {
       opt.axesSpec = next("--axes");
+    } else if (a == "--beams") {
+      opt.fanBeams = std::stoi(next("--beams"));
+    } else if (a == "--tilt") {
+      opt.tiltDegrees = std::stod(next("--tilt"));
     } else if (a == "--margin") {
       opt.margin = std::stod(next("--margin"));
     } else if (a == "--dump-rays") {
@@ -779,24 +452,6 @@ bool parseArgs(int argc, char** argv, Options& opt)
     throw std::runtime_error("either --db <dir>, --surfaces <file> or --self-test is required");
   }
   return true;
-}
-
-std::vector<int> parseAxes(const std::string& spec)
-{
-  std::vector<int> axes;
-  for (const char c : spec) {
-    if (c == 'x' || c == 'X') {
-      axes.push_back(0);
-    } else if (c == 'y' || c == 'Y') {
-      axes.push_back(1);
-    } else if (c == 'z' || c == 'Z') {
-      axes.push_back(2);
-    }
-  }
-  if (axes.empty()) {
-    throw std::runtime_error("no beam axis selected");
-  }
-  return axes;
 }
 
 std::vector<Part> collectParts(const Options& opt)
@@ -851,17 +506,21 @@ void writeRays(const std::string& dir, const std::string& partId, const Raster& 
   doc["windowMin"] = {raster.windowMin[0], raster.windowMin[1], raster.windowMin[2]};
   doc["windowMax"] = {raster.windowMax[0], raster.windowMax[1], raster.windowMax[2]};
   doc["raster"] = raster.n;
-  doc["axes"] = raster.axes;
-  doc["cellArea"] = {raster.cellArea[0], raster.cellArea[1], raster.cellArea[2]};
+  json beams = json::array();
+  for (const auto& beam : raster.beams) {
+    beams.push_back({{"label", beam.label}, {"dir", {beam.dir[0], beam.dir[1], beam.dir[2]}}});
+  }
+  doc["beams"] = beams;
+  doc["cellArea"] = raster.cellArea;
   doc["transverseMargin"] = raster.transverseMargin;
-  doc["windowExcess"] = {raster.windowExcess[0], raster.windowExcess[1], raster.windowExcess[2]};
+  doc["windowExcess"] = raster.windowExcess;
   doc["bboxSource"] = bboxSource;
   json rays = json::array();
   for (const auto& r : raster.rays) {
     rays.push_back({{"o", {r.origin[0], r.origin[1], r.origin[2]}},
                     {"d", {r.dir[0], r.dir[1], r.dir[2]}},
                     {"tmax", r.tMax},
-                    {"axis", r.axis}});
+                    {"beam", r.beam}});
   }
   doc["rays"] = std::move(rays);
   const std::string path = dir + "/xrays_" + sanitizePartId(partId) + ".json";
@@ -909,19 +568,19 @@ OracleCrossings loadOracleCrossings(const std::string& dir, const std::string& p
   out.raster.transverseMargin = doc.value("transverseMargin", 0.);
   const auto& window0 = doc.at("windowMin");
   const auto& window1 = doc.at("windowMax");
-  const auto& cell = doc.at("cellArea");
   for (int k = 0; k < 3; ++k) {
     out.raster.windowMin[k] = window0[k].get<double>();
     out.raster.windowMax[k] = window1[k].get<double>();
-    out.raster.cellArea[k] = cell[k].get<double>();
   }
-  if (doc.contains("windowExcess")) {
+  out.raster.cellArea = doc.at("cellArea").get<std::vector<double>>();
+  out.raster.windowExcess = doc.value("windowExcess", std::vector<double>(out.raster.cellArea.size(), 0.));
+  for (const auto& b : doc.at("beams")) {
+    Beam beam;
+    beam.label = b.at("label").get<std::string>();
     for (int k = 0; k < 3; ++k) {
-      out.raster.windowExcess[k] = doc.at("windowExcess")[k].get<double>();
+      beam.dir[k] = b.at("dir")[k].get<double>();
     }
-  }
-  for (const auto& axis : doc.at("axes")) {
-    out.raster.axes.push_back(axis.get<int>());
+    out.raster.beams.push_back(std::move(beam));
   }
   out.raster.rays.reserve(doc.at("rays").size());
   for (const auto& r : doc.at("rays")) {
@@ -931,7 +590,7 @@ OracleCrossings loadOracleCrossings(const std::string& dir, const std::string& p
       ray.dir[k] = r.at("d")[k].get<double>();
     }
     ray.tMax = r.at("tmax").get<double>();
-    ray.axis = r.at("axis").get<int>();
+    ray.beam = r.at("beam").get<int>();
     out.raster.rays.push_back(ray);
     std::vector<Crossing> crossings;
     const auto& ts = r.at("t");
@@ -946,19 +605,6 @@ OracleCrossings loadOracleCrossings(const std::string& dir, const std::string& p
     out.ambiguous.push_back(r.value("amb", false));
   }
   return out;
-}
-
-double chordVolume(const Raster& raster, const std::vector<double>& insideLengthPerAxis)
-{
-  // Each beam axis is an independent estimate of the same volume; the reported number is their
-  // mean, and the per-axis spread is reported alongside because it is the honest error bar.
-  double sum = 0.;
-  int used = 0;
-  for (const int axis : raster.axes) {
-    sum += insideLengthPerAxis[axis] * raster.cellArea[axis];
-    ++used;
-  }
-  return used > 0 ? sum / used : 0.;
 }
 
 /// The tightest CONTAINING bounding box available for a part, and where it came from.
@@ -1082,14 +728,14 @@ int selfTest()
     const Point3D bboxMin{-1., -1.5, -2.};
     const Point3D bboxMax{1., 1.5, 2.};
     for (const int n : {7, 32}) {
-      Raster raster = buildRaster(bboxMin, bboxMax, n, {0, 1, 2}, 0.);
+      Raster raster = buildRaster(bboxMin, bboxMax, n, buildBeams("xyz", 0.), 0.);
       Robustness s;
       std::vector<double> byAxis(3, 0.);
       for (const auto& ray : raster.rays) {
         const double before = s.insideLength;
         auto crossings = stepWithShapeApi(&box, ray.origin, ray.dir, ray.tMax, cfg, s);
         auditCrossingList(crossings, nullptr, ray.origin, ray.dir, ray.tMax, cfg, s);
-        byAxis[ray.axis] += s.insideLength - before;
+        byAxis[ray.beam] += s.insideLength - before;
       }
       const double volume = chordVolume(raster, byAxis);
       check(("box 2 x 3 x 4 cm: chord integral is EXACT at N=" + std::to_string(n)).c_str(),
@@ -1109,13 +755,13 @@ int selfTest()
     const double exact = 4. / 3. * 3.14159265358979323846;
     double worst = 0.;
     for (const int n : {24, 48, 96, 192}) {
-      Raster raster = buildRaster(bboxMin, bboxMax, n, {2}, 0.);
+      Raster raster = buildRaster(bboxMin, bboxMax, n, buildBeams("z", 0.), 0.);
       Robustness s;
       for (const auto& ray : raster.rays) {
         auto crossings = stepWithShapeApi(&sphere, ray.origin, ray.dir, ray.tMax, cfg, s);
         auditCrossingList(crossings, nullptr, ray.origin, ray.dir, ray.tMax, cfg, s);
       }
-      const double volume = s.insideLength * raster.cellArea[2];
+      const double volume = s.insideLength * raster.cellArea[0];
       const double rel = std::fabs(volume - exact) / exact;
       worst = std::max(worst, rel);
       std::printf("        sphere r=1: raster %3d x %3d -> V = %.8f cm^3, exact %.8f, "
@@ -1214,10 +860,14 @@ int main(int argc, char** argv)
     return selfTest();
   }
 
-  std::vector<int> axes;
+  std::vector<Beam> beams;
   std::vector<Part> parts;
   try {
-    axes = parseAxes(opt.axesSpec);
+    beams = opt.fanBeams > 0 ? buildFanBeams(opt.fanBeams)
+                             : buildBeams(opt.axesSpec, opt.tiltDegrees);
+    if (beams.empty()) {
+      throw std::runtime_error("no beam selected (--axes)");
+    }
     parts = collectParts(opt);
   } catch (const std::exception& e) {
     std::cerr << "error: " << e.what() << "\n";
@@ -1267,11 +917,11 @@ int main(int argc, char** argv)
         std::printf("  skip: no representation could supply a bounding box\n");
         continue;
       }
-      raster = buildRaster(lo, hi, opt.raster, axes, opt.margin);
-      std::printf("  raster: %d x %d x %zu axes = %zu rays; window from the '%s' bounding box "
-                  "+ %.3g cm, cross-section excess %.3g\n",
-                  raster.n, raster.n, raster.axes.size(), raster.rays.size(), bboxSource.c_str(),
-                  raster.transverseMargin, raster.windowExcess[raster.axes.front()]);
+      raster = buildRaster(lo, hi, opt.raster, beams, opt.margin);
+      std::printf("  raster: %d x %d x %zu beam(s) = %zu rays (tilt %.3g deg); window from the "
+                  "'%s' bounding box + %.3g cm, cross-section excess %.3g\n",
+                  raster.n, raster.n, raster.beams.size(), raster.rays.size(), opt.tiltDegrees,
+                  bboxSource.c_str(), raster.transverseMargin, raster.windowExcess.front());
     }
 
     // `--dump-rays` writes the raster and stops: the oracle answers it next, and the scoring pass
@@ -1368,7 +1018,7 @@ int main(int argc, char** argv)
 
       // ---- mode (a): the shape API ------------------------------------------------------
       Robustness statsA;
-      std::vector<double> insideByAxisA(3, 0.);
+      std::vector<double> insideByAxisA(raster.beams.size(), 0.);
       std::vector<std::vector<Crossing>> listsA(raster.rays.size());
       ListComparison vsOracleA;
       {
@@ -1378,15 +1028,15 @@ int main(int argc, char** argv)
           const double before = statsA.insideLength;
           listsA[i] = stepWithShapeApi(shape, ray.origin, ray.dir, ray.tMax, opt.step, statsA);
           auditCrossingList(listsA[i], shape, ray.origin, ray.dir, ray.tMax, opt.step, statsA);
-          insideByAxisA[ray.axis] += statsA.insideLength - before;
+          insideByAxisA[ray.beam] += statsA.insideLength - before;
         }
         statsA.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
       }
       repJson["modeA"] = robustnessToJson(statsA);
       repJson["modeA"]["volumeChordCm3"] = chordVolume(raster, insideByAxisA);
       json perAxisA = json::object();
-      for (const int axis : raster.axes) {
-        perAxisA[std::string(1, "xyz"[axis])] = insideByAxisA[axis] * raster.cellArea[axis];
+      for (size_t b = 0; b < raster.beams.size(); ++b) {
+        perAxisA[raster.beams[b].label] = insideByAxisA[b] * raster.cellArea[b];
       }
       repJson["modeA"]["volumeChordPerAxisCm3"] = perAxisA;
       if (oracle.has) {
@@ -1423,19 +1073,23 @@ int main(int argc, char** argv)
       // ---- mode (b): the real navigator -------------------------------------------------
       if (!opt.skipNavigator && box != nullptr) {
         Robustness statsB;
-        std::vector<double> insideByAxisB(3, 0.);
+        std::vector<double> insideByAxisB(raster.beams.size(), 0.);
         ListComparison vsOracleB;
         ListComparison aVsB;
-        const Point3D worldMin{box->GetOrigin()[0] - box->GetDX(), box->GetOrigin()[1] - box->GetDY(),
-                               box->GetOrigin()[2] - box->GetDZ()};
-        const Point3D worldMax{box->GetOrigin()[0] + box->GetDX(), box->GetOrigin()[1] + box->GetDY(),
-                               box->GetOrigin()[2] + box->GetDZ()};
-        // The world must contain the raster window, not just the part's own box.
-        Point3D wMin = worldMin;
-        Point3D wMax = worldMax;
-        for (int k = 0; k < 3; ++k) {
-          wMin[k] = std::min(wMin[k], raster.windowMin[k]);
-          wMax[k] = std::max(wMax[k], raster.windowMax[k]);
+        // The world must contain the part AND every ray of the raster, start to finish. Deriving
+        // it from the axis-aligned window is not enough once the beams are tilted: a rotated
+        // lattice reaches outside the part's own box, and the first version of this loop reported
+        // 5358 lost crossings at a 27 degree tilt that were entirely its own undersized world.
+        Point3D wMin{box->GetOrigin()[0] - box->GetDX(), box->GetOrigin()[1] - box->GetDY(),
+                     box->GetOrigin()[2] - box->GetDZ()};
+        Point3D wMax{box->GetOrigin()[0] + box->GetDX(), box->GetOrigin()[1] + box->GetDY(),
+                     box->GetOrigin()[2] + box->GetDZ()};
+        for (const auto& ray : raster.rays) {
+          for (int k = 0; k < 3; ++k) {
+            const double end = ray.origin[k] + ray.tMax * ray.dir[k];
+            wMin[k] = std::min({wMin[k], ray.origin[k], end});
+            wMax[k] = std::max({wMax[k], ray.origin[k], end});
+          }
         }
         NavigatorTransport transport(manager, shape, wMin, wMax);
         const auto t0 = std::chrono::steady_clock::now();
@@ -1443,8 +1097,11 @@ int main(int argc, char** argv)
           const auto& ray = raster.rays[i];
           const double before = statsB.insideLength;
           auto listB = transport.transport(ray.origin, ray.dir, ray.tMax, opt.step, statsB);
-          auditCrossingList(listB, nullptr, ray.origin, ray.dir, ray.tMax, opt.step, statsB);
-          insideByAxisB[ray.axis] += statsB.insideLength - before;
+          // The shape is handed in here as well, deliberately: in mode (b) the parity audit
+          // compares the NAVIGATOR's crossing list against the SHAPE's own Contains(), which is a
+          // genuine cross-check between the two and not a tautology.
+          auditCrossingList(listB, shape, ray.origin, ray.dir, ray.tMax, opt.step, statsB);
+          insideByAxisB[ray.beam] += statsB.insideLength - before;
           if (oracle.has && i < oracle.perRay.size() && !oracle.ambiguous[i]) {
             compareLists(listB, oracle.perRay[i], ray.origin, ray.dir, opt.step.matchTolerance,
                          vsOracleB);
@@ -1459,11 +1116,11 @@ int main(int argc, char** argv)
         }
         repJson["modeAvsB"] = comparisonToJson(aVsB);
         std::printf("    (b) navigator: %lld rays, %lld crossings, %.4f s | zero=%lld nonAdv=%lld "
-                    "cap=%lld unterm=%lld odd=%lld dup=%lld noTransition=%lld\n",
+                    "cap=%lld unterm=%lld odd=%lld dup=%lld noTransition=%lld outsideWorld=%lld\n",
                     statsB.rays, statsB.crossings, statsB.seconds, statsB.zeroLengthSteps,
                     statsB.nonAdvancingSteps, statsB.iterationCapHits, statsB.unterminated,
                     statsB.oddCrossingLists, statsB.duplicateCrossings,
-                    statsB.boundaryWithoutTransition);
+                    statsB.boundaryWithoutTransition, statsB.originOutsideWorld);
         if (oracle.has) {
           std::printf("        vs OCCT : %lld/%lld rays identical, LOST=%lld extra=%lld "
                       "displaced=%lld worst dt=%.3g cm\n",
@@ -1484,12 +1141,10 @@ int main(int argc, char** argv)
     }
 
     partJson["raster"] = {{"n", raster.n},
-                          {"axes", raster.axes},
                           {"rays", raster.rays.size()},
-                          {"cellArea", {raster.cellArea[0], raster.cellArea[1], raster.cellArea[2]}},
+                          {"cellArea", raster.cellArea},
                           {"transverseMargin", raster.transverseMargin},
-                          {"windowExcess", {raster.windowExcess[0], raster.windowExcess[1],
-                                            raster.windowExcess[2]}},
+                          {"windowExcess", raster.windowExcess},
                           {"windowMin", {raster.windowMin[0], raster.windowMin[1], raster.windowMin[2]}},
                           {"windowMax", {raster.windowMax[0], raster.windowMax[1], raster.windowMax[2]}}};
     if (oracle.has) {

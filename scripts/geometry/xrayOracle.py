@@ -56,7 +56,7 @@ from OCC.Core.gp import gp_Dir, gp_Lin, gp_Pnt
 from occtOracle import load_solid, shape_tolerance, volume_of
 
 # Must match kXRayFormatVersion in runXRayBenchmark.cxx.
-XRAY_FORMAT_VERSION = 1
+XRAY_FORMAT_VERSION = 2
 
 # A ray parameter this close to the origin is the origin itself, not a crossing. Same constant the
 # kernel and occtOracle.py use.
@@ -150,7 +150,7 @@ def answer(brep_path: Path, ray_doc: dict, verbose: bool) -> dict:
     oracle = CrossingOracle(solid, tolerance)
 
     rays_out = []
-    inside_by_axis = {}
+    inside_by_beam = {}
     ambiguous_rays = 0
     total_crossings = 0
     started = time.time()
@@ -160,23 +160,26 @@ def answer(brep_path: Path, ray_doc: dict, verbose: bool) -> dict:
         norm = math.sqrt(sum(c * c for c in direction))
         unit = [c / norm for c in direction]
         ts, kinds, inside, ambiguous, origin_state = oracle.crossings(origin, unit, ray["tmax"])
-        axis = ray["axis"]
-        inside_by_axis[axis] = inside_by_axis.get(axis, 0.0) + inside
+        beam = ray["beam"]
+        inside_by_beam[beam] = inside_by_beam.get(beam, 0.0) + inside
         ambiguous_rays += bool(ambiguous)
         total_crossings += len(ts)
-        rays_out.append({"o": origin, "d": direction, "tmax": ray["tmax"], "axis": axis,
+        rays_out.append({"o": origin, "d": direction, "tmax": ray["tmax"], "beam": beam,
                          "t": ts, "k": kinds, "L": inside, "amb": bool(ambiguous),
                          "s": origin_state})
         if verbose and (index + 1) % 2000 == 0:
             print(f"    {index + 1}/{len(ray_doc['rays'])} rays "
                   f"({time.time() - started:.1f} s)", flush=True)
 
+    # Each beam is an independent estimate of the same volume; the reported number is their mean
+    # and the per-beam spread is the honest error bar.
     cell_area = ray_doc["cellArea"]
-    per_axis = {}
+    labels = [b["label"] for b in ray_doc.get("beams", [])]
+    per_beam = {}
     volumes = []
-    for axis, length in sorted(inside_by_axis.items()):
-        volume = length * cell_area[axis]
-        per_axis["xyz"[axis]] = volume
+    for beam, length in sorted(inside_by_beam.items()):
+        volume = length * cell_area[beam]
+        per_beam[labels[beam] if beam < len(labels) else str(beam)] = volume
         volumes.append(volume)
     chord_volume = sum(volumes) / len(volumes) if volumes else 0.0
 
@@ -186,7 +189,7 @@ def answer(brep_path: Path, ray_doc: dict, verbose: bool) -> dict:
     document["capacity"] = volume_of(solid)
     document["valid"] = bool(BRepCheck_Analyzer(solid).IsValid())
     document["volumeChord"] = chord_volume
-    document["volumeChordPerAxis"] = per_axis
+    document["volumeChordPerBeam"] = per_beam
     document["ambiguousRays"] = ambiguous_rays
     document["totalCrossings"] = total_crossings
     document["oracleSeconds"] = time.time() - started
