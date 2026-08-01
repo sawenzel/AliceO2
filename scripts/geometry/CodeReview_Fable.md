@@ -1009,3 +1009,70 @@ that question is the closure check's, so the closure check is where the next wor
    `--json` and three documents, and it has been read as a face-to-face separation in every one.
 4. **Then re-scope Phase 2**, on evidence that survives.
 
+## 20. Follow-up items 1-3 executed (2026-08-01) — the rim was never emitted, and it was K4
+
+The hand-over asked for three things in order. All three are done; full measurements in
+`TolerancePolicy.md` §13.
+
+**1. The rims are exposed.** `GetRimReports()` returns one record per trim loop — owning face,
+which loop of that face, chord count, length, unmatched length, the isolation of its loneliest
+chord and where that chord is, and the state that rim alone implies. That state is
+`NavigationReliability`, so `GetNavigationReliability()` is exactly the worst state present; the
+two are accumulated independently, so the identity is a self-check and a test pins it. The harness
+prints the offending loops by default and all of them under `--rims`, and writes them to `--json`.
+
+**2. The pairing read out in one command, and both hypotheses named the wrong rim.** §12.2 had
+inferred the unmatched rim was the boom tube's end trim. It is the *hole in the fat tube's wall*
+(face 2, loop 2, 709 chords), and its partner — the boom cylinder's junction trim — **is not
+emitted at all**: face 0 produces a single 24-chord rim, its end circle.
+
+**The cause is K4, and this is its first reproducer.** The junction curve is symmetric about its
+own parameter midpoint, so it meets its chord there to 2e-7 while straying 0.16 away at the quarter
+points. `bsplineSampleRecursive` probed the midpoint and nothing else, declared the 179-pole spline
+flat at the first step, and replaced it with a straight line. The same curve on the neighbouring
+face survives only because *there* it is closed, which takes the degenerate-chord branch instead.
+
+This was never only a diagnostic: `bsplineSamples()` is the polyline every point-in-wire query
+uses, so the boom cylinder's **trim itself** was a straight line in (phi, h). Flatness is now judged
+at three interior parameters instead of one, and an interval containing an interior knot is never
+called flat — a B-spline is one polynomial piece only within a span. Each half has its own test.
+
+**The fix then exposed the matching band.** With both faces resolving the seam, the two rims still
+did not pair, and two closed fixtures went open — with every numeric column bit-identical. Two
+polylines of one shared curve differ by the chord sagitta whatever the geometry does: 6.7e-6 cm
+there, against a declared tolerance of 1e-8. `rimChordResolution` had estimated that since it was
+written and was only ever printed; it is now kept per chord and widens the band a chord is matched
+in. The non-manifold test deliberately stays on the declared tolerance alone — widening it too made
+four clean parts non-manifold, because a corner is where a third face legitimately comes within a
+chord's length.
+
+**3. `maxGap` is `maxRimIsolation`,** everywhere it appeared, documented as what it is: how alone
+the loneliest chord is, not the width of a seam. The rename is inert — with that one key
+substituted the gate reports are identical.
+
+**Result.** Gate: fixtures 8/9, Bagger 5/12 → **6/12**. `ctest` **61 cases**, from 59. And the
+number that matters more than the totals: **every oracle disagreement outside tolerance on both
+corpora, on every column, is now zero — 35 → 0** — including on the seven parts that still fail.
+Rim isolation on the worst failing part fell from 0.747 cm to 6.9e-05 cm. The §4.2 sweep was re-run
+because the criterion changed: **0 direction-split points in 154000** over the 14 `Reliable` parts.
+
+**Next, and Phase 2 can now be scoped on evidence.**
+
+1. **The residual open boundary is 0.3-0.9 cm per part, and the band is what is too tight.**
+   Sweeping `kBSplineFlatness` 1e-5 → 1e-8 on `BoomCylinderInner` drops the rim isolation from
+   4.8e-05 to 2.6e-06 cm — so the two faces' disagreement really is mostly chording — but *raises*
+   the open length from 0.325 to 0.984 cm, because the match band is built from the sagitta and
+   shrinks faster than the disagreement does. The honest reading is that the per-chord sagitta
+   under-estimates the polyline-to-polyline disagreement by about an order of magnitude: it bounds
+   each polyline against its *own* curve and says nothing about the other face's. Tightening the
+   flattening is not the lever and neither is a fudge factor on the band. What removes the term is
+   Phase 2 (adjacency-based exact trims, §4.2) — two faces referencing the *same* neighbour surface
+   agree identically. Phase 2 now has its evidence, and an acceptance test beyond
+   `RayHit::onTrimBoundary`: on such a model the closure check should pass at the *declared*
+   tolerance with no sagitta widening at all.
+2. **The six cylinders' capacity error is not the open surface set.** It is unchanged to the last
+   bit by everything above, while those parts' navigation now agrees with OpenCascade exactly and
+   their faces are known to meet to 5e-05 cm. The contour integral never touches the flattened
+   polyline, so nothing here could have moved it. It is the only numeric column still failing
+   anywhere, and it is unexplained.
+3. **K6 still has no reproducer, and K4 is retired** — it had none either, until this session.
