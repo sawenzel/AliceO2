@@ -1024,3 +1024,87 @@ is Phase 2.
 
 ---
 
+## 14. `kQuarticEpsilon` — the register entry for a criterion that is not a length
+
+Added 2026-08-02 by `Stream_M_Quartic.md`, which has the measurements. This section is the entry in
+the register: what the constant governs, and why it has the form it has.
+
+### 14.1 The one case in this file where no length could ever have been right
+
+Every other constant in §2.3 answers "how far apart may two things be and still count as the same
+place?", and the repair for each was to make sure the quantity being compared really is a length in
+centimetres — that is what `parametricMetric` is for. `solveQuarticReal` is different in kind. Its
+three branch decisions ask **"did this cancellation land on zero?"** about `termQ`, the resolvent
+and the quartic's derivative, which for a root variable in cm carry **cm³, cm² and cm³**. They were
+all compared against `kTolerance` = 1e-9 cm.
+
+That is not a badly chosen tolerance, it is a category error, and it had the consequences a category
+error has: the decision depended on the size of the geometry, so the solver returned no roots at all
+for a ray that transversally crosses a torus (a missing wall), and routed asymmetric quartics into a
+branch that assumes symmetry (confidently wrong roots). The trigger is the ratio of the ray's lever
+arm to the feature it hits, so it fires on unscaled production geometry, not only on small parts.
+
+### 14.2 The criterion: normalise, then a dimensionless epsilon
+
+```cpp
+inline constexpr double kQuarticEpsilon = 32. * 2.220446049250313e-16;
+```
+
+The constant is only half of it, and the smaller half. `solveQuarticReal` first substitutes
+`x = scale · y`, where `scale` is the Cauchy root bound `max(|b|, |c|^½, |d|^⅓, |e|^¼)` of the monic
+quartic **rounded up to a power of two**. That leaves every coefficient in [−1, 1], so `p`, `q`,
+`r`, the resolvent and the derivative are dimensionless O(1) numbers and **1 is the unit of the
+problem**. A threshold in units of the machine epsilon is then a statement about double arithmetic
+rather than about centimetres, and it means the same thing at every scale — which is exactly the
+property §1.1 says the old constants lacked and `Stream_E_Scale.md` §3.3 measured them lacking.
+
+`32` is a running-error allowance, not a fitted value: each guarded quantity is a sum of three or
+four products of coefficients now bounded by 1, so its evaluation error is a small multiple of
+`DBL_EPSILON` times the sum of the term magnitudes (at most 1.625 for `q`), and 32 covers that
+multiple with room. Nothing in the corpus was tuned against it; the constant was chosen from the
+error analysis and the corpora were then measured, not the other way round.
+
+**Rounding the bound to a power of two is the load-bearing part.** Scaling by 2^k is exact in binary
+floating point, and so are the derived scalings (`sqrt` of an even power, `cbrt` of a multiple of
+three). So every intermediate quantity is exactly the old one with its exponent shifted, every
+rounding is the same rounding, and scaling the roots back is exact. **The normalisation cannot
+change an answer; only the guards can.** That converts "is this change inert?" from an argument into
+a structural fact, which the gate then confirms: `gate.json` moved 0 leaf fields of 15140 on Bagger
+and 9 of 8487 on the fixtures, all nine on the one toroidal part, all in the mesh-reference column,
+all in the last two or three digits, with no count, classification or verdict touched.
+
+A plain (unrounded) Cauchy bound does **not** have this property, and it was measured costing 1.7e-11
+relative on a true biquadratic in an intermediate version of this work.
+
+### 14.3 Two decisions that needed no constant at all, and are better for it
+
+Not every guard should become a relative threshold. Two of the four became exact structural
+conditions instead, and those are strictly preferable — a threshold that does not exist cannot be
+wrong at any scale.
+
+- **The Newton polishing step.** `|derivative| > kTolerance` becomes "take the step if it is finite
+  and no longer than 2", which is the Cauchy bound on the normalised roots. A zero derivative makes
+  the step non-finite and is rejected by the same test, so the old guard's only real purpose is kept
+  — and the old form additionally allowed an arbitrarily long step from a merely *small* derivative,
+  which this does not.
+- **`solveDepressedCubic`'s degenerate opener.** `|P| ≤ kTolerance && |Q| ≤ kTolerance -> push 0`
+  existed only to keep `P = Q = 0` out of the `0/0` in the trigonometric branch. The branches now
+  split on `P >= 0` (which forces the discriminant non-negative, so Cardano always applies) versus
+  `P < 0` (which makes the trigonometric magnitude strictly positive). No gap, no threshold, and the
+  degenerate case returns the same 0 through Cardano.
+
+### 14.4 The rule this generalises to, for the next constant in this file
+
+> A tolerance may only be compared against a quantity of the same dimension. Where the quantity is
+> not a length — a discriminant, a resolvent, a derivative, a cancellation residual — the fix is to
+> **normalise the problem so the quantity is dimensionless**, not to invent a constant with the
+> right units. Where the decision can be made by an exact structural condition instead, make it that
+> way and delete the constant.
+
+The next candidate in this file is named by the same measurement. `kBSplineFlatness` (§2.4, 1e-5) is
+an absolute parametric flatness, so at ×0.1 the trim sliver it licenses is ten times larger relative
+to the part; the ×0.1 direction-independence sweep reports 29 direction-split points on
+`cyl_cross_cyl`, `cyl_inter_cyl` and `tube_window` that this work left exactly where it found them.
+And `sameIntersection`'s `|t1 − t2| ≤ 1e-7 · max(1, |t1|, |t2|)` stops being relative below 1 cm for
+the same reason `Stream_E_Scale.md` §5.3 gave when it scoped this fix, and has still never been
+implicated by a measurement — which is a reason to keep looking, not to close it.
