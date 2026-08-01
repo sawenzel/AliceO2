@@ -53,6 +53,7 @@ import json
 import math
 import re
 import struct
+import sys
 from dataclasses import dataclass
 from pathlib import Path as _Path
 from typing import Dict, List, Optional, Pattern, Tuple
@@ -353,6 +354,20 @@ def volume_cm3_of_shape(shape, scale_to_cm: float) -> float:
 # -------------------------------
 # Naming helpers
 # -------------------------------
+
+def import_csg_hook():
+    """The converter's one CSG integration point: `scripts/geometry/csg/hook.py`.
+
+    Imported lazily and by path, so that the converter behaves exactly as before when `--csg` is
+    off, and so that a missing or broken `csg` package can never affect a conversion that did not
+    ask for it. See csg/hook.py for what the hook does and Stream_H_CSGEmitter.md for why.
+    """
+    here = str(_Path(__file__).resolve().parent)
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    from csg import hook
+    return hook
+
 
 def sanitize_cpp_name(s: str) -> str:
     safe = re.sub(r"[^0-9a-zA-Z]", "_", s)
@@ -2434,7 +2449,7 @@ def trsf_to_tgeo(trsf: gp_Trsf, name: str, scale_to_cm: float) -> str:
 """
 
 
-def emit_cpp_prelude(exact_surfaces: bool = False) -> str:
+def emit_cpp_prelude(exact_surfaces: bool = False, csg_shapes: bool = False) -> str:
     prelude = """#include <TGeoManager.h>
 #include <TFile.h>
 #include <fstream>
@@ -2463,6 +2478,8 @@ static void LoadFacets(const std::string& file, TGeoTessellated* solid, bool che
   solid->CloseShape(check, true);
 }
 """
+    if csg_shapes:
+        prelude += import_csg_hook().CPP_LOADER
     if not exact_surfaces:
         return prelude
 
@@ -3042,6 +3059,8 @@ def emit_root_macro(
     exact_surfaces: str = "off",
     recognize_surfaces: str = "exact",
     dump_brep: bool = False,
+    csg: str = "off",
+    csg_report: Optional[str] = None,
 ):
     # surface_files: def_lid -> absolute path of an exact-surface sidecar (surfaces_*.bin).
     # Volumes listed here are emitted as O2BVHSurfaceSolid via emit_surface_solid_cpp;
@@ -3160,6 +3179,29 @@ def emit_root_macro(
                     lines.append(f"  {name} [{lid}]: {'; '.join(uniq)}")
                 raise ValueError("\n".join(lines))
 
+    # --- CSG recognition (--csg auto|required) -- the one CSG hook ------------------------
+    #
+    # The cascade the project asked for is CSG -> exact surfaces -> tessellated, and this is
+    # where its first tier is decided. Recognition proposes a placed primitive (or a union of
+    # two) from the leaf solid's carrier structure and OCCT's symmetric-difference volume then
+    # accepts or rejects it exactly; only an accepted part reaches `csg_files` and only a part
+    # in `csg_files` is emitted as a native ROOT shape below. The other representations are
+    # still written -- the gate scores all three side by side and this must not remove parts
+    # from that comparison. See scripts/geometry/csg/hook.py and Stream_H_CSGEmitter.md.
+    csg_mode = (csg or "off").lower()
+    if csg_mode not in ("off", "auto", "required"):
+        raise ValueError(f"csg must be off|auto|required, got {csg!r}")
+    csg_files: Dict[str, str] = {}
+    if csg_mode != "off":
+        hook = import_csg_hook()
+        csg_files, csg_records = hook.recognise_and_emit(
+            def_shapes, def_names, scale_to_cm, out_folder, sanitize_filename, mode=csg_mode)
+        report_path = _Path(csg_report) if csg_report else (out_folder / "csg_report.json")
+        report = hook.write_report(csg_records, report_path, set(surface_files or {}),
+                                   set(logical_volumes))
+        hook.print_tier_table(report)
+        print(f"Wrote CSG report: {report_path}")
+
     # --- Geant4 NIST material DB (optional but recommended) ---
     g4db: Optional[Dict[str, dict]] = None
     if g4_nist_json:
@@ -3240,7 +3282,7 @@ def emit_root_macro(
               f"(macro requires the ALICE O2 environment)")
 
     cpp: List[str] = []
-    cpp.append(emit_cpp_prelude(exact_surfaces=bool(surface_files)))
+    cpp.append(emit_cpp_prelude(exact_surfaces=bool(surface_files), csg_shapes=bool(csg_files)))
 
     cpp.append("TGeoVolume* build(bool check=true) {")
     cpp.append('  if (!gGeoManager) { throw std::runtime_error("gGeoManager is null. Call build_and_export() or create a TGeoManager first."); }')
@@ -3255,7 +3297,12 @@ def emit_root_macro(
             mat_name = normalize_material_name(lid_to_bom[lid].material)
             med = medium_var_map.get(mat_name, "med_Default")
 
-        if lid in surface_files:
+        # The cascade, in one place: CSG, else exact surfaces, else the tessellated fallback.
+        if lid in csg_files:
+            shape_path = str(_Path(csg_files[lid]).expanduser().resolve()).replace("\\", "\\\\")
+            cpp.append(import_csg_hook().emit_csg_shape_cpp(
+                lid, def_names.get(lid, ""), shape_path, med, sanitize_cpp_name))
+        elif lid in surface_files:
             sidecar = str(_Path(surface_files[lid]).expanduser().resolve()).replace("\\", "\\\\")
             cpp.append(emit_surface_solid_cpp(lid, def_names.get(lid, ""), sidecar, med))
         else:
@@ -3365,6 +3412,8 @@ def main():
     ap.add_argument("--surface-report", default=None, metavar="PATH", help="Write a JSON report classifying each face by analytic surface type and each logical volume by exact O2BVHSurfaceSolid conversion eligibility. Does not change the generated geometry output.")
     ap.add_argument("--exact-surfaces", default="off", choices=["off", "auto", "required"], help="Emit exact O2BVHSurfaceSolid shapes instead of TGeoTessellated where possible. 'off' (default): tessellated only. 'auto': exact for each leaf solid whose faces all extract exactly, tessellated fallback otherwise. 'required': fail with a report if any leaf solid cannot be represented exactly. Writes a surfaces_*.bin sidecar per exact volume.")
     ap.add_argument("--dump-brep", action="store_true", help="With --exact-surfaces auto|required, also write brep_<VOLNAME>_<LID>.brep (OCCT BREP of the leaf solid, scaled to cm like the sidecar and the mesh) next to each surfaces_*.bin. Input for the OCCT reference oracle; changes nothing else in the output.")
+    ap.add_argument("--csg", default="off", choices=["off", "auto", "required"], help="Recognise leaf solids as native ROOT CSG shapes (TGeoBBox/TGeoTube/TGeoTubeSeg/TGeoCone/TGeoSphere, and the two-cluster TGeoTube-union of a barrel and a lug) and emit each accepted one as shape_<VOLNAME>_<LID>.root. 'off' (default): unchanged behaviour. 'auto': makes the per-part cascade CSG -> exact surfaces -> tessellated. 'required': fail with a report if any leaf solid is not CSG. A part is only converted this way when OCCT's symmetric-difference volume against the CAD solid is inside the model tolerance; the description and that evidence are written to csg_<VOLNAME>_<LID>.json and csg_report.json either way.")
+    ap.add_argument("--csg-report", default=None, metavar="PATH", help="Where to write the per-part CSG cascade report (default: csg_report.json in the output folder).")
     ap.add_argument("--recognize-surfaces", default="exact", choices=["exact", "off"], help="Canonical-form recognition pre-pass: recover an exact plane/sphere/cylinder/cone hiding behind a stored bspline/bezier/revolution/extrusion face (the stored STEP surface type describes the exporter, not the geometry). 'exact' (default): only accept a fit at machine precision. 'off': disable, keeping such faces on the tessellated fallback. Applies to both --surface-report and --exact-surfaces auto|required.")
 
     # NEW: BOM / material support
@@ -3442,6 +3491,8 @@ def main():
         exact_surfaces=args.exact_surfaces,
         recognize_surfaces=args.recognize_surfaces,
         dump_brep=args.dump_brep,
+        csg=args.csg,
+        csg_report=args.csg_report,
     )
     out_macro.write_text(code)
 
