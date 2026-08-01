@@ -66,6 +66,8 @@ struct Options {
   int repeat = 3;
   std::string dumpSamples; ///< directory to write per-part sample sets into, for the OCCT oracle
   std::string refAnswers;  ///< directory holding the oracle's answers for those sample sets
+  std::string loadSamples; ///< directory to read per-part sample sets from, instead of generating
+  bool edgeIdentity = false; ///< report the sidecar-v3 edge-identity block (Stream F's numbers)
 };
 
 struct Part {
@@ -89,6 +91,14 @@ void printUsage(const char* argv0)
     "  --rims             list every trim loop, not only the ones that are not cleanly matched;\n"
     "                     the same records go into --json unconditionally\n"
     "  --dump-samples D   write each part's sample set to D/samples_<part>.json\n"
+    "  --load-samples D   read each part's sample set from D/samples_<part>.json instead of\n"
+    "                     generating it. The generator derives its points from the *mesh*, so two\n"
+    "                     runs on differently-tessellated shapes cannot be compared point by\n"
+    "                     point; loading a frozen (and, for a transformed shape, transformed) set\n"
+    "                     removes the mesh from the comparison entirely. --points/--rays/--seed\n"
+    "                     are then ignored and the file's counts are used.\n"
+    "  --edge-identity    report the sidecar-v3 edge-identity block (source-edge counts and the\n"
+    "                     max shared-edge deviation) on stdout; it is always in --json\n"
     "  --ref-answers D    validate against D/answers_<part>.json instead of the mesh; those are\n"
     "                     produced by scripts/geometry/occtOracle.py from the part's .brep, so a\n"
     "                     disagreement outside the model tolerance is a defect, not chording\n\n"
@@ -156,6 +166,10 @@ bool parseArgs(int argc, char** argv, Options& opt)
       opt.dumpSamples = next("--dump-samples");
     } else if (a == "--ref-answers") {
       opt.refAnswers = next("--ref-answers");
+    } else if (a == "--load-samples") {
+      opt.loadSamples = next("--load-samples");
+    } else if (a == "--edge-identity") {
+      opt.edgeIdentity = true;
     } else if (a == "-h" || a == "--help") {
       printUsage(argv[0]);
       return false;
@@ -283,6 +297,66 @@ void writeSamples(const std::string& dir, const std::string& partId, const Sampl
   }
   out << doc.dump(1);
   std::printf("  wrote samples: %s\n", path.c_str());
+}
+
+std::vector<Point3D> pointsFromJson(const json& array)
+{
+  std::vector<Point3D> points;
+  points.reserve(array.size());
+  for (const auto& p : array) {
+    points.push_back(Point3D{p.at(0).get<double>(), p.at(1).get<double>(), p.at(2).get<double>()});
+  }
+  return points;
+}
+
+std::vector<Ray> raysFromJson(const json& array)
+{
+  std::vector<Ray> rays;
+  rays.reserve(array.size());
+  for (const auto& r : array) {
+    const auto& o = r.at("o");
+    const auto& d = r.at("d");
+    rays.push_back(Ray{Point3D{o.at(0).get<double>(), o.at(1).get<double>(), o.at(2).get<double>()},
+                       Point3D{d.at(0).get<double>(), d.at(1).get<double>(), d.at(2).get<double>()}});
+  }
+  return rays;
+}
+
+/// Read back a sample set written by writeSamples(). The exact inverse of that function, and the
+/// reason it exists: generateSamples() rejection-samples through the *tessellated* reference, so a
+/// run on a shape that tessellates differently -- a scaled copy, a re-meshed model, a different
+/// mesh precision -- gets a different sample set and cannot be compared with the first one point
+/// by point. Freezing the set (and, for a rigidly transformed shape, transforming it by the same
+/// map) makes the two runs ask literally the same questions of two shapes that differ only by that
+/// map. See scripts/geometry/Stream_E_Scale.md.
+SampleSet readSamples(const std::string& dir, const std::string& partId)
+{
+  const std::string path = dir + "/samples_" + sanitizePartId(partId) + ".json";
+  std::ifstream in(path);
+  if (!in) {
+    throw std::runtime_error("cannot read " + path);
+  }
+  json doc;
+  in >> doc;
+  const int version = doc.value("version", -1);
+  if (version != kOracleFormatVersion) {
+    throw std::runtime_error(path + ": sample format version " + std::to_string(version) +
+                             ", this harness speaks " + std::to_string(kOracleFormatVersion));
+  }
+  SampleSet samples;
+  for (int i = 0; i < 3; ++i) {
+    samples.bboxMin[i] = doc.at("bboxMin").at(i).get<double>();
+    samples.bboxMax[i] = doc.at("bboxMax").at(i).get<double>();
+  }
+  samples.bulkPoints = pointsFromJson(doc.at("points").at("bulk"));
+  samples.boundaryPoints = pointsFromJson(doc.at("points").at("boundary"));
+  samples.insidePoints = pointsFromJson(doc.at("points").at("inside"));
+  samples.outsideRays = raysFromJson(doc.at("rays").at("outside"));
+  samples.insideRays = raysFromJson(doc.at("rays").at("inside"));
+  std::printf("  loaded samples: %s (bulk=%zu boundary=%zu inside=%zu outRays=%zu inRays=%zu)\n",
+              path.c_str(), samples.bulkPoints.size(), samples.boundaryPoints.size(),
+              samples.insidePoints.size(), samples.outsideRays.size(), samples.insideRays.size());
+  return samples;
 }
 
 /// Oracle answers for one part, or `has == false` when no answer file exists for it.
@@ -504,6 +578,23 @@ int main(int argc, char** argv)
                 surf.GetMaxRimIsolation(), surf.GetRimChordResolution(), surf.GetRimMatchTolerance(), surf.GetRimCount(),
                 surf.GetMatchedRimCount(), surf.GetBoundaryRimCount(), surf.GetNonManifoldRimCount(),
                 surf.GetReversedRimCount(), surf.GetUnmatchedRimLength(), surf.GetTotalRimLength());
+    // Sidecar v3 (Stream F): closure decided by edge *identity* rather than by proximity. The
+    // deviation is a measured cm number and deliberately not a verdict -- it says how far the two
+    // faces that provably share an edge actually are, which is the first defensible answer this
+    // project has had to that question. Always in --json; on stdout only when asked, because a
+    // 19-part run is already dense.
+    if (opt.edgeIdentity) {
+      if (surf.HasEdgeIdentity()) {
+        std::printf("  edge identity: %d source edge(s) (shared=%d boundary=%d non-manifold=%d "
+                    "reversed=%d degenerate=%d), max shared-edge deviation %.4g cm\n",
+                    surf.GetSourceEdgeCount(), surf.GetSharedSourceEdgeCount(),
+                    surf.GetBoundarySourceEdgeCount(), surf.GetNonManifoldSourceEdgeCount(),
+                    surf.GetReversedSourceEdgeCount(), surf.GetDegenerateSourceEdgeCount(),
+                    surf.GetMaxSharedEdgeDeviation());
+      } else {
+        std::printf("  edge identity: absent (sidecar predates v3); closure fell back to proximity\n");
+      }
+    }
     // Name the offending rims. The line above says how many are open and how much length that is;
     // without this one, which rim it is has to be reconstructed from counts and totals by hand,
     // which is how TolerancePolicy.md section 12 had to be written.
@@ -541,7 +632,8 @@ int main(int argc, char** argv)
     cfg.nOutsideRays = opt.rays;
     cfg.nInsideRays = std::max(1, opt.rays / 2);
     cfg.seed = opt.seed;
-    const SampleSet samples = generateSamples(reference, bboxMin, bboxMax, cfg);
+    const SampleSet samples = opt.loadSamples.empty() ? generateSamples(reference, bboxMin, bboxMax, cfg)
+                                                      : readSamples(opt.loadSamples, part.id);
 
     long long candidatesSampled = 0;
     const size_t nProbe = std::min<size_t>(200, samples.outsideRays.size());
@@ -578,6 +670,14 @@ int main(int argc, char** argv)
                               {"boundaryRims", surf.GetBoundaryRimCount()},
                               {"nonManifoldRims", surf.GetNonManifoldRimCount()},
                               {"reversedRims", surf.GetReversedRimCount()},
+                              {"hasEdgeIdentity", surf.HasEdgeIdentity()},
+                              {"sourceEdges", surf.GetSourceEdgeCount()},
+                              {"sharedSourceEdges", surf.GetSharedSourceEdgeCount()},
+                              {"boundarySourceEdges", surf.GetBoundarySourceEdgeCount()},
+                              {"nonManifoldSourceEdges", surf.GetNonManifoldSourceEdgeCount()},
+                              {"reversedSourceEdges", surf.GetReversedSourceEdgeCount()},
+                              {"degenerateSourceEdges", surf.GetDegenerateSourceEdgeCount()},
+                              {"maxSharedEdgeDeviation", surf.GetMaxSharedEdgeDeviation()},
                               {"rimDetail", rimsJson}};
 
     std::vector<Point3D> allPoints = samples.bulkPoints;
