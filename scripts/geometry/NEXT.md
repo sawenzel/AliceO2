@@ -17,7 +17,7 @@ what is missing"*. Start there. This file is only the hand-over on top of it.
 
 | | |
 | --- | --- |
-| `ctest -R BVHSurfaceSolid` | **91 cases**, green |
+| `ctest -R BVHSurfaceSolid` | **92 cases**, green |
 | ladder fixtures | **9/9 scored** — of **10** leaf solids; `oblique_cut_cyl` has no sidecar and never has |
 | `Bagger.step` | **12/12 shipped**, 9/12 surface, 1 unscored (`Bucket`, ships as mesh) |
 | unexplained oracle disagreements | **0/0/0/0** on `surface`, both corpora; **0/0/0/0** on `shape` |
@@ -61,9 +61,15 @@ every CSG part exact (`dV_sym = 0`) and oracle-clean. That was the MVP and it is
    *(The ALICE3 transport defect and the quartic guards are both fixed and verified — ALICE3 is
    **13822/13822 rays identical to OpenCascade, 18/18 parts clean**, every robustness counter zero
    in both stepping modes. `Stream_L_ALICE3Defect.md`, `Stream_M_Quartic.md`.)*
-3. **Tier 0** — decode the NURBS-encoded quadrics. Takes ALICE3 quadric-only solids **15/55 →
-   36/55**, `as1-oc-214` **0/5 → 5/5**. Helps the exact path and the CSG path equally, because it
-   changes what a solid *is* before either looks at it. Highest-value coverage item.
+3. **The trim generalisation — this is what "Tier 0" actually turned out to be.** Recognition
+   already worked; ALICE3 emits **20** sidecars against **36** eligible solids and the 16 missing
+   ones fail in `_recognized_quadric_wire_block`, on boundary edges that are not iso in the
+   recognised (φ, h) domain — 1053 of 1891 are genuinely free-form there. **No exact
+   representation exists** (φ(u) is transcendental on a NURBS-encoded quadric), so this is a
+   *fitted* curve with a recorded 3D deviation. Designed with its acceptance criterion in
+   `Stream_K_Tier0.md` §2/§10.1; not built, because it trades exactness for coverage and that is
+   the project's standing bargain in the other direction. **Biggest converter-side coverage item
+   on the board — and a decision, not just work.**
 4. **Free-form surfaces** — the genuine remainder after Tier 0: **19 of 55 solids, 1373 faces**,
    not the 36/2377 the older brief states. Largest effort. Must report its own achieved tolerance
    honestly rather than claiming the exactness the analytic path has.

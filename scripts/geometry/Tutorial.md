@@ -203,8 +203,7 @@ The census that scoped all of this is complete and it changed the plan substanti
 - The property that matters for decomposition is **single-cell**, not convexity — a through hole
   has zero concave edges and is not convex.
 
-**Missing for completeness:** Tier 0 (decoding NURBS-encoded quadrics — the highest-value item on
-the board, and it helps representation 2 as much as CSG); Tier 3 for the parts that decline
+**Missing for completeness:** Tier 3 for the parts that decline
 (`Base`, `Boom`, `Stick`, `BucketLink1/2` — 2 to 7 axis clusters each); and coverage beyond
 Bagger. Design in `CSG_Pipeline.md`, census in `Stream_A_CSG.md`, emitter in
 `Stream_H_CSGEmitter.md`.
@@ -223,6 +222,37 @@ an identical copy under the same matrix, which is why a recognised plain tube ca
 `TGeoBBox`, `TGeoCone` and `TGeoCompositeShape` already exist in ROOT. A dedicated `O2CSGSolid`
 (flat DNF) is only needed if native composite trees turn out too slow or too deep — that is a
 later, gated decision, not a prerequisite.
+
+### 5.2b Tier 0 / canonical recognition — the premise was wrong, and the blocker is the trim
+
+**Recognition is not missing and never was.** `O2_CADtoTGeo.py` has not dispatched on the *stored*
+surface type for some time: `_recognize_analytic_surface` (a normal-field differential recogniser)
+already fires on **28/28** of `as1-oc-214`'s B-spline faces and on ~1000 of ALICE3's 2377. Earlier
+statements in these documents that Tier 0 would take ALICE3 from 15/55 to 36/55 were **describing
+work already done** — `n_eligible` was already 36/55. The "0/5 → 5/5" figure for `as1-oc-214` is
+recognition-on vs recognition-**off**, not before vs after any recent change.
+
+**The real coverage lever is the trim, not the surface.** ALICE3 emits **20** sidecars against 36
+eligible solids. The 16 missing ones fail *after* recognition, in `_recognized_quadric_wire_block`,
+on boundary edges that are not iso-curves in the recognised (φ, h) domain. Of 1891 such edges,
+**1053 are genuinely free-form there** and only 4 are arcs. There is no exact representation
+available: on a NURBS-encoded cylinder the angle is a rational function of the surface parameter,
+so φ(u) is transcendental and a pcurve's image is not a line, arc or B-spline in (φ, h). Carrying
+them requires a **fitted** curve with a recorded 3D deviation — a bounded approximation, scoped in
+`Stream_K_Tier0.md` §2 and deliberately **not built**.
+
+**A real latent bug was found here.** The acceptance criterion was not one: cylinders and spheres
+were scored by a relative distance but **planes and cones by an angle**. On a patch whose normal
+field is nearly rank-2 — a swept free-form profile — the least-squares apex runs off to 1e11
+diagonals, the half-angle collapses to zero, and both angular tests pass **vacuously**. That
+accepted **184 ALICE3 faces whose recognised cone misses the real surface by up to 79 cm, or 37
+patch diagonals**, at an internal residual of 6.7e-10 against a 1e-9 bound. Every candidate is now
+scored by the single quantity that decides — measured gap / patch diagonal — which is also the
+acceptance test. `O2_CADtoTGeo.py --self-test` went **7 failures → 0** and its invariant line went
+from *"worst cone at 2.11e-01"* to *"worst cylinder at 5.60e-16"*. Cross-checked three ways: OCCT's
+`ShapeAnalysis_CanonicalRecognition` declines all 184; the two implementations now agree to within
+ten faces of ~1000, the converter stricter in both classes. All 184 were on a solid that emits no
+sidecar, so this was **latent, not shipped** — but the trim work above would have shipped them.
 
 ### 5.3 The OCCT oracle and gate — working, and the most valuable asset here
 
@@ -342,6 +372,12 @@ for: gross errors, and **composites** — where it is the only independent volum
 Measured: the CSG composite and the exact surface solid agree to **2.6e-14** on `cyl_cross_cyl` and
 ≤1.6e-12 on all seven Bagger rams, while ROOT's Monte-Carlo `TGeoCompositeShape::Capacity()` is off
 by up to 1.45e-02.
+
+**Quote the sampling with the result.** On one identical tree, ALICE3 scores **18/18 parts clean
+with every counter zero** under the three-axis raster and **15/18 with 10 extra crossings and 2
+duplicates** under a 96-direction fan. Lost crossings are **0** either way — no wall is missing —
+but "every counter zero" is a statement about a *ray lattice*, not about a solid. Same lesson as
+the quartic: three axis beams are three directions however many rays you fire.
 
 **It is the first instrument that runs on ALICE3** — 18 parts in ~32 s / 371 MB at N=48, because
 *loading* dominates and stepping is nearly free. And it immediately found what nothing else could
