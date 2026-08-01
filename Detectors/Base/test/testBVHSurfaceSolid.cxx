@@ -4525,3 +4525,109 @@ BOOST_AUTO_TEST_CASE(EdgeIdentityVerdictIsIndependentOfChordSampling)
 }
 
 // --- Stream F: sidecar v3 edge identity ---
+
+// --- Stream E: position and scale independence (scripts/geometry/Stream_E_Scale.md) ---
+//
+// The kernel's length tolerances are absolute, so every number recorded on this branch is a
+// statement about centimetre-scale geometry near the origin until someone runs the ladder
+// somewhere else. Doing that found one defect, and these tests are what keeps it named.
+
+namespace
+{
+/// The ray/torus quartic exactly as TorusBoundedSurface::appendIntersections builds it, for a
+/// torus of the given radii on the origin with axis z. Kept here rather than reaching into the
+/// surface class so the test exercises the solver on coefficients a reader can check by hand.
+std::array<double, 5> torusRayQuartic(double majorRadius, double minorRadius,
+                                      const Point3D& origin, const Point3D& dir)
+{
+  const double dirDotDir = dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2];
+  const double originDotDir = origin[0] * dir[0] + origin[1] * dir[1] + origin[2] * dir[2];
+  const double originDotOrigin =
+    origin[0] * origin[0] + origin[1] * origin[1] + origin[2] * origin[2];
+  const double constantK = majorRadius * majorRadius - minorRadius * minorRadius;
+  const double transverseE = dir[0] * dir[0] + dir[1] * dir[1];
+  const double transverseF = origin[0] * dir[0] + origin[1] * dir[1];
+  const double transverseG = origin[0] * origin[0] + origin[1] * origin[1];
+  const double fourRSquared = 4. * majorRadius * majorRadius;
+  return {dirDotDir * dirDotDir,
+          4. * dirDotDir * originDotDir,
+          4. * originDotDir * originDotDir + 2. * dirDotDir * (originDotOrigin + constantK) -
+            fourRSquared * transverseE,
+          4. * originDotDir * (originDotOrigin + constantK) - 2. * fourRSquared * transverseF,
+          (originDotOrigin + constantK) * (originDotOrigin + constantK) -
+            fourRSquared * transverseG};
+}
+
+/// The offending ray of the x0.1 sweep, given at unit scale; the whole configuration scales with
+/// `scale` so the exact solution scales with it too.
+std::vector<double> torusRootsAtScale(double scale)
+{
+  const Point3D origin{2.094269422822338 * scale, 3.292530879918199 * scale,
+                       1.9347519602583996 * scale};
+  const Point3D dir{-0.7547297076674779, -0.03154700875395883, -0.655276929704412};
+  const auto c = torusRayQuartic(2.5 * scale, 0.8 * scale, origin, dir);
+  return surf::solveQuarticReal(c[0], c[1], c[2], c[3], c[4]);
+}
+} // namespace
+
+BOOST_AUTO_TEST_CASE(StreamE_TorusQuarticIsScaleCovariantWhereItWorks)
+{
+  // Ferrari's method is exactly scale-covariant: scaling the geometry and the ray origin by k
+  // scales every root by k and nothing else. This is the property the whole sweep rests on, so it
+  // is asserted rather than assumed.
+  const auto reference = torusRootsAtScale(1.);
+  BOOST_REQUIRE_EQUAL(reference.size(), 2u);
+  for (const double scale : {0.5, 2., 10.}) {
+    const auto roots = torusRootsAtScale(scale);
+    BOOST_REQUIRE_EQUAL(roots.size(), reference.size());
+    for (size_t i = 0; i < roots.size(); ++i) {
+      checkClose(roots[i], reference[i] * scale, 1.e-12);
+    }
+  }
+}
+
+BOOST_AUTO_TEST_CASE(StreamE_TorusQuarticLosesEveryRootBelowTheResolventGuard)
+{
+  // *** This test characterises a defect, deliberately. ***
+  //
+  // solveQuarticReal guards Ferrari's second stage with `resolvent > kTolerance`, and kTolerance
+  // is 1e-9 *cm* while the resolvent is the largest root of the resolvent cubic and therefore has
+  // units of cm^2. The comparison is dimensionally wrong, so the guard fires as the geometry
+  // shrinks and the solver returns **no roots at all** -- not a merged pair, not a tangency, an
+  // empty set -- for a ray that transversally enters and exits the torus at 69 degrees.
+  //
+  // Measured on the fixture ladder (scripts/geometry/Stream_E_Scale.md): the G1 ladder scaled by
+  // 0.1 loses exactly one of 2000 oracle distout rays on torus_union_cyl, and torus_union_cyl is
+  // the only part on either corpus that fails the sweep. Contains() and Safety() answer correctly
+  // at the same point, so only the ray path is affected. The threshold predicted by the guard is
+  // scale 0.1265 and the measured one is between 0.12 and 0.15.
+  //
+  // When the guard is made dimensionally consistent -- the mathematical condition is
+  // `resolvent > 0`, and a numerical one has to scale with the coefficients rather than with a
+  // fixed length -- these expectations become 2 and 2, and this test must be updated to say so.
+  // Failing here after such a change is the intended behaviour, not a regression.
+  BOOST_CHECK_EQUAL(torusRootsAtScale(0.15).size(), 2u);  // above the guard
+  BOOST_CHECK_EQUAL(torusRootsAtScale(0.12).size(), 0u);  // below it: every root lost
+  BOOST_CHECK_EQUAL(torusRootsAtScale(0.05).size(), 0u);
+
+  // And the roots really are there: the quartic changes sign across each of the two crossings the
+  // unit-scale solve found, scaled down. Without this the "0" above could be read as the solver
+  // correctly reporting a ray that misses.
+  const auto reference = torusRootsAtScale(1.);
+  BOOST_REQUIRE_EQUAL(reference.size(), 2u);
+  const double scale = 0.12;
+  const Point3D origin{2.094269422822338 * scale, 3.292530879918199 * scale,
+                       1.9347519602583996 * scale};
+  const Point3D dir{-0.7547297076674779, -0.03154700875395883, -0.655276929704412};
+  const auto c = torusRayQuartic(2.5 * scale, 0.8 * scale, origin, dir);
+  const auto evaluate = [&c](double t) {
+    return (((c[0] * t + c[1]) * t + c[2]) * t + c[3]) * t + c[4];
+  };
+  for (const double root : reference) {
+    const double t = root * scale;
+    const double span = 0.02 * t;
+    BOOST_CHECK_LT(evaluate(t - span) * evaluate(t + span), 0.);
+  }
+}
+
+// --- Stream E: position and scale independence ---
