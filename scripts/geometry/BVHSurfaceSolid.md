@@ -1372,4 +1372,35 @@ matching `kWireJoinTolerance = 1e-5` (both looser than the `1e-9` boundary toler
 	- **Gate: fixtures 6/9 → 8/9, Bagger 4/12 → 5/12; `ctest` green at 59 cases, from 57.** And the
 	  clarifying result: **every part that now passes is navigable and every part that fails is not**,
 	  on both corpora. The gate has collapsed onto the closure question alone.
-
+- 2026-08-01 (third session): **NEXT.md items 1-3 done, and item 2 found a kernel bug two levels
+  below where Phase 2 was looking.** Details in [`TolerancePolicy.md`](TolerancePolicy.md) §13 and
+  [`CodeReview_Fable.md`](CodeReview_Fable.md) §20; headlines only here.
+	- **Item 1 — the rims are exposed.** `GetRimReports()` gives one record per trim loop: owning
+	  face, which loop of it, chords, length, unmatched length, the isolation of its loneliest chord
+	  and where that chord is, and the state that rim alone implies — on the same
+	  `NavigationReliability` scale the solid reports, so the solid's verdict *is* the worst rim
+	  state, accumulated independently and pinned by a test. Harness: `--rims`, and `--json`
+	  `navigation.rimDetail`.
+	- **Item 2 — the missing rim was never emitted, and the cause is K4.** The unmatched rim is the
+	  hole in the fat tube's wall, not the boom tube's end trim as §12.2 inferred; its partner is
+	  absent because `bsplineSampleRecursive` probed only the parametric midpoint, and a tube-tube
+	  junction curve is symmetric about that midpoint — it meets its own chord there to **2e-7** while
+	  straying **0.16** away at the quarter points. A 179-pole spline was replaced by a straight line,
+	  on the face where the curve is *open*; on the face where it is closed the degenerate-chord
+	  branch saved it. Not a diagnostic defect: `bsplineSamples()` is the polyline every point-in-wire
+	  query uses, so that face's **trim itself** was wrong. Flatness now takes three interior probes,
+	  and an interval holding an interior knot is never called flat. **K4 is retired, with the first
+	  reproducer it ever had.**
+	- **The fix exposed the matching band.** Two polylines of one shared curve differ by the chord
+	  sagitta whatever the geometry does — 6.7e-6 cm against a declared 1e-8 — so two closed fixtures
+	  went open with every numeric column bit-identical. `rimChordResolution` had measured exactly
+	  that since it was written and was only ever printed; it is now per chord and widens the match
+	  band. The non-manifold test stays on the declared tolerance alone: widening it too turned four
+	  clean parts non-manifold, because a corner is where a third face comes within a chord's length.
+	- **Item 3 — `maxGap` is `maxRimIsolation`**, everywhere, documented as *how alone the loneliest
+	  chord is*. Inert: substitute the one JSON key and the gate reports are identical.
+	- **Gate: fixtures 8/9, Bagger 5/12 → 6/12; `ctest` green at 61 cases, from 59.** The result that
+	  outranks the totals: **every oracle disagreement outside tolerance on both corpora, on every
+	  column, is now zero — 35 → 0** — including on the seven parts that still fail their closure
+	  check. §4.2 re-run because the criterion changed: **0 direction-split in 154000** over 14
+	  `Reliable` parts.
