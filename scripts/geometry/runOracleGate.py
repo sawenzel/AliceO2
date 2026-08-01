@@ -189,6 +189,82 @@ def verdict(part_report: dict):
     return not reasons, reasons
 
 
+# ------------------------------------------------------------------------------------------
+# The `shape_<part>.root` sidecar: hand-written fixtures for the any-TGeoShape path
+# ------------------------------------------------------------------------------------------
+#
+# Two ladder fixtures are, by construction, *exactly* a ROOT shape: `box` is a TGeoBBox and
+# `box_minus_cyl` is a TGeoCompositeShape (box - tube). Emitting them in the sidecar convention
+# and gating them proves the whole any-shape path end to end -- convention, loader, frame,
+# scoring -- before the CSG emitter exists, and gives that emitter's author a smoke test on day
+# one. The numbers are read straight out of make_boolean_fixtures.py (mm there, cm here).
+#
+# Each entry is (part id, TGeoShape builder). The builder is only called when --fixture-shapes is
+# given, so nothing here needs ROOT unless it is asked for.
+def _build_box_shape():
+    """`box`: a 20 x 30 x 40 mm box with its corner at the origin, i.e. 2 x 3 x 4 cm.
+
+    TGeoBBox is centred on `fOrigin`, and the fixture is not centred, so the offset is the whole
+    point of this fixture: it is the cheapest way for the frame convention to be wrong and be
+    caught. The oracle's own bbox is [0,0,0] to [2,3,4] cm.
+    """
+    import ROOT
+    from array import array
+    return ROOT.TGeoBBox("shape", 1.0, 1.5, 2.0, array("d", [1.0, 1.5, 2.0]))
+
+
+def _build_box_minus_cyl_shape():
+    """`box_minus_cyl`: a 40 mm cube centred on the origin, minus an r = 8 mm axial through-hole.
+
+    In cm: TGeoBBox(2,2,2) - TGeoTube(0, 0.8, 2.5), the tube deliberately longer than the cube so
+    the hole is a through-hole rather than a blind one with two coincident cap faces.
+    """
+    import ROOT
+    box = ROOT.TGeoBBox("cube", 2.0, 2.0, 2.0)
+    drill = ROOT.TGeoTube("drill", 0.0, 0.8, 2.5)
+    # The boolean node takes ownership of both operands; without this PyROOT frees them first.
+    ROOT.SetOwnership(box, False)
+    ROOT.SetOwnership(drill, False)
+    node = ROOT.TGeoSubtraction(box, drill, ROOT.nullptr, ROOT.nullptr)
+    ROOT.SetOwnership(node, False)
+    return ROOT.TGeoCompositeShape("shape", node)
+
+
+_FIXTURE_SHAPES = {
+    "box/box_0_1_1_1": _build_box_shape,
+    "box_minus_cyl/box_minus_cyl_0_1_1_1": _build_box_minus_cyl_shape,
+}
+
+
+def write_fixture_shapes(manifest: dict):
+    """Write `shape_<VOL>_<LID>.root` next to the sidecar for every fixture that has a builder.
+
+    The file format is the convention documented in DetectorsBase/O2SolidHarness.h: one object
+    inheriting from TGeoShape, under the key "shape", in cm, in the part's local frame. This is
+    the same single `WriteTObject(shape, "shape")` that `harness::saveShapeToRootFile` performs;
+    the C++ side is the authority and the unit test round-trips through it.
+    """
+    import ROOT
+    ROOT.gROOT.SetBatch(True)
+    written = []
+    for part in manifest.get("parts", []):
+        builder = _FIXTURE_SHAPES.get(part["id"])
+        if builder is None:
+            continue
+        surfaces = Path(part["surfaces"])
+        target = surfaces.parent / surfaces.name.replace("surfaces_", "shape_").replace(".bin", ".root")
+        shape = builder()
+        out = ROOT.TFile.Open(str(target), "RECREATE")
+        out.WriteTObject(shape, "shape")
+        out.Close()
+        print(f"  wrote {target} ({shape.ClassName()}, capacity {shape.Capacity():.6g} cm^3)")
+        written.append(part["id"])
+    if not written:
+        print("  [warn] --fixture-shapes given but no part in the DB has a builder "
+              f"(known: {', '.join(sorted(_FIXTURE_SHAPES))})")
+    return written
+
+
 def column_disagreements(oracle: dict, key: str):
     column = oracle.get(key)
     if column is None:
@@ -288,6 +364,12 @@ def main():
                         help="generate and gate the synthetic Boolean ladder")
     parser.add_argument("--skip-convert", action="store_true",
                         help="reuse an existing part DB in <workdir>/db")
+    parser.add_argument("--fixture-shapes", action="store_true",
+                        help="write the hand-built shape_<part>.root sidecars for the ladder "
+                             "fixtures that are exactly a ROOT shape (box -> TGeoBBox, "
+                             "box_minus_cyl -> TGeoCompositeShape) before scoring, so the "
+                             "any-TGeoShape path is exercised end to end without an emitter. "
+                             "Needs PyROOT; combine with --fixtures or --skip-convert.")
     parser.add_argument("--points", type=int, default=2000)
     parser.add_argument("--rays", type=int, default=2000)
     parser.add_argument("--seed", type=int, default=1)
@@ -324,6 +406,10 @@ def main():
     manifest = build_part_db(models, args.workdir, args.skip_convert)
     db_dir = args.workdir / "db"
     sample_dir = args.workdir / "oracle"
+
+    if args.fixture_shapes:
+        print("[1b/4] writing hand-built TGeoShape sidecars for the exactly-representable fixtures")
+        write_fixture_shapes(manifest)
 
     dump_samples(harness, db_dir, sample_dir, args.points, args.rays, args.seed, args.load_samples)
     run_oracle(manifest.get("parts", []), sample_dir, args.distance_limit)
