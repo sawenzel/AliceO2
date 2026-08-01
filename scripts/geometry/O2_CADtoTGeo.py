@@ -1538,6 +1538,52 @@ def extract_toroidal_face(face, scale_to_cm: float) -> Tuple[Optional[dict], Opt
 _RECOGNIZE_TOL_EXACT = 1.e-9
 
 
+def _analytic_surface_gap(kind: str, model: dict, P) -> float:
+    """The *achieved gap* of a candidate analytic surface: the largest distance, in native (unscaled)
+    CAD length units, from any sampled surface point to the candidate surface itself.
+
+    This is deliberately ONE quantity for every candidate kind. The recognizer scores each candidate
+    with whatever expression falls out of its own linear solve, and those are not the same thing:
+    the sphere's and the cylinder's are distances, but the plane's is an angle between normals and
+    the cone's is `max |u . N|` plus the spread of a direction cosine. Comparing four different
+    quantities against one tolerance -- and against each other, to pick a model -- is not a
+    criterion, and for the cone it is not conservative either:
+
+      measured on ALICE3 (`CAD_noETA.stp`), 184 faces are accepted as cones with an internal
+      residual <= 6.7e-10 whose recognized cone misses the surface by up to **79 cm**, a relative
+      gap of 37 patch diagonals. The mechanism is an ill-conditioned apex: on a patch whose normal
+      field is nearly rank-2 (an extruded free-form profile -- a "generalized cylinder"), the
+      least-squares apex runs off to 1e9...1e11 patch diagonals, the recognized half-angle collapses
+      to 0, and both cone tests then pass *vacuously* -- `u . N ~ 0` merely restates that every
+      normal is perpendicular to the one direction all the `u` have collapsed onto.
+      `ShapeAnalysis_CanonicalRecognition` declines all 184 independently.
+
+    Measuring the gap is what makes "when in doubt, decline" mean something: a declined face costs
+    coverage, a wrongly-accepted face costs correctness. See `scripts/geometry/Stream_K_Tier0.md`.
+    """
+    if kind == "plane":
+        normal = np.asarray(model["normal"], dtype=float)
+        normal = normal / np.linalg.norm(normal)
+        return float(np.abs((P - np.asarray(model["point"], dtype=float)) @ normal).max())
+    if kind == "sphere":
+        return float(np.abs(np.linalg.norm(P - model["centre"], axis=1) - model["radius"]).max())
+    if kind == "cylinder":
+        axis = np.asarray(model["axis"], dtype=float)
+        axis = axis / np.linalg.norm(axis)
+        radial = P - model["origin"]
+        radial = radial - np.outer(radial @ axis, axis)
+        return float(np.abs(np.linalg.norm(radial, axis=1) - model["radius"]).max())
+    if kind == "cone":
+        axis = np.asarray(model["axis"], dtype=float)
+        axis = axis / np.linalg.norm(axis)
+        rel = P - model["apex"]
+        h = rel @ axis
+        r = np.linalg.norm(rel - np.outer(h, axis), axis=1)
+        half = model["half_angle"]
+        return float(np.abs(r * math.cos(half) - h * math.sin(half)).max())
+    return float("inf")
+
+
 def _sample_surface_for_recognition(adaptor, umin: float, umax: float, vmin: float, vmax: float, n: int = 9):
     """Sample an (n x n) grid over the face's actual trimmed (u, v) box (from `breptools.UVBounds`,
     not the underlying surface's full natural domain). Returns (points, unit normals) in *native*
@@ -1584,7 +1630,10 @@ def _recognize_analytic_surface(adaptor, uv_bounds) -> Optional[dict]:
     dev = float(np.abs(np.abs(N @ N[0]) - 1.0).max())
     if dev < 1e-12:
         normal = N[0] / np.linalg.norm(N[0])
-        return {"kind": "plane", "residual": dev, "normal": normal, "point": P[0], "P": P, "N": N}
+        out = {"kind": "plane", "residual": dev, "normal": normal, "point": P[0], "P": P, "N": N}
+        out["gap"] = _analytic_surface_gap("plane", out, P)
+        out["gap_relative"] = out["gap"] / scale
+        return out
 
     best = ("freeform", float("inf"), {})
 
@@ -1648,7 +1697,162 @@ def _recognize_analytic_surface(adaptor, uv_bounds) -> Optional[dict]:
         return None
     out = {"kind": kind, "residual": res, "P": P, "N": N}
     out.update(extra)
+    out["gap"] = _analytic_surface_gap(kind, out, P)
+    out["gap_relative"] = out["gap"] / scale
     return out
+
+
+# -------------------------------
+# Self-test for the recognition path (`--self-test`)
+# -------------------------------
+# `csg/census.py --self-test` is the model here, and its lesson is the one that matters: a
+# recogniser's positive control is worthless without a NEGATIVE control. "1004 of ALICE3's B-spline
+# surfaces are secretly quadrics" only means something if the same recogniser can also say *no*.
+# Every control below is built in-process from OCC primitives, so this runs with no CAD file.
+
+def _self_test_faces_of(shape) -> List[object]:
+    out = []
+    explorer = TopExp_Explorer(shape, TopAbs_FACE)
+    while explorer.More():
+        out.append(topods.Face(explorer.Current()))
+        explorer.Next()
+    return out
+
+
+def _self_test_bezier_patch(fn, nu: int, nv: int):
+    """A non-rational Bezier patch whose control net is `fn(s, t)` on a (nu x nv) grid."""
+    from OCC.Core.Geom import Geom_BSplineSurface
+    from OCC.Core.TColgp import TColgp_Array2OfPnt
+    from OCC.Core.TColStd import TColStd_Array1OfReal, TColStd_Array1OfInteger
+    from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeFace
+
+    poles = TColgp_Array2OfPnt(1, nu, 1, nv)
+    for i in range(nu):
+        for j in range(nv):
+            x, y, z = fn(i / (nu - 1.0), j / (nv - 1.0))
+            poles.SetValue(i + 1, j + 1, gp_Pnt(float(x), float(y), float(z)))
+    uk = TColStd_Array1OfReal(1, 2)
+    uk.SetValue(1, 0.0)
+    uk.SetValue(2, 1.0)
+    vk = TColStd_Array1OfReal(1, 2)
+    vk.SetValue(1, 0.0)
+    vk.SetValue(2, 1.0)
+    um = TColStd_Array1OfInteger(1, 2)
+    um.SetValue(1, nu)
+    um.SetValue(2, nu)
+    vm = TColStd_Array1OfInteger(1, 2)
+    vm.SetValue(1, nv)
+    vm.SetValue(2, nv)
+    surface = Geom_BSplineSurface(poles, uk, vk, um, vm, nu - 1, nv - 1)
+    return BRepBuilderAPI_MakeFace(surface, 1e-6).Face()
+
+
+def _self_test_tapered_near_circle(bulge: float, taper: float):
+    """The negative control that names the cone over-acceptance.
+
+    A patch swept from a *non-circular* profile (`r = R (1 + bulge cos 3a)`) with a tiny linear
+    taper. It is genuinely free-form: no plane, sphere, cylinder or cone is within `bulge` of it.
+    The taper controls how nearly rank-2 the normal field is, which is exactly the knob that sends
+    the least-squares cone apex to infinity, and every value of it must be declined.
+    """
+    def fn(s, t):
+        a = 1.2 * s - 0.6
+        r = 9.8 * (1.0 + bulge * math.cos(3.0 * a)) * (1.0 + taper * t)
+        return (r * math.cos(a), r * math.sin(a), 10.0 * t)
+    return _self_test_bezier_patch(fn, nu=6, nv=3)
+
+
+def run_recognition_self_test() -> int:
+    """Assert the canonical-form recognizer against models whose answer is known in closed form.
+
+    Returns the number of failures; prints one line per check.
+    """
+    from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_NurbsConvert, BRepBuilderAPI_MakeFace
+    from OCC.Core.BRepPrimAPI import (BRepPrimAPI_MakeCone, BRepPrimAPI_MakeCylinder,
+                                      BRepPrimAPI_MakeSphere, BRepPrimAPI_MakeTorus)
+    from OCC.Core.gp import (gp_Ax2, gp_Ax3, gp_Cone, gp_Cylinder, gp_Dir, gp_Pln, gp_Sphere)
+
+    failures = 0
+    checks = 0
+    accepted_gaps = []
+
+    def report(ok: bool, label: str, detail: str = ""):
+        nonlocal failures, checks
+        checks += 1
+        if not ok:
+            failures += 1
+        print(f"  [{'ok ' if ok else 'FAIL'}] {label}{(' -- ' + detail) if detail else ''}")
+
+    def recognize(face):
+        adaptor = BRepAdaptor_Surface(face)
+        try:
+            uv_bounds = breptools.UVBounds(face)
+        except Exception:
+            return None
+        rec = _recognize_analytic_surface(adaptor, uv_bounds)
+        if rec is not None:
+            accepted_gaps.append((rec["kind"], rec["gap_relative"]))
+        return rec
+
+    def nurbs(shape):
+        return BRepBuilderAPI_NurbsConvert(shape, True).Shape()
+
+    def expect(face, want: Optional[str], label: str):
+        rec = recognize(face)
+        got = rec["kind"] if rec else None
+        detail = (f"got {got}" if rec is None or want is None else
+                  f"got {got}, gap {rec['gap_relative']:.2e} of the patch diagonal")
+        if rec is not None and want is not None and got == want:
+            detail = f"gap {rec['gap_relative']:.2e} of the patch diagonal"
+        report(got == want, label, detail)
+        return rec
+
+    print("Canonical-form recognition self-test")
+    print(" positive controls: a quadric written as NURBS must be recovered")
+    # BRepBuilderAPI_NurbsConvert turns each analytic face into the rational B-spline a CAD
+    # exporter would have written -- the exporter artefact this whole path exists for, built here.
+    frame = gp_Ax3(gp_Pnt(1.0, -2.0, 3.0), gp_Dir(0.3, 0.4, 0.866), gp_Dir(0.866, 0.0, -0.3))
+    for label, surface, want in (
+            ("cylinder", gp_Cylinder(frame, 5.0), "cylinder"),
+            ("cone", gp_Cone(frame, 0.4, 2.0), "cone"),
+            ("sphere", gp_Sphere(frame, 7.0), "sphere"),
+            ("plane", gp_Pln(frame), "plane")):
+        if label == "plane":
+            native = BRepBuilderAPI_MakeFace(surface, -5.0, 5.0, -3.0, 3.0).Shape()
+        elif label == "sphere":
+            native = BRepBuilderAPI_MakeFace(surface, 0.2, 2.4, -0.9, 0.9).Shape()
+        else:
+            native = BRepBuilderAPI_MakeFace(surface, 0.2, 2.4, 1.0, 9.0).Shape()
+        faces = _self_test_faces_of(nurbs(native))
+        report(len(faces) == 1, f"NURBS-converted {label} patch is one face", f"{len(faces)} found")
+        if faces:
+            expect(faces[0], want, f"NURBS-encoded {label} is recognized as a {want}")
+
+    print(" negative controls: a genuinely free-form surface must be declined")
+    expect(_self_test_bezier_patch(
+        lambda s, t: (10 * s - 5, 10 * t - 5, (10 * s - 5) * (10 * t - 5) / 10.0), 6, 6),
+        None, "free-form saddle is not recognized as any quadric")
+    expect(_self_test_bezier_patch(
+        lambda s, t: (20 * s - 10, 0.5 * t, 0.02 * (20 * s - 10) ** 2 + 0.3 * (20 * s - 10) * t), 6, 6),
+        None, "narrow free-form ridge is not recognized as any quadric")
+    for face in _self_test_faces_of(
+            nurbs(BRepPrimAPI_MakeTorus(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 10.0, 1.0).Shape())):
+        expect(face, None, "NURBS-encoded torus is declined (no torus model -- known limitation)")
+
+    print(" the ALICE3 cone over-acceptance (Stream_K_Tier0.md): a swept non-circular profile")
+    for bulge in (1.0e-3, 1.0e-2):
+        for taper in (1.0e-4, 1.0e-6, 1.0e-8):
+            expect(_self_test_tapered_near_circle(bulge, taper), None,
+                   f"swept non-circular profile (bulge {bulge:.0e}, taper {taper:.0e}) is declined")
+
+    print(" the invariant: every accepted recognition is within the declared tolerance")
+    worst = max(accepted_gaps, key=lambda kv: kv[1], default=("-", 0.0))
+    report(all(gap < _RECOGNIZE_TOL_EXACT for _kind, gap in accepted_gaps),
+           "every accepted face's MEASURED gap is below the acceptance tolerance",
+           f"worst {worst[0]} at {worst[1]:.2e} against {_RECOGNIZE_TOL_EXACT:.0e}")
+
+    print(f"\n{checks} checks, {failures} failure(s)")
+    return failures
 
 
 def _recognized_inner_wall(face, rec) -> Optional[bool]:
@@ -3464,7 +3668,7 @@ def print_geom(step_file):
 
 def main():
     ap = argparse.ArgumentParser(description="Convert STEP/XCAF to ROOT TGeo macro, facets in per-volume binary files.")
-    ap.add_argument("step", help="Input STEP file")
+    ap.add_argument("step", nargs="?", help="Input STEP file (omit with --self-test)")
     ap.add_argument("-o", "--out", default="geom.C", help="Output ROOT macro file name (default: geom.C)")
     ap.add_argument("--output-folder", default="./", help="Output folder for macro + facet files")
     ap.add_argument("--out-path", default=None, help="(deprecated) Alias for --output-folder")
@@ -3498,7 +3702,14 @@ def main():
     ap.add_argument("--mat-max-log-density-diff", type=float, default=0.0, help="Optional hard density filter in log-space (0 disables). Example 0.8 ~ within 2.2x (default: 0.0)")
     ap.add_argument("--mat-compound-penalty", type=float, default=0.25, help="Penalty for matching to oxides/carbides/etc. when BOM doesn't mention them (default: 0.25)")
 
+    ap.add_argument("--self-test", action="store_true", help="Run the canonical-form recognition self-test (positive and negative controls, built in-process; no STEP file needed) and exit non-zero on any failure.")
+
     args = ap.parse_args()
+
+    if args.self_test:
+        sys.exit(1 if run_recognition_self_test() else 0)
+    if args.step is None:
+        ap.error("the following arguments are required: step (or pass --self-test)")
 
     step_path = str(_Path(args.step).expanduser().resolve())
     if args.print_tree:
