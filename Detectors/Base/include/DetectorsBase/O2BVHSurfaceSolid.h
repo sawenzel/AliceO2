@@ -78,6 +78,15 @@ struct BVHSurfaceRecord {
   std::vector<BVHSurfaceCurveRecord> curves;
   std::vector<int> wireSizes;
 
+  /// The identity of this face's boundary edges in the source solid, in the order the face's
+  /// curves are listed above (outer wire first, then the inner wires): parallel arrays of a
+  /// `uint32` edge index into the model's edge table and a flag byte. Sidecar version 3; empty
+  /// when the source stated none, and the closure check then falls back on its geometric rim
+  /// measurement. See O2BVHSurfaceSolid::BoundaryEdgeFlag and
+  /// scripts/geometry/Stream_F_EdgeIdentity.md.
+  std::vector<unsigned int> boundaryEdgeIds;
+  std::vector<unsigned char> boundaryEdgeFlags;
+
   /// How many entries \a scalars must hold for \a kind, or -1 for an unknown kind.
   static int expectedScalarCount(int recordKind);
 };
@@ -226,6 +235,35 @@ class O2BVHSurfaceSolid : public TGeoBBox
                           double majorRadius, double minorRadius, double phiStart, double phiSweep, double tubeStart,
                           double tubeSweep, bool innerWall, const std::vector<PlanarBoundaryCurve>& outerTrim,
                           const std::vector<std::vector<PlanarBoundaryCurve>>& innerTrims = {});
+
+  /// \name Boundary edge identity (sidecar v3)
+  /// Which edges of the source solid a face is bounded by, and which way it runs along each.
+  ///
+  /// This is what makes "watertight" checkable rather than tuned. Whether two faces share an edge
+  /// is a topological fact the CAD kernel already knows; before v3 the sidecar wrote the trim
+  /// curves and threw the identity away, and the closure check had to guess it back by searching
+  /// for a nearby chord -- a proximity query standing in for a count, whose band bounds each
+  /// polyline against its *own* curve and never against the other face's. With the identity
+  /// present, CloseShape() decides on it: every edge exactly twice, opposite sense, no tolerance
+  /// and no sampling anywhere in the verdict, and the geometric disagreement between the two
+  /// faces becomes a reported number (GetMaxSharedEdgeDeviation) instead of a criterion.
+  ///
+  /// Setting none of them (the default) keeps the previous behaviour exactly, which is what a
+  /// version-1 or version-2 sidecar gets.
+  /// @{
+  enum BoundaryEdgeFlag : unsigned char {
+    kEdgeReversed = 1u << 0,   ///< the face runs against the edge's own direction
+    kEdgeDegenerate = 1u << 1, ///< cone apex / sphere pole: a point, so it has no second face
+    kEdgeAnchored = 1u << 2    ///< entry i is trim curve i of this face, so it can be measured
+  };
+
+  /// Attach the boundary edge identities of surface \a surfaceIndex: \a edgeIds indexes the
+  /// model's edge table and \a edgeFlags is the matching BoundaryEdgeFlag mask, both in the order
+  /// the surface's trim curves were given (outer wire first, then the inner wires). Returns false
+  /// for an out-of-range index or mismatched array lengths. Takes effect at the next CloseShape().
+  bool SetSurfaceBoundaryEdges(int surfaceIndex, const std::vector<unsigned int>& edgeIds,
+                               const std::vector<unsigned char>& edgeFlags);
+  /// @}
 
   /// Finalize the shape: compute the bounding box, the display mesh, the closure/orientation
   /// diagnostics (when \a check is set) and build the BVH acceleration structure over the
@@ -380,6 +418,33 @@ class O2BVHSurfaceSolid : public TGeoBBox
   /// places for two sessions -- the tell that it is not one is that it does not move with the
   /// declared tolerance at all (scripts/geometry/TolerancePolicy.md section 12.3).
   double GetMaxRimIsolation() const;
+  /// \name Closure by edge identity
+  /// Available when every face stated its boundary edges (sidecar v3, see SetSurfaceBoundaryEdges).
+  /// When it is, **these decide** IsClosed(), IsOrientationConsistent() and
+  /// GetNavigationReliability(), and the rim numbers above become pure measurement.
+  /// @{
+  /// Whether the edge identities were complete enough to decide closure by counting.
+  bool HasEdgeIdentity() const;
+  /// Distinct source edges over all faces, and how they were incident: shared (twice, opposite
+  /// sense -- a seam edge counts here, being the two visits of one face), boundary (once: a face
+  /// is missing), non-manifold (three or more), reversed (twice, same sense) and degenerate (a
+  /// cone apex or sphere pole, excluded from the others because a point has no second face).
+  int GetSourceEdgeCount() const;
+  int GetSharedSourceEdgeCount() const;
+  int GetBoundarySourceEdgeCount() const;
+  int GetNonManifoldSourceEdgeCount() const;
+  int GetReversedSourceEdgeCount() const;
+  int GetDegenerateSourceEdgeCount() const;
+  /// **How far apart the two faces of a shared edge really are, in cm** -- the largest symmetric
+  /// Hausdorff distance between the two faces' own 3D realisations of one shared edge. It is a
+  /// *measurement*: nothing is accepted or rejected on it. It is the number GetMaxRimIsolation()
+  /// was read as for two sessions and never was.
+  double GetMaxSharedEdgeDeviation() const;
+  /// How many shared edges that maximum is over, and how many could not contribute because one of
+  /// the two faces carries a parametric-rectangle trim with no per-edge curve to sample.
+  int GetMeasuredSharedEdgeCount() const;
+  int GetUnmeasuredSharedEdgeCount() const;
+  /// @}
   /// How far a rim polyline can itself sit from the smooth rim it samples, in cm -- the largest
   /// such value on this solid. Two faces sampling one shared curve at different phases disagree by
   /// about this much whatever the geometry does, which is why the per-chord value of it widens the

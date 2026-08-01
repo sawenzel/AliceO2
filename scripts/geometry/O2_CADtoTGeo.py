@@ -81,9 +81,10 @@ from OCC.Core.GeomAbs import (
     GeomAbs_Line, GeomAbs_Circle, GeomAbs_Ellipse, GeomAbs_Hyperbola, GeomAbs_Parabola,
     GeomAbs_BezierCurve, GeomAbs_BSplineCurve, GeomAbs_OffsetCurve, GeomAbs_OtherCurve,
 )
-from OCC.Core.TopExp import TopExp_Explorer
+from OCC.Core.TopExp import TopExp_Explorer, topexp
 from OCC.Core.TopLoc import TopLoc_Location
 from OCC.Core.TopAbs import TopAbs_REVERSED, TopAbs_WIRE, TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
+from OCC.Core.TopTools import TopTools_IndexedMapOfShape
 from OCC.Core.TopoDS import topods
 from OCC.Extend.TopologyUtils import TopologyExplorer
 
@@ -694,11 +695,62 @@ def build_surface_report(step_path: str, scale_to_cm: float, recognize_surfaces:
 # loader o2::base::LoadSurfaceSolid (DetectorsBase/O2SurfaceSolidIO.h).
 
 SURFACE_SIDECAR_MAGIC = b"O2SS"
-# Version 2 appends a float64 model tolerance (cm) to the fixed header. The kernel reads both.
-SURFACE_SIDECAR_VERSION = 2
+# Version 2 appends a float64 model tolerance (cm) to the fixed header.
+# Version 3 appends a uint32 edge-table size to the header and, per surface, the ordered list of
+# (edgeId, flags) of the face's boundary edges -- the topological identity that turns closure from
+# a proximity query into a count. The kernel reads all three.
+SURFACE_SIDECAR_VERSION = 3
 SURFACE_TYPE_ENUM = {"plane": 1, "cylinder": 2, "cone": 3, "sphere": 4, "torus": 5}
 CURVE_TYPE_ENUM = {"line": 0, "arc": 1, "bspline": 2}
 SURFACE_FLAG_INNER_WALL = 1 << 0
+
+# Per-boundary-edge flag bits, version 3.
+EDGE_FLAG_REVERSED = 1 << 0    # the face traverses the edge against the edge's own direction
+EDGE_FLAG_DEGENERATE = 1 << 1  # BRep_Tool.Degenerated: a cone apex / sphere pole, no 3D curve
+EDGE_FLAG_ANCHORED = 1 << 2    # entry i is trim curve i of this surface, in flattened wire order
+
+
+def build_edge_table(shape):
+    """Index every TopoDS_Edge of \\a shape once, and return (map, edge_id).
+
+    `edge_id(edge)` is a 0-based `uint32` stable for the whole solid: it is what makes two faces'
+    trim curves *the same edge* rather than two curves that happen to run close together. The
+    measurement that licenses keying on it is in `Stream_F_EdgeIdentity.md`: over both corpora
+    (9 fixtures, 12 Bagger parts, 546 edges) every edge is visited exactly twice by
+    `BRepTools_WireExplorer` -- the very walk the trim extractors use -- with opposite orientation,
+    a seam edge being the two visits of one face and every other edge one visit of each of two.
+    """
+    edge_map = TopTools_IndexedMapOfShape()
+    topexp.MapShapes(shape, TopAbs_EDGE, edge_map)
+
+    def edge_id(edge) -> int:
+        return edge_map.FindIndex(edge) - 1  # FindIndex is 1-based; 0 means "not in the map"
+
+    return edge_map, edge_id
+
+
+def face_boundary_edge_refs(face, edge_id, anchored: bool) -> List[Tuple[int, int]]:
+    """The face's boundary edges as ordered (edgeId, flags) pairs.
+
+    The order is `_face_wire_edges(face)` order -- wire by wire, edge by edge -- which is exactly
+    the order `extract_planar_face`, `_quadric_trim_wire` and `_recognized_quadric_wire_block`
+    emit their sidecar trim curves in. `anchored` says whether the record actually carries that
+    wire block: a quadric whose trim is the plain parametric rectangle carries its trim in the
+    scalar params instead, so its edge ids are still a complete statement of *which* edges the
+    face owns (which is all the closure verdict needs) but there is no trim curve to hang the
+    geometric deviation measurement on.
+    """
+    refs: List[Tuple[int, int]] = []
+    base_flags = EDGE_FLAG_ANCHORED if anchored else 0
+    for _wire, _is_outer, edges in _face_wire_edges(face):
+        for edge, _start_vertex in edges:
+            flags = base_flags
+            if edge.Orientation() == TopAbs_REVERSED:
+                flags |= EDGE_FLAG_REVERSED
+            if BRep_Tool.Degenerated(edge):
+                flags |= EDGE_FLAG_DEGENERATE
+            refs.append((edge_id(edge), flags))
+    return refs
 
 
 def shape_model_tolerance(shape, scale_to_cm: float) -> float:
@@ -721,7 +773,8 @@ def shape_model_tolerance(shape, scale_to_cm: float) -> float:
     return worst * scale_to_cm
 
 
-def write_surfaces_bin(path: _Path, surfaces: List[dict], model_tolerance_cm: float = 0.0):
+def write_surfaces_bin(path: _Path, surfaces: List[dict], model_tolerance_cm: float = 0.0,
+                       n_model_edges: int = 0):
     """
     Writes the surface sidecar. `surfaces` is a list of records:
       {"type": "plane"|"cylinder"|"cone"|"sphere"|"torus",
@@ -731,17 +784,24 @@ def write_surfaces_bin(path: _Path, surfaces: List[dict], model_tolerance_cm: fl
                                         # plain parametric rectangle (else carried in params)
           {"role": "outer"|"inner",     # general line/arc loops (polygon, disk, rounded rect)
            "edges": [{"curve": "line"|"arc", "params": [float, ...]}, ...]},
-       ]}
+       ],
+       "edge_refs": [(edgeId, flags), ...]}   # version 3; see face_boundary_edge_refs
 
     `model_tolerance_cm` is the source model's declared tolerance (shape_model_tolerance), written
     into the version-2 header. Zero means "not stated"; the reader then falls back on its own
     documented constant and says so.
+
+    `n_model_edges` is the size of the solid's edge table (`build_edge_table`), written into the
+    version-3 header so the reader can size its incidence count without scanning first. Zero, or
+    a record with no `edge_refs`, means this sidecar states no edge identity and the reader falls
+    back on the geometric rim measurement -- which is exactly what a version-2 file does.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "wb") as f:
         f.write(SURFACE_SIDECAR_MAGIC)
         f.write(struct.pack("<III", SURFACE_SIDECAR_VERSION, len(surfaces), 0))
         f.write(struct.pack("<d", float(model_tolerance_cm)))
+        f.write(struct.pack("<I", int(n_model_edges)))
         for srec in surfaces:
             stype = SURFACE_TYPE_ENUM[srec["type"]]
             flags = SURFACE_FLAG_INNER_WALL if srec.get("inner_wall") else 0
@@ -761,6 +821,10 @@ def write_surfaces_bin(path: _Path, surfaces: List[dict], model_tolerance_cm: fl
                     f.write(struct.pack("<II", ctype, len(cparams)))
                     if cparams:
                         f.write(struct.pack(f"<{len(cparams)}d", *cparams))
+            edge_refs = srec.get("edge_refs", [])
+            f.write(struct.pack("<I", len(edge_refs)))
+            for edge_id, edge_flags in edge_refs:
+                f.write(struct.pack("<IB", int(edge_id), int(edge_flags)))
 
 
 def write_brep_cm(path: _Path, shape, scale_to_cm: float):
@@ -1835,12 +1899,18 @@ _FACE_EXTRACTORS = {
 
 
 def extract_surfaces_for_shape(shape, scale_to_cm: float,
-                               recognize_surfaces: bool = True) -> Tuple[Optional[List[dict]], List[str]]:
+                               recognize_surfaces: bool = True) -> Tuple[Optional[List[dict]], List[str], int]:
     """Attempt to extract every face of a leaf solid into exact sidecar surface records.
 
-    Returns (surfaces, []) when all faces are supported, or (None, reasons) listing why the
-    solid cannot be represented exactly (one reason per unsupported face). A shape with no
-    faces is treated as unsupported.
+    Returns (surfaces, [], nModelEdges) when all faces are supported, or (None, reasons, 0)
+    listing why the solid cannot be represented exactly (one reason per unsupported face). A shape
+    with no faces is treated as unsupported.
+
+    Every accepted record carries `edge_refs`: the identity of the face's boundary edges within
+    this solid (see `face_boundary_edge_refs`). Because a single unsupported face rejects the
+    whole solid, an emitted sidecar always describes *all* of the shape's faces, which is what
+    makes the edge incidence count on the reader's side a complete statement rather than a
+    statement about the subset that converted.
 
     `recognize_surfaces`: when a face's *stored* surface type has no direct extractor (typically
     bspline/bezier/revolution/extrusion), try the canonical-form recognition pre-pass
@@ -1850,6 +1920,7 @@ def extract_surfaces_for_shape(shape, scale_to_cm: float,
     surfaces: List[dict] = []
     reasons: List[str] = []
     n_faces = 0
+    edge_map, edge_id = build_edge_table(shape)
     for face in TopologyExplorer(shape).faces():
         n_faces += 1
         adaptor = BRepAdaptor_Surface(face)
@@ -1868,12 +1939,14 @@ def extract_surfaces_for_shape(shape, scale_to_cm: float,
         if record is None:
             reasons.append(reason or f"{surf_type} face not supported")
         else:
+            record["edge_refs"] = face_boundary_edge_refs(face, edge_id,
+                                                         anchored=bool(record.get("wires")))
             surfaces.append(record)
     if n_faces == 0:
-        return None, ["shape has no faces"]
+        return None, ["shape has no faces"], 0
     if reasons:
-        return None, reasons
-    return surfaces, []
+        return None, reasons, 0
+    return surfaces, [], edge_map.Size()
 
 
 # -------------------------------
@@ -3050,7 +3123,8 @@ def emit_root_macro(
         brep_files: Dict[str, str] = {}  # def_lid -> absolute path of brep_*.brep (--dump-brep)
         failures: Dict[str, List[str]] = {}  # def_lid -> unsupported-face reasons
         for lid, shape in def_shapes.items():
-            surfaces, reasons = extract_surfaces_for_shape(shape, scale_to_cm, recognize_surfaces=recognize_flag)
+            surfaces, reasons, n_model_edges = extract_surfaces_for_shape(
+                shape, scale_to_cm, recognize_surfaces=recognize_flag)
             if surfaces is None:
                 failures[lid] = reasons
                 continue
@@ -3058,7 +3132,7 @@ def emit_root_macro(
             volname = sanitize_filename(disp) if disp else "vol"
             name_suffix = f"{volname}_{sanitize_filename(lid)}"
             fpath = (out_folder / f"surfaces_{name_suffix}.bin").resolve()
-            write_surfaces_bin(fpath, surfaces, shape_model_tolerance(shape, scale_to_cm))
+            write_surfaces_bin(fpath, surfaces, shape_model_tolerance(shape, scale_to_cm), n_model_edges)
             surface_files[lid] = str(fpath)
             if dump_brep:
                 bpath = (out_folder / f"brep_{name_suffix}.brep").resolve()

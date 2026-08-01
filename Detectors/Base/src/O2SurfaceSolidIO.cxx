@@ -10,7 +10,7 @@
 // or submit itself to any jurisdiction.
 
 /// \file O2SurfaceSolidIO.cxx
-/// \brief Reader for the exact-surface sidecar format (surfaces_*.bin, versions 1 and 2).
+/// \brief Reader for the exact-surface sidecar format (surfaces_*.bin, versions 1 to 3).
 ///
 /// The binary layout is documented in scripts/geometry/BVHSurfaceSolid.md
 /// ("Surface sidecar format") and written by write_surfaces_bin in
@@ -40,9 +40,12 @@ namespace
 
 /// Sidecar versions this reader understands. Version 2 appends a float64 model tolerance (cm) to
 /// the fixed header; everything after the header is unchanged, so a v1 file is a v2 file that
-/// simply does not say what its model's tolerance is.
+/// simply does not say what its model's tolerance is. Version 3 appends a uint32 edge-table size
+/// to the header and, after each surface's wire block, that face's boundary edge identities -- so
+/// a v2 file is a v3 file that states no identities, and it loads exactly as it always did and
+/// gets exactly the geometric closure verdict it always got.
 constexpr uint32_t kSidecarVersionMin = 1;
-constexpr uint32_t kSidecarVersionMax = 2;
+constexpr uint32_t kSidecarVersionMax = 3;
 
 /// What a version-1 sidecar's model tolerance is taken to be, in cm. Version 1 carried no such
 /// statement, so this is the project's measured extractor precision standing in for one -- the
@@ -119,8 +122,33 @@ bool readU32(std::ifstream& in, uint32_t& value)
   return static_cast<bool>(in);
 }
 
-bool readDoubles(std::ifstream& in, std::vector<double>& values, uint32_t n)
+bool readU8(std::ifstream& in, uint8_t& value)
 {
+  in.read(reinterpret_cast<char*>(&value), sizeof(value));
+  return static_cast<bool>(in);
+}
+
+/// How many bytes are left to read, or 0 once the stream has gone bad.
+///
+/// Every count in this format is a `uint32` read from the file, and a file that is not the file it
+/// claims to be -- a version-2 body behind a version-3 header, say -- yields counts of billions.
+/// `resize`-ing to them is not a parse error, it is an out-of-memory kill, and the reader then
+/// reports nothing at all. Sizing every allocation against what the file can actually hold turns
+/// that back into the truncation error it is.
+uint64_t bytesRemaining(std::ifstream& in, std::streamoff fileSize)
+{
+  if (!in) {
+    return 0;
+  }
+  const std::streamoff here = in.tellg();
+  return here < 0 || here > fileSize ? 0 : static_cast<uint64_t>(fileSize - here);
+}
+
+bool readDoubles(std::ifstream& in, std::vector<double>& values, uint32_t n, std::streamoff fileSize)
+{
+  if (static_cast<uint64_t>(n) * sizeof(double) > bytesRemaining(in, fileSize)) {
+    return false;
+  }
   values.resize(n);
   in.read(reinterpret_cast<char*>(values.data()), static_cast<std::streamsize>(n) * sizeof(double));
   return static_cast<bool>(in);
@@ -307,6 +335,58 @@ bool collectQuadricTrim(const std::string& file, size_t surfaceIndex, const std:
   return true;
 }
 
+/// Permute a face's edge identities from the sidecar's wire order into the kernel's.
+///
+/// The sidecar lists wires in the order the CAD walk found them, each tagged outer or inner; the
+/// Add*Surface API takes the outer wire as one argument and the inner wires as another, so the
+/// kernel's flattened trim-curve index is "outer wire's curves, then the inner wires' in order".
+/// Those two orders coincide only when the outer wire happens to come first, and an edge identity
+/// that is off by one wire pairs the wrong two curves -- which is silent, because a wrong pairing
+/// still produces a number. Permute rather than hope.
+///
+/// A face with no wire block (a quadric trimmed to its parametric rectangle) is left alone: its
+/// identities are not anchored to any curve, and their order carries no meaning.
+void reorderEdgeRefsToKernelOrder(const std::vector<SidecarWire>& wires, std::vector<unsigned int>& edgeIds,
+                                  std::vector<unsigned char>& edgeFlags)
+{
+  size_t totalEdges = 0;
+  for (const auto& wire : wires) {
+    totalEdges += wire.edges.size();
+  }
+  if (wires.empty() || totalEdges != edgeIds.size()) {
+    return;
+  }
+  // kernel offset of each sidecar wire: the outer wire first, then the inner wires in file order
+  std::vector<size_t> kernelOffset(wires.size(), 0);
+  size_t running = 0;
+  for (size_t w = 0; w < wires.size(); ++w) {
+    if (wires[w].role == 0) {
+      kernelOffset[w] = 0;
+      running = wires[w].edges.size();
+      break;
+    }
+  }
+  for (size_t w = 0; w < wires.size(); ++w) {
+    if (wires[w].role != 0) {
+      kernelOffset[w] = running;
+      running += wires[w].edges.size();
+    }
+  }
+
+  std::vector<unsigned int> permutedIds(edgeIds.size());
+  std::vector<unsigned char> permutedFlags(edgeFlags.size());
+  size_t sidecarOffset = 0;
+  for (size_t w = 0; w < wires.size(); ++w) {
+    for (size_t e = 0; e < wires[w].edges.size(); ++e) {
+      permutedIds[kernelOffset[w] + e] = edgeIds[sidecarOffset + e];
+      permutedFlags[kernelOffset[w] + e] = edgeFlags[sidecarOffset + e];
+    }
+    sidecarOffset += wires[w].edges.size();
+  }
+  edgeIds.swap(permutedIds);
+  edgeFlags.swap(permutedFlags);
+}
+
 } // namespace
 
 bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
@@ -316,6 +396,10 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
     ::Error("LoadSurfaceSolid", "Cannot open surface sidecar file %s", file.c_str());
     return false;
   }
+
+  in.seekg(0, std::ios::end);
+  const std::streamoff fileSize = in.tellg();
+  in.seekg(0, std::ios::beg);
 
   char magic[4];
   in.read(magic, sizeof(magic));
@@ -335,6 +419,7 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
     return false;
   }
 
+  uint32_t nModelEdges = 0;
   if (version >= 2) {
     double modelTolerance = 0.;
     in.read(reinterpret_cast<char*>(&modelTolerance), sizeof(modelTolerance));
@@ -343,6 +428,10 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
       return false;
     }
     solid.SetModelTolerance(modelTolerance);
+    if (version >= 3 && !readU32(in, nModelEdges)) {
+      ::Error("LoadSurfaceSolid", "%s: truncated version-3 header (no edge table size)", file.c_str());
+      return false;
+    }
   } else {
     ::Warning("LoadSurfaceSolid",
               "%s is a version-1 sidecar and states no model tolerance; assuming %g cm (the extractor's precision). "
@@ -358,7 +447,7 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
       return false;
     }
     std::vector<double> p;
-    if (!readDoubles(in, p, nParams)) {
+    if (!readDoubles(in, p, nParams, fileSize)) {
       ::Error("LoadSurfaceSolid", "%s: truncated parameters of surface %zu", file.c_str(), s);
       return false;
     }
@@ -369,6 +458,11 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
       ::Error("LoadSurfaceSolid", "%s: truncated wire count of surface %zu", file.c_str(), s);
       return false;
     }
+    // 8 bytes of header per wire is the floor, so a count beyond that cannot be honest
+    if (static_cast<uint64_t>(nWires) * 8u > bytesRemaining(in, fileSize)) {
+      ::Error("LoadSurfaceSolid", "%s: surface %zu claims %u wires, more than the file holds", file.c_str(), s, nWires);
+      return false;
+    }
     std::vector<SidecarWire> wires(nWires);
     for (auto& wire : wires) {
       uint32_t nEdges = 0;
@@ -376,13 +470,52 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
         ::Error("LoadSurfaceSolid", "%s: truncated wire header in surface %zu", file.c_str(), s);
         return false;
       }
+      if (static_cast<uint64_t>(nEdges) * 8u > bytesRemaining(in, fileSize)) {
+        ::Error("LoadSurfaceSolid", "%s: surface %zu claims %u wire edges, more than the file holds", file.c_str(), s,
+                nEdges);
+        return false;
+      }
       wire.edges.resize(nEdges);
       for (auto& edge : wire.edges) {
         uint32_t nCurveParams = 0;
-        if (!readU32(in, edge.curveType) || !readU32(in, nCurveParams) || !readDoubles(in, edge.params, nCurveParams)) {
+        if (!readU32(in, edge.curveType) || !readU32(in, nCurveParams) ||
+            !readDoubles(in, edge.params, nCurveParams, fileSize)) {
           ::Error("LoadSurfaceSolid", "%s: truncated edge record in surface %zu", file.c_str(), s);
           return false;
         }
+      }
+    }
+
+    // Version 3: the face's boundary edge identities, in the sidecar's own wire order.
+    std::vector<unsigned int> edgeIds;
+    std::vector<unsigned char> edgeFlags;
+    if (version >= 3) {
+      uint32_t nEdgeRefs = 0;
+      if (!readU32(in, nEdgeRefs)) {
+        ::Error("LoadSurfaceSolid", "%s: truncated edge identity count of surface %zu", file.c_str(), s);
+        return false;
+      }
+      if (static_cast<uint64_t>(nEdgeRefs) * 5u > bytesRemaining(in, fileSize)) {
+        ::Error("LoadSurfaceSolid", "%s: surface %zu claims %u edge identities, more than the file holds",
+                file.c_str(), s, nEdgeRefs);
+        return false;
+      }
+      edgeIds.resize(nEdgeRefs);
+      edgeFlags.resize(nEdgeRefs);
+      for (uint32_t e = 0; e < nEdgeRefs; ++e) {
+        uint32_t edgeId = 0;
+        uint8_t edgeFlag = 0;
+        if (!readU32(in, edgeId) || !readU8(in, edgeFlag)) {
+          ::Error("LoadSurfaceSolid", "%s: truncated edge identity %u of surface %zu", file.c_str(), e, s);
+          return false;
+        }
+        if (nModelEdges > 0 && edgeId >= nModelEdges) {
+          ::Error("LoadSurfaceSolid", "%s: surface %zu edge identity %u is %u, outside the model's %u edge(s)",
+                  file.c_str(), s, e, edgeId, nModelEdges);
+          return false;
+        }
+        edgeIds[e] = edgeId;
+        edgeFlags[e] = edgeFlag;
       }
     }
 
@@ -529,6 +662,10 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
     if (!added) {
       ::Error("LoadSurfaceSolid", "%s: surface %zu was rejected by O2BVHSurfaceSolid", file.c_str(), s);
       return false;
+    }
+    if (!edgeIds.empty()) {
+      reorderEdgeRefsToKernelOrder(wires, edgeIds, edgeFlags);
+      solid.SetSurfaceBoundaryEdges(static_cast<int>(s), edgeIds, edgeFlags);
     }
   }
 
