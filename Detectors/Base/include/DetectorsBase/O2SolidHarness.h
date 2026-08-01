@@ -273,6 +273,45 @@ struct PartStats {
   long long bvhRayCandidatesSampled = 0; // summed over a probe ray set, caller-defined
 };
 
+// ------------------------------------------------------------------------------------------
+// The `shape_<part>.root` sidecar: handing an arbitrary TGeoShape to the harness and the gate
+// ------------------------------------------------------------------------------------------
+//
+// The gate could previously score exactly one thing: an O2BVHSurfaceSolid loaded from
+// `surfaces_<part>.bin`. The four scored queries are TGeoShape virtuals, so nothing but the
+// loading was actually specific to that class. These two functions are the third way to obtain a
+// candidate -- a plain ROOT-serialised TGeoShape -- which is how the planned CSG emitter will
+// hand over TGeoTube / TGeoBBox / TGeoCompositeShape trees.
+//
+// The convention, stated in full so an emitter can be written against it without reading this
+// code (and again in scripts/geometry/Stream_G_AnyShape.md):
+//
+//   * one file per part, named `shape_<VOL>_<LID>.root`, sitting in the same converter output
+//     directory as `surfaces_<VOL>_<LID>.bin`, `facets_<VOL>_<LID>.bin` and
+//     `brep_<VOL>_<LID>.brep`;
+//   * it holds exactly one object inheriting from TGeoShape, stored under the key name "shape".
+//     A file whose "shape" key is missing is searched for the first TGeoShape-derived key, so a
+//     hand-written file with a different key name still loads, but emitters must write "shape";
+//   * lengths are in CENTIMETRES and the shape is expressed in the part's own LOCAL frame -- the
+//     same frame as the sidecar, the mesh and the .brep, i.e. the leaf solid as the converter
+//     emits it, with no placement matrix applied. This is the whole correctness precondition:
+//     the oracle answers questions about the .brep in that frame, and a TGeoShape answers in its
+//     own, so a shape written in the assembly frame produces a full table of plausible nonsense.
+//     The harness measures the deviation between the shape's bounding box and the oracle's
+//     (`bboxDeviationFromOracle`) and reports it per representation so the mistake is visible
+//     rather than silent;
+//   * a TGeoCompositeShape is written whole -- its TGeoBoolNode and component shapes stream with
+//     it -- and needs no TGeoManager on either side.
+
+/// Read the single TGeoShape from a `shape_<part>.root` sidecar. Returns nullptr on any failure,
+/// with a human-readable reason in `*error` when that is non-null. The caller owns the result;
+/// it is detached from the file, which is closed before returning.
+TGeoShape* loadShapeFromRootFile(const std::string& path, std::string* error = nullptr);
+
+/// Write one, so that producer and consumer of the convention cannot drift apart: the unit test
+/// and any fixture generator go through the same function the harness reads with.
+bool saveShapeToRootFile(const std::string& path, const TGeoShape& shape, std::string* error = nullptr);
+
 } // namespace harness
 } // namespace base
 } // namespace o2
