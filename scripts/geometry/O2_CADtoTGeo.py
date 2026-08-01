@@ -563,6 +563,12 @@ def classify_face(face, scale_to_cm: float, recognize_surfaces: bool = True) -> 
         if rec is not None:
             record["recognized_type"] = rec["kind"]
             record["recognized_residual"] = rec["residual"]
+            # The *achieved* gap, reported per face and in both units, because that is the number
+            # the acceptance was actually made on and the number a reader has to be able to argue
+            # with (`_analytic_surface_gap`). `recognized_residual` is the same quantity relative
+            # to the patch diagonal and is kept under its old name for older readers.
+            record["recognized_gap_cm"] = rec["gap"] * scale_to_cm
+            record["recognized_gap_relative"] = rec["gap_relative"]
 
     try:
         outer_wire = breptools.OuterWire(face)
@@ -655,6 +661,10 @@ def build_surface_report(step_path: str, scale_to_cm: float, recognize_surfaces:
     recognized_surface_counts: Dict[str, int] = {}
     recognized_stored_type_counts: Dict[str, int] = {}
 
+    recognized_max_gap_cm: Dict[str, float] = {}
+    n_eligible_without_recognition = 0
+    n_rescued_by_recognition = 0
+
     for lid, shape in def_shapes.items():
         faces = []
         for face in TopologyExplorer(shape).faces():
@@ -674,14 +684,34 @@ def build_surface_report(step_path: str, scale_to_cm: float, recognize_surfaces:
             if recognized_kind is not None:
                 recognized_surface_counts[recognized_kind] = recognized_surface_counts.get(recognized_kind, 0) + 1
                 recognized_stored_type_counts[rec["type"]] = recognized_stored_type_counts.get(rec["type"], 0) + 1
+                gap = rec.get("recognized_gap_cm", 0.0)
+                recognized_max_gap_cm[recognized_kind] = max(recognized_max_gap_cm.get(recognized_kind, 0.0), gap)
 
         eligible = bool(faces) and all(f["supported"] for f in faces)
+        # The coverage *delta* recognition is responsible for: how the same solid would score with
+        # the pre-pass switched off. Quoting `n_eligible` on its own does not say that.
+        eligible_without = bool(faces) and all(
+            f["supported"] and f.get("recognized_type") is None for f in faces)
         if eligible:
             n_eligible += 1
+        if eligible_without:
+            n_eligible_without_recognition += 1
+        elif eligible:
+            n_rescued_by_recognition += 1
+        vol_recognized: Dict[str, int] = {}
+        vol_gap = 0.0
+        for f in faces:
+            k = f.get("recognized_type")
+            if k is not None:
+                vol_recognized[k] = vol_recognized.get(k, 0) + 1
+                vol_gap = max(vol_gap, f.get("recognized_gap_cm", 0.0))
         volumes[lid] = {
             "name": def_names.get(lid, ""),
             "n_faces": len(faces),
             "eligible": eligible,
+            "eligible_without_recognition": eligible_without,
+            "recognized_counts": vol_recognized,
+            "recognized_max_gap_cm": vol_gap,
             "faces": faces,
         }
 
@@ -697,6 +727,10 @@ def build_surface_report(step_path: str, scale_to_cm: float, recognize_surfaces:
             "fallback_reasons": fallback_reasons,
             "recognized_surface_counts": recognized_surface_counts,
             "recognized_stored_type_counts": recognized_stored_type_counts,
+            "recognized_max_gap_cm": recognized_max_gap_cm,
+            "recognized_acceptance_tolerance_relative": _RECOGNIZE_TOL_EXACT,
+            "n_eligible_without_recognition": n_eligible_without_recognition,
+            "n_rescued_by_recognition": n_rescued_by_recognition,
         },
         "volumes": volumes,
     }
@@ -3407,6 +3441,8 @@ def emit_root_macro(
     recognize_flag = recognize_mode == "exact"
 
     # --- optional exact-surface eligibility report (does not modify the emitted geometry) ---
+    report = None
+    report_path = None
     if surface_report:
         report = build_surface_report(step_path, scale_to_cm, recognize_surfaces=recognize_flag)
         report_path = _Path(surface_report).expanduser().resolve()
@@ -3437,12 +3473,14 @@ def emit_root_macro(
         surface_files = {}
         brep_files: Dict[str, str] = {}  # def_lid -> absolute path of brep_*.brep (--dump-brep)
         failures: Dict[str, List[str]] = {}  # def_lid -> unsupported-face reasons
+        extracted: Dict[str, int] = {}   # def_lid -> number of surface records written
         for lid, shape in def_shapes.items():
             surfaces, reasons, n_model_edges = extract_surfaces_for_shape(
                 shape, scale_to_cm, recognize_surfaces=recognize_flag)
             if surfaces is None:
                 failures[lid] = reasons
                 continue
+            extracted[lid] = len(surfaces)
             disp = def_names.get(lid, "")
             volname = sanitize_filename(disp) if disp else "vol"
             name_suffix = f"{volname}_{sanitize_filename(lid)}"
@@ -3458,9 +3496,9 @@ def emit_root_macro(
         n_leaf = len(def_shapes)
         print(f"Exact-surface extraction ({exact_mode}): {len(surface_files)}/{n_leaf} leaf solids "
               f"represented exactly, {len(failures)} fall back to tessellation")
+        reason_counts: Dict[str, int] = {}
         if failures:
             # Aggregate reasons for a compact, useful report.
-            reason_counts: Dict[str, int] = {}
             for reasons in failures.values():
                 for r in reasons:
                     reason_counts[r] = reason_counts.get(r, 0) + 1
@@ -3474,6 +3512,31 @@ def emit_root_macro(
                     uniq = sorted(set(failures[lid]))
                     lines.append(f"  {name} [{lid}]: {'; '.join(uniq)}")
                 raise ValueError("\n".join(lines))
+
+        # The report's `eligible` is a claim about *surfaces* only; `emitted` is what actually
+        # happened, and on ALICE3 the two differ by 16 solids that recognize fine and are then
+        # declined by the trim (Stream_K_Tier0.md sec 2). Reporting one without the other is how
+        # that gap stayed invisible, so the report now carries both, per solid and in the summary.
+        if report is not None:
+            n_emitted_rescued = 0
+            for lid, vol in report["volumes"].items():
+                emitted_here = lid in extracted
+                vol["emitted"] = emitted_here
+                if not emitted_here:
+                    vol["extraction_reasons"] = sorted(set(failures.get(lid, [])))
+                elif vol["recognized_counts"]:
+                    n_emitted_rescued += 1
+            summary = report["summary"]
+            summary["n_emitted"] = len(extracted)
+            summary["n_emitted_carrying_recognized_faces"] = n_emitted_rescued
+            summary["n_eligible_but_not_emitted"] = sum(
+                1 for v in report["volumes"].values() if v["eligible"] and not v["emitted"])
+            summary["extraction_fallback_reasons"] = reason_counts if failures else {}
+            report_path.write_text(json.dumps(report, indent=1))
+            print(f"  emitted {summary['n_emitted']}/{summary['n_volumes']}; "
+                  f"{summary['n_eligible_but_not_emitted']} surface-eligible solid(s) declined at "
+                  f"extraction; {summary['n_emitted_carrying_recognized_faces']} emitted solid(s) "
+                  f"carry recognized faces")
 
     # --- CSG recognition (--csg auto|required) -- the one CSG hook ------------------------
     #
