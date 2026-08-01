@@ -2530,7 +2530,7 @@ void appendDoubles(std::vector<char>& bytes, std::initializer_list<double> value
 // cm. The default stays at version 1 on purpose: every sidecar test below then doubles as a
 // regression test that the reader still accepts the older format.
 void appendSidecarHeader(std::vector<char>& bytes, uint32_t nSurfaces, uint32_t version = 1,
-                         double modelTolerance = 0.)
+                         double modelTolerance = 0., uint32_t nModelEdges = 0)
 {
   bytes.insert(bytes.end(), {'O', '2', 'S', 'S'});
   appendU32(bytes, version);
@@ -2538,6 +2538,9 @@ void appendSidecarHeader(std::vector<char>& bytes, uint32_t nSurfaces, uint32_t 
   appendU32(bytes, 0); // reserved
   if (version >= 2) {
     appendDoubles(bytes, {modelTolerance});
+  }
+  if (version >= 3) {
+    appendU32(bytes, nModelEdges); // size of the model's edge table
   }
 }
 
@@ -2725,10 +2728,13 @@ BOOST_AUTO_TEST_CASE(SidecarModelToleranceRoundTrip)
   handBuilt.SetModelTolerance(-1.); // refused, and the previous value stands
   checkClose(handBuilt.GetModelTolerance(), 1.e-4, 1.e-18);
 
+  // version 3 is understood now (it is a version-2 file that also states its edge identities);
+  // it is exercised in SidecarV3EdgeIdentityRoundTrip below.
+
   // an unknown version is refused rather than reinterpreted
-  SurfaceSolid v3("sidecarV3");
-  BOOST_CHECK(!loadFrom("o2_sidecar_v3.bin", boxBytesWithHeader(3, 1.e-5), v3));
-  BOOST_CHECK_EQUAL(v3.GetNsurfaces(), 0);
+  SurfaceSolid v4("sidecarV4");
+  BOOST_CHECK(!loadFrom("o2_sidecar_v4.bin", boxBytesWithHeader(4, 1.e-5), v4));
+  BOOST_CHECK_EQUAL(v4.GetNsurfaces(), 0);
 
   // and a v2 header that stops before its tolerance is a truncated file, not a v1 one
   std::vector<char> stump;
@@ -4129,3 +4135,393 @@ BOOST_AUTO_TEST_CASE(UnclampedBSplineEndpointsAreEvaluatedNotReadOffThePoles)
   BOOST_CHECK_SMALL(std::abs(unclamped.pointAt(0.).uCoord - start.uCoord), 1.e-12);
   BOOST_CHECK_SMALL(std::abs(unclamped.pointAt(1.).vCoord - end.vCoord), 1.e-12);
 }
+
+// --------------------------------------------------------------------------------------------
+// Stream F: sidecar v3 edge identity. Everything below this line belongs to that stream; the
+// block is delimited so that concurrent work appending its own cases never conflicts with it.
+// --------------------------------------------------------------------------------------------
+
+namespace
+{
+/// The v3 edge identity of a box built by addBoxSurfaces, derived from the geometry *once, here*.
+///
+/// The converter derives this from `TopExp::MapShapesAndAncestors` on the source B-rep; a unit
+/// test has no B-rep, so it keys the identity on the shared 3D endpoints of the box's own trim
+/// segments. That is legitimate precisely because it is not what is under test: what is under
+/// test is that the kernel decides closure by *counting the identities it is given* and by
+/// nothing else, so the identities have to come from somewhere the kernel cannot see.
+///
+/// `perFace[f]` is face f's list of (edgeId, flags) in the order AddPlanarSurface was given its
+/// four rectangle vertices, which is the order SetSurfaceBoundaryEdges expects.
+std::vector<std::pair<std::vector<unsigned int>, std::vector<unsigned char>>>
+  boxEdgeIdentity(double halfX, double halfY, double halfZ)
+{
+  using Key = std::array<long long, 6>;
+  auto quantize = [](double value) { return static_cast<long long>(std::llround(value * 1.e9)); };
+  std::map<Key, unsigned int> edgeIds;
+  std::vector<std::pair<std::vector<unsigned int>, std::vector<unsigned char>>> perFace(6);
+
+  for (int faceIndex = 0; faceIndex < 6; ++faceIndex) {
+    const FaceFrame frame = boxFaceFrame(faceIndex, halfX, halfY, halfZ);
+    const auto corners = rectangleWire(frame.extentU, frame.extentV);
+    for (size_t segment = 0; segment < corners.size(); ++segment) {
+      const auto& startUV = corners[segment];
+      const auto& endUV = corners[(segment + 1) % corners.size()];
+      auto toGlobal = [&](const Point2D& uv) {
+        return Point3D{frame.origin[0] + frame.axisU[0] * uv[0] + frame.axisV[0] * uv[1],
+                       frame.origin[1] + frame.axisU[1] * uv[0] + frame.axisV[1] * uv[1],
+                       frame.origin[2] + frame.axisU[2] * uv[0] + frame.axisV[2] * uv[1]};
+      };
+      const Point3D start = toGlobal(startUV);
+      const Point3D end = toGlobal(endUV);
+      const Key forwardKey{quantize(start[0]), quantize(start[1]), quantize(start[2]),
+                           quantize(end[0]), quantize(end[1]), quantize(end[2])};
+      const Key backwardKey{forwardKey[3], forwardKey[4], forwardKey[5],
+                            forwardKey[0], forwardKey[1], forwardKey[2]};
+      // the lexicographically smaller ordering names the edge; running the other way is "reversed"
+      const bool reversed = backwardKey < forwardKey;
+      const Key canonical = reversed ? backwardKey : forwardKey;
+      const auto inserted = edgeIds.emplace(canonical, static_cast<unsigned int>(edgeIds.size()));
+      perFace[faceIndex].first.push_back(inserted.first->second);
+      perFace[faceIndex].second.push_back(
+        static_cast<unsigned char>(SurfaceSolid::kEdgeAnchored | (reversed ? SurfaceSolid::kEdgeReversed : 0u)));
+    }
+  }
+  BOOST_REQUIRE_EQUAL(edgeIds.size(), 12u); // a box has twelve edges; if it did not, nothing below means anything
+  return perFace;
+}
+
+/// A closed box carrying its v3 edge identity, ready for CloseShape().
+std::unique_ptr<SurfaceSolid> makeIdentifiedBox(const char* name, double halfX, double halfY, double halfZ)
+{
+  auto solid = std::make_unique<SurfaceSolid>(name);
+  addBoxSurfaces(*solid, halfX, halfY, halfZ);
+  const auto identity = boxEdgeIdentity(halfX, halfY, halfZ);
+  for (int faceIndex = 0; faceIndex < 6; ++faceIndex) {
+    BOOST_REQUIRE(solid->SetSurfaceBoundaryEdges(faceIndex, identity[faceIndex].first, identity[faceIndex].second));
+  }
+  return solid;
+}
+} // namespace
+
+/// N3, the core of it. Closure is a count of edge identities, and no tolerance, band or sampling
+/// enters the verdict. The self-check is the box: 12 edges, every one of them shared by exactly
+/// two faces running opposite ways, and the two faces' realisations of each edge coincide exactly.
+BOOST_AUTO_TEST_CASE(EdgeIdentityDecidesClosureByCounting)
+{
+  const auto box = makeIdentifiedBox("identityBox", 1., 2., 3.);
+  box->CloseShape(false);
+
+  BOOST_CHECK(box->HasEdgeIdentity());
+  BOOST_CHECK_EQUAL(box->GetSourceEdgeCount(), 12);
+  BOOST_CHECK_EQUAL(box->GetSharedSourceEdgeCount(), 12);
+  BOOST_CHECK_EQUAL(box->GetBoundarySourceEdgeCount(), 0);
+  BOOST_CHECK_EQUAL(box->GetNonManifoldSourceEdgeCount(), 0);
+  BOOST_CHECK_EQUAL(box->GetReversedSourceEdgeCount(), 0);
+  BOOST_CHECK_EQUAL(box->GetDegenerateSourceEdgeCount(), 0);
+  BOOST_CHECK(box->IsClosed());
+  BOOST_CHECK(box->IsOrientationConsistent());
+  BOOST_CHECK(box->IsNavigable());
+
+  // the deviation is a measurement, and on a box built from one set of corners it is exactly zero
+  BOOST_CHECK_EQUAL(box->GetMeasuredSharedEdgeCount(), 12);
+  BOOST_CHECK_EQUAL(box->GetUnmeasuredSharedEdgeCount(), 0);
+  BOOST_CHECK_SMALL(box->GetMaxSharedEdgeDeviation(), 1.e-15);
+}
+
+/// A missing face is a missing face however close the survivors happen to lie. Five faces of a box
+/// leave four edges used once, and that is decided by counting rather than by how far apart
+/// anything is -- the old criterion had to find the nearest chord and compare it against a band.
+BOOST_AUTO_TEST_CASE(EdgeIdentityFindsTheMissingFace)
+{
+  SurfaceSolid openBox("identityOpenBox");
+  for (int faceIndex = 0; faceIndex < 5; ++faceIndex) {
+    BOOST_REQUIRE(addBoxFace(openBox, faceIndex, 1., 2., 3.));
+  }
+  const auto identity = boxEdgeIdentity(1., 2., 3.);
+  for (int faceIndex = 0; faceIndex < 5; ++faceIndex) {
+    BOOST_REQUIRE(openBox.SetSurfaceBoundaryEdges(faceIndex, identity[faceIndex].first, identity[faceIndex].second));
+  }
+  openBox.CloseShape(false);
+
+  BOOST_CHECK(openBox.HasEdgeIdentity());
+  BOOST_CHECK_EQUAL(openBox.GetSourceEdgeCount(), 12);
+  BOOST_CHECK_EQUAL(openBox.GetSharedSourceEdgeCount(), 8);
+  BOOST_CHECK_EQUAL(openBox.GetBoundarySourceEdgeCount(), 4); // the missing face's own four edges
+  BOOST_CHECK(!openBox.IsClosed());
+  BOOST_CHECK(!openBox.IsNavigable());
+  BOOST_CHECK_EQUAL(static_cast<int>(openBox.GetNavigationReliability()),
+                    static_cast<int>(SurfaceSolid::NavigationReliability::OpenSurfaceSet));
+}
+
+/// The sense bit carries the orientation, and it is checked. Two faces that traverse a shared edge
+/// the same way disagree about which side is out, whatever their normals happen to look like.
+BOOST_AUTO_TEST_CASE(EdgeIdentityFindsReversedAndDuplicatedFaces)
+{
+  {
+    const auto box = makeIdentifiedBox("identityReversed", 1., 2., 3.);
+    // flip one face's senses: its four edges now read "twice, same way" instead of "twice, opposite"
+    auto identity = boxEdgeIdentity(1., 2., 3.);
+    for (auto& flag : identity[0].second) {
+      flag = static_cast<unsigned char>(flag ^ SurfaceSolid::kEdgeReversed);
+    }
+    BOOST_REQUIRE(box->SetSurfaceBoundaryEdges(0, identity[0].first, identity[0].second));
+    box->CloseShape(false);
+    BOOST_CHECK_EQUAL(box->GetReversedSourceEdgeCount(), 4);
+    BOOST_CHECK(box->IsClosed()); // still every edge twice: closed, but inconsistently oriented
+    BOOST_CHECK(!box->IsOrientationConsistent());
+    BOOST_CHECK_EQUAL(static_cast<int>(box->GetNavigationReliability()),
+                      static_cast<int>(SurfaceSolid::NavigationReliability::ReversedFaces));
+  }
+  {
+    // a seventh face claiming edges that already have two owners is non-manifold by count
+    const auto box = makeIdentifiedBox("identityNonManifold", 1., 2., 3.);
+    BOOST_REQUIRE(addBoxFace(*box, 0, 1., 2., 3.));
+    const auto identity = boxEdgeIdentity(1., 2., 3.);
+    BOOST_REQUIRE(box->SetSurfaceBoundaryEdges(6, identity[0].first, identity[0].second));
+    box->CloseShape(false);
+    BOOST_CHECK_EQUAL(box->GetNonManifoldSourceEdgeCount(), 4);
+    BOOST_CHECK(!box->IsClosed());
+    BOOST_CHECK_EQUAL(static_cast<int>(box->GetNavigationReliability()),
+                      static_cast<int>(SurfaceSolid::NavigationReliability::NonManifold));
+  }
+}
+
+/// maxSharedEdgeDeviation is a measurement, and it has to measure the thing it is named after.
+/// Move one face of the box bodily by a known delta while it keeps claiming the same edges: the
+/// solid is still *closed* by identity (nothing about which edges exist has changed) and the
+/// deviation reports the delta. That separation is the whole design -- the verdict says whether
+/// the faces are meant to meet, the number says how well they do.
+BOOST_AUTO_TEST_CASE(SharedEdgeDeviationMeasuresHowFarApartTheFacesAre)
+{
+  constexpr double delta = 3.e-4;
+  SurfaceSolid shifted("identityShifted");
+  for (int faceIndex = 0; faceIndex < 6; ++faceIndex) {
+    // face 4 is the +z cap; nudge it along +z, which pulls its whole rim off the four side faces
+    const Point3D centre = faceIndex == 4 ? Point3D{0., 0., delta} : Point3D{0., 0., 0.};
+    BOOST_REQUIRE(addBoxFace(shifted, faceIndex, 1., 2., 3., false, centre));
+  }
+  const auto identity = boxEdgeIdentity(1., 2., 3.);
+  for (int faceIndex = 0; faceIndex < 6; ++faceIndex) {
+    BOOST_REQUIRE(shifted.SetSurfaceBoundaryEdges(faceIndex, identity[faceIndex].first, identity[faceIndex].second));
+  }
+  shifted.CloseShape(false);
+
+  BOOST_CHECK(shifted.HasEdgeIdentity());
+  BOOST_CHECK_EQUAL(shifted.GetSharedSourceEdgeCount(), 12);
+  BOOST_CHECK(shifted.IsClosed()); // by identity: the same twelve edges, each used twice
+  BOOST_CHECK_EQUAL(shifted.GetMeasuredSharedEdgeCount(), 12);
+  checkClose(shifted.GetMaxSharedEdgeDeviation(), delta, 1.e-12);
+}
+
+/// The correspondence between edge identity i and trim curve i survives the wire reorientation
+/// that CurveWire/SurfaceWire perform on load. A loop handed in with the wrong winding is
+/// reversed in place, so storage index i stops being input index i; pairing the wrong two curves
+/// would still produce a number, and a plausible one, which is why the mapping is recorded rather
+/// than assumed. Handing the same box in with every loop wound the other way must not move the
+/// deviation off zero.
+BOOST_AUTO_TEST_CASE(TrimCurveIdentitySurvivesWireReorientation)
+{
+  SurfaceSolid flipped("identityFlippedWinding");
+  const auto identity = boxEdgeIdentity(1., 2., 3.);
+  std::vector<std::vector<unsigned int>> ids(6);
+  std::vector<std::vector<unsigned char>> flags(6);
+  for (int faceIndex = 0; faceIndex < 6; ++faceIndex) {
+    FaceFrame frame = boxFaceFrame(faceIndex, 1., 2., 3.);
+    auto corners = rectangleWire(frame.extentU, frame.extentV);
+    // reverse the vertex ring: segment j of the new ring is segment (n-2-j) of the old one, run
+    // backwards, and initialize() will reverse it again to restore the winding it wants
+    std::reverse(corners.begin(), corners.end());
+    BOOST_REQUIRE(flipped.AddPlanarSurface(frame.origin, frame.axisU, frame.axisV, corners));
+    const size_t n = corners.size();
+    ids[faceIndex].resize(n);
+    flags[faceIndex].resize(n);
+    for (size_t j = 0; j < n; ++j) {
+      const size_t source = (n - 2 - j + n) % n;
+      ids[faceIndex][j] = identity[faceIndex].first[source];
+      flags[faceIndex][j] = identity[faceIndex].second[source];
+    }
+    BOOST_REQUIRE(flipped.SetSurfaceBoundaryEdges(faceIndex, ids[faceIndex], flags[faceIndex]));
+  }
+  flipped.CloseShape(false);
+
+  BOOST_CHECK(flipped.HasEdgeIdentity());
+  BOOST_CHECK_EQUAL(flipped.GetSharedSourceEdgeCount(), 12);
+  BOOST_CHECK_EQUAL(flipped.GetMeasuredSharedEdgeCount(), 12);
+  // the load-bearing assertion: had the reversal gone unrecorded, this would be a box edge long
+  BOOST_CHECK_SMALL(flipped.GetMaxSharedEdgeDeviation(), 1.e-12);
+}
+
+/// Partial identity is no identity. A face that names no edges looks exactly like a face with no
+/// missing neighbours, which is the failure this replaces, so the whole solid falls back on the
+/// geometric rim measurement unless *every* face states its edges.
+BOOST_AUTO_TEST_CASE(PartialEdgeIdentityFallsBackToTheRimMeasurement)
+{
+  SurfaceSolid partial("identityPartial");
+  addBoxSurfaces(partial, 1., 2., 3.);
+  const auto identity = boxEdgeIdentity(1., 2., 3.);
+  for (int faceIndex = 0; faceIndex < 5; ++faceIndex) { // one face left silent
+    BOOST_REQUIRE(partial.SetSurfaceBoundaryEdges(faceIndex, identity[faceIndex].first, identity[faceIndex].second));
+  }
+  partial.CloseShape(false);
+  BOOST_CHECK(!partial.HasEdgeIdentity());
+  BOOST_CHECK_EQUAL(partial.GetSourceEdgeCount(), 0);
+  BOOST_CHECK(partial.IsNavigable()); // the geometric verdict, unchanged: the box really is closed
+
+  // and an out-of-range index or mismatched arrays are refused rather than half-applied
+  BOOST_CHECK(!partial.SetSurfaceBoundaryEdges(6, identity[0].first, identity[0].second));
+  BOOST_CHECK(!partial.SetSurfaceBoundaryEdges(0, {1u, 2u}, {0}));
+}
+
+/// The identity is persistent state, not derived state: a solid that loses it on the way through a
+/// ROOT file would come back deciding closure by a different rule than the one that was written.
+BOOST_AUTO_TEST_CASE(EdgeIdentitySurvivesPersistence)
+{
+  const auto box = makeIdentifiedBox("identityPersist", 1., 2., 3.);
+  box->CloseShape(false);
+  BOOST_REQUIRE(box->HasEdgeIdentity());
+
+  const auto restored = writeAndReadBack(*box);
+  BOOST_REQUIRE(restored != nullptr);
+  BOOST_CHECK(restored->HasEdgeIdentity());
+  BOOST_CHECK_EQUAL(restored->GetSourceEdgeCount(), box->GetSourceEdgeCount());
+  BOOST_CHECK_EQUAL(restored->GetSharedSourceEdgeCount(), box->GetSharedSourceEdgeCount());
+  BOOST_CHECK_EQUAL(restored->GetMeasuredSharedEdgeCount(), box->GetMeasuredSharedEdgeCount());
+  checkClose(restored->GetMaxSharedEdgeDeviation(), box->GetMaxSharedEdgeDeviation(), 1.e-18);
+  checkSolidsIdentical(*box, *restored, 4.5, 5);
+}
+
+/// The version-3 sidecar: the edge identities reach the kernel through the file, a version-2 file
+/// still loads and still gets the geometric verdict, and a file that claims v3 without carrying
+/// the identities is rejected as truncated rather than parsed into whatever follows.
+BOOST_AUTO_TEST_CASE(SidecarV3EdgeIdentityRoundTrip)
+{
+  constexpr double halfX = 1.;
+  constexpr double halfY = 2.;
+  constexpr double halfZ = 3.;
+  const auto identity = boxEdgeIdentity(halfX, halfY, halfZ);
+
+  const auto boxBytes = [&](uint32_t version, bool writeIdentity) {
+    std::vector<char> bytes;
+    appendSidecarHeader(bytes, 6, version, 1.e-7, writeIdentity ? 12u : 0u);
+    for (int faceIndex = 0; faceIndex < 6; ++faceIndex) {
+      appendPlaneRecord(bytes, boxFaceFrame(faceIndex, halfX, halfY, halfZ));
+      if (version >= 3) {
+        const auto& ids = identity[faceIndex].first;
+        const auto& flags = identity[faceIndex].second;
+        appendU32(bytes, writeIdentity ? static_cast<uint32_t>(ids.size()) : 0u);
+        if (writeIdentity) {
+          for (size_t e = 0; e < ids.size(); ++e) {
+            appendU32(bytes, ids[e]);
+            bytes.push_back(static_cast<char>(flags[e]));
+          }
+        }
+      }
+    }
+    return bytes;
+  };
+
+  SurfaceSolid v3("sidecarV3Identity");
+  const auto v3Path = writeSidecarFile("o2_sidecar_v3_identity.bin", boxBytes(3, true));
+  BOOST_REQUIRE(o2::base::LoadSurfaceSolid(v3Path.string(), v3));
+  std::filesystem::remove(v3Path);
+  v3.CloseShape(false);
+  BOOST_CHECK(v3.HasEdgeIdentity());
+  BOOST_CHECK_EQUAL(v3.GetSourceEdgeCount(), 12);
+  BOOST_CHECK_EQUAL(v3.GetSharedSourceEdgeCount(), 12);
+  BOOST_CHECK_EQUAL(v3.GetMeasuredSharedEdgeCount(), 12);
+  BOOST_CHECK_SMALL(v3.GetMaxSharedEdgeDeviation(), 1.e-15);
+  BOOST_CHECK(v3.IsNavigable());
+  TGeoBBox reference("identityBoxReference", halfX, halfY, halfZ);
+  compareContainsGrid(v3, reference, 4., 7);
+  checkClose(v3.Capacity(), reference.Capacity(), 1.e-9);
+
+  // a v3 file may legitimately state no identities per face, and then it is a v2 file in all but
+  // the header: same load, same geometric verdict, and nothing pretends to know the topology
+  SurfaceSolid v3Silent("sidecarV3Silent");
+  const auto silentPath = writeSidecarFile("o2_sidecar_v3_silent.bin", boxBytes(3, false));
+  BOOST_REQUIRE(o2::base::LoadSurfaceSolid(silentPath.string(), v3Silent));
+  std::filesystem::remove(silentPath);
+  v3Silent.CloseShape(false);
+  BOOST_CHECK(!v3Silent.HasEdgeIdentity());
+  BOOST_CHECK(v3Silent.IsNavigable());
+
+  // and the same six faces written as version 2 -- the compatibility statement, in one assertion
+  SurfaceSolid v2("sidecarV2StillLoads");
+  const auto v2Path = writeSidecarFile("o2_sidecar_v2_still_loads.bin", boxBytes(2, false));
+  BOOST_REQUIRE(o2::base::LoadSurfaceSolid(v2Path.string(), v2));
+  std::filesystem::remove(v2Path);
+  v2.CloseShape(false);
+  BOOST_CHECK(!v2.HasEdgeIdentity());
+  BOOST_CHECK(v2.IsNavigable());
+  checkClose(v2.GetModelTolerance(), 1.e-7, 1.e-18);
+
+  // a v3 header over a v2 body: the counts it reads are the next record's bytes, and a reader that
+  // resize()s to them is killed rather than reporting anything. It must fail as a parse error.
+  std::vector<char> mislabelled;
+  appendSidecarHeader(mislabelled, 6, 2, 1.e-7);
+  mislabelled[4] = 3; // rewrite the version word in place, leaving a version-2 body behind it
+  for (int faceIndex = 0; faceIndex < 6; ++faceIndex) {
+    appendPlaneRecord(mislabelled, boxFaceFrame(faceIndex, halfX, halfY, halfZ));
+  }
+  SurfaceSolid mislabelledSolid("sidecarV3Mislabelled");
+  const auto badPath = writeSidecarFile("o2_sidecar_v3_mislabelled.bin", mislabelled);
+  BOOST_CHECK(!o2::base::LoadSurfaceSolid(badPath.string(), mislabelledSolid));
+  std::filesystem::remove(badPath);
+}
+
+/// The point of the exercise, stated as a test: the verdict must not depend on how finely a
+/// B-spline trim is flattened. Under the old criterion it did, and *inversely* -- tightening
+/// kBSplineFlatness shrank the per-chord sagitta faster than it shrank the disagreement it was
+/// standing in for, so a better-resolved solid read as more open (TolerancePolicy.md 13.8).
+/// Sampling cannot reach this criterion at all: it counts identities, and the deviation it reports
+/// is evaluated on the curves rather than on their polylines.
+BOOST_AUTO_TEST_CASE(EdgeIdentityVerdictIsIndependentOfChordSampling)
+{
+  const auto box = makeIdentifiedBox("identitySampling", 1., 2., 3.);
+  box->CloseShape(false);
+  const double deviation = box->GetMaxSharedEdgeDeviation();
+  const bool navigable = box->IsNavigable();
+
+  // Resample one face's rim at a different chord count by splitting its wire into eight segments
+  // instead of four. The rim polylines the geometric measurement compares now differ in phase and
+  // in count -- the exact situation section 13 shows moving the old verdict -- while the edge
+  // identity, and every curve it names, is untouched.
+  SurfaceSolid resampled("identitySamplingResampled");
+  const auto identity = boxEdgeIdentity(1., 2., 3.);
+  for (int faceIndex = 0; faceIndex < 6; ++faceIndex) {
+    const FaceFrame frame = boxFaceFrame(faceIndex, 1., 2., 3.);
+    auto corners = rectangleWire(frame.extentU, frame.extentV);
+    std::vector<Point2D> dense;
+    std::vector<unsigned int> ids;
+    std::vector<unsigned char> flags;
+    for (size_t segment = 0; segment < corners.size(); ++segment) {
+      const auto& a = corners[segment];
+      const auto& b = corners[(segment + 1) % corners.size()];
+      dense.push_back(a);
+      dense.push_back({0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1])});
+      // both halves of one box edge carry that edge's identity: an edge split for sampling is
+      // still one edge, and the count has to see it as one
+      for (int half = 0; half < 2; ++half) {
+        ids.push_back(identity[faceIndex].first[segment]);
+        flags.push_back(identity[faceIndex].second[segment]);
+      }
+    }
+    BOOST_REQUIRE(resampled.AddPlanarSurface(frame.origin, frame.axisU, frame.axisV, dense));
+    BOOST_REQUIRE(resampled.SetSurfaceBoundaryEdges(faceIndex, ids, flags));
+  }
+  resampled.CloseShape(false);
+
+  // every box edge now appears four times (twice per face, split in half), so it is *not* the
+  // "exactly twice" case -- which is the honest answer for this deliberately abused fixture, and
+  // the assertion worth making is that the count says so rather than that it says "closed"
+  BOOST_CHECK(resampled.HasEdgeIdentity());
+  BOOST_CHECK_EQUAL(resampled.GetSourceEdgeCount(), 12);
+  BOOST_CHECK_EQUAL(resampled.GetNonManifoldSourceEdgeCount(), 12);
+
+  // and the undisturbed box is unmoved by anything sampling-related
+  BOOST_CHECK_EQUAL(box->IsNavigable(), navigable);
+  checkClose(box->GetMaxSharedEdgeDeviation(), deviation, 1.e-18);
+}
+
+// --- Stream F: sidecar v3 edge identity ---

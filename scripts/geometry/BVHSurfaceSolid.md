@@ -688,16 +688,31 @@ All integers are little-endian `uint32`, all geometry values are little-endian `
 lengths in cm, angles in radians.
 
 **Version 2** appends one `float64` to the fixed header and changes nothing else, so a version-1
-file is a version-2 file that does not state its model's tolerance. The converter writes version 2;
-the reader accepts both, and warns when it falls back for a version-1 file.
+file is a version-2 file that does not state its model's tolerance.
+
+**Version 3** appends one `uint32` to the fixed header and one block per surface, and changes
+nothing else, so a version-2 file is a version-3 file that does not state its **edge identity**.
+The converter writes version 3; the reader accepts all three, and warns when it falls back for a
+version-1 file.
+
+The edge identity is what turns the closure check from a proximity query into a count. Whether two
+faces share an edge is a topological fact the CAD kernel already knows and the converter already
+walks past; before v3 the sidecar wrote the trim curves and discarded the identity, and
+`validateClosure` had to guess it back by searching for a nearby chord — a band that bounds each
+polyline against *its own* curve and never against the other face's. With the identity present the
+verdict is "every edge exactly twice, opposite sense", with no tolerance and no sampling anywhere
+in it, and the geometric disagreement between the two faces becomes a reported measurement
+(`GetMaxSharedEdgeDeviation`, cm). Cost: 5 bytes per trim curve, nothing at run time. See
+`Stream_F_EdgeIdentity.md`.
 
 ```
 header:
   char[4]  magic        = "O2SS"
-  uint32   version      = 2
+  uint32   version      = 3
   uint32   nSurfaces
   uint32   reserved     = 0
-  float64  modelTolerance          # version 2 only; cm; 0 = not stated
+  float64  modelTolerance          # version 2+ only; cm; 0 = not stated
+  uint32   nModelEdges             # version 3 only; size of this solid's edge table; 0 = not stated
 per surface (nSurfaces times):
   uint32   surfaceType     1=plane 2=cylinder 3=cone 4=sphere 5=torus
   uint32   flags           bit 0: innerWall (quadrics/torus: outward normal towards the axis/center/tube spine)
@@ -716,7 +731,26 @@ per surface (nSurfaces times):
         bspline: degree nPoles poles[2*nPoles] weights[nPoles] knots[nPoles+degree+1]
                  (clamped flat knot vector; weights all 1 => non-rational; Bezier is the
                   single-span special case)
+  uint32   nBoundaryEdges  # version 3 only; 0 = this face states no identity
+  per boundary edge (nBoundaryEdges times):
+    uint32   edgeId        0-based index into this solid's edge table
+    uint8    edgeFlags     bit 0: reversed   (the face runs against the edge's own direction)
+                           bit 1: degenerate (cone apex / sphere pole: a point, no partner)
+                           bit 2: anchored   (entry i is also trim curve i of this face)
 ```
+
+The boundary edge list is written **wire by wire in the file's own wire order**, edge by edge —
+the same order the trim curves above are written in, which is
+`BRepTools_WireExplorer` order. It is a property of the *face*, not of the wire block, because a
+quadric trimmed to its plain parametric rectangle carries no wire block at all and still has to
+name its edges: the verdict is a count and needs only the identities, while the deviation
+measurement additionally needs `anchored`. The reader permutes the list into the kernel's
+outer-wire-first order, which is not the file's order whenever the outer wire is not listed first.
+
+Closure by identity applies only when **every** surface of a solid states its edges. A partial
+edge table would let a face that named none look like a face with no missing neighbours, which is
+the exact failure the identity replaces; a solid that states only some falls back on the geometric
+rim measurement in full.
 
 Per-type `params` layouts (matching the `O2BVHSurfaceSolid::Add*Surface` signatures):
 
