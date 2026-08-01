@@ -111,12 +111,17 @@ def build_part_db(models, workdir: Path, skip_convert: bool) -> dict:
     return json.loads(manifest_path.read_text())
 
 
-def dump_samples(harness: Path, db_dir: Path, sample_dir: Path, points: int, rays: int, seed: int):
+def dump_samples(harness: Path, db_dir: Path, sample_dir: Path, points: int, rays: int, seed: int,
+                 load_samples: Path = None):
     print(f"[2/4] dumping sample sets into {sample_dir}")
     sample_dir.mkdir(parents=True, exist_ok=True)
-    run([harness, "--db", db_dir, "--dump-samples", sample_dir, "--points", points,
-         "--rays", rays, "--seed", seed, "--only", "contains"],
-        env=harness_env(), stdout=subprocess.DEVNULL)
+    cmd = [harness, "--db", db_dir, "--dump-samples", sample_dir, "--points", points,
+           "--rays", rays, "--seed", seed, "--only", "contains"]
+    if load_samples is not None:
+        # Round-trips the frozen set through the harness so the oracle and the scoring run below
+        # read the same file the scoring run will use, rather than two copies that could drift.
+        cmd += ["--load-samples", load_samples]
+    run(cmd, env=harness_env(), stdout=subprocess.DEVNULL)
 
 
 def run_oracle(parts, sample_dir: Path, distance_limit: int):
@@ -141,11 +146,14 @@ def run_oracle(parts, sample_dir: Path, distance_limit: int):
 
 
 def score(harness: Path, db_dir: Path, sample_dir: Path, points: int, rays: int, seed: int,
-          json_out: Path):
+          json_out: Path, load_samples: Path = None):
     print(f"[4/4] scoring against the oracle")
-    run([harness, "--db", db_dir, "--ref-answers", sample_dir, "--points", points,
-         "--rays", rays, "--seed", seed, "--loop-crosscheck", "--json", json_out],
-        env=harness_env())
+    cmd = [harness, "--db", db_dir, "--ref-answers", sample_dir, "--points", points,
+           "--rays", rays, "--seed", seed, "--loop-crosscheck", "--edge-identity",
+           "--json", json_out]
+    if load_samples is not None:
+        cmd += ["--load-samples", load_samples]
+    run(cmd, env=harness_env())
     return json.loads(json_out.read_text())
 
 
@@ -197,6 +205,18 @@ def main():
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--distance-limit", type=int, default=1000,
                         help="points per category the oracle computes exact distances for")
+    parser.add_argument("--transform", default=None,
+                        help="transform applied to every --fixtures shape before conversion, for "
+                             "the position/scale sweep: 'translate:dx,dy,dz' (mm) or 'scale:f'. "
+                             "The STEP is the only shape in the pipeline, so the converter, the "
+                             "sidecar, the mesh and the oracle's .brep all move with it.")
+    parser.add_argument("--load-samples", type=Path, default=None,
+                        help="reuse a frozen sample set from another run's <workdir>/oracle "
+                             "instead of generating one. Required to compare a transformed run "
+                             "with its baseline: the generator rejection-samples through the "
+                             "tessellated reference, so a differently-meshed shape otherwise gets "
+                             "different points and the columns are not comparable. Transform the "
+                             "frozen set by the same map first (transformSamples.py).")
     args = parser.parse_args()
 
     args.workdir.mkdir(parents=True, exist_ok=True)
@@ -204,8 +224,10 @@ def main():
     if args.fixtures:
         fixture_dir = args.workdir / "fixtures"
         print(f"[0/4] generating the Boolean fixture ladder into {fixture_dir}")
-        run([_OCC_PYTHON, _HERE / "make_boolean_fixtures.py", "--outdir", fixture_dir],
-            env=occ_env())
+        fixture_cmd = [_OCC_PYTHON, _HERE / "make_boolean_fixtures.py", "--outdir", fixture_dir]
+        if args.transform:
+            fixture_cmd += ["--transform", args.transform]
+        run(fixture_cmd, env=occ_env())
         models += sorted(str(p) for p in fixture_dir.glob("*.step"))
     if not models and not args.skip_convert:
         parser.error("give --model and/or --fixtures, or --skip-convert to reuse a DB")
@@ -215,10 +237,10 @@ def main():
     db_dir = args.workdir / "db"
     sample_dir = args.workdir / "oracle"
 
-    dump_samples(harness, db_dir, sample_dir, args.points, args.rays, args.seed)
+    dump_samples(harness, db_dir, sample_dir, args.points, args.rays, args.seed, args.load_samples)
     run_oracle(manifest.get("parts", []), sample_dir, args.distance_limit)
     report = score(harness, db_dir, sample_dir, args.points, args.rays, args.seed,
-                   args.workdir / "gate.json")
+                   args.workdir / "gate.json", args.load_samples)
 
     print("\n=== GATE SUMMARY ===")
     passed = 0
