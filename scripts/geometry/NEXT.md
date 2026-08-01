@@ -22,7 +22,7 @@ what is missing"*. Start there. This file is only the hand-over on top of it.
 | `Bagger.step` | **12/12 shipped**, 9/12 surface, 1 unscored (`Bucket`, ships as mesh) |
 | unexplained oracle disagreements | **0/0/0/0** on `surface`, both corpora; **0/0/0/0** on `shape` |
 | `runOracleGate.py --self-test` | 17/17 |
-| `o2-bench-detectorsbase-xray --self-test` | 19/19 |
+| `o2-bench-detectorsbase-xray --self-test` | 17 checks, 0 failures |
 
 **Gate totals and disagreement counts are separate numbers. Never quote one without the other.**
 
@@ -48,19 +48,25 @@ every CSG part exact (`dV_sym = 0`) and oracle-clean. That was the MVP and it is
 
 ## Open, in the order I would take them
 
-1. **The ALICE3 defect** *(in progress at the time of writing)*. The X-ray found that **4 of 18
-   converting ALICE3 parts lose 418 crossings, invert the sense of 236, leave 70 transports
-   unterminated and contradict `Contains()` on 336 intervals — while all 18 report `reliable` and
-   `navigable` with zero non-manifold edges.** Three of the four are the `ST0923290` family. This
-   is the first concrete instance of the caveat `Stream_F_EdgeIdentity.md` states in writing:
-   identity certifies that the source *topology* survived conversion, **not** each face's
-   *geometry*. Diagnosis goes in `Stream_L_ALICE3Defect.md`.
-2. **The quartic guards.** `solveQuarticReal` compares quantities of dimension **L²** and **L³**
-   against `kTolerance`, a **length** (1e-9 cm). Two live consequences: the resolvent guard fails
-   and a ray **silently misses a torus it does cross**; the `termQ` guard misroutes an asymmetric
-   quartic into the biquadratic branch and returns **two confidently wrong roots instead of four
-   right ones**. Not a small-geometry curiosity: 1 ray in 5162 is already lost at the shipped
-   fixture size. Bagger has 2 toroidal faces of 288, ALICE3 has 350.
+1. **The quartic guards — now the top item, and worse than it looked.** `solveQuarticReal`
+   compares quantities of dimension **L²** and **L³** against `kTolerance`, a **length** (1e-9 cm).
+   The ALICE3 diagnosis reduced a real failure to one call on real, **unscaled** geometry:
+   `solveQuarticReal(1.0, -1501.7280000044018, 845808.25396968238, -211752288.545858,
+   19882619385.616932)` returns **0 roots** where two genuine ones exist at 375.3392298 and
+   375.5247703. A biquadratic whose `termQ` cancels to −5.96e-08 instead of 0 fails the absolute
+   guard, is misrouted to the resolvent branch, and that resolvent (7.1e-15) fails its own absolute
+   guard. **The trigger is ray-distance / feature-size — 375 cm against a 0.1 cm tube — not model
+   scale**, so it fires whenever a ray travels far relative to what it hits. That is exactly
+   assembly-level transport. Five-line reproducer ready; fix all three guards dimensionally.
+2. **A face-geometry gate column.** The ALICE3 diagnosis produced the criterion
+   `Stream_F_EdgeIdentity.md` says edge identity lacks: **no face's outward normal may be
+   antiparallel to the source face's**. It caught a defect that closure, edge identity and
+   `Capacity()`-free sampling all missed. It is not yet a harness flag or a gate column; it should
+   be both.
+
+   *(The ALICE3 defect itself is diagnosed and its dominant mechanism fixed — see
+   `Stream_L_ALICE3Defect.md`. LOST 418 → 14, sense 236 → 0, parity 336 → 0, 17/18 parts clean.
+   The residual 14 is item 1.)*
 3. **Tier 0** — decode the NURBS-encoded quadrics. Takes ALICE3 quadric-only solids **15/55 →
    36/55**, `as1-oc-214` **0/5 → 5/5**. Helps the exact path and the CSG path equally, because it
    changes what a solid *is* before either looks at it. Highest-value coverage item.
@@ -107,7 +113,14 @@ Any per-face comparison must restrict itself to curved faces and account for pla
 cannot resolve the 1.3e-06 capacity residuals and must never be quoted as if it could. Its value
 is gross errors and **composites**.
 
-**Do not read ALICE3's `reliable` as evidence.** Item 1 above is exactly the counterexample.
+**Do not read `reliable` as evidence about a face's geometry.** Three ALICE3 parts reported
+`reliable`, `navigable`, zero non-manifold edges — with nine faces whose outward normal pointed
+*inward*. **Closure and edge identity are sign-blind.** The normal-direction check is the fix for
+that blindness and is not yet in the gate.
+
+**A recognised NURBS quadric's `face.Orientation()` says nothing about its axis.** It describes the
+exporter's parametrisation. Measure the outward side; never read it off the flag. This is what
+mechanism 1 of `Stream_L_ALICE3Defect.md` was.
 
 ## Traps in the environment
 
