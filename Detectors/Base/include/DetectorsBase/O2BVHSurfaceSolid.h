@@ -336,9 +336,9 @@ class O2BVHSurfaceSolid : public TGeoBBox
     Reliable,               ///< closed, consistently oriented 2-manifold: parity is well defined
     ReversedFaces,          ///< closed, but some rim's partner traverses the shared curve the same
                             ///< way: at least one face's outward normal points inward
-    OpenSurfaceSet,         ///< some rim has no other face within tolerance (missing faces / trim
-                            ///< gaps): parity is undefined in the shadow of every gap along the
-                            ///< parity test direction. GetMaxRimGap() says how wide, in cm
+    OpenSurfaceSet,         ///< some rim has no other face within the match band (missing faces /
+                            ///< trim gaps): parity is undefined in the shadow of every gap along
+                            ///< the parity test direction. GetRimReports() names the loops
     NonManifold             ///< some rim has two or more other faces within tolerance (coincident
                             ///< or duplicated faces): parity depends on the order hits are
                             ///< clustered in
@@ -373,19 +373,26 @@ class O2BVHSurfaceSolid : public TGeoBBox
   /// scripts/geometry/TolerancePolicy.md sections 9 and 10 for the measurement that licenses it.
   /// @{
   /// The largest distance in cm from any face's trim boundary to the nearest trim boundary of a
-  /// *different* face -- the answer to "how far apart are the faces". Zero when there is nothing
-  /// to compare (fewer than two faces with rims). Read it together with GetRimChordResolution():
-  /// a rim is a polyline, and two faces sampling one shared curve at different phases differ by
-  /// up to that much even when the curve is shared exactly.
-  double GetMaxRimGap() const;
-  /// How far a rim polyline can itself sit from the smooth rim it samples, in cm. This is the
-  /// floor below which GetMaxRimGap() is sampling noise rather than geometry.
+  /// *different* face: **how alone the loneliest chord is**, not how far apart two faces are at a
+  /// seam. On a closed solid it is bounded by the match band and means little; on an open one it
+  /// is the worst open chord's isolation. Zero when there is nothing to compare (fewer than two
+  /// faces with rims). The name it had before said "gap", and it was read as a seam width in four
+  /// places for two sessions -- the tell that it is not one is that it does not move with the
+  /// declared tolerance at all (scripts/geometry/TolerancePolicy.md section 12.3).
+  double GetMaxRimIsolation() const;
+  /// How far a rim polyline can itself sit from the smooth rim it samples, in cm -- the largest
+  /// such value on this solid. Two faces sampling one shared curve at different phases disagree by
+  /// about this much whatever the geometry does, which is why the per-chord value of it widens the
+  /// band a chord is matched in.
   double GetRimChordResolution() const;
-  /// The tolerance rim matching used, in cm: the model's own declared tolerance when the sidecar
-  /// states one (see GetModelTolerance), else a documented fallback.
+  /// The tolerance rim matching *declares*, in cm: the model's own when the sidecar states one
+  /// (see GetModelTolerance), else a documented fallback. It is the floor of the match band, not
+  /// the whole of it -- each chord's band is this plus the two chords' own sampling resolutions.
+  /// A rim state therefore does not become stricter than the rims were sampled, however small a
+  /// tolerance the model declares.
   double GetRimMatchTolerance() const;
   /// Summed length of every face's trim boundary, in cm, and how much of it has no other face
-  /// within GetRimMatchTolerance(). This is the honest replacement for a chord count: it says how
+  /// within the match band. This is the honest replacement for a chord count: it says how
   /// much boundary is open, not how many samples were emitted along it.
   double GetTotalRimLength() const;
   double GetUnmatchedRimLength() const;
@@ -395,6 +402,35 @@ class O2BVHSurfaceSolid : public TGeoBBox
   int GetBoundaryRimCount() const;
   int GetNonManifoldRimCount() const;
   int GetReversedRimCount() const;
+
+  /// One trim loop of one face, as the closure measurement saw it.
+  ///
+  /// The counts above say *how many* rims are open and the lengths say *how much* is open; neither
+  /// can say **which** rim, and that has had to be reconstructed by hand from counts and totals
+  /// every time it was needed (scripts/geometry/TolerancePolicy.md section 12 is entirely such a
+  /// reconstruction). These records name the rim and locate its worst chord.
+  struct RimReport {
+    int surface = -1;      ///< index into GetSurfaceRecords() of the face owning this rim
+    int rimOnSurface = -1; ///< which trim loop of that face, in the order the face emits them
+    bool closed = false;   ///< the rim polyline returns to its own first point
+    int chords = 0;
+    int unmatchedChords = 0;     ///< of them, how many found no other face within the tolerance
+    double length = 0.;          ///< the rim's length in cm
+    double unmatchedLength = 0.; ///< how much of it has no other face within the tolerance, in cm
+    /// The largest distance in cm from a chord midpoint of this rim to the nearest chord of a
+    /// *different* face, where that chord's midpoint is, and which face was nearest there (-1 if
+    /// no other face has a rim at all). This is the per-rim term of GetMaxRimIsolation(), and it means
+    /// what that means -- how alone the loneliest chord is, not how wide a seam is.
+    double maxIsolation = 0.;
+    std::array<double, 3> maxIsolationPoint{{0., 0., 0.}};
+    int maxIsolationFace = -1;
+    /// What this rim alone implies about the solid, on the same scale GetNavigationReliability()
+    /// reports: Reliable means matched. That call returns exactly the worst state present here.
+    NavigationReliability state = NavigationReliability::Undetermined;
+  };
+  /// Every rim of the last CloseShape(), in the order the faces were visited; empty before it has
+  /// run. GetRimCount() is its size.
+  const std::vector<RimReport>& GetRimReports() const;
   /// @}
 
   void ComputeBBox() override;

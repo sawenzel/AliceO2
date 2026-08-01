@@ -388,6 +388,25 @@ bool oddCrossingParity(std::vector<RayHit>& hits, const Vec3& rayDirection)
   });
   return (crossings & 1) != 0;
 }
+
+/// A rim's state, on the scale the solid reports. The two enums carry the same four states -- a
+/// rim's verdict *is* what the solid would report if that rim were its only defect -- so the solid
+/// state is the worst over its rims, and there is one set of names for both.
+O2BVHSurfaceSolid::NavigationReliability rimStateToReliability(RimState state)
+{
+  using Reliability = O2BVHSurfaceSolid::NavigationReliability;
+  switch (state) {
+    case RimState::Matched:
+      return Reliability::Reliable;
+    case RimState::Reversed:
+      return Reliability::ReversedFaces;
+    case RimState::Boundary:
+      return Reliability::OpenSurfaceSet;
+    case RimState::NonManifold:
+      return Reliability::NonManifold;
+  }
+  return Reliability::Undetermined;
+}
 } // namespace
 
 struct O2BVHSurfaceSolid::Impl {
@@ -395,6 +414,9 @@ struct O2BVHSurfaceSolid::Impl {
   std::vector<Vec3> displayVertices;
   std::vector<std::array<int, 3>> displayTriangles;
   ClosureReport closure;
+  /// closure.rimRecords in the public form, built once by CloseShape so the accessor can hand out
+  /// a reference. The two are the same data; only the state enum and the Vec3 differ in type.
+  std::vector<RimReport> rimReports;
   bool defined = false;
   std::unique_ptr<BVH> bvh; //!< acceleration structure over the surface AABBs (built in CloseShape)
 
@@ -1108,6 +1130,24 @@ void O2BVHSurfaceSolid::CloseShape(bool check)
   }
 
   fImpl->closure = validateClosure(fImpl->surfaces, fModelTolerance);
+  fImpl->rimReports.clear();
+  fImpl->rimReports.reserve(fImpl->closure.rimRecords.size());
+  for (const RimRecord& record : fImpl->closure.rimRecords) {
+    RimReport report;
+    report.surface = record.surfaceIndex;
+    report.rimOnSurface = record.rimIndexOnSurface;
+    report.closed = record.closed;
+    report.chords = record.chords;
+    report.unmatchedChords = record.unmatchedChords;
+    report.length = record.length;
+    report.unmatchedLength = record.unmatchedLength;
+    report.maxIsolation = record.maxIsolation;
+    report.maxIsolationPoint = {record.maxIsolationPoint.xCoord, record.maxIsolationPoint.yCoord,
+                                record.maxIsolationPoint.zCoord};
+    report.maxIsolationFace = record.maxIsolationFace;
+    report.state = rimStateToReliability(record.state);
+    fImpl->rimReports.push_back(report);
+  }
   fImpl->defined = true;
 
   if (check) {
@@ -1118,13 +1158,15 @@ void O2BVHSurfaceSolid::CloseShape(bool check)
     // centimetres. See scripts/geometry/ExactTrimTopology.md.
     if (closure.boundaryRims > 0) {
       Error("CloseShape",
-            "Shape %s is NOT a closed surface: %d of %d trim loop(s) have no neighbouring face within %g cm, "
-            "leaving %g cm of its %g cm of boundary open, the worst gap being %g cm. NAVIGATION IS UNRELIABLE: "
+            "Shape %s is NOT a closed surface: %d of %d trim loop(s) run out of neighbouring face (declared "
+            "tolerance %g cm, widened per chord by the rim sampling), leaving %g cm of its %g cm of boundary open; "
+            "the most isolated open chord is %g cm from any other face. NAVIGATION IS UNRELIABLE: "
             "parity containment is undefined in the shadow of every gap, so Contains()/DistFrom*() can be wrong "
             "arbitrarily far from any surface, not just near the gap. Check IsNavigable()/"
-            "GetNavigationReliability() before trusting any answer from this shape.",
+            "GetNavigationReliability() before trusting any answer from this shape; GetRimReports() names the "
+            "offending loops.",
             GetName(), closure.boundaryRims, closure.rims, closure.rimEpsilon, closure.unmatchedRimLength,
-            closure.totalRimLength, closure.maxGap);
+            closure.totalRimLength, closure.maxRimIsolation);
     }
     if (closure.nonManifoldRims > 0) {
       Error("CloseShape",
@@ -1267,9 +1309,9 @@ int O2BVHSurfaceSolid::GetReversedEdgeCount() const
   return fImpl == nullptr ? 0 : fImpl->closure.reversedEdges;
 }
 
-double O2BVHSurfaceSolid::GetMaxRimGap() const
+double O2BVHSurfaceSolid::GetMaxRimIsolation() const
 {
-  return fImpl == nullptr ? 0. : fImpl->closure.maxGap;
+  return fImpl == nullptr ? 0. : fImpl->closure.maxRimIsolation;
 }
 
 double O2BVHSurfaceSolid::GetRimChordResolution() const
@@ -1315,6 +1357,12 @@ int O2BVHSurfaceSolid::GetNonManifoldRimCount() const
 int O2BVHSurfaceSolid::GetReversedRimCount() const
 {
   return fImpl == nullptr ? 0 : fImpl->closure.reversedRims;
+}
+
+const std::vector<O2BVHSurfaceSolid::RimReport>& O2BVHSurfaceSolid::GetRimReports() const
+{
+  static const std::vector<RimReport> empty;
+  return fImpl == nullptr ? empty : fImpl->rimReports;
 }
 
 void O2BVHSurfaceSolid::ComputeBBox()
@@ -1387,11 +1435,11 @@ void O2BVHSurfaceSolid::Print(Option_t*) const
   } else {
     std::cout << "not stated";
   }
-  // The gap, and the resolution it was measured at, always together: below the chord resolution
-  // the number is how the two faces were sampled, not how far apart they are.
+  // The isolation, and the resolution that widened the band it was judged in, always together: the
+  // number is how alone the loneliest chord is, not how far apart two faces are.
   if (GetRimCount() > 0) {
-    std::cout << "\n    rim gap: max " << GetMaxRimGap() << " cm (chord resolution " << GetRimChordResolution()
-              << " cm, matched at " << GetRimMatchTolerance() << " cm)"
+    std::cout << "\n    rim isolation: max " << GetMaxRimIsolation() << " cm (chord resolution "
+              << GetRimChordResolution() << " cm, declared tolerance " << GetRimMatchTolerance() << " cm)"
               << "\n    rims: " << GetRimCount() << " (matched=" << GetMatchedRimCount()
               << " boundary=" << GetBoundaryRimCount() << " non-manifold=" << GetNonManifoldRimCount()
               << " reversed=" << GetReversedRimCount() << "), open " << GetUnmatchedRimLength() << " of "

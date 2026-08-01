@@ -1195,6 +1195,27 @@ struct Curve2D {
     bsplineSampleRecursive(t0, t1, startPointValue, endPointValue, flatnessSq, maxDepth, samples);
   }
 
+  /// Does the knot interval (\a lowT, \a highT) contain a knot strictly inside it?
+  ///
+  /// A B-spline is a single polynomial piece only *within* one knot span. A flatness test that
+  /// straddles a knot is therefore testing a curve its own model does not describe, and two spans
+  /// that mirror each other defeat it outright. So an interval that still contains an interior
+  /// knot is never called flat, whatever the probes say.
+  bool spansInteriorKnot(double lowT, double highT) const
+  {
+    // a clamped knot vector repeats its ends degree+1 times, so the interior knots are the
+    // entries [degree + 1, poles.size()); a single-span (Bezier) curve has none
+    const size_t firstInterior = static_cast<size_t>(degree) + 1;
+    const size_t endInterior = std::min(poles.size(), knots.size());
+    if (firstInterior >= endInterior) {
+      return false;
+    }
+    const auto begin = knots.begin() + static_cast<std::ptrdiff_t>(firstInterior);
+    const auto end = knots.begin() + static_cast<std::ptrdiff_t>(endInterior);
+    const auto firstAbove = std::upper_bound(begin, end, lowT);
+    return firstAbove != end && *firstAbove < highT;
+  }
+
   void bsplineSampleRecursive(double t0, double t1, const Vec2& p0, const Vec2& p1, double flatnessSq,
                               int depth, std::vector<Vec2>& samples) const
   {
@@ -1202,16 +1223,29 @@ struct Curve2D {
     Vec2 midPoint;
     Vec2 unusedDerivative;
     bsplineEval(tMid, midPoint, unusedDerivative);
-    // Stop when flat enough or at the depth cap. A short chord alone must NOT end the recursion:
-    // a *closed* curve has p0 == p1 exactly, so its chord is zero however much curve lies between
-    // them -- a full circle written as one periodic B-spline (which is what a CAD kernel emits for
-    // a tube-tube intersection) would otherwise flatten to two coincident points and vanish. When
-    // the chord is degenerate the only meaningful flatness test is whether the midpoint sits on it
-    // too; pointSegmentDistanceSq would compare against a zero-length segment.
-    const double flatness = (surface::distanceSq(p0, p1) <= flatnessSq)
-                              ? surface::distanceSq(midPoint, p0)
-                              : pointSegmentDistanceSq(midPoint, p0, p1);
-    if (depth <= 0 || flatness <= flatnessSq) {
+    // A short chord alone must NOT end the recursion: a *closed* curve has p0 == p1 exactly, so
+    // its chord is zero however much curve lies between them -- a full circle written as one
+    // periodic B-spline (which is what a CAD kernel emits for a tube-tube intersection) would
+    // otherwise flatten to two coincident points and vanish. When the chord is degenerate the only
+    // meaningful test is the distance to that single point; pointSegmentDistanceSq would compare
+    // against a zero-length segment.
+    const bool degenerateChord = surface::distanceSq(p0, p1) <= flatnessSq;
+    const auto deviationSq = [&](const Vec2& point) {
+      return degenerateChord ? surface::distanceSq(point, p0) : pointSegmentDistanceSq(point, p0, p1);
+    };
+    // Three interior probes, not one. A single midpoint probe is blind to every curve that is
+    // symmetric about its own parameter midpoint -- and that is exactly what a CAD kernel emits
+    // for a tube-tube intersection seen from the *thin* tube: on Bagger/BoomCylinderInner the
+    // midpoint sits 2e-7 from the chord while the curve bulges 0.16 away from it. That curve was
+    // declared flat at the top level and replaced by its chord, taking the whole junction rim of
+    // six Bagger parts with it (TolerancePolicy.md section 13, finding K4).
+    double flatness = deviationSq(midPoint);
+    for (const double fraction : {0.25, 0.75}) {
+      Vec2 probePoint;
+      bsplineEval(t0 + (t1 - t0) * fraction, probePoint, unusedDerivative);
+      flatness = std::max(flatness, deviationSq(probePoint));
+    }
+    if (depth <= 0 || (flatness <= flatnessSq && !spansInteriorKnot(t0, t1))) {
       samples.push_back(p1);
       return;
     }
@@ -4601,6 +4635,39 @@ class DummyBoundedSurface final : public BoundedSurface
   Vec3 mNormal;
 };
 
+/// How one rim came out of the closure measurement. The four states are exhaustive, and they are
+/// exactly the four the ClosureReport rim counters tally.
+enum class RimState {
+  Matched = 0, ///< every chord has another face within its match band, traversed the other way
+  Reversed,    ///< matched, but the partner traverses the shared curve the same way
+  Boundary,    ///< some chord has no other face within its match band
+  NonManifold  ///< some chord has two or more other faces within the declared tolerance
+};
+
+/// One trim loop of one face, as measureRimClosure saw it.
+///
+/// The aggregate counters below answer "how many rims are open, and how much length is open". They
+/// cannot answer "which rim", and every diagnosis so far has had to reconstruct that from counts
+/// and totals by hand (TolerancePolicy.md section 12 is entirely such a reconstruction). These
+/// records name it, and say where on it the worst chord sits.
+struct RimRecord {
+  int surfaceIndex = -1;      ///< the owning face's index in the solid's surface list
+  int rimIndexOnSurface = -1; ///< which trim loop of that face, in the order the face emits them
+  bool closed = false;        ///< the polyline returns to its own first point
+  int chords = 0;
+  int unmatchedChords = 0;     ///< of them, how many found no other face within their match band
+  double length = 0.;          ///< summed chord length, cm
+  double unmatchedLength = 0.; ///< how much of it has no other face within the match band, cm
+  /// The largest distance in cm from a chord midpoint of this rim to the nearest chord of a
+  /// *different* face, and where that chord's midpoint is. This is the per-rim term of
+  /// ClosureReport::maxRimIsolation, and it means what that field means: how alone the loneliest
+  /// chord is, not how wide a seam is.
+  double maxIsolation = 0.;
+  Vec3 maxIsolationPoint{};
+  int maxIsolationFace = -1; ///< the face owning the nearest chord there, or -1 if there was none
+  RimState state = RimState::Matched;
+};
+
 /// Result of validating that a set of bounded surfaces forms a consistently-oriented, closed
 /// 2-manifold. This is the solid-level counterpart to per-wire validation and detects missing
 /// or reversed faces via a directed half-edge check.
@@ -4616,25 +4683,39 @@ struct ClosureReport {
   /// The chord counters above answer "did two faces emit the same vertices"; on real CAD they
   /// answer "no" for reasons that are not gaps (see SurfaceRim), and they answer it in units of
   /// chords, which is why a 4-face solid can report 1418 boundary edges. The fields below measure
-  /// the same boundary as *curves*, in centimetres, and count it per rim. Nothing derives a
-  /// verdict from them yet -- GetNavigationReliability() still reads the chord counters -- so
-  /// they are a diagnostic, deliberately, until the direction-independence sweep that licenses
-  /// changing that has been re-run (TolerancePolicy.md section 8).
+  /// the same boundary as *curves*, in centimetres, and count it per rim. **The verdict is theirs**
+  /// -- validateClosure derives closed/orientationConsistent from the rim counters and the chord
+  /// counters decide nothing (TolerancePolicy.md sections 9 and 10 measured what licenses that).
+  ///
+  /// A chord counts as matched when another face's chord is within the *match band*: the declared
+  /// rimEpsilon plus the two chords' own sagittas, because two polylines sampling one shared curve
+  /// disagree by that much whatever the geometry does. Only nonManifoldRims is decided on
+  /// rimEpsilon alone (see measureRimClosure).
   /// @{
-  double maxGap = 0.;              ///< largest distance in cm from a rim to the nearest rim of a
-                                   ///< *different* face; 0 when there is nothing to compare
+  /// The largest distance in cm from any rim chord to the nearest chord of a *different* face; 0
+  /// when there is nothing to compare. Read it as "how alone is the loneliest chord", which is
+  /// what it measures -- **not** as the width of a seam between two faces. On a solid with no open
+  /// rim it is bounded by the match band and says nothing; on one with an open rim it is that
+  /// rim's isolation. It was read as a face-to-face separation in four places for two sessions,
+  /// and the tell that it is not one is that it has no dependence on rimEpsilon at all
+  /// (TolerancePolicy.md section 12.3).
+  double maxRimIsolation = 0.;
   double totalRimLength = 0.;      ///< summed length in cm of every face's trim boundary
-  double unmatchedRimLength = 0.;  ///< how much of it has no other face within rimEpsilon, in cm
-  double rimEpsilon = 0.;          ///< the matching tolerance actually used, in cm
-  double rimChordResolution = 0.;  ///< how far a rim polyline can itself sit from the smooth rim
-                                   ///< it samples, in cm: maxGap is noise below it
+  double unmatchedRimLength = 0.;  ///< how much of it has no other face within the match band, cm
+  double rimEpsilon = 0.;          ///< the declared matching tolerance, in cm
+  double rimChordResolution = 0.;  ///< the largest amount by which any rim polyline can sit off the
+                                   ///< smooth rim it samples, in cm; the per-chord value of this is
+                                   ///< what widens the match band
   int rims = 0;                    ///< total number of trim loops over all faces
-  int matchedRims = 0;             ///< every chord has exactly one other face within rimEpsilon,
+  int matchedRims = 0;             ///< every chord has another face within the match band,
                                    ///< traversed the opposite way
   int reversedRims = 0;            ///< matched, but the partner traverses the shared curve the
                                    ///< same way (one face's outward normal points inward)
   int nonManifoldRims = 0;         ///< some chord has two or more other faces within rimEpsilon
-  int boundaryRims = 0;            ///< some chord has no other face within rimEpsilon
+  int boundaryRims = 0;            ///< some chord has no other face within the match band
+  /// One entry per rim, in the order the faces were visited: the detail behind the counters above.
+  /// The counters say how many rims are open; these say which, and where.
+  std::vector<RimRecord> rimRecords;
   /// @}
 };
 
@@ -4654,6 +4735,7 @@ inline void measureRimClosure(const std::vector<std::unique_ptr<BoundedSurface>>
   report.rimEpsilon = epsilon;
 
   std::vector<SurfaceRim> rims;
+  std::vector<int> rimIndexOnSurface;
   for (size_t surfaceIndex = 0; surfaceIndex < surfaces.size(); ++surfaceIndex) {
     if (surfaces[surfaceIndex] == nullptr) {
       continue;
@@ -4662,6 +4744,7 @@ inline void measureRimClosure(const std::vector<std::unique_ptr<BoundedSurface>>
     surfaces[surfaceIndex]->appendRims(rims);
     for (size_t rimIndex = firstNewRim; rimIndex < rims.size(); ++rimIndex) {
       rims[rimIndex].surfaceIndex = static_cast<int>(surfaceIndex);
+      rimIndexOnSurface.push_back(static_cast<int>(rimIndex - firstNewRim));
     }
   }
   report.rims = static_cast<int>(rims.size());
@@ -4669,22 +4752,30 @@ inline void measureRimClosure(const std::vector<std::unique_ptr<BoundedSurface>>
     return;
   }
 
-  // Flatten to chords, and take the polylines' own accuracy while we are here. Two faces sampling
-  // one shared curve at different phases differ by the chord sagitta even when the curve is shared
-  // exactly, so the sagitta is the floor of what maxGap can resolve.
+  // Flatten to chords, and take each chord's own accuracy while we are here. Two faces sampling one
+  // shared curve at different phases differ by the chord sagitta even when the curve is shared
+  // exactly, so the sagitta is the floor of what any comparison between two rims can resolve -- and
+  // it is therefore the band a chord has to be matched in. Matching below it does not measure the
+  // geometry, it measures the sampler: it was a 1e-8 cm band against a 4e-9 cm sagitta that let
+  // cyl_cross_cyl read as closed, and the same band against a 7e-6 cm sagitta that made it read as
+  // open the moment the B-spline sampler started resolving its seam properly (section 13).
   //
-  // Estimating it needs the smooth rim, which is not available here, so estimate it from the
-  // polyline: a vertex whose two chords turn through a small angle is a sample of a smooth run,
+  // Estimating the sagitta needs the smooth rim, which is not available here, so estimate it from
+  // the polyline: a vertex whose two chords turn through a small angle is a sample of a smooth run,
   // and for a run of curvature radius r sampled every angle t the chord is 2 r sin(t/2) and the
   // sagitta r (1 - cos(t/2)) = (chord/2) tan(t/4). A vertex whose chords turn through more than
   // kMaxSmoothTurn is a genuine corner of the trim, where the polyline is exact and there is no
   // sagitta at all -- which is why the deviation of the vertex from the chord joining its
   // neighbours is the wrong measure: on a box it reports the corner offset, half a face wide.
+  //
+  // The bound is kept *per chord*, not just as the solid-wide maximum: a densely sampled seam has
+  // no reason to inherit the uncertainty of the coarsest 24-sample arc elsewhere on the solid.
   constexpr double kMaxSmoothTurn = 0.52; // ~30 degrees; a rim sampled at kArcSamples turns by 15
   struct Chord {
     Vec3 start;
     Vec3 end;
     int surfaceIndex;
+    double resolution; ///< how far this chord can sit from the smooth rim it samples, in cm
   };
   std::vector<Chord> chords;
   std::vector<std::pair<size_t, size_t>> chordRange(rims.size()); // [first, last) chord of each rim
@@ -4692,11 +4783,7 @@ inline void measureRimClosure(const std::vector<std::unique_ptr<BoundedSurface>>
     const SurfaceRim& rim = rims[rimIndex];
     chordRange[rimIndex].first = chords.size();
     const size_t pointCount = rim.points.size();
-    const size_t chordCount = rim.closed ? pointCount : pointCount - 1;
-    for (size_t pointIndex = 0; pointIndex < chordCount; ++pointIndex) {
-      chords.push_back({rim.points[pointIndex], rim.points[(pointIndex + 1) % pointCount], rim.surfaceIndex});
-    }
-    chordRange[rimIndex].second = chords.size();
+    std::vector<double> vertexSagitta(pointCount, 0.);
     const size_t interiorCount = rim.closed ? pointCount : (pointCount >= 2 ? pointCount - 2 : 0);
     for (size_t offset = 0; offset < interiorCount; ++offset) {
       const size_t middle = rim.closed ? offset : offset + 1;
@@ -4711,9 +4798,16 @@ inline void measureRimClosure(const std::vector<std::unique_ptr<BoundedSurface>>
       if (turn > kMaxSmoothTurn) {
         continue; // a corner of the trim, not a sample of a smooth run
       }
-      report.rimChordResolution =
-        std::max(report.rimChordResolution, 0.25 * (incomingLength + outgoingLength) * std::tan(0.25 * turn));
+      vertexSagitta[middle] = 0.25 * (incomingLength + outgoingLength) * std::tan(0.25 * turn);
+      report.rimChordResolution = std::max(report.rimChordResolution, vertexSagitta[middle]);
     }
+    const size_t chordCount = rim.closed ? pointCount : pointCount - 1;
+    for (size_t pointIndex = 0; pointIndex < chordCount; ++pointIndex) {
+      const size_t nextIndex = (pointIndex + 1) % pointCount;
+      chords.push_back({rim.points[pointIndex], rim.points[nextIndex], rim.surfaceIndex,
+                        std::max(vertexSagitta[pointIndex], vertexSagitta[nextIndex])});
+    }
+    chordRange[rimIndex].second = chords.size();
   }
   if (chords.empty()) {
     return;
@@ -4763,12 +4857,30 @@ inline void measureRimClosure(const std::vector<std::unique_ptr<BoundedSurface>>
   struct Match {
     double distance = std::numeric_limits<double>::infinity();
     int chordIndex = -1;
-    /// The distinct faces found within epsilon. Room for three is enough: the classification only
-    /// distinguishes none, one and "more than one".
-    std::array<int, 3> partnerFaces{-1, -1, -1};
-    int partnerFaceCount = 0;
+    /// Some other face's chord lies inside this chord's match band -- the declared tolerance plus
+    /// what the two polylines can differ by while sampling the very same curve. This is what
+    /// decides matched against open.
+    bool withinBand = false;
+    /// The distinct faces found within the declared tolerance alone. Room for three is enough:
+    /// only none, one and "more than one" are distinguished, and only the last is used.
+    std::array<int, 3> coincidentFaces{-1, -1, -1};
+    int coincidentFaceCount = 0;
   };
-  auto nearestOtherFace = [&](const Vec3& probe, int ownSurfaceIndex) {
+  // Two questions, two bands, and they must not be the same band.
+  //
+  // "Is this chord's edge shared with another face" is answered in the sampling-aware band: below
+  // the sagitta, two polylines of one shared curve disagree for reasons that are not gaps.
+  //
+  // "Do two other faces occupy this edge at once" is answered in the declared tolerance alone.
+  // Widening it to the sagitta as well makes every chord next to a corner non-manifold, because a
+  // corner is where a third face's rim legitimately comes within a chord's length -- probing chord
+  // midpoints rather than vertices keeps a *vertex* out of that trap, but nothing keeps a whole
+  // chord out of it once the band is a hundredth of a centimetre. That widening turned four
+  // clean Bagger parts non-manifold and was the entire cost of the first attempt at this (section
+  // 13). Neither corpus has a single coincident-face part to calibrate a wider test on, so the
+  // strict one stays until one exists.
+  const double maxBand = epsilon + 2. * report.rimChordResolution;
+  auto nearestOtherFace = [&](const Vec3& probe, int ownSurfaceIndex, double probeResolution) {
     Match match;
     auto consider = [&](int chordIndex) {
       const Chord& chord = chords[static_cast<size_t>(chordIndex)];
@@ -4780,13 +4892,16 @@ inline void measureRimClosure(const std::vector<std::unique_ptr<BoundedSurface>>
         match.distance = distance;
         match.chordIndex = chordIndex;
       }
-      if (distance <= epsilon && match.partnerFaceCount < static_cast<int>(match.partnerFaces.size())) {
-        for (int seen = 0; seen < match.partnerFaceCount; ++seen) {
-          if (match.partnerFaces[static_cast<size_t>(seen)] == chord.surfaceIndex) {
+      if (distance <= epsilon + probeResolution + chord.resolution) {
+        match.withinBand = true;
+      }
+      if (distance <= epsilon && match.coincidentFaceCount < static_cast<int>(match.coincidentFaces.size())) {
+        for (int seen = 0; seen < match.coincidentFaceCount; ++seen) {
+          if (match.coincidentFaces[static_cast<size_t>(seen)] == chord.surfaceIndex) {
             return;
           }
         }
-        match.partnerFaces[static_cast<size_t>(match.partnerFaceCount++)] = chord.surfaceIndex;
+        match.coincidentFaces[static_cast<size_t>(match.coincidentFaceCount++)] = chord.surfaceIndex;
       }
     };
     const int xCentre = cellOf(probe.xCoord, lower.xCoord);
@@ -4795,9 +4910,9 @@ inline void measureRimClosure(const std::vector<std::unique_ptr<BoundedSurface>>
     for (int shell = 0; shell < gridDimension; ++shell) {
       // every cell strictly inside this shell has already been visited, so once the nearest hit is
       // closer than the shell's own inner distance nothing further out can beat it -- and the
-      // shells must still reach epsilon, or a partner face inside the band could be missed
+      // shells must still reach the match band, or a partner face inside it could be missed
       const double shellReach = (shell - 1) * cellSize;
-      if (shell > 0 && shellReach > std::max(match.distance, epsilon)) {
+      if (shell > 0 && shellReach > std::max(match.distance, maxBand)) {
         break;
       }
       for (int xCell = xCentre - shell; xCell <= xCentre + shell; ++xCell) {
@@ -4827,27 +4942,42 @@ inline void measureRimClosure(const std::vector<std::unique_ptr<BoundedSurface>>
     return match;
   };
 
+  report.rimRecords.reserve(rims.size());
   for (size_t rimIndex = 0; rimIndex < rims.size(); ++rimIndex) {
     bool hasUnmatched = false;
     bool hasNonManifold = false;
     int sameDirectionVotes = 0;
     int oppositeDirectionVotes = 0;
+    RimRecord record;
+    record.surfaceIndex = rims[rimIndex].surfaceIndex;
+    record.rimIndexOnSurface = rimIndexOnSurface[rimIndex];
+    record.closed = rims[rimIndex].closed;
+    record.chords = static_cast<int>(chordRange[rimIndex].second - chordRange[rimIndex].first);
     for (size_t chordIndex = chordRange[rimIndex].first; chordIndex < chordRange[rimIndex].second; ++chordIndex) {
       const Chord& chord = chords[chordIndex];
       const Vec3 along = chord.end - chord.start;
       const double chordLength = norm(along);
       report.totalRimLength += chordLength;
-      const Match match = nearestOtherFace(chord.start + along * 0.5, chord.surfaceIndex);
+      record.length += chordLength;
+      const Vec3 probe = chord.start + along * 0.5;
+      const Match match = nearestOtherFace(probe, chord.surfaceIndex, chord.resolution);
       if (std::isfinite(match.distance)) {
-        report.maxGap = std::max(report.maxGap, match.distance);
+        report.maxRimIsolation = std::max(report.maxRimIsolation, match.distance);
+        if (match.distance > record.maxIsolation || record.maxIsolationFace < 0) {
+          record.maxIsolation = match.distance;
+          record.maxIsolationPoint = probe;
+          record.maxIsolationFace = chords[static_cast<size_t>(match.chordIndex)].surfaceIndex;
+        }
       }
-      if (match.partnerFaceCount == 0) {
-        hasUnmatched = true;
-        report.unmatchedRimLength += chordLength;
-        continue;
-      }
-      if (match.partnerFaceCount > 1) {
+      if (match.coincidentFaceCount > 1) {
         hasNonManifold = true;
+      }
+      if (!match.withinBand) {
+        hasUnmatched = true;
+        ++record.unmatchedChords;
+        report.unmatchedRimLength += chordLength;
+        record.unmatchedLength += chordLength;
+        continue;
       }
       const Chord& partner = chords[static_cast<size_t>(match.chordIndex)];
       if (dot(along, partner.end - partner.start) < 0.) {
@@ -4858,13 +4988,18 @@ inline void measureRimClosure(const std::vector<std::unique_ptr<BoundedSurface>>
     }
     if (hasNonManifold) {
       ++report.nonManifoldRims;
+      record.state = RimState::NonManifold;
     } else if (hasUnmatched) {
       ++report.boundaryRims;
+      record.state = RimState::Boundary;
     } else if (sameDirectionVotes > oppositeDirectionVotes) {
       ++report.reversedRims;
+      record.state = RimState::Reversed;
     } else {
       ++report.matchedRims;
+      record.state = RimState::Matched;
     }
+    report.rimRecords.push_back(record);
   }
 }
 
