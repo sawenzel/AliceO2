@@ -132,6 +132,25 @@ def _perpendicular(a, b):
     return abs(_dot(a, b)) <= ANG_TOL
 
 
+_COORDINATE_AXES = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+
+
+def _snap_to_coordinate_axis(vec):
+    """(index, sign) if `vec` is a coordinate axis to within ANG_TOL, else None.
+
+    Worth the few lines because of what it buys downstream: a frame whose rotation is exactly the
+    identity lets `primitives.build_root` emit a bare `TGeoBBox` (which carries its own origin)
+    instead of a `TGeoCompositeShape`. That is one shape instead of three objects and a matrix,
+    an analytic `Capacity()` instead of a Monte-Carlo one, and it is the common case in real
+    mechanical CAD -- the census counts 62560 placed six-plane boxes in oTOF alone.
+    """
+    for index, axis in enumerate(_COORDINATE_AXES):
+        dot = _dot(vec, axis)
+        if abs(abs(dot) - 1.0) <= ANG_TOL and _norm(_cross(vec, axis)) <= ANG_TOL:
+            return index, (1.0 if dot > 0.0 else -1.0)
+    return None
+
+
 def _on_axis(point, loc, direction, tol):
     delta = _sub(point, loc)
     return _norm(_sub(delta, _scale(direction, _dot(delta, direction)))) <= tol
@@ -249,7 +268,16 @@ def _match_box(records, tol):
                 raise Declined("the three plane pairs are not mutually perpendicular")
     if any(half <= 0.0 for _n, _mid, half in axes):
         raise Declined("the plane pair separations are not positive (inverted orientations?)")
-    if _dot(_cross(axes[0][0], axes[1][0]), axes[2][0]) < 0.0:
+    # A box is symmetric under flipping any of its own axes and under permuting them, so when the
+    # three axes *are* the coordinate axes the frame can be relabelled into the identity without
+    # changing the solid -- and then the emitter writes a bare TGeoBBox rather than a composite.
+    snapped = [_snap_to_coordinate_axis(n) for n, _mid, _half in axes]
+    if all(s is not None for s in snapped) and len({s[0] for s in snapped}) == 3:
+        ordered = [None, None, None]
+        for (index, sign), (_n, mid, half) in zip(snapped, axes):
+            ordered[index] = (_COORDINATE_AXES[index], sign * mid, half)
+        axes = ordered
+    elif _dot(_cross(axes[0][0], axes[1][0]), axes[2][0]) < 0.0:
         axes = [axes[0], axes[2], axes[1]]                       # keep the frame right-handed
     x, y, z = axes[0][0], axes[1][0], _cross(axes[0][0], axes[1][0])
     halves = [axes[k][2] for k in range(3)]
