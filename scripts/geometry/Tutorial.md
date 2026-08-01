@@ -274,11 +274,24 @@ confirmed on this branch:
   **two confidently wrong roots** instead of four right ones (worse than a miss — a miss at least
   leaves a visible gap).
 
-**How much should you care?** It is scale-dependent, not scale-exclusive: at the shipped fixture
-size 1 ray in 5162 is already lost, which is why 2000-ray gates never saw it. Bagger has **2
-toroidal faces out of 288**, so it is *not* an MVP blocker. ALICE3 has **350**, and small
-toroidal features (fillets, bellows knuckles) are exactly where it bites. Fix it before ALICE3,
-not before the MVP.
+**How much should you care? More than this section originally said.** It was written as a
+small-geometry effect. The ALICE3 diagnosis (§5.7) then reduced a real failure to a single call on
+real, **unscaled** geometry:
+
+```
+solveQuarticReal(1.0, -1501.7280000044018, 845808.25396968238,
+                 -211752288.545858, 19882619385.616932)   ->  0 roots
+```
+where two genuine roots exist at 375.3392298 and 375.5247703 (the quartic evaluates to ~1.9e-06
+there, against coefficients of order 1e10 — numerically exact). It is a biquadratic whose `termQ`
+cancels to **−5.96e-08** rather than 0, fails the **absolute** `|termQ| ≤ 1e-9` test, is misrouted
+to the resolvent branch, whose resolvent is 7.1e-15 and fails *its* absolute guard. No roots.
+
+**The trigger is the ratio of ray distance to feature size — 375 cm to a 0.1 cm tube — not the
+model's scale.** So this is not "small parts only": it fires whenever a ray travels far relative
+to the feature it hits, which is precisely what assembly-level transport does. Bagger has 2
+toroidal faces of 288 and ALICE3 has 350. Fix the guards before assembly transport, and before
+trusting any torus at distance.
 
 ### 5.6 Tessellated fallback — works, and is what will not scale
 
@@ -302,7 +315,7 @@ actually fails.
 
 ```bash
 O2_BUILD_DIR=$B python3 scripts/geometry/runXRayBench.py --workdir /tmp/xray --fixtures
-$B/stage/bin/o2-bench-detectorsbase-xray --self-test     # 19 checks, no DB, no oracle
+$B/stage/bin/o2-bench-detectorsbase-xray --self-test     # 17 checks, no DB, no oracle
 ```
 
 Measured: **zero stalls of any kind over 1.15M steps** on fixtures and Bagger — the feared failure
@@ -328,12 +341,35 @@ Measured: the CSG composite and the exact surface solid agree to **2.6e-14** on 
 by up to 1.45e-02.
 
 **It is the first instrument that runs on ALICE3** — 18 parts in ~32 s / 371 MB at N=48, because
-*loading* dominates and stepping is nearly free. And it immediately found what nothing else can
-see: **4 of 18 parts lose 418 crossings, invert the sense of 236, leave 70 transports
-unterminated and contradict `Contains()` on 336 intervals — while all 18 report `reliable` and
-`navigable` with zero non-manifold edges.** That is §5.4's stated caveat — identity certifies the
-*topology* survived conversion, not each face's *geometry* — measured for the first time, on real
-geometry, with a number. Three of the four are the `ST0923290` family. Reported, not diagnosed.
+*loading* dominates and stepping is nearly free. And it immediately found what nothing else could
+see: **4 of 18 parts lost 418 crossings, inverted the sense of 236, left 70 transports
+unterminated and contradicted `Contains()` on 336 intervals — while all 18 reported `reliable` and
+`navigable` with zero non-manifold edges.** That is §5.4's caveat — identity certifies the
+*topology* survived conversion, not each face's *geometry* — measured for the first time.
+
+**Now diagnosed, and it was three mechanisms, not one** (`Stream_L_ALICE3Defect.md`):
+
+1. **An inverted outward normal on a recognised NURBS quadric** — 404 LOST, all 236 sense
+   inversions, 68 of 70 unterminated, all 336 parity mismatches. `inner_wall` was read off
+   `face.Orientation()`, which on a NURBS-encoded quadric describes the *exporter's
+   parametrisation* and says nothing about the axis. The kernel found both crossings with
+   `dot(n, d)` of the wrong sign, and **closure and edge identity are sign-blind**, so all three
+   parts read `reliable`. Fixed by *measuring* the outward side. **LOST 418 → 14, sense 236 → 0,
+   parity 336 → 0, parts clean 14/18 → 17/18**, confirmed independently by `Capacity()` on
+   `ST0923290_013`: **−32.6% → +3.7e-07**.
+2. **The quartic guards** (§5.5) — the remaining 14. See below; it is worse than §5.5 said.
+3. **The two sidecars that do not load at all** — a different cause: a fixed 1e-06 cm wire-join
+   tolerance against faces whose own edges declare 8.6e-05 and 3.1e-04 cm.
+
+**Two premises died here, both recorded rather than quietly dropped.** ALICE3's loose edge
+tolerances are *not* the cause — the offending parts carry the **tightest** tolerances
+(2.2e-06…5.3e-05) and the 4.3e-04 parts are clean. And degenerate edges are **excluded**: three
+parts carry them (up to 20), load, and are 768/768 clean, so `Stream_F_EdgeIdentity.md` §8.3's
+"implemented but untested" premise is out of date.
+
+**The general criterion this yields** — *no face's outward normal may be antiparallel to the
+source face's* — is exactly the checkable face-geometry test §5.4 says edge identity lacks. It
+belongs in the gate as a column; it is not there yet.
 
 Assembly-level transport (several parts in one world, where leaking between volumes would show) is
 **not** built; `Stream_J_XRay.md` §9 scopes what it needs, including a **leaking** counter that
