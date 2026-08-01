@@ -132,6 +132,17 @@ def compare_part(base: dict, cand: dict, factor: float, gate_only: bool = False)
             if b != c:
                 differences.append((path, b, c, f"integer differs by {c - b:+d}"))
             continue
+        if b is None or c is None:
+            # A null leaf is a real value, not a missing one: `capacityRelativeDeviation` is null
+            # for a representation whose volume is not comparable (a TGeoCompositeShape, whose
+            # ROOT Capacity() is Monte-Carlo). null -> null is no change; null -> a number, or the
+            # reverse, is exactly the kind of change this tool exists to report. Falling through to
+            # the numeric branch instead raised TypeError and took the whole comparison down --
+            # including its own --self-test, so the project's declared instrument for "diff
+            # columns, not verdicts" could not run on any report containing a CSG part.
+            if b != c:
+                differences.append((path, b, c, "differs"))
+            continue
         expected = b * (factor ** exponent_of(path))
         if expected == c:
             continue
