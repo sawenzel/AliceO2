@@ -297,3 +297,70 @@ wants:
 So the honest statement of the census's "1004 quadrics in disguise" for *this* converter is
 **996 + 2 = 998 at a relative gap below 1e-9**, with the remaining 8 sitting between 1e-9 and
 1.6e-7 and reported rather than taken.
+
+---
+
+## 6. `surface_report.json`: what it now records, and the two numbers that must be quoted together
+
+The report used to answer one question — *are this solid's surfaces individually representable?* —
+and ALICE3's answer to it (`n_eligible = 36`) has been quoted as coverage. The number that
+describes what is actually written is `emitted = 20`. **Reporting one without the other is how §2's
+16-solid gap stayed invisible**, so the report now carries both, per solid and in the summary,
+along with the evidence each recognition was accepted on.
+
+| field | per | meaning |
+| --- | --- | --- |
+| `recognized_gap_cm`, `recognized_gap_relative` | face | the **achieved** gap the acceptance was made on |
+| `recognized_counts`, `recognized_max_gap_cm` | solid | which target types, and the worst gap in it |
+| `eligible_without_recognition` | solid | the same solid with the pre-pass off |
+| `emitted`, `extraction_reasons` | solid | whether a sidecar was written, and if not, why |
+| `recognized_max_gap_cm` (by type), `recognized_acceptance_tolerance_relative` | model | the acceptance criterion and what it achieved |
+| `n_eligible_without_recognition`, `n_rescued_by_recognition` | model | the **coverage delta** recognition is responsible for |
+| `n_emitted`, `n_eligible_but_not_emitted`, `n_emitted_carrying_recognized_faces` | model | what was written, and the §2 gap as a number |
+
+### 6.1 The coverage table
+
+| model | leaf solids | eligible **without** recognition | rescued by recognition | eligible | **emitted** | eligible but declined at extraction | faces recognized | max achieved gap (cm) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |
+| `as1-oc-214.stp` | 5 | **0** | **5** | 5 | **5** | 0 | 28 cylinder | 5.5e-12 |
+| `Bagger.step` | 13 | 12 | **0** | 12 | **12** | 0 | — | — |
+| `CAD_noETA.stp` | 55 | **15** | **21** | 36 | **20** | **16** | 786 cyl / 176 cone / 36 sph | 3.8e-11 |
+| `ST2487728_01` (IRIS) | 21 | 11 | 0 | 11 | **11** | 0 | 786 cyl / 176 cone / 36 sph | 3.8e-11 |
+
+`15 + 21 = 36` reproduces `Stream_A_CSG.md`'s `quadricOnly = 15` and `tier0Rescues = 21`
+**exactly**, from the converter's own extractor rather than from the census — a fourth independent
+instrument agreeing on the same cells. as1-oc-214 is `0 → 5` **on the eligibility column**, which is
+the sense in which the brief's `0/5 → 5/5` is true; on the sidecar column it was 5/5 already (§1).
+
+*(IRIS's leaf-solid count is 21 here against the census's 62 prototypes: the converter dedups by
+XCAF definition label and the census by `TShape` identity, so the denominators are not the same
+quantity. Its per-face recognition counts are identical to ALICE3's because the two models share
+parts, which `Stream_A_CSG.md` §1.6 already records.)*
+
+---
+
+## 7. The outward-normal audit
+
+`Stream_L_ALICE3Defect.md`'s criterion — *no face's outward normal may be antiparallel to the source
+face's* — applied to **every face of every emitted sidecar**, before and after this work, with the
+existing probes (`probes/faceNormalSamples.py` + `probes/faceNormals.cxx`; no third instrument was
+written).
+
+| corpus | sidecars audited | faces checked | **antiparallel** | of which recognized faces |
+| --- | ---: | ---: | ---: | ---: |
+| `CAD_noETA.stp`, before | 18 of 20 | 1936 | **0** | 87 |
+| `CAD_noETA.stp`, after | 18 of 20 | 1936 | **0** | 87 |
+| `as1-oc-214.stp`, after | 5 of 5 | 53 | **0** | 28 |
+| `Bagger.step` | 12 of 12 | 191 | **0** | 0 |
+
+**115 recognized faces ship inside sidecars across the two models, and none of them is inverted.**
+
+Two things this audit is not:
+
+- It is **not** evidence that recognition "went well" — `Stream_L_ALICE3Defect.md` is explicit that
+  `reliable` was not evidence before and is not now. It is one specific check, the only one in the
+  project that is sign-sensitive.
+- The 2 ALICE3 sidecars that do not load are excluded, not clean: `ST1829909_004` and
+  `ST1829909_01` still fail at load on the fixed 1e-06 cm wire-join tolerance (mechanism 3, gaps
+  4.00e-06 and 5.41e-06 cm), unchanged by this work and unchanged in count (20 emitted / 18 load,
+  before and after). Nothing here touches that.
