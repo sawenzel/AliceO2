@@ -64,7 +64,8 @@ because each of them changes what a ratio means.
 
 `NEXT.md`: *a refuted experiment is not a refuted hypothesis.* A timing harness that cannot tell a
 slowed shape from a fast one is not measuring what it claims, so `o2-bench-detectorsbase-xray
---self-test` went **17 → 37 checks** and every measurement family got a negative control:
+--self-test` went **17 → 34 checks** (the first commit of this stream said 37; the binary counts 34,
+and the binary is right) and every measurement family got a negative control:
 
 | control | what it does | what it caught |
 | --- | --- | --- |
