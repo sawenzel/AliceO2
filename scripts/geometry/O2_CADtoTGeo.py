@@ -442,7 +442,12 @@ _CURVE_TYPE_NAMES = {
 #    the (phi, height/theta) or (phiRing, phiTube) domain (holes allowed); the trim must not wrap
 #    more than a full turn in phi (for the torus, also not in the tube angle)
 _SUPPORTED_SURFACE_TYPES = {"plane", "cylinder", "cone", "sphere", "torus"}
-_SUPPORTED_PLANAR_CURVES = {"line", "circle", "bspline", "bezier"}
+# An ellipse is here for the same reason it is in the quadric set below, and it is not an
+# approximation: a conic IS a rational quadratic B-spline exactly, `GeomConvert` writes that form,
+# and the plane projection is an isometry, so the poles carry over unchanged. See
+# `Stream_Q_EllipseTrim.md`. Hyperbola and parabola stay out: no corpus needs them and nothing has
+# measured them, and this project does not ship a representation it has not measured.
+_SUPPORTED_PLANAR_CURVES = {"line", "circle", "ellipse", "bspline", "bezier"}
 # Boundary curves whose 2D pcurve the quadric extractor can turn into an exact (phi, v) trim edge:
 # a straight line stays a line; circle/ellipse/bezier/B-spline pcurves are converted to a B-spline
 # and transformed by the affine (u, v) -> (phi, height/theta) map (a B-spline is closed under it).
@@ -1177,8 +1182,11 @@ def extract_planar_face(face, scale_to_cm: float, frame_override=None) -> Tuple[
     line/arc/B-spline boundary wires (polygon, disk/annulus, rounded rectangle, slot, ...).
 
     Each wire is walked in connected order; straight edges become 'line' segments and circular
-    edges become 'arc' segments in the plane's local (u, v) frame. Boundary edges that are
-    neither straight lines nor circular arcs (ellipses, splines, ...) force a fallback.
+    edges become 'arc' segments in the plane's local (u, v) frame. Ellipses, B-splines and Beziers
+    become 'bspline' segments by projecting their 3D control poles into the plane frame -- an
+    isometry, so the projected poles describe the curve exactly, and an ellipse's rational
+    quadratic B-spline form is the same conic in a heavier representation, not an approximation.
+    Anything else (hyperbola, parabola, offset curve, ...) forces a fallback.
 
     `frame_override`, when given, is an (origin_cm, axis_u, axis_v) triple that replaces the
     face's own OCC plane frame (used by the canonical-recognition pre-pass to extract a face
@@ -1207,9 +1215,11 @@ def extract_planar_face(face, scale_to_cm: float, frame_override=None) -> Tuple[
                 gt = curve.GetType()
             except Exception:
                 gt = None
-            if gt not in (GeomAbs_Line, GeomAbs_Circle, GeomAbs_BSplineCurve, GeomAbs_BezierCurve):
+            if gt not in (GeomAbs_Line, GeomAbs_Circle, GeomAbs_Ellipse,
+                          GeomAbs_BSplineCurve, GeomAbs_BezierCurve):
                 name = _CURVE_TYPE_NAMES.get(gt, "unknown")
-                return None, f"planar boundary edge is a {name} curve (only line/circle/bspline supported)"
+                return None, (f"planar boundary edge is a {name} curve "
+                              "(only line/circle/ellipse/bspline supported)")
             classified.append((edge, curve, gt, project(BRep_Tool.Pnt(start_vertex))))
 
         n = len(classified)
@@ -1229,7 +1239,10 @@ def extract_planar_face(face, scale_to_cm: float, frame_override=None) -> Tuple[
                 if params is None:
                     return None, reason
                 resolved.append(("arc", params))
-            else:  # B-spline / Bezier: project the 3D poles into the plane frame
+            else:  # ellipse / B-spline / Bezier: project the 3D poles into the plane frame
+                # `GeomConvert` writes an ellipse as the rational quadratic B-spline it exactly is,
+                # so this branch is a change of representation, not a fit; the plane projection is
+                # an isometry, so the poles land in (u, v) unchanged. `Stream_Q_EllipseTrim.md`.
                 params = _planar_bspline_edge_params(edge, project)
                 if params is None:
                     return None, "planar B-spline boundary edge extraction failed"
@@ -2107,6 +2120,268 @@ def run_placement_self_test() -> int:
                          ("part-only", "dropping the shape placement")):
         bad, _n = disagreements(order)
         report(bad > 0, f"{label} does move the count", f"{bad} disagreement(s)")
+
+    print(f"\n{checks} checks, {failures} failure(s)")
+    return failures
+
+
+# -------------------------------
+# Self-test for the planar trim vocabulary (`--self-test`, third block)
+# -------------------------------
+# `Stream_Q_EllipseTrim.md`. A plane cutting a cylinder obliquely meets it on an ELLIPSE, and that
+# ellipse is the planar face's whole boundary. The sidecar has no conic curve kind, but it does not
+# need one: a conic IS a rational quadratic B-spline, exactly, and the sidecar's B-spline record is
+# rational. So the test that matters is not "was it accepted" but "how far is the stored curve from
+# the CAD curve", measured both ways, and the instrument has to be shown capable of a large answer.
+
+def _self_test_oblique_cut_cylinder(radius: float = 1.2, height: float = 5.0,
+                                    tilt_deg: float = 60.0, lift: float = 2.5):
+    """The `oblique_cut_cyl` ladder fixture, built in-process: a cylinder cut by a plane inclined
+    to its axis. Returns the solid. Everything is already in cm (scale_to_cm = 1)."""
+    from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Cut
+    from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeCylinder
+    from OCC.Core.gp import gp_Ax1, gp_Dir, gp_Trsf, gp_Vec
+
+    cyl = BRepPrimAPI_MakeCylinder(radius, height).Shape()
+    knife = BRepPrimAPI_MakeBox(gp_Pnt(-20.0, -20.0, 0.0), 40.0, 40.0, 40.0).Shape()
+    rot = gp_Trsf()
+    rot.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(1, 0, 0)), math.radians(tilt_deg))
+    move = gp_Trsf()
+    move.SetTranslation(gp_Vec(0.0, 0.0, lift))
+    knife = BRepBuilderAPI_Transform(knife, move * rot, True).Shape()
+    return BRepAlgoAPI_Cut(cyl, knife).Shape()
+
+
+def _self_test_conic_bounded_plane(conic, t0: float, t1: float):
+    """A planar face bounded by one conic arc from `t0` to `t1` plus the chord closing it.
+
+    Used for the hyperbola/parabola negative controls and for the *partial* ellipse (the
+    `Bagger/Bucket` case, where the boundary carries an ellipse arc rather than a closed ellipse)."""
+    from OCC.Core.BRepBuilderAPI import (BRepBuilderAPI_MakeEdge, BRepBuilderAPI_MakeFace,
+                                         BRepBuilderAPI_MakeWire)
+    arc = BRepBuilderAPI_MakeEdge(conic, t0, t1).Edge()
+    chord = BRepBuilderAPI_MakeEdge(conic.Value(t1), conic.Value(t0)).Edge()
+    wire = BRepBuilderAPI_MakeWire(arc, chord).Wire()
+    return BRepBuilderAPI_MakeFace(wire, True).Face()
+
+
+def _self_test_rebuild_2d_curve(seg):
+    """Rebuild a sidecar wire segment as an OCC `Geom2d_Curve`, so the curve the *sidecar* carries
+    can be measured against the CAD edge instead of being argued about."""
+    from OCC.Core.Geom2d import Geom2d_BSplineCurve
+    from OCC.Core.gp import gp_Pnt2d
+    from OCC.Core.TColgp import TColgp_Array1OfPnt2d
+    from OCC.Core.TColStd import TColStd_Array1OfReal, TColStd_Array1OfInteger
+
+    if seg["curve"] != "bspline":
+        return None
+    p = seg["params"]
+    degree, n_poles = int(p[0]), int(p[1])
+    poles = TColgp_Array1OfPnt2d(1, n_poles)
+    for i in range(n_poles):
+        poles.SetValue(i + 1, gp_Pnt2d(p[2 + 2 * i], p[3 + 2 * i]))
+    weights = TColStd_Array1OfReal(1, n_poles)
+    for i in range(n_poles):
+        weights.SetValue(i + 1, p[2 + 2 * n_poles + i])
+    flat = p[2 + 3 * n_poles:]
+    distinct = []
+    for k in flat:
+        if not distinct or abs(k - distinct[-1][0]) > 1e-12:
+            distinct.append([k, 1])
+        else:
+            distinct[-1][1] += 1
+    knots = TColStd_Array1OfReal(1, len(distinct))
+    mults = TColStd_Array1OfInteger(1, len(distinct))
+    for i, (k, m) in enumerate(distinct):
+        knots.SetValue(i + 1, k)
+        mults.SetValue(i + 1, m)
+    return Geom2d_BSplineCurve(poles, weights, knots, mults, degree)
+
+
+def _self_test_trim_deviation(face, record, scale_to_cm: float = 1.0, n: int = 257):
+    """Largest distance, in cm, between the CAD face's boundary curves and the curves the sidecar
+    record stores, measured BOTH ways: every CAD sample to the stored curve, and every stored
+    sample back to the CAD curve. One-way agreement is not agreement -- a stored curve that covers
+    only half the CAD edge is close to it at every one of its own points.
+
+    Returns (max_deviation_cm, patch_diagonal_cm) or (None, None) if a segment cannot be rebuilt."""
+    from OCC.Core.Geom2dAPI import Geom2dAPI_ProjectPointOnCurve
+    from OCC.Core.GeomAPI import GeomAPI_ProjectPointOnCurve
+    from OCC.Core.gp import gp_Pnt2d
+
+    origin_cm = record["params"][0:3]
+    axis_u = record["params"][3:6]
+    axis_v = record["params"][6:9]
+    project = _planar_projector(origin_cm, axis_u, axis_v, scale_to_cm)
+
+    def unproject(u, v):
+        return gp_Pnt(*[origin_cm[i] + u * axis_u[i] + v * axis_v[i] for i in range(3)])
+
+    def distance_to(proj, endpoints, point):
+        """Distance from `point` to a curve. `GeomAPI/Geom2dAPI_ProjectPointOnCurve` return only
+        the *perpendicular* extrema, so they find nothing when the nearest point is an end of the
+        curve. Falling back to the endpoint distance keeps the instrument alive there, and it is an
+        UPPER bound on the true distance -- it can only over-report, never under-report, so it
+        cannot turn an approximation into a pass."""
+        best = min(point.Distance(e) for e in endpoints)
+        if proj.NbPoints() > 0:
+            best = min(best, proj.LowerDistance())
+        return best
+
+    segs = [s for w in record["wires"] for s in w["edges"]]
+    edges = [e for _w, _o, es in _face_wire_edges(face) for e, _v in es]
+    if len(segs) != len(edges):
+        return None, None
+    worst = 0.0
+    points = []
+    for seg, edge in zip(segs, edges):
+        curve3d, first, last = BRep_Tool.Curve(edge)
+        if curve3d is None:
+            return None, None
+        lo, hi = (first, last) if first <= last else (last, first)
+        cad = [curve3d.Value(float(t)) for t in np.linspace(lo, hi, n)]
+        points.extend([(p.X() * scale_to_cm, p.Y() * scale_to_cm, p.Z() * scale_to_cm) for p in cad])
+        if seg["curve"] == "line":
+            u0, v0, u1, v1 = seg["params"]
+            for p in cad:
+                u, v = project(p)
+                du, dv = u - u0, v - v0
+                lu, lv = u1 - u0, v1 - v0
+                l2 = lu * lu + lv * lv
+                t = 0.0 if l2 <= 0.0 else min(1.0, max(0.0, (du * lu + dv * lv) / l2))
+                worst = max(worst, math.hypot(du - t * lu, dv - t * lv))
+            stored = [unproject(u0 + (u1 - u0) * t, v0 + (v1 - v0) * t)
+                      for t in np.linspace(0.0, 1.0, n)]
+        elif seg["curve"] == "arc":
+            cu, cv, r, a0, sweep = seg["params"]
+            stored = [unproject(cu + r * math.cos(a0 + sweep * t), cv + r * math.sin(a0 + sweep * t))
+                      for t in np.linspace(0.0, 1.0, n)]
+        else:
+            curve2d = _self_test_rebuild_2d_curve(seg)
+            if curve2d is None:
+                return None, None
+            t0, t1 = curve2d.FirstParameter(), curve2d.LastParameter()
+            stored = []
+            for t in np.linspace(t0, t1, n):
+                q = curve2d.Value(float(t))
+                stored.append(unproject(q.X(), q.Y()))
+            ends2d = [curve2d.Value(t0), curve2d.Value(t1)]
+            for p in cad:
+                u, v = project(p)
+                here = gp_Pnt2d(u, v)
+                worst = max(worst, distance_to(Geom2dAPI_ProjectPointOnCurve(here, curve2d),
+                                               ends2d, here))
+        # the reverse direction: every stored sample back onto the CAD 3D curve
+        ends3d = [curve3d.Value(float(lo)), curve3d.Value(float(hi))]
+        for q in stored:
+            here = gp_Pnt(q.X() / scale_to_cm, q.Y() / scale_to_cm, q.Z() / scale_to_cm)
+            worst = max(worst, scale_to_cm *
+                        distance_to(GeomAPI_ProjectPointOnCurve(here, curve3d), ends3d, here))
+    arr = np.asarray(points)
+    diagonal = float(np.linalg.norm(arr.max(axis=0) - arr.min(axis=0))) if len(arr) else 0.0
+    return worst, diagonal
+
+
+def run_planar_trim_self_test() -> int:
+    """Assert the planar face's trim-curve vocabulary: an ellipse boundary is carried EXACTLY, and
+    a boundary that is not a conic we can write exactly is still declined."""
+    from OCC.Core.Geom import Geom_Ellipse, Geom_Hyperbola, Geom_Parabola
+    from OCC.Core.gp import gp_Ax2, gp_Dir, gp_Elips, gp_Hypr, gp_Parab
+
+    failures = 0
+    checks = 0
+
+    def report(ok: bool, label: str, detail: str = ""):
+        nonlocal failures, checks
+        checks += 1
+        if not ok:
+            failures += 1
+        print(f"  [{'ok ' if ok else 'FAIL'}] {label}{(' -- ' + detail) if detail else ''}")
+
+    print("\nPlanar trim vocabulary: the ellipse boundary (Stream_Q_EllipseTrim.md)")
+
+    solid = _self_test_oblique_cut_cylinder()
+    cut_face = None
+    for face in _self_test_faces_of(solid):
+        adaptor = BRepAdaptor_Surface(face)
+        if adaptor.GetType() != GeomAbs_Plane:
+            continue
+        kinds = set()
+        for _w, _o, es in _face_wire_edges(face):
+            for e, _v in es:
+                kinds.add(_CURVE_TYPE_NAMES.get(BRepAdaptor_Curve(e).GetType(), "unknown"))
+        if "ellipse" in kinds:
+            cut_face = face
+    report(cut_face is not None,
+           "the oblique cut of a cylinder really does produce an ellipse-bounded planar face",
+           "found" if cut_face is not None else "no ellipse boundary edge -- fixture is wrong")
+
+    if cut_face is not None:
+        record, reason = extract_planar_face(cut_face, 1.0)
+        report(record is not None, "an oblique planar cut of a cylinder is accepted",
+               "accepted" if record else f"declined: {reason}")
+        if record is not None:
+            segs = [s for w in record["wires"] for s in w["edges"]]
+            kinds = sorted({s["curve"] for s in segs})
+            report(kinds == ["bspline"],
+                   "the ellipse is stored as a B-spline segment", f"segments: {kinds}")
+            rational = False
+            for s in segs:
+                if s["curve"] != "bspline":
+                    continue
+                n_poles = int(s["params"][1])
+                w = s["params"][2 + 2 * n_poles: 2 + 3 * n_poles]
+                rational = rational or (max(w) - min(w) > 1e-12)
+            report(rational,
+                   "it is a RATIONAL B-spline -- the exact conic form, not a polynomial fit",
+                   f"weight spread {max(w) - min(w):.3f}" if segs else "")
+            dev, diag = _self_test_trim_deviation(cut_face, record)
+            report(dev is not None and dev < 1.0e-9,
+                   "the stored trim reproduces the CAD boundary at machine precision",
+                   f"max deviation {dev:.2e} cm = {dev / diag:.2e} patch diagonals"
+                   if dev is not None else "could not be measured")
+
+    # A partial ellipse arc: the Bagger/Bucket shape of the problem, not the fixture's closed one.
+    frame = gp_Ax2(gp_Pnt(0.3, -0.2, 1.1), gp_Dir(0.3, 0.4, 0.866), gp_Dir(0.866, 0.0, -0.3))
+    ell_face = _self_test_conic_bounded_plane(Geom_Ellipse(gp_Elips(frame, 2.4, 1.2)), 0.35, 2.6)
+    record, reason = extract_planar_face(ell_face, 1.0)
+    report(record is not None, "an ellipse ARC boundary (the Bucket case) is accepted",
+           "accepted" if record else f"declined: {reason}")
+    if record is not None:
+        dev, diag = _self_test_trim_deviation(ell_face, record)
+        report(dev is not None and dev < 1.0e-9,
+               "the ellipse arc's stored trim reproduces the CAD boundary at machine precision",
+               f"max deviation {dev:.2e} cm = {dev / diag:.2e} patch diagonals"
+               if dev is not None else "could not be measured")
+
+    print(" the deviation instrument must be able to return a large number")
+    if record is not None:
+        # Replace the stored ellipse arc with the circular arc of the same endpoints and centre --
+        # a curve that is *nearly* the ellipse. If the instrument cannot see this, it cannot see
+        # a silent approximation either.
+        import copy
+        wrong = copy.deepcopy(record)
+        for w in wrong["wires"]:
+            for s in w["edges"]:
+                if s["curve"] == "bspline":
+                    n_poles = int(s["params"][1])
+                    for i in range(n_poles):
+                        s["params"][2 + 2 * i] *= 0.5   # squash the major axis: a different conic
+        bad_dev, bad_diag = _self_test_trim_deviation(ell_face, wrong)
+        report(bad_dev is not None and bad_dev > 1.0e-3,
+               "a deliberately wrong conic is caught by the same measurement",
+               f"max deviation {bad_dev:.2e} cm = {bad_dev / bad_diag:.2e} patch diagonals"
+               if bad_dev is not None else "could not be measured")
+
+    print(" negative controls: a boundary that is not an exactly-writable conic is still declined")
+    hyp_face = _self_test_conic_bounded_plane(Geom_Hyperbola(gp_Hypr(frame, 2.0, 1.0)), 0.2, 0.9)
+    record, reason = extract_planar_face(hyp_face, 1.0)
+    report(record is None and reason is not None and "hyperbola" in reason,
+           "a hyperbola boundary edge is declined", reason if record is None else "ACCEPTED")
+    par_face = _self_test_conic_bounded_plane(Geom_Parabola(gp_Parab(frame, 1.5)), -1.4, 1.4)
+    record, reason = extract_planar_face(par_face, 1.0)
+    report(record is None and reason is not None and "parabola" in reason,
+           "a parabola boundary edge is declined", reason if record is None else "ACCEPTED")
 
     print(f"\n{checks} checks, {failures} failure(s)")
     return failures
@@ -4023,7 +4298,8 @@ def main():
     args = ap.parse_args()
 
     if args.self_test:
-        sys.exit(1 if (run_recognition_self_test() + run_placement_self_test()) else 0)
+        sys.exit(1 if (run_recognition_self_test() + run_placement_self_test()
+                       + run_planar_trim_self_test()) else 0)
     if args.step is None:
         ap.error("the following arguments are required: step (or pass --self-test)")
 
