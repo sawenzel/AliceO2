@@ -17,11 +17,13 @@ what is missing"*. Start there. This file is only the hand-over on top of it.
 
 | | |
 | --- | --- |
-| `ctest -R BVHSurfaceSolid` | **92 cases**, green |
+| `ctest -R BVHSurfaceSolid` | **97 cases**, green |
 | ladder fixtures | **9/9 scored** — of **10** leaf solids; `oblique_cut_cyl` has no sidecar and never has |
 | `Bagger.step` | **12/12 shipped**, 9/12 surface, 1 unscored (`Bucket`, ships as mesh) |
 | unexplained oracle disagreements | **0/0/0/0** on `surface`, both corpora; **0/0/0/0** on `shape` |
 | `runOracleGate.py --self-test` | 17/17 |
+| `O2_CADtoTGeo.py --self-test` | **26 checks**, 0 failures (18 recognition + 8 placement) |
+| `csg/emit.py --self-test` | 33/33 |
 | `o2-bench-detectorsbase-xray --self-test` | 17 checks, 0 failures |
 
 **Gate totals and disagreement counts are separate numbers. Never quote one without the other.**
@@ -45,6 +47,10 @@ every CSG part exact (`dV_sym = 0`) and oracle-clean. That was the MVP and it is
   `Stream_I_Verdict.md`.
 - **X-ray transport benchmark** — the only instrument here that *steps* rather than asking
   single-shot questions, and the only one that runs on ALICE3. `Stream_J_XRay.md`.
+- **(2026-08-02) Placed primitives** — the self-union composite is gone: a recognised primitive is
+  emitted at the origin with its rigid transform stored beside it, and `Bagger/BasePin` is a
+  `TGeoTube` again with an analytic `Capacity()` (2.045e-04 Monte-Carlo → 6.785e-16).
+  `Stream_N_PlacedPrimitives.md`.
 
 ## Open, in the order I would take them
 
@@ -54,9 +60,16 @@ every CSG part exact (`dV_sym = 0`) and oracle-clean. That was the MVP and it is
    sampling gate all missed — three parts read `reliable` with nine inward-pointing faces.
    **Closure and edge identity are sign-blind.** It is not yet a harness flag or a gate column;
    it should be both.
-2. **`compareGateRuns.py` is broken** — `TypeError` on a null leaf (the CSG parts'
-   `capacityRelativeDeviation`), *including in its own `--self-test`*. It is the project's declared
-   instrument for "diff columns, not verdicts". Small, and it should not stay broken.
+2. **The oTOF corpus is unreachable from the converter, and it is the one that would pay best.**
+   `O2_CADtoTGeo.py` sees **3** leaf solids in `oTOF System V3-R92cm.step`, not the 20 prototypes
+   in 62628 placements `Stream_A_CSG.md`'s census reports, and without `--mesh` it does not even
+   complete — `triangulate_asbbox()` dies with `Standard_ConstructionError: Bnd_Box is void`. The
+   census walks the STEP assembly differently from the converter's own leaf-solid extraction, and
+   only the converter's view can produce artefacts. That corpus is ~62560 *placed boxes*, i.e.
+   exactly the case `Stream_N_PlacedPrimitives.md` just made cheap. Measured 2026-08-02.
+
+   *(`compareGateRuns.py` was fixed in `11ba928968` and is working: a Bagger pre/post diff ran
+   clean and accounted for all 115 moved fields. The item that used to sit here is done.)*
 
    *(The ALICE3 transport defect and the quartic guards are both fixed and verified — ALICE3 is
    **13822/13822 rays identical to OpenCascade, 18/18 parts clean**, every robustness counter zero

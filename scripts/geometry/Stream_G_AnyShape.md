@@ -25,11 +25,14 @@ This is the contract the CSG emitter is written against. It is stated in
 | **file** | `shape_<VOL>_<LID>.root`, in the same converter output directory as `surfaces_<VOL>_<LID>.bin`, `facets_<VOL>_<LID>.bin` and `brep_<VOL>_<LID>.brep` |
 | **content** | exactly one object inheriting from `TGeoShape`, stored under the key name **`shape`** |
 | **units** | centimetres |
-| **frame** | the part's own **local** frame — the leaf solid as the converter emits it, **no placement matrix applied**. The same frame as the sidecar, the mesh and the `.brep`. |
+| **frame** | the part's own **local** frame — the leaf solid as the converter emits it, the same frame as the sidecar, the mesh and the `.brep` — **or** the shape's own canonical frame, with the transform between the two stored beside it (next row). |
+| **placement** *(added by `Stream_N_PlacedPrimitives.md`)* | an **optional** `TGeoHMatrix` under the key **`placement`**, mapping the shape's own frame into the part's (`placement->MasterToLocal` carries a part-frame point into the shape's). **Absent means the identity**, which is what every file written before that change means, so nothing older had to be rewritten. It exists because no `TGeoShape` in ROOT 6.36 carries a rigid transform and the alternative — a degenerate `TGeoCompositeShape` — costs the analytic `Capacity()` and the shape's real class name. |
 | **composites** | a `TGeoCompositeShape` is written whole; its `TGeoBoolNode` and component shapes stream with it. No `TGeoManager` is needed on either side (ROOT creates a default one as a side effect of constructing a bool node; that is harmless — `TGeoShape::~TGeoShape` de-registers itself, so ownership is not shared). |
 
-Write one with `o2::base::harness::saveShapeToRootFile(path, shape)`; read one with
-`o2::base::harness::loadShapeFromRootFile(path)`. Both live in `O2SolidHarness.h/.cxx` **so that
+Write one with `o2::base::harness::saveShapeToRootFile(path, shape)` — or
+`saveShapeToRootFile(path, shape, placement, &error)` when there is a placement; read one with
+`o2::base::harness::loadShapeFromRootFile(path)` plus
+`loadShapePlacementFromRootFile(path)`, which returns `nullptr` when the file records none. Both live in `O2SolidHarness.h/.cxx` **so that
 producer and consumer cannot drift**: the unit test, the fixture generator and the harness all go
 through the same pair. A file whose `shape` key is missing is searched for the first
 `TGeoShape`-derived key — that exists only so a hand-made file (`root -e '...'`) still loads;
