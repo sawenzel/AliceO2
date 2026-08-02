@@ -988,7 +988,89 @@ json localiseSurfaceSolid(const O2BVHSurfaceSolid* solid, const QuerySamples& s,
     return acc;
   });
 
+  // --- the nearest-patch queries: Safety() and ComputeNormal() -------------------------------
+  //
+  // Same shape of measurement, on the kernel Stream_P_RepresentationBench.md S2.3 reported as
+  // having no acceleration structure at all. The `_Loop` twins are the code that stream measured,
+  // verbatim, so "before" and "after" here are the same binary, the same sample set and the same
+  // pass structure -- which is a stronger comparison than two runs on a shared machine.
+  //
+  // The disagreement counter travels with the timing on purpose: the twins must return bit-
+  // identical answers, and a speed ratio quoted without it would price two different kernels.
+  O2BVHSurfaceSolid::ResetSafetyCandidateCounter();
+  long long safetyDisagreements = 0;
+  long long normalDisagreements = 0;
+  for (size_t index = 0; index < s.points.size(); ++index) {
+    const bool inside = s.pointIsInside[index] != 0;
+    if (solid->Safety(s.points[index].data(), inside) != solid->Safety_Loop(s.points[index].data(), inside)) {
+      ++safetyDisagreements;
+    }
+    Point3D viaBVH{0., 0., 0.};
+    Point3D viaLoop{0., 0., 0.};
+    solid->ComputeNormal(s.points[index].data(), nullptr, viaBVH.data());
+    solid->ComputeNormal_Loop(s.points[index].data(), nullptr, viaLoop.data());
+    if (viaBVH != viaLoop) {
+      ++normalDisagreements;
+    }
+  }
+  O2BVHSurfaceSolid::ResetSafetyCandidateCounter();
+  for (size_t index = 0; index < s.points.size(); ++index) {
+    volatile double sink = solid->Safety(s.points[index].data(), s.pointIsInside[index] != 0);
+    (void)sink;
+  }
+  const long long safetyCandidates = O2BVHSurfaceSolid::GetSafetyCandidateCount();
+
+  const TimingStat safetyBVH = timePasses(static_cast<long long>(s.points.size()), warmup, passes, [&]() {
+    uint64_t acc = 0;
+    for (size_t index = 0; index < s.points.size(); ++index) {
+      acc ^= static_cast<uint64_t>(solid->Safety(s.points[index].data(), s.pointIsInside[index] != 0) * 1.e6);
+    }
+    return acc;
+  });
+  const TimingStat safetyLoop = timePasses(static_cast<long long>(s.points.size()), warmup, passes, [&]() {
+    uint64_t acc = 0;
+    for (size_t index = 0; index < s.points.size(); ++index) {
+      acc ^= static_cast<uint64_t>(solid->Safety_Loop(s.points[index].data(), s.pointIsInside[index] != 0) * 1.e6);
+    }
+    return acc;
+  });
+  const TimingStat normalBVH = timePasses(static_cast<long long>(s.points.size()), warmup, passes, [&]() {
+    uint64_t acc = 0;
+    Point3D normal{0., 0., 0.};
+    for (const auto& p : s.points) {
+      solid->ComputeNormal(p.data(), nullptr, normal.data());
+      acc ^= static_cast<uint64_t>(normal[0] * 1.e6);
+    }
+    return acc;
+  });
+  const TimingStat normalLoop = timePasses(static_cast<long long>(s.points.size()), warmup, passes, [&]() {
+    uint64_t acc = 0;
+    Point3D normal{0., 0., 0.};
+    for (const auto& p : s.points) {
+      solid->ComputeNormal_Loop(p.data(), nullptr, normal.data());
+      acc ^= static_cast<uint64_t>(normal[0] * 1.e6);
+    }
+    return acc;
+  });
+
   const double rays = static_cast<double>(std::max<size_t>(1, s.outsideRays.size()));
+  const double points = static_cast<double>(std::max<size_t>(1, s.points.size()));
+  out["safetyBVHNs"] = safetyBVH.medianNsPerCall;
+  out["safetyLoopNs"] = safetyLoop.medianNsPerCall;
+  out["safetySpeedup"] = safetyBVH.medianNsPerCall > 0. ? safetyLoop.medianNsPerCall / safetyBVH.medianNsPerCall : 0.;
+  out["normalBVHNs"] = normalBVH.medianNsPerCall;
+  out["normalLoopNs"] = normalLoop.medianNsPerCall;
+  out["bvhCandidatesPerSafetyCall"] = safetyCandidates / points;
+  out["loopCandidatesPerSafetyCall"] = static_cast<double>(solid->GetNsurfaces());
+  out["safetyDisagreements"] = safetyDisagreements;
+  out["normalDisagreements"] = normalDisagreements;
+  out["nearestPatchComparedPoints"] = static_cast<long long>(s.points.size());
+  std::printf("      safety:   %.1f ns BVH vs %.1f ns _Loop (%.1fx) | %.2f candidates/call of %d | "
+              "normal %.1f ns vs %.1f ns | disagreements %lld safety / %lld normal in %zu points\n",
+              safetyBVH.medianNsPerCall, safetyLoop.medianNsPerCall, out["safetySpeedup"].get<double>(),
+              safetyCandidates / points, solid->GetNsurfaces(), normalBVH.medianNsPerCall,
+              normalLoop.medianNsPerCall, safetyDisagreements, normalDisagreements, s.points.size());
+
   out["patches"] = solid->GetNsurfaces();
   out["bvhCandidatesPerDistOutCall"] = prunedCandidates / rays;
   out["loopCandidatesPerDistOutCall"] = unprunedCandidates / rays;
