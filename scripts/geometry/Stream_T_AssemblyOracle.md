@@ -36,7 +36,7 @@ slip. And these are the *only 28 parts I could census in the time available* —
 run is §3.4.
 
 **The other assembly in the corpus is clean, and that is a measurement:** `as1-oc-214.stp`, 18
-placed solids, 153 pairs, **0 interpenetrating**, 32 pairs sharing faces exactly. So the instrument
+placed solids, 153 pairs, **0 interpenetrating**, 32 pairs touching with zero shared volume. So the instrument
 does not report overlaps everywhere, and Bagger's 3 and ALICE3's 7 can be believed. §3.3 shows the
 same clean model turning dirty the moment a deliberate 0.2 cm interpenetration is injected — and
 the instrument recovering the injected displacement to six digits.
@@ -350,8 +350,8 @@ cause in how this sub-assembly was authored is not established here.
 
 **22 disjoint pairs, tightest gaps:** `_019`\|`_027` and `_019`\|`_028` at **0.02 cm**,
 `_{006,007,008,009}`\|`_011` at 0.0309 cm, `_018`\|`_020` at 0.05 cm, `_{006,007,008}`\|`_010` at
-0.06 cm. **29 coincident-face pairs**, including `_018` sharing faces with `_019`, `_022`, `_023`,
-`_024`, `_027` and `_028`.
+0.06 cm. **29 coincident (touching) pairs**, including `_018` touching `_019`, `_022`, `_023`,
+`_024`, `_027` and `_028` — see §3.5 for what actually touches in them.
 
 ### 3.5 What actually touches, in the pairs the census calls `coincident`
 
@@ -409,6 +409,12 @@ Error in ...: at least 1802 / 1694 / 5012 / 6172 points
 filling the caller's array**. The shipped display meshes have 1694–6172 vertices against ROOT's
 default budget of 1000. **The default-configuration verdict is therefore not computed from points on
 these shapes**, and its agreement with the census cannot be taken as evidence of anything.
+
+Why the vertex counts are that large is visible in `CloseShape`: the display mesh is assembled by
+calling `appendDisplayMesh` once **per bounded surface**, each appending its own vertices, so it is
+a *soup of per-face patches with no vertices shared between surfaces*. `GetNmeshVertices` counts
+the duplicates. That explains the starvation; it does not explain the phantom overlaps, and I could
+not go further without touching C++.
 
 **Feed the sampler properly and the verdict changes:**
 
