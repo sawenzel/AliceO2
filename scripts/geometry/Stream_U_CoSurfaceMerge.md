@@ -260,8 +260,10 @@ is required, because they are separate windows in one tube, not four quadrants o
 ```
 
 The dominant motif is unmistakable and it is exactly what `Stream_R` §4 described: **115 surfaces
-written as three adjacent patches**, one 120° third each. `ST0923290_014` f#105…f#110+ is eleven
-coplanar faces on one plane; `ST0923290_016` f#16/17/18/22/25 is five patches of one cone.
+carrying exactly three faces, and 118 adjacent components of exactly three** — one 120° third each.
+(118 > 115 because three of the larger surfaces break into three-patch components.)
+`ST0923290_014` f#105…f#110+ is eleven coplanar faces on one plane; `ST0923290_016`
+f#16/17/18/22/25 is five patches of one cone.
 
 ---
 
