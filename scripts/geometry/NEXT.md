@@ -64,12 +64,19 @@ every CSG part exact (`dV_sym = 0`) and oracle-clean. That was the MVP and it is
 3. **The trim generalisation — this is what "Tier 0" actually turned out to be.** Recognition
    already worked; ALICE3 emits **20** sidecars against **36** eligible solids and the 16 missing
    ones fail in `_recognized_quadric_wire_block`, on boundary edges that are not iso in the
-   recognised (φ, h) domain — 1053 of 1891 are genuinely free-form there. **No exact
-   representation exists** (φ(u) is transcendental on a NURBS-encoded quadric), so this is a
-   *fitted* curve with a recorded 3D deviation. Designed with its acceptance criterion in
-   `Stream_K_Tier0.md` §2/§10.1; not built, because it trades exactness for coverage and that is
-   the project's standing bargain in the other direction. **Biggest converter-side coverage item
-   on the board — and a decision, not just work.**
+   recognised (φ, h) domain. **Biggest converter-side coverage item on the board — and a decision,
+   not just work.**
+
+   **The "fitted curve" half of this item is superseded — read
+   [`Stream_N_ImplicitTrims.md`](Stream_N_ImplicitTrims.md) before acting on it.** The claim that
+   1053 of 1891 edges are "genuinely free-form" and that "no exact representation exists"
+   reproduces only against the *pre-fix* recogniser; against the shipping converter it is 763 of
+   1303. More importantly, **691 of those 763 are exactly the intersection of two analytic
+   surfaces we already recognise**, and a per-edge census puts **15 of the 16 solids** entirely in
+   that bucket — 443 edges, none needing a fit. The route is an *implicit / co-surface* trim, not
+   a fitted B-spline. Smallest first step: an ellipse boundary on a **planar** face
+   (`plane ∩ cylinder`), which is exact at machine precision and takes Bagger 12→13 and the ladder
+   fixtures 9→10, i.e. it moves the two corpora the gate can actually score.
 4. **Free-form surfaces** — the genuine remainder after Tier 0: **19 of 55 solids, 1373 faces**,
    not the 36/2377 the older brief states. Largest effort. Must report its own achieved tolerance
    honestly rather than claiming the exactness the analytic path has.
@@ -99,8 +106,14 @@ part one CSG tier down.
 looks like a failed emitter. `rebase_manifest()` exists now; use it.
 
 **No `TGeoShape` in ROOT 6.36 carries a rigid transform** — `TGeoBBox` has `fOrigin`, nothing else
-has anything, only `TGeoCompositeShape` holds a matrix. A *placed* primitive is emitted as its
-union with an identical copy, so a recognised plain tube reads as a composite in `gate.json`.
+has anything, only `TGeoCompositeShape` holds a matrix. That used to force a placed primitive to be
+emitted as its union with an identical copy of itself. **Since Stream N (placed primitives) it is not**: the shape is
+written in its own canonical frame and the transform travels beside it, as a `TGeoHMatrix` under the
+key `placement` in `shape_<part>.root` and as a 3x4 array in `csg_*.json` / `manifest.json` /
+`gate.json`. **No placement recorded means the identity**, so every older artefact still loads
+unchanged. Consumers compose it: the harness and the X-ray benchmark transform points and rays into
+the shape's frame; `geom.C` places the volume with `partPlacement * shapePlacement`, in that order.
+`Stream_N_PlacedPrimitives.md`.
 
 **`TGeoCompositeShape::Capacity()` is Monte-Carlo in ROOT.** A geometrically exact composite came
 back 3.3e-04 off; a capacity gate would have failed a correct shape by 330×. Composites are

@@ -56,6 +56,7 @@
 #include "TGeoBBox.h"
 #include "TGeoManager.h"
 #include "TGeoMaterial.h"
+#include "TGeoMatrix.h"
 #include "TGeoMedium.h"
 #include "TGeoNavigator.h"
 #include "TGeoNode.h"
@@ -149,8 +150,13 @@ class NavigatorTransport
   /// shape being handed in (TGeoShape registers itself in `gGeoManager`'s shape list on
   /// construction). The world therefore has to be built in the manager the shape already belongs
   /// to, and everything created here is freed with it.
+  /// `placement` is the shape's own frame expressed in the part frame, or null when they are the
+  /// same. Mode (b) carries it on the NODE rather than transforming the rays, which is the whole
+  /// point of having a navigator: the rays stay in the part frame, ROOT performs the transform it
+  /// would perform in production, and mode (a) -- which transforms the rays by hand -- becomes an
+  /// independent check of it rather than a restatement.
   NavigatorTransport(TGeoManager* manager, TGeoShape* shape, const Point3D& bboxMin,
-                     const Point3D& bboxMax)
+                     const Point3D& bboxMax, const TGeoMatrix* placement = nullptr)
   {
     mManager = manager;
     auto* material = new TGeoMaterial("Vacuum", 0., 0., 0.);
@@ -164,7 +170,8 @@ class NavigatorTransport
     auto* worldBox = new TGeoBBox("xrayWorld", half[0], half[1], half[2], centre);
     mWorld = new TGeoVolume("TOP", worldBox, medium);
     mPart = new TGeoVolume("PART", shape, medium);
-    mWorld->AddNode(mPart, 1); // identity placement: the part is already in this frame
+    // Identity unless the shape carries a placement, in which case this is where it is applied.
+    mWorld->AddNode(mPart, 1, placement != nullptr ? new TGeoHMatrix(*placement) : nullptr);
     mManager->SetTopVolume(mWorld);
     mManager->CloseGeometry();
     mManager->SetNsegments(80);
@@ -607,6 +614,53 @@ OracleCrossings loadOracleCrossings(const std::string& dir, const std::string& p
   return out;
 }
 
+/// A ray of the part frame, expressed in a placed shape's own frame.
+///
+/// Mode (a) speaks to the shape API directly, so it is the caller's job to put the query in the
+/// shape's frame. A rigid transform preserves lengths, so every `t` in the resulting crossing list
+/// is the same number it would have been in the part frame -- which is why the lists produced this
+/// way are compared against the oracle's, and against mode (b)'s, without any further correction.
+void toShapeFrame(const TGeoMatrix* placement, const Point3D& origin, const Point3D& dir,
+                  Point3D& localOrigin, Point3D& localDir)
+{
+  if (placement == nullptr) {
+    localOrigin = origin;
+    localDir = dir;
+    return;
+  }
+  placement->MasterToLocal(origin.data(), localOrigin.data());
+  placement->MasterToLocalVect(dir.data(), localDir.data());
+}
+
+/// A shape's bounding box carried into the part frame: the axis-aligned hull of the eight
+/// transformed corners. Conservative for a rotated body, which is exactly what a raster window and
+/// a navigator world both need.
+void placedBox(const TGeoBBox& box, const TGeoMatrix* placement, Point3D& lo, Point3D& hi)
+{
+  const double half[3] = {box.GetDX(), box.GetDY(), box.GetDZ()};
+  for (int k = 0; k < 3; ++k) {
+    lo[k] = box.GetOrigin()[k] - half[k];
+    hi[k] = box.GetOrigin()[k] + half[k];
+  }
+  if (placement == nullptr) {
+    return;
+  }
+  Point3D outLo{1.e300, 1.e300, 1.e300};
+  Point3D outHi{-1.e300, -1.e300, -1.e300};
+  for (int corner = 0; corner < 8; ++corner) {
+    const double local[3] = {(corner & 1) ? hi[0] : lo[0], (corner & 2) ? hi[1] : lo[1],
+                             (corner & 4) ? hi[2] : lo[2]};
+    double master[3];
+    placement->LocalToMaster(local, master);
+    for (int k = 0; k < 3; ++k) {
+      outLo[k] = std::min(outLo[k], master[k]);
+      outHi[k] = std::max(outHi[k], master[k]);
+    }
+  }
+  lo = outLo;
+  hi = outHi;
+}
+
 /// The tightest CONTAINING bounding box available for a part, and where it came from.
 ///
 /// The order is a measurement, not a preference. `O2BVHSurfaceSolid`'s box is the union of one
@@ -631,6 +685,7 @@ bool resolveBoundingBox(const Part& part, const Options& opt, Point3D& lo, Point
     }
     auto* manager = new TGeoManager("xrayBBox", "bbox probe");
     TGeoShape* shape = nullptr;
+    std::unique_ptr<TGeoHMatrix> placement;
     if (std::string(candidate.name) == "surface") {
       auto* solid = new O2BVHSurfaceSolid(part.id.c_str());
       if (LoadSurfaceSolid(candidate.path, *solid)) {
@@ -645,13 +700,14 @@ bool resolveBoundingBox(const Part& part, const Options& opt, Point3D& lo, Point
       }
     } else {
       shape = loadShapeFromRootFile(candidate.path, nullptr);
+      // The window must be stated in the PART frame, so a placed shape's box is carried through
+      // its placement first. Skipping this would raster a rotated tube against the box of the tube
+      // at the origin -- a window that misses the part entirely.
+      placement.reset(loadShapePlacementFromRootFile(candidate.path));
     }
     const auto* box = dynamic_cast<const TGeoBBox*>(shape);
     if (box != nullptr) {
-      for (int k = 0; k < 3; ++k) {
-        lo[k] = box->GetOrigin()[k] - (k == 0 ? box->GetDX() : k == 1 ? box->GetDY() : box->GetDZ());
-        hi[k] = box->GetOrigin()[k] + (k == 0 ? box->GetDX() : k == 1 ? box->GetDY() : box->GetDZ());
-      }
+      placedBox(*box, placement.get(), lo, hi);
       source = candidate.name;
       delete manager;
       gGeoManager = nullptr;
@@ -959,6 +1015,9 @@ int main(int argc, char** argv)
       // one-part world mode (b) transports through.
       auto* manager = new TGeoManager(("xray_" + spec.name).c_str(), "X-ray benchmark world");
       TGeoShape* shape = nullptr;
+      // The shape's own frame, when it is not the part frame. Mode (a) transforms each ray into
+      // it; mode (b) puts it on the node. Owned here: the manager owns the shape, not the matrix.
+      std::unique_ptr<TGeoHMatrix> placement;
       double loadSeconds = 0.;
       int primitives = -1;
       const char* primitiveKind = "";
@@ -998,6 +1057,7 @@ int main(int argc, char** argv)
           gGeoManager = nullptr;
           continue;
         }
+        placement.reset(loadShapePlacementFromRootFile(spec.source));
         primitiveKind = shape->ClassName();
       }
       loadSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - tLoad0).count();
@@ -1015,6 +1075,7 @@ int main(int argc, char** argv)
       repJson["primitiveKind"] = primitiveKind;
       repJson["loadSeconds"] = loadSeconds;
       repJson["capacity"] = shape->Capacity();
+      repJson["placed"] = (placement != nullptr);
 
       // ---- mode (a): the shape API ------------------------------------------------------
       Robustness statsA;
@@ -1026,8 +1087,11 @@ int main(int argc, char** argv)
         for (size_t i = 0; i < raster.rays.size(); ++i) {
           const auto& ray = raster.rays[i];
           const double before = statsA.insideLength;
-          listsA[i] = stepWithShapeApi(shape, ray.origin, ray.dir, ray.tMax, opt.step, statsA);
-          auditCrossingList(listsA[i], shape, ray.origin, ray.dir, ray.tMax, opt.step, statsA);
+          Point3D o;
+          Point3D d;
+          toShapeFrame(placement.get(), ray.origin, ray.dir, o, d);
+          listsA[i] = stepWithShapeApi(shape, o, d, ray.tMax, opt.step, statsA);
+          auditCrossingList(listsA[i], shape, o, d, ray.tMax, opt.step, statsA);
           insideByAxisA[ray.beam] += statsA.insideLength - before;
         }
         statsA.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
@@ -1080,10 +1144,9 @@ int main(int argc, char** argv)
         // it from the axis-aligned window is not enough once the beams are tilted: a rotated
         // lattice reaches outside the part's own box, and the first version of this loop reported
         // 5358 lost crossings at a 27 degree tilt that were entirely its own undersized world.
-        Point3D wMin{box->GetOrigin()[0] - box->GetDX(), box->GetOrigin()[1] - box->GetDY(),
-                     box->GetOrigin()[2] - box->GetDZ()};
-        Point3D wMax{box->GetOrigin()[0] + box->GetDX(), box->GetOrigin()[1] + box->GetDY(),
-                     box->GetOrigin()[2] + box->GetDZ()};
+        Point3D wMin;
+        Point3D wMax;
+        placedBox(*box, placement.get(), wMin, wMax);
         for (const auto& ray : raster.rays) {
           for (int k = 0; k < 3; ++k) {
             const double end = ray.origin[k] + ray.tMax * ray.dir[k];
@@ -1091,7 +1154,7 @@ int main(int argc, char** argv)
             wMax[k] = std::max({wMax[k], ray.origin[k], end});
           }
         }
-        NavigatorTransport transport(manager, shape, wMin, wMax);
+        NavigatorTransport transport(manager, shape, wMin, wMax, placement.get());
         const auto t0 = std::chrono::steady_clock::now();
         for (size_t i = 0; i < raster.rays.size(); ++i) {
           const auto& ray = raster.rays[i];
@@ -1100,7 +1163,10 @@ int main(int argc, char** argv)
           // The shape is handed in here as well, deliberately: in mode (b) the parity audit
           // compares the NAVIGATOR's crossing list against the SHAPE's own Contains(), which is a
           // genuine cross-check between the two and not a tautology.
-          auditCrossingList(listB, shape, ray.origin, ray.dir, ray.tMax, opt.step, statsB);
+          Point3D o;
+          Point3D d;
+          toShapeFrame(placement.get(), ray.origin, ray.dir, o, d);
+          auditCrossingList(listB, shape, o, d, ray.tMax, opt.step, statsB);
           insideByAxisB[ray.beam] += statsB.insideLength - before;
           if (oracle.has && i < oracle.perRay.size() && !oracle.ambiguous[i]) {
             compareLists(listB, oracle.perRay[i], ray.origin, ray.dir, opt.step.matchTolerance,

@@ -13,6 +13,7 @@
 
 #include "TClass.h"
 #include "TFile.h"
+#include "TGeoMatrix.h"
 #include "TKey.h"
 
 #include <algorithm>
@@ -643,6 +644,9 @@ namespace
 /// The key an emitter is required to write. Kept here rather than duplicated at both call sites
 /// so reader and writer cannot disagree about it.
 constexpr const char* kShapeKeyName = "shape";
+/// The optional companion key: the shape's rigid placement, `local -> part`. Absent means
+/// identity (scripts/geometry/Stream_N_PlacedPrimitives.md).
+constexpr const char* kPlacementKeyName = "placement";
 } // namespace
 
 TGeoShape* loadShapeFromRootFile(const std::string& path, std::string* error)
@@ -689,7 +693,30 @@ TGeoShape* loadShapeFromRootFile(const std::string& path, std::string* error)
   return shape;
 }
 
+TGeoHMatrix* loadShapePlacementFromRootFile(const std::string& path)
+{
+  std::unique_ptr<TFile> file(TFile::Open(path.c_str(), "READ"));
+  if (!file || file->IsZombie()) {
+    return nullptr;
+  }
+  auto* stored = file->Get<TGeoHMatrix>(kPlacementKeyName);
+  if (stored == nullptr) {
+    return nullptr;
+  }
+  // Copied out rather than detached: TGeoHMatrix registers itself with gGeoManager when one
+  // exists, and handing the file's own object to a caller that may outlive the file has bitten
+  // this project before. A copy is 16 doubles.
+  auto* placement = new TGeoHMatrix(*stored);
+  return placement;
+}
+
 bool saveShapeToRootFile(const std::string& path, const TGeoShape& shape, std::string* error)
+{
+  return saveShapeToRootFile(path, shape, nullptr, error);
+}
+
+bool saveShapeToRootFile(const std::string& path, const TGeoShape& shape,
+                         const TGeoMatrix* placement, std::string* error)
 {
   std::unique_ptr<TFile> file(TFile::Open(path.c_str(), "RECREATE"));
   if (!file || file->IsZombie()) {
@@ -699,6 +726,14 @@ bool saveShapeToRootFile(const std::string& path, const TGeoShape& shape, std::s
     return false;
   }
   const int written = file->WriteTObject(&shape, kShapeKeyName);
+  // An identity placement is deliberately NOT written: "no key" must keep meaning "identity", and
+  // an artefact that records the identity explicitly would be a second way of saying the same
+  // thing for a reader to get wrong.
+  if (placement != nullptr && !placement->IsIdentity()) {
+    TGeoHMatrix stored(*placement);
+    stored.SetName(kPlacementKeyName);
+    file->WriteTObject(&stored, kPlacementKeyName);
+  }
   file->Close();
   if (written <= 0) {
     if (error != nullptr) {

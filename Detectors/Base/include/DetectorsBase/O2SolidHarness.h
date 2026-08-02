@@ -24,6 +24,9 @@
 
 #include "TGeoShape.h"
 
+class TGeoMatrix;
+class TGeoHMatrix;
+
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -292,14 +295,23 @@ struct PartStats {
 //   * it holds exactly one object inheriting from TGeoShape, stored under the key name "shape".
 //     A file whose "shape" key is missing is searched for the first TGeoShape-derived key, so a
 //     hand-written file with a different key name still loads, but emitters must write "shape";
-//   * lengths are in CENTIMETRES and the shape is expressed in the part's own LOCAL frame -- the
-//     same frame as the sidecar, the mesh and the .brep, i.e. the leaf solid as the converter
-//     emits it, with no placement matrix applied. This is the whole correctness precondition:
-//     the oracle answers questions about the .brep in that frame, and a TGeoShape answers in its
-//     own, so a shape written in the assembly frame produces a full table of plausible nonsense.
-//     The harness measures the deviation between the shape's bounding box and the oracle's
-//     (`bboxDeviationFromOracle`) and reports it per representation so the mistake is visible
-//     rather than silent;
+//   * lengths are in CENTIMETRES;
+//   * the shape is expressed either in the part's own LOCAL frame -- the same frame as the
+//     sidecar, the mesh and the .brep -- or in ITS OWN canonical frame with the rigid transform
+//     between the two stored beside it, as a TGeoHMatrix under the key "placement". **No
+//     "placement" key means the identity**, which is what every file written before this
+//     convention existed means, so nothing older changes meaning. The transform is `local ->
+//     part`: a point in the part frame is carried into the shape's frame with
+//     `placement->MasterToLocal`. It exists because no TGeoShape in ROOT 6.36 can carry a rigid
+//     transform, and the alternative -- writing a placed primitive as a degenerate
+//     TGeoCompositeShape unioned with a copy of itself -- costs the analytic Capacity() and the
+//     shape's real class name (scripts/geometry/Stream_N_PlacedPrimitives.md);
+//   * the frame is the whole correctness precondition: the oracle answers questions about the
+//     .brep in the part frame, and a TGeoShape answers in its own, so a shape written in the
+//     assembly frame, or a placement dropped on the floor, produces a full table of plausible
+//     nonsense. The harness measures the deviation between the shape's bounding box -- carried
+//     through the placement -- and the oracle's (`bboxDeviationFromOracle`) and reports it per
+//     representation so the mistake is visible rather than silent;
 //   * a TGeoCompositeShape is written whole -- its TGeoBoolNode and component shapes stream with
 //     it -- and needs no TGeoManager on either side.
 
@@ -308,9 +320,17 @@ struct PartStats {
 /// it is detached from the file, which is closed before returning.
 TGeoShape* loadShapeFromRootFile(const std::string& path, std::string* error = nullptr);
 
+/// Read the shape's placement, or nullptr when the file records none (which means the identity).
+/// The caller owns the result. Never fails loudly: a file with no placement and a file that is
+/// not there are the same answer, because both mean "query this shape in the part frame".
+TGeoHMatrix* loadShapePlacementFromRootFile(const std::string& path);
+
 /// Write one, so that producer and consumer of the convention cannot drift apart: the unit test
-/// and any fixture generator go through the same function the harness reads with.
+/// and any fixture generator go through the same function the harness reads with. `placement` may
+/// be null (or the identity, which is not written), and is stored under the key "placement".
 bool saveShapeToRootFile(const std::string& path, const TGeoShape& shape, std::string* error = nullptr);
+bool saveShapeToRootFile(const std::string& path, const TGeoShape& shape,
+                         const TGeoMatrix* placement, std::string* error);
 
 } // namespace harness
 } // namespace base

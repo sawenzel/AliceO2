@@ -26,6 +26,7 @@
 
 #include "TGeoBBox.h"
 #include "TGeoCompositeShape.h"
+#include "TGeoMatrix.h"
 #include "TGeoScaledShape.h"
 
 #include <nlohmann/json.hpp>
@@ -128,7 +129,9 @@ void printUsage(const char* argv0)
     "    mesh     facets_<part>.bin    -> O2Tessellated       (also the sampling reference)\n"
     "    shape    shape_<part>.root    -> any TGeoShape       (the CSG emitter's hand-over)\n"
     "  The `shape` sidecar is one ROOT file holding one TGeoShape-derived object under the key\n"
-    "  \"shape\", in cm, in the part's local frame; see DetectorsBase/O2SolidHarness.h.\n\n"
+    "  \"shape\", in cm, plus an OPTIONAL TGeoHMatrix under the key \"placement\" taking it from\n"
+    "  its own frame into the part's; absent means identity, and points and rays are transformed\n"
+    "  into the shape's frame before it is asked. See DetectorsBase/O2SolidHarness.h.\n\n"
     "  --loop-crosscheck  also run the surface solid's non-BVH _Loop twins and require exact\n"
     "                     agreement; this is the correctness guard that does not involve the mesh\n"
     "  --pruning-ab       re-run the distance kernels with ray tmax pruning disabled, reporting\n"
@@ -582,7 +585,60 @@ struct Representation {
   const O2BVHSurfaceSolid* surfaceSolid = nullptr; ///< non-null only for "surface"
   int primitives = 0;                              ///< patches / triangles / -1 when not countable
   const char* primitiveKind = "";
+  /// The shape's own frame, expressed in the part frame; null means the two are the same.
+  ///
+  /// Only the `shape` representation can have one, and only since a placed primitive stopped
+  /// being written as a degenerate TGeoCompositeShape. **Points and rays are transformed into the
+  /// shape's frame** rather than the shape being wrapped in something that carries the matrix.
+  /// The reason is that this is the only arrangement under which the object the gate scores is
+  /// the object the converter emitted: `shapeClass` is the real class, `Capacity()` is the real
+  /// analytic capacity, and nothing between the sample and the shape can absorb an error. A
+  /// wrapper (or a one-node TGeoVolume) would reintroduce exactly the indirection this change
+  /// removed, and its own bounding box would be the inflated corner hull again.
+  const TGeoMatrix* placement = nullptr;
 };
+
+/// A point of the part frame, expressed in the shape's own frame.
+Point3D toLocal(const TGeoMatrix* placement, const Point3D& p)
+{
+  if (placement == nullptr) {
+    return p;
+  }
+  Point3D out{};
+  placement->MasterToLocal(p.data(), out.data());
+  return out;
+}
+
+/// A direction of the part frame, expressed in the shape's own frame. A rigid transform preserves
+/// lengths, so every distance the oracle states along a ray is unchanged by this -- which is why
+/// the oracle's answers can be compared against the transformed query without touching them.
+Ray toLocal(const TGeoMatrix* placement, const Ray& r)
+{
+  if (placement == nullptr) {
+    return r;
+  }
+  Ray out{};
+  placement->MasterToLocal(r.origin.data(), out.origin.data());
+  placement->MasterToLocalVect(r.dir.data(), out.dir.data());
+  return out;
+}
+
+/// Transformed copies of a sample vector. Returns an EMPTY vector when there is no placement, so
+/// that the overwhelmingly common unplaced case selects the caller's own vector by reference and
+/// copies nothing.
+template <typename T>
+std::vector<T> toLocal(const TGeoMatrix* placement, const std::vector<T>& in)
+{
+  if (placement == nullptr) {
+    return {};
+  }
+  std::vector<T> out;
+  out.reserve(in.size());
+  for (const auto& item : in) {
+    out.push_back(toLocal(placement, item));
+  }
+  return out;
+}
 
 /// How the shape computes Capacity(), and therefore whether comparing it against the OCCT volume
 /// is a measurement or noise.
@@ -638,7 +694,15 @@ CapacityKind capacityKindOf(const Representation& rep)
 /// every column below fills with plausible-looking nonsense and nothing else would notice.
 /// Returns -1 when the shape does not derive from TGeoBBox (nothing in ROOT's shape library that
 /// matters here fails that) or when the answer file predates the bbox fields.
-double bboxDeviationFromOracle(const TGeoShape* shape, const OracleAnswers& oracle)
+///
+/// With a placement, the shape's box has to be carried into the part frame before it can be
+/// compared, and the only frame-independent way to do that is to transform the eight corners and
+/// take their axis-aligned hull. For a rotated body that hull is strictly larger than the body, so
+/// the number becomes conservative -- exactly as it already was for a TGeoCompositeShape, whose
+/// TGeoBoolNode::ComputeBBox does the same thing internally. It is a *frame* check, not a
+/// tightness measurement, and it still moves by the size of a frame error.
+double bboxDeviationFromOracle(const TGeoShape* shape, const OracleAnswers& oracle,
+                               const TGeoMatrix* placement = nullptr)
 {
   if (!oracle.hasBbox) {
     return -1.;
@@ -648,12 +712,32 @@ double bboxDeviationFromOracle(const TGeoShape* shape, const OracleAnswers& orac
     return -1.;
   }
   const double half[3] = {box->GetDX(), box->GetDY(), box->GetDZ()};
+  double lo[3];
+  double hi[3];
+  for (int i = 0; i < 3; ++i) {
+    lo[i] = box->GetOrigin()[i] - half[i];
+    hi[i] = box->GetOrigin()[i] + half[i];
+  }
+  if (placement != nullptr) {
+    double outLo[3] = {1.e300, 1.e300, 1.e300};
+    double outHi[3] = {-1.e300, -1.e300, -1.e300};
+    for (int corner = 0; corner < 8; ++corner) {
+      const double local[3] = {(corner & 1) ? hi[0] : lo[0], (corner & 2) ? hi[1] : lo[1],
+                               (corner & 4) ? hi[2] : lo[2]};
+      double master[3];
+      placement->LocalToMaster(local, master);
+      for (int i = 0; i < 3; ++i) {
+        outLo[i] = std::min(outLo[i], master[i]);
+        outHi[i] = std::max(outHi[i], master[i]);
+      }
+    }
+    std::copy(std::begin(outLo), std::end(outLo), std::begin(lo));
+    std::copy(std::begin(outHi), std::end(outHi), std::begin(hi));
+  }
   double worst = 0.;
   for (int i = 0; i < 3; ++i) {
-    const double lo = box->GetOrigin()[i] - half[i];
-    const double hi = box->GetOrigin()[i] + half[i];
-    worst = std::max(worst, std::fabs(lo - oracle.bboxMin[i]));
-    worst = std::max(worst, std::fabs(hi - oracle.bboxMax[i]));
+    worst = std::max(worst, std::fabs(lo[i] - oracle.bboxMin[i]));
+    worst = std::max(worst, std::fabs(hi[i] - oracle.bboxMax[i]));
   }
   return worst;
 }
@@ -665,12 +749,22 @@ double bboxDeviationFromOracle(const TGeoShape* shape, const OracleAnswers& orac
 /// representation's columns are produced by the same code that produced them before and the
 /// existing path stays inert.
 json scoreAgainstOracle(const TGeoShape* candidate, const OracleAnswers& oracle,
-                        const ValidationOptions& oracleOpt, const std::vector<Point3D>& allPoints,
+                        const ValidationOptions& oracleOpt, const std::vector<Point3D>& allPointsIn,
                         const std::vector<int>& containsState,
-                        const std::vector<double>& boundaryDistance, const SampleSet& samples,
+                        const std::vector<double>& boundaryDistance, const SampleSet& samplesIn,
                         const std::set<std::string>& only, const std::string& label,
-                        const std::string& capacityLabel)
+                        const std::string& capacityLabel, const TGeoMatrix* placement = nullptr)
 {
+  // The samples are stated in the part frame -- the frame the oracle answered in. A shape that
+  // carries a placement answers in its own, so the *questions* move and the answers do not: a
+  // rigid transform preserves both the inside/outside relation and every distance along a ray.
+  const std::vector<Point3D> localPoints = toLocal(placement, allPointsIn);
+  const std::vector<Ray> localOutsideRays = toLocal(placement, samplesIn.outsideRays);
+  const std::vector<Ray> localInsideRays = toLocal(placement, samplesIn.insideRays);
+  const std::vector<Point3D>& allPoints = placement != nullptr ? localPoints : allPointsIn;
+  const std::vector<Ray>& outsideRays =
+    placement != nullptr ? localOutsideRays : samplesIn.outsideRays;
+  const std::vector<Ray>& insideRays = placement != nullptr ? localInsideRays : samplesIn.insideRays;
   json oracleJson;
   oracleJson["tolerance"] = oracle.tolerance;
   oracleJson["capacity"] = oracle.capacity;
@@ -695,7 +789,7 @@ json scoreAgainstOracle(const TGeoShape* candidate, const OracleAnswers& oracle,
   if (only.count("distout")) {
     const auto it = oracle.distOutside.find("outside");
     if (it != oracle.distOutside.end()) {
-      auto v = validateDistanceAgainstOracle(candidate, samples.outsideRays, it->second,
+      auto v = validateDistanceAgainstOracle(candidate, outsideRays, it->second,
                                              /*wantInside=*/false, oracleOpt,
                                              originStateFor("outside"));
       printValidation(label + ":distout", v);
@@ -705,7 +799,7 @@ json scoreAgainstOracle(const TGeoShape* candidate, const OracleAnswers& oracle,
   if (only.count("distin")) {
     const auto it = oracle.distInside.find("inside");
     if (it != oracle.distInside.end()) {
-      auto v = validateDistanceAgainstOracle(candidate, samples.insideRays, it->second,
+      auto v = validateDistanceAgainstOracle(candidate, insideRays, it->second,
                                              /*wantInside=*/true, oracleOpt, originStateFor("inside"));
       printValidation(label + ":distin", v);
       oracleJson["distin"] = validationToJson(v);
@@ -800,14 +894,18 @@ int main(int argc, char** argv)
     representations.push_back({"surface", part.surfaces, &surf, &surf, surf.GetNsurfaces(), "patches"});
     representations.push_back({"mesh", part.facets, &mesh, nullptr, mesh.GetNfacets(), "triangles"});
     std::unique_ptr<TGeoShape> rootShape;
+    std::unique_ptr<TGeoHMatrix> rootShapePlacement;
     if (fileExists(part.shape)) {
       std::string shapeError;
       rootShape.reset(loadShapeFromRootFile(part.shape, &shapeError));
       if (rootShape) {
-        std::printf("  shape sidecar: %s -> %s \"%s\"\n", part.shape.c_str(), rootShape->ClassName(),
-                    rootShape->GetName());
-        representations.push_back(
-          {"shape", part.shape, rootShape.get(), nullptr, -1, rootShape->ClassName()});
+        rootShapePlacement.reset(loadShapePlacementFromRootFile(part.shape));
+        std::printf("  shape sidecar: %s -> %s \"%s\"%s\n", part.shape.c_str(),
+                    rootShape->ClassName(), rootShape->GetName(),
+                    rootShapePlacement ? "  (placed: queries are transformed into its own frame)"
+                                       : "");
+        representations.push_back({"shape", part.shape, rootShape.get(), nullptr, -1,
+                                   rootShape->ClassName(), rootShapePlacement.get()});
       } else {
         std::printf("  shape sidecar: *** %s\n", shapeError.c_str());
       }
@@ -996,7 +1094,19 @@ int main(int argc, char** argv)
           repJson["capacityComparable"] = capacityKind.comparable;
           // The frame check, per representation: a candidate whose box does not sit where the
           // oracle's box sits is not being asked the same questions the oracle answered.
-          repJson["bboxDeviationFromOracle"] = bboxDeviationFromOracle(rep.shape, oracle);
+          repJson["bboxDeviationFromOracle"] =
+            bboxDeviationFromOracle(rep.shape, oracle, rep.placement);
+          // The placement, mirrored into the scorecard as a 3x4 row-major [R | t] so that a
+          // Python consumer never has to open the .root file, and null when there is none.
+          if (rep.placement != nullptr) {
+            const double* rot = rep.placement->GetRotationMatrix();
+            const double* tr = rep.placement->GetTranslation();
+            repJson["placement"] = {{rot[0], rot[1], rot[2], tr[0]},
+                                    {rot[3], rot[4], rot[5], tr[1]},
+                                    {rot[6], rot[7], rot[8], tr[2]}};
+          } else {
+            repJson["placement"] = nullptr;
+          }
 
           // Closure / rims / NavigationReliability are O2BVHSurfaceSolid concepts. A
           // TGeoCompositeShape has neither, and a triangle mesh has a different notion entirely,
@@ -1024,7 +1134,7 @@ int main(int argc, char** argv)
             repJson["oracle"] = scoreAgainstOracle(rep.shape, oracle, oracleOpt, allPoints,
                                                    containsState, boundaryDistance, samples,
                                                    opt.only, "R:" + rep.name,
-                                                   "oracle[" + rep.name + "]");
+                                                   "oracle[" + rep.name + "]", rep.placement);
           }
           repJson["disagreements"] = countDisagreements(repJson["oracle"]);
           representationsJson.push_back(std::move(repJson));

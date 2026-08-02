@@ -19,21 +19,37 @@ Every leaf carries an explicit orthonormal frame `(origin, x, y, z)` in the part
 cm. The primitive's own parameters are stated in that frame with `z` as its axis, which is both
 ROOT's convention for `TGeoTube`/`TGeoCone`/`TGeoSphere` and OCCT's for `gp_Ax2`.
 
-The ROOT trap this module exists to absorb
+The ROOT trap this module absorbs, and how
 ------------------------------------------
 **No ROOT shape class can carry a rigid transform.** `TGeoBBox` has `fOrigin` (a translation and
 nothing more); every other primitive is fixed to the origin with its axis along z; and the only
 `TGeoShape` in ROOT 6.36 that holds a `TGeoMatrix` is `TGeoCompositeShape`, through its
-`TGeoBoolNode`. So a recognised tube that is not already on the z axis of the part's own frame can
-only be written as a composite. This module writes it as the union of the primitive **with a
-second, identical copy of itself under the same matrix**, which is set-theoretically the primitive
-and was measured to be exactly that: 20000 random probes, 0 disagreements on `Contains`, `Safety`,
-`DistFromOutside` and `DistFromInside` against the primitive queried in its own frame, with a
-negative control (rmax 1.00 vs 1.05) that does move the count. See `Stream_H_CSGEmitter.md` §2.
+`TGeoBoolNode`.
 
-The cost is that `TGeoCompositeShape::Capacity()` is Monte-Carlo sampled, so such a part reports
-`capacityComparable=false` in the gate — which is exactly why acceptance for a CSG part is the
-symmetric-difference volume and never the capacity (Stream G §2).
+That is still true of ROOT. What is no longer true is the conclusion the first version of this
+module drew from it — that a placed primitive must therefore be written as a `TGeoCompositeShape`
+(the primitive unioned with an identical copy of itself under the same matrix). **The shape is now
+emitted in its own canonical frame at the origin and the rigid transform travels beside it**, as a
+`placement`: a 3x4 row-major `[R | t]` with `part = R * canonical + t`, i.e. `R`'s columns are the
+leaf frame's basis vectors. `build_root()` returns `(shape, placement)`; `placement is None` means
+identity, which is what every artefact written before this change means too, so nothing older has
+to be rewritten. See `Stream_N_PlacedPrimitives.md`.
+
+Consumers compose it where they used to rely on the shape already being in the part frame:
+`shape_<VOL>_<LID>.root` carries a `TGeoHMatrix` under the key `placement`; the harness and the
+X-ray benchmark transform their points and rays into the shape's local frame; `geom.C` places the
+volume with `partPlacement * shapePlacement`, in that order.
+
+`build_occ()` is unchanged and still builds the solid **in the part frame** — the OCCT
+symmetric-difference acceptance therefore keeps measuring the *placed* solid against the original
+CAD solid, which is the property that would otherwise have silently changed meaning.
+
+What this buys, measured: a placed primitive is a `TGeoTube`/`TGeoTubeSeg`/`TGeoCone`/... again, so
+its `Capacity()` is analytic instead of `TGeoCompositeShape`'s Monte-Carlo sampling, and the gate's
+capacity column becomes a real measurement (`capacityComparable=true`) for those parts instead of
+being unavailable. Genuine multi-leaf booleans still emit a `TGeoCompositeShape` and still report
+`capacityComparable=false`; for those, acceptance remains the symmetric-difference volume
+(Stream G §2).
 """
 
 import math
@@ -139,6 +155,58 @@ def leaf(kind, params, frame):
         raise ValueError(f"{kind}: missing parameter(s) {missing}")
     return {"type": kind, "params": {k: float(params[k]) for k in _REQUIRED_PARAMS[kind]},
             "frame": frame}
+
+
+def placement_from_frame(frame):
+    """The frame as a 3x4 row-major `[R | t]`, with `part = R * canonical + t`.
+
+    `R`'s **columns** are the frame's basis vectors expressed in the part frame, which is the same
+    convention `TGeoRotation::SetMatrix` takes (local -> master) and the same one
+    `_root_matrix()` builds. Stated once here so that the JSON description, the `TGeoHMatrix` in
+    `shape_<part>.root` and the C++ consumers cannot drift apart.
+    """
+    x, y, z, o = frame["x"], frame["y"], frame["z"], frame["origin"]
+    return [[x[0], y[0], z[0], o[0]],
+            [x[1], y[1], z[1], o[1]],
+            [x[2], y[2], z[2], o[2]]]
+
+
+def placement_to_local(placement, point):
+    """`R^T (p - t)`: a point in the part frame expressed in the shape's own frame."""
+    if placement is None:
+        return tuple(float(c) for c in point)
+    d = (point[0] - placement[0][3], point[1] - placement[1][3], point[2] - placement[2][3])
+    return tuple(sum(placement[r][c] * d[r] for r in range(3)) for c in range(3))
+
+
+def placement_direction_to_local(placement, direction):
+    """`R^T d`: a direction in the part frame expressed in the shape's own frame."""
+    if placement is None:
+        return tuple(float(c) for c in direction)
+    return tuple(sum(placement[r][c] * direction[r] for r in range(3)) for c in range(3))
+
+
+def placement_for_candidate(cand):
+    """The rigid transform `build_root()` will hand back beside the shape, or None for identity.
+
+    Computable without ROOT, which matters: the hook writes `csg_<part>.json` in an interpreter
+    that may not have PyROOT, and `emit.py --from-json` completes the `.root` file later. Both
+    must agree about the placement, so exactly one function decides it and `build_root()` calls
+    this one rather than repeating the rule.
+    """
+    if cand["op"] != "primitive":
+        # A genuine multi-leaf boolean is still a TGeoCompositeShape, whose TGeoBoolNode carries
+        # the leaves' matrices itself; the composite is already in the part frame.
+        return None
+    lf = cand["leaves"][0]
+    frame = lf["frame"]
+    if frame_is_identity(frame):
+        return None
+    if lf_is_box(lf) and frame_is_identity_rotation(frame):
+        # TGeoBBox carries a pure translation itself, through fOrigin. Leaving it there keeps
+        # every artefact written for an axis-aligned box byte-identical to before this change.
+        return None
+    return placement_from_frame(frame)
 
 
 def candidate(op, leaves, recogniser, notes=None):
@@ -274,27 +342,65 @@ def _pad(dz):
 # ------------------------------------------------------------------------------------------
 
 def build_root(cand, name="shape"):
-    """Realise the description as a `TGeoShape`. Requires PyROOT."""
+    """Realise the description as `(TGeoShape, placement)`. Requires PyROOT.
+
+    The shape is in its **own canonical frame**: a single recognised primitive comes back as the
+    bare `TGeoTube`/`TGeoTubeSeg`/`TGeoCone`/`TGeoSphere`/`TGeoBBox` at the origin with its axis
+    along z, and `placement` (3x4 `[R | t]`, or None for identity) says where that sits in the
+    part frame. A genuine multi-leaf union is still a `TGeoCompositeShape` already expressed in
+    the part frame, and its placement is None.
+
+    Composing the two reproduces exactly what `build_occ()` builds -- that is the invariant the
+    self-tests measure, and it is the only reason the two acceptance tests stay independent.
+    """
     import ROOT
-    shapes = []
-    for i, lf in enumerate(cand["leaves"]):
-        shapes.append((_root_leaf(lf, f"{name}_l{i}"), lf["frame"]))
+    placement = placement_for_candidate(cand)
     if cand["op"] == "primitive":
-        shape, frame = shapes[0]
-        if frame_is_identity(frame):
-            shape.SetName(name)
-            return shape
-        if lf_is_box(cand["leaves"][0]) and frame_is_identity_rotation(frame):
-            # TGeoBBox is the one ROOT primitive that carries a translation itself.
-            p = cand["leaves"][0]["params"]
+        lf = cand["leaves"][0]
+        frame = lf["frame"]
+        if placement is None and lf_is_box(lf) and not frame_is_identity(frame):
+            # Axis-aligned box: TGeoBBox's own fOrigin is the placement.
             from array import array
+            p = lf["params"]
             return ROOT.TGeoBBox(name, p["dx"], p["dy"], p["dz"],
-                                 array("d", [float(c) for c in frame["origin"]]))
-        # No ROOT primitive can carry a rotation: emit the primitive united with an identical
-        # copy of itself under the same matrix. See this module's docstring.
-        twin = _root_leaf(cand["leaves"][0], f"{name}_l0b")
-        return _root_composite(name, [(shapes[0][0], frame), (twin, frame)], "union")
-    return _root_composite(name, shapes, cand["op"])
+                                 array("d", [float(c) for c in frame["origin"]])), None
+        shape = _root_leaf(lf, name)
+        return shape, placement
+    shapes = [(_root_leaf(lf, f"{name}_l{i}"), lf["frame"])
+              for i, lf in enumerate(cand["leaves"])]
+    return _root_composite(name, shapes, cand["op"]), placement
+
+
+def root_placement_matrix(placement, name="placement"):
+    """The placement as a `TGeoHMatrix` -- what `shape_<part>.root` carries under key `placement`.
+
+    Returns None for an identity placement, which is what an artefact that records nothing means.
+    """
+    if placement is None:
+        return None
+    import ROOT
+    # Built through TGeoRotation::SetMatrix / TGeoCombiTrans rather than by poking TGeoHMatrix's
+    # arrays directly, because those two set the kGeoRotation / kGeoTranslation bits that decide
+    # whether ROOT treats the matrix as anything other than the identity.
+    combi = _root_matrix({"x": [placement[0][0], placement[1][0], placement[2][0]],
+                          "y": [placement[0][1], placement[1][1], placement[2][1]],
+                          "z": [placement[0][2], placement[1][2], placement[2][2]],
+                          "origin": [placement[0][3], placement[1][3], placement[2][3]]}, name)
+    matrix = ROOT.TGeoHMatrix(combi)
+    matrix.SetName(name)
+    ROOT.SetOwnership(matrix, False)
+    return matrix
+
+
+def placement_from_root_matrix(matrix):
+    """The inverse of `root_placement_matrix()`, for reading an artefact back."""
+    if matrix is None:
+        return None
+    rot = matrix.GetRotationMatrix()
+    tr = matrix.GetTranslation()
+    return [[rot[0], rot[1], rot[2], tr[0]],
+            [rot[3], rot[4], rot[5], tr[1]],
+            [rot[6], rot[7], rot[8], tr[2]]]
 
 
 def lf_is_box(lf):
