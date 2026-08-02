@@ -8,6 +8,7 @@ the instruments.
 | --- | --- | --- |
 | Stream L — ALICE3 transport | `faceNormalSamples.py`, `faceNormals.cxx`, `faceAttrib.cxx`, `torusQuartic.cxx` | [`../Stream_L_ALICE3Defect.md`](../Stream_L_ALICE3Defect.md), [`../Stream_M_Quartic.md`](../Stream_M_Quartic.md) |
 | Stream N — implicit trims | `trimEdgeCensus.py`, `trimEdgeCensusReport.py` | [`../Stream_O_ImplicitTrims.md`](../Stream_O_ImplicitTrims.md) |
+| Stream R — co-surface trims | `implicitTrimValidate.py`, `implicitTrimValidateReport.py` | [`../Stream_R_CoSurfaceTrims.md`](../Stream_R_CoSurfaceTrims.md) |
 
 ---
 
@@ -84,3 +85,31 @@ threshold and the summary prints the whole sweep.
 `_recognize_analytic_surface` (`git 237be7f81a^`). It exists solely to reproduce numbers measured
 before `Stream_K_Tier0.md` §5 landed; the production function is never modified and the default
 path calls the shipping one.
+
+---
+
+## Stream R — is the trimmed face the intersection of its neighbours' half-spaces?
+
+Converter-side, pure python. Read [`../Stream_R_CoSurfaceTrims.md`](../Stream_R_CoSurfaceTrims.md)
+§2 for the full method; `Stream_N`'s census says the *edges* are co-surface intersections, this asks
+whether the resulting *containment rule* is the same set as the face.
+
+| probe | what it measures |
+| --- | --- |
+| `implicitTrimValidate.py` | per face: samples the face's own surface on an `N x N` grid over its `(u, v)` rectangle, classifies every sample with **`BRepTopAdaptor_FClass2d`** (ground truth) and with the half-space conjunction (the rule), and reports false positives / false negatives with the 3D distance to the boundary and the depth on the wrong side. Also reports the **arrangement-cell** structure — `cellsIn` (how many DNF terms an exact description would need) and `leak` (points no DNF over those surfaces can reject) — both independent of any sense convention. Censuses the failure modes: a neighbour on the face's own surface, a free-form neighbour, a seam, a hole, one surface bounding twice, one surface needing both senses, tangency. |
+| `implicitTrimValidateReport.py` | the document's tables; stdlib + numpy only. `--per-solid`, `--solids`, `--split-population`. |
+
+```bash
+# env as for Stream N
+python3 implicitTrimValidate.py --model ALICE3:../ALICE_3_example/CAD_noETA.stp \
+        --grid 32 --far-grid 16 --json /tmp/r/alice3.json        # ~5 min for ALICE3
+python3 implicitTrimValidateReport.py /tmp/r/alice3.json --per-solid
+```
+
+**Three self-checks, and the numbers mean nothing without them.** (i) `--flip-sense k` inverts one
+stored sense per face and `--perturb-radius R` displaces every trimming surface by R cm; both must
+move the disagreement counts, and a **10 µm** perturbation does. (ii) `--verify N` re-checks false
+positives against `BRepExtrema_DistShapeShape`, which shares no code with `FClass2d`; 268 of 268
+checked were confirmed genuinely off the face. (iii) `--solid-crosscheck N` compares the ground truth
+against `BRepClass3d_SolidClassifier`. Sweep `--grid` before believing any *positive* result: the
+instrument can prove a face wrong but not prove one right (§5.5).
