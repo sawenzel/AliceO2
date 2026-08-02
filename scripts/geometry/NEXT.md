@@ -81,7 +81,7 @@ every CSG part exact (`dV_sym = 0`) and oracle-clean. That was the MVP and it is
    not just work.**
 
    **The "fitted curve" half of this item is superseded — read
-   [`Stream_N_ImplicitTrims.md`](Stream_N_ImplicitTrims.md) before acting on it.** The claim that
+   [`Stream_O_ImplicitTrims.md`](Stream_O_ImplicitTrims.md) before acting on it.** The claim that
    1053 of 1891 edges are "genuinely free-form" and that "no exact representation exists"
    reproduces only against the *pre-fix* recogniser; against the shipping converter it is 763 of
    1303. More importantly, **691 of those 763 are exactly the intersection of two analytic
