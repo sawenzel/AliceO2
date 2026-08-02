@@ -1,7 +1,8 @@
 # NEXT — session-start instruction for the CAD → TGeo work
 
 This file is the current hand-over. Whoever finishes a session should **rewrite it**.
-Last updated 2026-08-01, end of a long day: wave 0, wave 1, the MVP, and the X-ray benchmark.
+Last updated 2026-08-03, after an overnight run: placed primitives, the ellipse trim, the
+representation benchmark, the Safety BVH, two closed coverage routes, and the overlap census.
 
 Branch `swenzel/bvhsurfacesolid`. Everything below is committed.
 
@@ -57,8 +58,110 @@ record is rational, so widening one set literal was the whole fix. See `Stream_Q
   emitted at the origin with its rigid transform stored beside it, and `Bagger/BasePin` is a
   `TGeoTube` again with an analytic `Capacity()` (2.045e-04 Monte-Carlo → 6.785e-16).
   `Stream_N_PlacedPrimitives.md`.
+- **(2026-08-02) The ellipse trim** — Bagger 12→13 and the fixtures 9→10, at machine precision
+  (7.9e-15 cm), by widening one set literal. **Bagger now ships no tessellated part.**
+  `Stream_Q_EllipseTrim.md`.
+- **(2026-08-02) The representation benchmark** — per-call ns, memory and accuracy for all three
+  representations. **`TGeoCompositeShape` is the *fastest*, by 40–145×**, not the slow one.
+  `Stream_P_RepresentationBench.md`.
+- **(2026-08-02) `Safety`/`ComputeNormal` use the BVH** — 835 µs → 22.4 µs on ALICE3's 965-patch
+  solid, bit-for-bit identical to the loop over 74329 points. `Stream_S_SafetyBVH.md`.
+- **(2026-08-03) The assembly oracle and the overlap census** — and the finding that outranks
+  everything else here: **the models are not legal for Geant4.** `Stream_T_AssemblyOracle.md`.
+- **(2026-08-03) Two exact-coverage routes measured and closed.** Co-surface half-space trims carry
+  **1 of 15** target solids, not 15 (`Stream_R_CoSurfaceTrims.md`); merging the exporter's
+  co-surface patches is worth **1 of 16** (`Stream_U_CoSurfaceMerge.md`).
 
 ## Open, in the order I would take them
+
+0. **THE MODELS ARE NOT LEGAL FOR GEANT4, AND THIS BLOCKS THE STATED NEXT GOAL.** Neither
+   `Bagger.step` nor ALICE3 composes into a world TGeo or Geant4 will accept: both contain placed
+   solids with **positive shared volume**. Bagger has **3 of 78** pairs — `Base`∩`BoomCylinderOuter`
+   8.66e-02 cm³, `Stick`∩`Bucket` 7.27e-02, `BucketLink2`∩`BucketLink1` 3.56e-02 — all at joints,
+   tenths of a millimetre, where the modeller plainly meant an exact touch (11 pairs *are* exact
+   touches, which are legal) or a designed clearance and got neither. ALICE3 is worse: **7 of 378**
+   pairs in the `ST0923290` sub-assembly alone, **2.3 mm** deep, one part with **32%** of its volume
+   inside a neighbour — and they are the same parts (`_013`, `_018`, `_019`) that `Stream_J_XRay.md`
+   §7 named as ALICE3's only non-clean single-solid transports. `as1-oc-214.stp` is clean, 0/153.
+
+   **Every "0 disagreements" number on this branch is a statement about solids in isolation.** They
+   remain true and they do not add up to a valid world. Fixing the source geometry is the *model
+   owner's* decision, not a conversion bug — do not silently repair it.
+
+   Two corrections travel with this. The converter's "55 solids" is **definitions**; ALICE3's world
+   has **206 placed instances**, i.e. 21115 pairs. And `TGeoManager::CheckOverlaps` **does not work
+   on `O2BVHSurfaceSolid`** — starved by default (`GetPointsOnSegments` returns without filling its
+   buffer) and wrong when fed (it called a provably 0.09 cm gap a 0.41 cm overlap, and its
+   `BasePin|Base` entry is a 24-gon's chord error to five significant figures). So there is
+   currently **no working overlap check on the representation we ship**, which is ours to fix and is
+   a second blocking item.
+
+1. **Assembly-level transport, the C++ half.** The oracle now exists — `assemblyOracle.py` gives an
+   ordered per-ray crossing list whose interval answer is a **set of occupants**, not a boolean, so
+   touching, gaps, nesting and interpenetration all fall out of one design (28 analytic self-checks,
+   0 failures). What is missing is the navigator side and the **leaking** counter. Note that on a
+   geometry with item 0's overlaps, "leaking" and "overlapping" are not separable — fix or exclude
+   the overlapping pairs first, or the counter measures the model rather than the code.
+
+2. **The exact-coverage ladder for ALICE3 has one rung left, and it is expensive.** ALICE3 emits
+   **20 of 55**. Everything cheap has now been measured and closed:
+   - *fitted trim curves* — refused: approximate, and an independently-fitted shared edge breaks
+     edge identity;
+   - *co-surface half-space trims* — the naive conjunction carries **1 of 15** target solids and
+     gets Bagger **1 of 13** (it ships 13/13 today); the L-shaped `l-bracket` face misses by 4.94 cm
+     and needs 3 arrangement cells. `Stream_R_CoSurfaceTrims.md`;
+   - *merging the exporter's co-surface patches* — **1 of 16**. The fragmentation premise was right
+     (92% of wire-block faces have a neighbour on their own surface) but seams are 37.6% of all
+     boundary edges and only 31.5% of the *rejected* ones: it is everywhere, and almost all of it is
+     on edges that already work. `Stream_U_CoSurfaceMerge.md`.
+
+   The only remaining exact route is **exact arrangement-cell enumeration** (`Stream_R` §9.3) — a
+   union of cells rather than one conjunction, which reaches 13/15 but *cannot* be derived by
+   sampling (cell counts move with grid density on 3.6% of faces; the leak verdict flips on 2.2%).
+   That is research-grade work. **Absent it, the honest answer for those solids is tessellated** —
+   which is the standing bargain, now evidence-backed rather than assumed.
+
+   Two bounded exact wins do remain: `ST0923290_014` via a per-solid merge pre-pass (20 → 21), and
+   `ST0923290_021`, which needs more than the three-edge guard.
+
+3. **The tessellated fallback is not automatically sound** — see `MeshHealing.md`. A mesh can be
+   *invalid*, not merely inaccurate, and chordal accuracy does not detect it. This matters more now
+   that item 2 makes tessellation the answer for 35 ALICE3 solids. Mesh validity is also
+   **non-monotone in precision**: refining `BucketLink2` from 0.1 to 0.05 takes it from 6600 to
+   10697 LOST crossings. CGAL is already an O2 dependency, so the repair options cost a call rather
+   than an adoption.
+
+4. **`Curve2D::closestPoint` is now the hottest thing in the kernel** — 61% of `Contains`, and the
+   reason a visited candidate patch costs 2.4–8.6× the corpus average. The surface solid is 40–145×
+   slower than a `TGeoCompositeShape` doing identical work, and this is where that lives.
+   `Stream_P_RepresentationBench.md` §2.2, `Stream_S_SafetyBVH.md`.
+
+5. **A face-geometry gate column.** The criterion `Stream_F_EdgeIdentity.md` says edge identity
+   lacks: **no face's outward normal may be antiparallel to the source face's**. It caught a defect
+   closure, edge identity and the sampling gate all missed — three parts read `reliable` with nine
+   inward-pointing faces. **Closure and edge identity are sign-blind.** Still not a harness flag or
+   a gate column; it should be both. *(Flagged in three consecutive hand-overs now.)*
+
+6. **The oTOF corpus is unreachable from the converter, and it is the one that would pay best.**
+   `O2_CADtoTGeo.py` sees **3** leaf solids in `oTOF System V3-R92cm.step`, not the 20 prototypes in
+   62628 placements `Stream_A_CSG.md`'s census reports, and without `--mesh` it does not even
+   complete — `triangulate_asbbox()` dies with `Standard_ConstructionError: Bnd_Box is void`. The
+   census walks the STEP assembly differently from the converter's own leaf-solid extraction, and
+   only the converter's view can produce artefacts. ~62560 *placed boxes*, i.e. exactly the case
+   `Stream_N_PlacedPrimitives.md` made cheap. Measured 2026-08-02.
+
+7. **Free-form surfaces** — the genuine remainder: **19 of 55 solids, 1373 faces**, not the 36/2377
+   the older brief states. Largest effort. Must report its own achieved tolerance honestly rather
+   than claiming the exactness the analytic path has.
+
+8. **Small, named, and unexplained.** ALICE3's 9.75 s `CloseShape` is now the largest number on that
+   corpus by three orders of magnitude. `cyl_inter_cyl`'s *surface* shows 2 extra crossings / 2
+   unterminated / 2 parity at 96 beams and is clean at 3 axis beams. `Bagger/Bucket` contributes 1
+   extra crossing in 221184 rays. Each needs a per-face X-ray localiser that does not exist.
+
+   *(Done and no longer here: `compareGateRuns.py` (`11ba928968`); the ALICE3 transport defect and
+   the quartic guards; the ellipse trim; the placed-primitive composite; `Safety`'s missing BVH.)*
+
 
 1. **A face-geometry gate column.** The ALICE3 diagnosis produced the criterion
    `Stream_F_EdgeIdentity.md` says edge identity lacks: **no face's outward normal may be
