@@ -5962,3 +5962,153 @@ BOOST_AUTO_TEST_CASE(NodeMatrixIsPartPlacementTimesShapePlacement)
   BOOST_CHECK_GT(disagreements[3], 0u);     // shape placement dropped
 }
 // --- Stream N (placed primitives): placed primitives ---
+
+// ============================================================================================
+// Stream P: the representation cost/memory benchmark's own instruments
+// ============================================================================================
+//
+// These pin the MEASURING apparatus, not the geometry. A per-call cost table is only worth
+// reading if the harness that produced it can be shown to move its number when the thing it
+// measures moves, and this project has shipped an instrument that could not do that once already
+// (Stream_J_XRay.md section 6.1). Each case below is that demonstration for one column of
+// Stream_P_RepresentationBench.md.
+//
+// They include RepresentationBench.h -- the SAME header the benchmark binary times with.
+
+#include "RepresentationBench.h"
+
+using namespace o2::base::bench;
+
+/// The timing harness must distinguish a slower shape from a faster one, on every kernel it
+/// reports. `BallastShape` is a TGeoBBox that answers identically and takes measurably longer;
+/// if the ratio does not exceed 2 on all four kernels, the cost table is measuring the loop
+/// around the call rather than the call.
+BOOST_AUTO_TEST_CASE(RepBenchTimingHarnessSeesADeliberatelySlowedShape)
+{
+  TGeoBBox fast("repBenchFast", 1., 1., 1.);
+  BallastShape slow("repBenchSlow", 1., 1., 1., 60);
+  const o2::base::harness::Point3D lo{-1., -1., -1.};
+  const o2::base::harness::Point3D hi{1., 1., 1.};
+  const QuerySamples samples = buildQuerySamples(&fast, "control", lo, hi, 1500, 1500);
+
+  // The sample set has to be capable of exercising both branches, or three of the four kernels
+  // are being timed on an empty vector.
+  BOOST_CHECK_GT(samples.insidePoints, 100);
+  BOOST_CHECK_LT(samples.insidePoints, static_cast<long long>(samples.points.size()) - 100);
+  BOOST_CHECK_EQUAL(samples.outsideRays.size(), 1500u);
+  BOOST_CHECK_EQUAL(samples.insideRays.size(), 1500u);
+
+  BOOST_CHECK_GT(timeContainsPass(&slow, samples, 1, 5).medianNsPerCall,
+                 2. * timeContainsPass(&fast, samples, 1, 5).medianNsPerCall);
+  BOOST_CHECK_GT(timeSafetyPass(&slow, samples, 1, 5).medianNsPerCall,
+                 2. * timeSafetyPass(&fast, samples, 1, 5).medianNsPerCall);
+  BOOST_CHECK_GT(timeDistOutPass(&slow, samples, 1, 5).medianNsPerCall,
+                 2. * timeDistOutPass(&fast, samples, 1, 5).medianNsPerCall);
+  BOOST_CHECK_GT(timeDistInPass(&slow, samples, 1, 5).medianNsPerCall,
+                 2. * timeDistInPass(&fast, samples, 1, 5).medianNsPerCall);
+
+  // And the loop must not have been optimised away: a non-zero checksum, a positive time, and
+  // the requested number of passes actually run.
+  const TimingStat stat = timeContainsPass(&fast, samples, 1, 5);
+  BOOST_CHECK_NE(stat.checksum, 0u);
+  BOOST_CHECK_GT(stat.medianNsPerCall, 0.);
+  BOOST_CHECK_EQUAL(stat.passes, 5);
+  BOOST_CHECK_LE(stat.minNsPerCall, stat.medianNsPerCall);
+  BOOST_CHECK_LE(stat.medianNsPerCall, stat.maxNsPerCall);
+}
+
+/// The sample set is the whole basis of "the same questions from the same sample sets": every
+/// representation of a part is handed this one object. So its labels must agree with the
+/// reference that produced them, and rays must actually reach the solid -- a DistFromOutside
+/// column measured on rays that all miss prices the early-out, not the kernel.
+BOOST_AUTO_TEST_CASE(RepBenchSampleSetIsReproducibleAndActuallyHits)
+{
+  TGeoTube tube("repBenchTube", 0.3, 1., 2.);
+  const o2::base::harness::Point3D lo{-1., -1., -2.};
+  const o2::base::harness::Point3D hi{1., 1., 2.};
+  const QuerySamples a = buildQuerySamples(&tube, "surface", lo, hi, 2000, 2000);
+  const QuerySamples b = buildQuerySamples(&tube, "surface", lo, hi, 2000, 2000);
+
+  // Same seed, same bbox, same reference -> bit-identical. Without this the cost table's
+  // "same sample set" claim is not checkable from outside.
+  BOOST_REQUIRE_EQUAL(a.points.size(), b.points.size());
+  for (size_t i = 0; i < a.points.size(); ++i) {
+    BOOST_CHECK_EQUAL(a.points[i][0], b.points[i][0]);
+    BOOST_CHECK_EQUAL(a.pointIsInside[i], b.pointIsInside[i]);
+    BOOST_CHECK_EQUAL(a.pointIsInside[i] != 0, tube.Contains(a.points[i].data()));
+  }
+  BOOST_CHECK_GT(timeDistOutPass(&tube, a, 1, 3).hitFraction, 0.5);
+  BOOST_CHECK_EQUAL(timeDistInPass(&tube, a, 1, 3).hitFraction, 1.);
+}
+
+/// Both memory columns have to move when memory moves, and the heap column has to come back when
+/// it is released. The 64 MB block is deliberately over glibc's mmap threshold: `uordblks` alone
+/// does not see such an allocation at all, which is exactly how this check earned its place.
+BOOST_AUTO_TEST_CASE(RepBenchMemoryProbeSeesAnAllocationAndItsRelease)
+{
+  const MemorySnapshot before = readMemory();
+  constexpr size_t kBytes = 64u << 20;
+  auto block = std::make_unique<char[]>(kBytes);
+  for (size_t i = 0; i < kBytes; i += 4096) {
+    block[i] = static_cast<char>(i);
+  }
+  const MemorySnapshot delta = readMemory() - before;
+  BOOST_CHECK_GT(delta.residentBytes, 32LL << 20);
+  BOOST_CHECK_GT(delta.heapInUseBytes, 32LL << 20);
+  block.reset();
+  BOOST_CHECK_LT((readMemory() - before).heapInUseBytes, 8LL << 20);
+}
+
+/// The synthetic boolean ladder is a fixture whose whole purpose is a scaling exponent, so the
+/// structure it claims has to be the structure it built -- and the two tree shapes have to be
+/// genuinely different, or the "chain vs balanced" column compares a thing with itself.
+BOOST_AUTO_TEST_CASE(RepBenchBooleanLadderHasTheStructureItClaims)
+{
+  auto* manager = new TGeoManager("repBenchLadder", "ladder");
+  for (const int k : {2, 4, 8, 16, 32}) {
+    const BooleanTreeStats chain =
+      booleanTreeStats(buildBooleanLadder(k, LadderShape::Chain, "tC" + std::to_string(k)));
+    const BooleanTreeStats balanced =
+      booleanTreeStats(buildBooleanLadder(k, LadderShape::Balanced, "tB" + std::to_string(k)));
+    BOOST_CHECK_EQUAL(chain.leaves, k);
+    BOOST_CHECK_EQUAL(balanced.leaves, k);
+    BOOST_CHECK_EQUAL(chain.nodes, k - 1);
+    BOOST_CHECK_EQUAL(balanced.nodes, k - 1);
+    BOOST_CHECK_EQUAL(chain.depth, k);
+    BOOST_CHECK_EQUAL(balanced.depth, 1 + static_cast<int>(std::lround(std::log2(k))));
+  }
+  // A single leaf is not a composite at all: the ladder must hand back the primitive rather than
+  // a one-sided union, or the K=1 baseline row would be priced with boolean machinery.
+  TGeoShape* single = buildBooleanLadder(1, LadderShape::Balanced, "tOne");
+  BOOST_CHECK(dynamic_cast<TGeoCompositeShape*>(single) == nullptr);
+  BOOST_CHECK_EQUAL(booleanTreeStats(single).leaves, 1);
+  delete manager;
+  gGeoManager = nullptr;
+}
+
+/// The scaling claim itself, as a test rather than as a table: a 32-leaf union must cost
+/// measurably more per Contains() than a 2-leaf one. If it did not, the ladder could not
+/// distinguish "composites scale with leaf count" from "composites are free", and the
+/// recommendation that rests on it would rest on nothing.
+BOOST_AUTO_TEST_CASE(RepBenchBooleanLadderCostGrowsWithLeafCount)
+{
+  auto* manager = new TGeoManager("repBenchLadderCost", "ladder cost");
+  TGeoShape* small = buildBooleanLadder(2, LadderShape::Balanced, "cS");
+  TGeoShape* big = buildBooleanLadder(32, LadderShape::Balanced, "cB");
+  const auto* box = dynamic_cast<const TGeoBBox*>(big);
+  const o2::base::harness::Point3D lo{box->GetOrigin()[0] - box->GetDX(),
+                                      box->GetOrigin()[1] - box->GetDY(),
+                                      box->GetOrigin()[2] - box->GetDZ()};
+  const o2::base::harness::Point3D hi{box->GetOrigin()[0] + box->GetDX(),
+                                      box->GetOrigin()[1] + box->GetDY(),
+                                      box->GetOrigin()[2] + box->GetDZ()};
+  const QuerySamples samples = buildQuerySamples(big, "self", lo, hi, 1500, 1500);
+  const double smallNs = timeContainsPass(small, samples, 1, 5).medianNsPerCall;
+  const double bigNs = timeContainsPass(big, samples, 1, 5).medianNsPerCall;
+  // Measured at ~14x on this fixture (12.6 -> 182 ns); the bound is deliberately far below that,
+  // so the case pins the SIGN of the scaling and is not a performance regression trap.
+  BOOST_CHECK_GT(bigNs, 4. * smallNs);
+  delete manager;
+  gGeoManager = nullptr;
+}
+// --- Stream P: representation cost/memory benchmark ---

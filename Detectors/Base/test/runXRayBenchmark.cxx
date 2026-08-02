@@ -46,6 +46,7 @@
 /// `generateSamples()` nothing here rejection-samples through `O2Tessellated`. That is what makes
 /// this instrument runnable on a model whose meshing does not fit in memory.
 
+#include "RepresentationBench.h"
 #include "XRayTransport.h"
 
 #include "DetectorsBase/O2SolidHarness.h"
@@ -84,6 +85,7 @@ using json = nlohmann::json;
 using namespace o2::base;
 using namespace o2::base::harness;
 using namespace o2::base::xray;
+using namespace o2::base::bench;
 
 namespace
 {
@@ -295,6 +297,16 @@ struct Options {
   bool skipNavigator = false;
   bool selfTest = false;
   bool costOnly = false; ///< load, raster and step mode (a) only; no oracle, no navigator
+  /// The representation cost/memory comparison (Stream_P_RepresentationBench.md): per-call ns for
+  /// the four navigation kernels plus transport, and two memory numbers, per representation, from
+  /// ONE shared sample set per part.
+  bool perf = false;
+  int perfPoints = 4096;
+  int perfRays = 4096;
+  int perfPasses = 9;
+  int perfWarmup = 2;
+  /// Comma-separated leaf counts for the synthetic boolean ladder. Needs no database and no model.
+  std::string ladderSpec;
   StepConfig step;
 };
 
@@ -369,6 +381,20 @@ void printUsage(const char* argv0)
     "  --no-navigator    skip mode (b); mode (a) depends on nothing but the shape\n"
     "  --cost-only       load + raster + mode (a) only, and report wall clock and crossing counts.\n"
     "                    This is the scaling probe: it needs no mesh and no oracle.\n"
+    "  --perf            the representation cost/memory comparison: per-call ns for Contains,\n"
+    "                    Safety, DistFromOutside and DistFromInside, plus transport ns/ray and\n"
+    "                    ns/crossing, plus structural and measured memory -- for every\n"
+    "                    representation, from ONE shared sample set per part. Warm cache; the\n"
+    "                    reported number is the median over --perf-passes complete passes and the\n"
+    "                    min/max spread is printed with it.\n"
+    "  --perf-points N   query points per part (default 4096)\n"
+    "  --perf-rays N     rays per distance kernel (default 4096)\n"
+    "  --perf-passes N   timed passes (default 9); --perf-warmup N untimed first (default 2)\n"
+    "  --ladder 2,4,8    the synthetic boolean ladder: unions of K TGeoTubes as a left-deep CHAIN\n"
+    "                    and as a BALANCED tree, timed with the same kernels. Needs no database:\n"
+    "                    every genuine boolean in the corpus is a 2-leaf union, so the corpus\n"
+    "                    cannot answer how a composite scales with leaf count and this fixture is\n"
+    "                    what does.\n"
     "  --push X          distance advanced past a found crossing (cm, default 1e-9 = kRayTolerance)\n"
     "  --unstick-push X  the nudge a stalled step is repaired with (cm, default 1e-6); every use\n"
     "                    is counted in `unstickPushes`\n"
@@ -438,6 +464,18 @@ bool parseArgs(int argc, char** argv, Options& opt)
     } else if (a == "--cost-only") {
       opt.costOnly = true;
       opt.skipNavigator = true;
+    } else if (a == "--perf") {
+      opt.perf = true;
+    } else if (a == "--perf-points") {
+      opt.perfPoints = std::stoi(next("--perf-points"));
+    } else if (a == "--perf-rays") {
+      opt.perfRays = std::stoi(next("--perf-rays"));
+    } else if (a == "--perf-passes") {
+      opt.perfPasses = std::stoi(next("--perf-passes"));
+    } else if (a == "--perf-warmup") {
+      opt.perfWarmup = std::stoi(next("--perf-warmup"));
+    } else if (a == "--ladder") {
+      opt.ladderSpec = next("--ladder");
     } else if (a == "--push") {
       opt.step.push = std::stod(next("--push"));
     } else if (a == "--unstick-push") {
@@ -455,8 +493,9 @@ bool parseArgs(int argc, char** argv, Options& opt)
       throw std::runtime_error("unrecognized option: " + a);
     }
   }
-  if (!opt.selfTest && opt.db.empty() && opt.explicitSurfaces.empty()) {
-    throw std::runtime_error("either --db <dir>, --surfaces <file> or --self-test is required");
+  if (!opt.selfTest && opt.ladderSpec.empty() && opt.db.empty() && opt.explicitSurfaces.empty()) {
+    throw std::runtime_error(
+      "either --db <dir>, --surfaces <file>, --ladder <counts> or --self-test is required");
   }
   return true;
 }
@@ -720,6 +759,339 @@ bool resolveBoundingBox(const Part& part, const Options& opt, Point3D& lo, Point
 }
 
 // ------------------------------------------------------------------------------------------
+// --perf: per-call cost and memory, per representation, from one shared sample set
+// ------------------------------------------------------------------------------------------
+//
+// Everything here answers one question -- "what does asking this representation a navigation
+// question cost, and what does holding it cost" -- and it answers it under three constraints that
+// are the whole difference between a benchmark and a stopwatch:
+//
+//   * SAME QUESTIONS. The point and ray sets are built once per part, from a designated reference
+//     representation's own Contains(), and handed unchanged to all three. `partitionedBy` is
+//     reported so nobody has to guess which one.
+//   * WARM CACHE, and said so. Every kernel is warmed before it is timed and every part fits in
+//     cache, so these are steady-state numbers for a single resident solid. A real simulation
+//     holds thousands of solids and misses; the ratios here are an upper bound on how well the
+//     cheaper representation does there, not a prediction of it.
+//   * LOAD EXCLUDED FROM THE KERNEL, AND REPORTED SEPARATELY. Loading dominates an ALICE3-scale
+//     run (Stream_J_XRay.md section 7) and folding it into a per-call cost would price the
+//     converter's output format as if it were the kernel.
+
+json timingToJson(const TimingStat& t)
+{
+  json out{{"callsPerPass", t.callsPerPass},
+           {"passes", t.passes},
+           {"nsPerCallMedian", t.medianNsPerCall},
+           {"nsPerCallMin", t.minNsPerCall},
+           {"nsPerCallMax", t.maxNsPerCall},
+           {"spread", t.spread},
+           {"checksum", t.checksum}};
+  if (t.hitFraction >= 0.) {
+    out["hitFraction"] = t.hitFraction;
+  }
+  return out;
+}
+
+/// A representation, loaded, with everything the cost table needs to say about it.
+struct LoadedRep {
+  TGeoManager* manager = nullptr;
+  TGeoShape* shape = nullptr;
+  const O2BVHSurfaceSolid* surfaceSolid = nullptr;
+  std::unique_ptr<TGeoHMatrix> placement;
+  StructuralMemory structural;
+  MemorySnapshot loadDelta;    ///< across the file read
+  MemorySnapshot closeDelta;   ///< across CloseShape(), i.e. the acceleration structure
+  double loadSeconds = 0.;
+  double closeSeconds = 0.;
+  bool meshClosedBody = true;
+  bool ok = false;
+};
+
+/// Load one representation into its own TGeoManager, measuring what it cost to do so.
+///
+/// The split between `loadDelta` and `closeDelta` is deliberate and it is where the surface
+/// solid's memory actually is: `LoadSurfaceSolid` reads the sidecar, `CloseShape` builds the BVH,
+/// and lumping the two together would attribute an acceleration structure to a file format.
+LoadedRep loadRepresentation(const std::string& name, const std::string& source, const std::string& partId)
+{
+  LoadedRep rep;
+  rep.manager = new TGeoManager(("perf_" + name).c_str(), "representation benchmark");
+  rep.structural.sidecarBytes = fileBytes(source);
+  const MemorySnapshot before = readMemory();
+  const auto t0 = std::chrono::steady_clock::now();
+  if (name == "surface") {
+    auto* solid = new O2BVHSurfaceSolid(partId.c_str());
+    if (!LoadSurfaceSolid(source, *solid)) {
+      return rep;
+    }
+    const auto t1 = std::chrono::steady_clock::now();
+    rep.loadSeconds = std::chrono::duration<double>(t1 - t0).count();
+    rep.loadDelta = readMemory() - before;
+    const MemorySnapshot beforeClose = readMemory();
+    solid->CloseShape(true);
+    rep.closeSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t1).count();
+    rep.closeDelta = readMemory() - beforeClose;
+    rep.shape = solid;
+    rep.surfaceSolid = solid;
+    rep.structural.primitives = solid->GetNsurfaces();
+    // The patch count and the sidecar are the two EXACT numbers a surface solid has. The trim
+    // wires are variable-length per patch and live behind a private type, so the in-memory
+    // arithmetic is not available from outside; the sidecar bytes bound it from below and the
+    // measured heap delta bounds it from above, and both are printed rather than one guessed
+    // number in between.
+    rep.structural.bytes = rep.structural.sidecarBytes;
+    rep.structural.formula = "patches=" + std::to_string(rep.structural.primitives) +
+                             "; bytes = sidecar on disk (in-memory trim arrays are not "
+                             "introspectable; see measured heap delta)";
+  } else if (name == "mesh") {
+    auto* solid = new O2Tessellated(partId.c_str());
+    if (!LoadFacetSolid(source, *solid)) {
+      return rep;
+    }
+    const auto t1 = std::chrono::steady_clock::now();
+    rep.loadSeconds = std::chrono::duration<double>(t1 - t0).count();
+    rep.loadDelta = readMemory() - before;
+    const MemorySnapshot beforeClose = readMemory();
+    solid->CloseShape();
+    rep.closeSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t1).count();
+    rep.closeDelta = readMemory() - beforeClose;
+    rep.shape = solid;
+    rep.meshClosedBody = solid->IsClosedBody();
+    rep.structural.primitives = solid->GetNfacets();
+    // Exact, and the one representation whose in-memory size IS arithmetic: three index arrays
+    // per facet plus a deduplicated vertex array plus one outward normal per facet.
+    const long long nF = solid->GetNfacets();
+    const long long nV = solid->GetNvertices();
+    rep.structural.bytes = nV * static_cast<long long>(sizeof(O2Tessellated::Vertex_t)) +
+                           nF * static_cast<long long>(sizeof(TGeoFacet)) +
+                           nF * static_cast<long long>(sizeof(O2Tessellated::Vertex_t));
+    rep.structural.formula =
+      std::to_string(nV) + " vertices x " + std::to_string(sizeof(O2Tessellated::Vertex_t)) +
+      " B + " + std::to_string(nF) + " facets x " + std::to_string(sizeof(TGeoFacet)) +
+      " B + " + std::to_string(nF) + " normals x " + std::to_string(sizeof(O2Tessellated::Vertex_t)) + " B";
+  } else {
+    std::string error;
+    rep.shape = loadShapeFromRootFile(source, &error);
+    if (rep.shape == nullptr) {
+      return rep;
+    }
+    rep.placement.reset(loadShapePlacementFromRootFile(source));
+    rep.loadSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    rep.loadDelta = readMemory() - before;
+    const BooleanTreeStats tree = booleanTreeStats(rep.shape);
+    rep.structural.primitives = tree.leaves;
+    // A composite is a handful of objects: the node count is exact and tiny, and that is the
+    // headline of the whole memory column.
+    rep.structural.bytes = tree.leaves * 200 + tree.nodes * 200;
+    rep.structural.formula = "leaves=" + std::to_string(tree.leaves) +
+                             " nodes=" + std::to_string(tree.nodes) +
+                             " depth=" + std::to_string(tree.depth) +
+                             "; bytes ~ (leaves+nodes) x 200 B (ROOT object overhead dominates)";
+  }
+  rep.ok = true;
+  return rep;
+}
+
+/// The same sample set, expressed in a placed shape's own frame.
+///
+/// A rigid transform preserves lengths, so every distance the kernels return is the number it
+/// would have been in the part frame. This is the same argument mode (a) of the transport loop
+/// makes, and it is why the timing of a placed primitive is comparable with everything else.
+QuerySamples toShapeFrame(const QuerySamples& in, const TGeoMatrix* placement)
+{
+  if (placement == nullptr) {
+    return in;
+  }
+  QuerySamples out = in;
+  for (auto& p : out.points) {
+    Point3D q;
+    placement->MasterToLocal(p.data(), q.data());
+    p = q;
+  }
+  auto move = [&](std::vector<Ray>& rays) {
+    for (auto& r : rays) {
+      Point3D o;
+      Point3D d;
+      placement->MasterToLocal(r.origin.data(), o.data());
+      placement->MasterToLocalVect(r.dir.data(), d.data());
+      r.origin = o;
+      r.dir = d;
+    }
+  };
+  move(out.outsideRays);
+  move(out.insideRays);
+  return out;
+}
+
+/// The one part of this that is about O2BVHSurfaceSolid rather than about representations.
+///
+/// An aggregate says *that*, never *where*. If the surface solid is slower than a two-leaf
+/// composite, "the BVH surface solid is slow" is not a finding -- it is a restatement. These four
+/// numbers localise it: how many patches the BVH hands to the leaf callback per ray query, what
+/// the same query costs with the acceleration structure's tmax pruning switched off, what it
+/// costs with no BVH at all (the `_Loop` twin), and therefore what one patch intersection costs.
+/// Nothing here is optimised; it is measured and reported.
+json localiseSurfaceSolid(const O2BVHSurfaceSolid* solid, const QuerySamples& s, int warmup, int passes)
+{
+  json out;
+  const auto* shape = static_cast<const TGeoShape*>(solid);
+  (void)shape;
+
+  const bool pruningWas = O2BVHSurfaceSolid::GetRayTMaxPruning();
+
+  O2BVHSurfaceSolid::SetRayTMaxPruning(true);
+  O2BVHSurfaceSolid::ResetRayCandidateCounter();
+  for (const auto& ray : s.outsideRays) {
+    volatile double sink = solid->DistFromOutside(ray.origin.data(), ray.dir.data(), 3, TGeoShape::Big(), nullptr);
+    (void)sink;
+  }
+  const long long prunedCandidates = O2BVHSurfaceSolid::GetRayCandidateCount();
+  const TimingStat pruned = timePasses(static_cast<long long>(s.outsideRays.size()), warmup, passes, [&]() {
+    uint64_t acc = 0;
+    for (const auto& ray : s.outsideRays) {
+      acc ^= static_cast<uint64_t>(
+        solid->DistFromOutside(ray.origin.data(), ray.dir.data(), 3, TGeoShape::Big(), nullptr) * 1.e6);
+    }
+    return acc;
+  });
+
+  O2BVHSurfaceSolid::SetRayTMaxPruning(false);
+  O2BVHSurfaceSolid::ResetRayCandidateCounter();
+  for (const auto& ray : s.outsideRays) {
+    volatile double sink = solid->DistFromOutside(ray.origin.data(), ray.dir.data(), 3, TGeoShape::Big(), nullptr);
+    (void)sink;
+  }
+  const long long unprunedCandidates = O2BVHSurfaceSolid::GetRayCandidateCount();
+  const TimingStat unpruned = timePasses(static_cast<long long>(s.outsideRays.size()), warmup, passes, [&]() {
+    uint64_t acc = 0;
+    for (const auto& ray : s.outsideRays) {
+      acc ^= static_cast<uint64_t>(
+        solid->DistFromOutside(ray.origin.data(), ray.dir.data(), 3, TGeoShape::Big(), nullptr) * 1.e6);
+    }
+    return acc;
+  });
+  O2BVHSurfaceSolid::SetRayTMaxPruning(pruningWas);
+
+  const TimingStat loop = timePasses(static_cast<long long>(s.outsideRays.size()), warmup, passes, [&]() {
+    uint64_t acc = 0;
+    for (const auto& ray : s.outsideRays) {
+      acc ^= static_cast<uint64_t>(
+        solid->DistFromOutside_Loop(ray.origin.data(), ray.dir.data()) * 1.e6);
+    }
+    return acc;
+  });
+  const TimingStat containsLoop = timePasses(static_cast<long long>(s.points.size()), warmup, passes, [&]() {
+    uint64_t acc = 0;
+    for (const auto& p : s.points) {
+      acc ^= solid->Contains_Loop(p.data()) ? 1u : 0u;
+    }
+    return acc;
+  });
+
+  const double rays = static_cast<double>(std::max<size_t>(1, s.outsideRays.size()));
+  out["patches"] = solid->GetNsurfaces();
+  out["bvhCandidatesPerDistOutCall"] = prunedCandidates / rays;
+  out["loopCandidatesPerDistOutCall"] = unprunedCandidates / rays;
+  out["distOutPrunedNs"] = pruned.medianNsPerCall;
+  out["distOutUnprunedNs"] = unpruned.medianNsPerCall;
+  out["distOutLoopNs"] = loop.medianNsPerCall;
+  out["containsLoopNs"] = containsLoop.medianNsPerCall;
+  out["nsPerBVHCandidate"] =
+    prunedCandidates > 0 ? pruned.medianNsPerCall * rays / static_cast<double>(prunedCandidates) : 0.;
+  std::printf("      localise: %d patches | %.1f BVH candidates/distout call (unpruned %.1f) | "
+              "distout %.1f ns pruned, %.1f ns unpruned, %.1f ns _Loop | %.2f ns per candidate patch | "
+              "Contains_Loop %.1f ns\n",
+              solid->GetNsurfaces(), prunedCandidates / rays, unprunedCandidates / rays,
+              pruned.medianNsPerCall, unpruned.medianNsPerCall, loop.medianNsPerCall,
+              out["nsPerBVHCandidate"].get<double>(), containsLoop.medianNsPerCall);
+  return out;
+}
+
+void printTiming(const char* label, const TimingStat& t)
+{
+  std::printf("      %-14s %9.1f ns/call  [%9.1f .. %9.1f, spread %5.1f%%]", label,
+              t.medianNsPerCall, t.minNsPerCall, t.maxNsPerCall, 100. * t.spread);
+  if (t.hitFraction >= 0.) {
+    std::printf("  hit %5.1f%%", 100. * t.hitFraction);
+  }
+  std::printf("\n");
+}
+
+/// The synthetic boolean ladder: `--ladder 2,4,8,16,32`.
+///
+/// It exists because the corpus cannot answer the question it answers. Reported for both tree
+/// shapes and with the leaf count verified from the built tree rather than from the request --
+/// a fixture that claims 32 leaves and holds 16 would show sublinear scaling and be wrong.
+json runLadder(const Options& opt)
+{
+  json out = json::array();
+  std::vector<int> counts;
+  {
+    std::stringstream ss(opt.ladderSpec);
+    std::string tok;
+    while (std::getline(ss, tok, ',')) {
+      if (!tok.empty()) {
+        counts.push_back(std::stoi(tok));
+      }
+    }
+  }
+  std::printf("=== synthetic boolean ladder: unions of K overlapping TGeoTubes ===\n");
+  std::printf("    Every genuine boolean in the corpus is a 2-leaf union of two TGeoTubes, so the\n"
+              "    corpus cannot say how a composite scales with K. This can.\n\n");
+  for (const int k : counts) {
+    for (const auto shapeKind : {LadderShape::Chain, LadderShape::Balanced}) {
+      const char* kindName = shapeKind == LadderShape::Chain ? "chain" : "balanced";
+      auto* manager = new TGeoManager("ladder", "boolean ladder");
+      const std::string tag = std::string("L") + kindName + std::to_string(k);
+      const MemorySnapshot before = readMemory();
+      TGeoShape* shape = buildBooleanLadder(k, shapeKind, tag);
+      const MemorySnapshot after = readMemory();
+      if (shape == nullptr) {
+        delete manager;
+        gGeoManager = nullptr;
+        continue;
+      }
+      const BooleanTreeStats tree = booleanTreeStats(shape);
+      const auto* box = dynamic_cast<const TGeoBBox*>(shape);
+      const Point3D lo{box->GetOrigin()[0] - box->GetDX(), box->GetOrigin()[1] - box->GetDY(),
+                       box->GetOrigin()[2] - box->GetDZ()};
+      const Point3D hi{box->GetOrigin()[0] + box->GetDX(), box->GetOrigin()[1] + box->GetDY(),
+                       box->GetOrigin()[2] + box->GetDZ()};
+      const QuerySamples samples =
+        buildQuerySamples(shape, "self", lo, hi, opt.perfPoints, opt.perfRays);
+      const TimingStat contains = timeContainsPass(shape, samples, opt.perfWarmup, opt.perfPasses);
+      const TimingStat safety = timeSafetyPass(shape, samples, opt.perfWarmup, opt.perfPasses);
+      const TimingStat distOut = timeDistOutPass(shape, samples, opt.perfWarmup, opt.perfPasses);
+      const TimingStat distIn = timeDistInPass(shape, samples, opt.perfWarmup, opt.perfPasses);
+      std::printf("  --- K=%-3d %-9s (leaves=%lld nodes=%lld depth=%d, %.1f%% of points inside) ---\n",
+                  k, kindName, tree.leaves, tree.nodes, tree.depth,
+                  100. * static_cast<double>(samples.insidePoints) /
+                    static_cast<double>(std::max<size_t>(1, samples.points.size())));
+      printTiming("Contains", contains);
+      printTiming("Safety", safety);
+      printTiming("DistFromOutside", distOut);
+      printTiming("DistFromInside", distIn);
+      out.push_back({{"leavesRequested", k},
+                     {"treeShape", kindName},
+                     {"leaves", tree.leaves},
+                     {"nodes", tree.nodes},
+                     {"depth", tree.depth},
+                     {"buildResidentBytes", (after - before).residentBytes},
+                     {"buildHeapBytes", (after - before).heapInUseBytes},
+                     {"insideFraction", static_cast<double>(samples.insidePoints) /
+                                          static_cast<double>(std::max<size_t>(1, samples.points.size()))},
+                     {"contains", timingToJson(contains)},
+                     {"safety", timingToJson(safety)},
+                     {"distFromOutside", timingToJson(distOut)},
+                     {"distFromInside", timingToJson(distIn)}});
+      delete manager;
+      gGeoManager = nullptr;
+    }
+  }
+  return out;
+}
+
+// ------------------------------------------------------------------------------------------
 // Self-test: analytic references, and the controls that prove the comparison can fail
 // ------------------------------------------------------------------------------------------
 
@@ -877,6 +1249,107 @@ int selfTest()
     check("control 4: a crossing with the wrong sense is CAUGHT", sense.kindMismatch == 1);
   }
 
+  // 5b. THE TIMING HARNESS'S OWN NEGATIVE CONTROL. A timing harness that cannot distinguish a
+  //     deliberately slowed shape from a fast one is not measuring what it claims, and this
+  //     project has shipped exactly that mistake once already (Stream_J_XRay.md section 6.1). So:
+  //     time the same kernels on a TGeoBBox and on a TGeoBBox carrying ballast, and require the
+  //     number to MOVE, in the right direction, on all four kernels.
+  {
+    TGeoBBox fast("perfControlFast", 1., 1., 1.);
+    BallastShape slow("perfControlSlow", 1., 1., 1., 60);
+    const Point3D lo{-1., -1., -1.};
+    const Point3D hi{1., 1., 1.};
+    const QuerySamples samples = buildQuerySamples(&fast, "control", lo, hi, 2000, 2000);
+    check("control 5: the shared sample set has both inside and outside points",
+          samples.insidePoints > 100 &&
+            samples.insidePoints < static_cast<long long>(samples.points.size()) - 100,
+          "inside=" + std::to_string(samples.insidePoints) + " of " +
+            std::to_string(samples.points.size()));
+    check("control 6: the sample partition is consistent with the reference it came from", [&] {
+      for (size_t i = 0; i < samples.points.size(); ++i) {
+        if (fast.Contains(samples.points[i].data()) != (samples.pointIsInside[i] != 0)) {
+          return false;
+        }
+      }
+      return true;
+    }());
+    check("control 7: DistFromOutside rays actually hit (an all-miss set times the early-out)",
+          timeDistOutPass(&fast, samples, 1, 3).hitFraction > 0.5);
+
+    struct Kernel {
+      const char* name;
+      TimingStat (*fn)(const TGeoShape*, const QuerySamples&, int, int);
+    };
+    const Kernel kernels[4] = {{"Contains", &timeContainsPass},
+                               {"Safety", &timeSafetyPass},
+                               {"DistFromOutside", &timeDistOutPass},
+                               {"DistFromInside", &timeDistInPass}};
+    for (const auto& kernel : kernels) {
+      const TimingStat quick = kernel.fn(&fast, samples, 2, 7);
+      const TimingStat heavy = kernel.fn(&slow, samples, 2, 7);
+      const double ratio = quick.medianNsPerCall > 0. ? heavy.medianNsPerCall / quick.medianNsPerCall : 0.;
+      check((std::string("control 8: ballast is VISIBLE on ") + kernel.name +
+             " (the timing harness can move its own number)").c_str(),
+            ratio > 2.,
+            std::string("fast=") + std::to_string(quick.medianNsPerCall) + " ns slow=" +
+              std::to_string(heavy.medianNsPerCall) + " ns ratio=" + std::to_string(ratio));
+      check((std::string("control 9: the ") + kernel.name +
+             " timing loop was not elided (non-zero checksum, positive time)").c_str(),
+            quick.checksum != 0 && quick.medianNsPerCall > 0. && quick.passes == 7);
+    }
+  }
+
+  // 5c. THE MEMORY PROBE'S NEGATIVE CONTROL. Both memory numbers must move when memory is taken,
+  //     and the heap number must come back when it is given up. Without this the "resident delta"
+  //     column could be reporting allocator noise and nobody would know.
+  {
+    const MemorySnapshot before = readMemory();
+    constexpr size_t kBytes = 64u << 20;
+    auto* block = new char[kBytes];
+    for (size_t i = 0; i < kBytes; i += 4096) {
+      block[i] = static_cast<char>(i); // touch every page: an untouched mmap is not resident
+    }
+    const MemorySnapshot held = readMemory();
+    const MemorySnapshot delta = held - before;
+    check("control 10: the resident probe sees a 64 MB touched allocation",
+          delta.residentBytes > 32LL << 20,
+          "delta=" + std::to_string(delta.residentBytes >> 20) + " MB");
+    check("control 11: the heap probe sees a 64 MB allocation",
+          delta.heapInUseBytes > 32LL << 20,
+          "delta=" + std::to_string(delta.heapInUseBytes >> 20) + " MB");
+    delete[] block;
+    const MemorySnapshot released = readMemory() - before;
+    check("control 12: the heap probe sees it released again (the resident one need not)",
+          released.heapInUseBytes < 8LL << 20,
+          "still=" + std::to_string(released.heapInUseBytes >> 20) + " MB");
+  }
+
+  // 5d. THE STRUCTURAL MEMORY CONTROL. The exact column has to depend on the geometry, so build
+  //     the same tree twice at different sizes and require the count -- and the derived byte
+  //     figure -- to follow. A structural number that does not move with the structure is a
+  //     constant with a units label.
+  {
+    auto* manager = new TGeoManager("perfControlLadder", "structural control");
+    TGeoShape* small = buildBooleanLadder(4, LadderShape::Balanced, "ctlS");
+    TGeoShape* big = buildBooleanLadder(32, LadderShape::Balanced, "ctlB");
+    const BooleanTreeStats a = booleanTreeStats(small);
+    const BooleanTreeStats b = booleanTreeStats(big);
+    check("control 13: the ladder builds the leaf count it was asked for",
+          a.leaves == 4 && b.leaves == 32,
+          "got " + std::to_string(a.leaves) + " and " + std::to_string(b.leaves));
+    check("control 14: a balanced ladder's depth is logarithmic in its leaf count",
+          a.depth == 3 && b.depth == 6,
+          "depth " + std::to_string(a.depth) + " and " + std::to_string(b.depth));
+    TGeoShape* chain = buildBooleanLadder(32, LadderShape::Chain, "ctlC");
+    const BooleanTreeStats c = booleanTreeStats(chain);
+    check("control 15: a chain ladder of the same leaf count is deeper, so the two tree shapes "
+          "really are different fixtures",
+          c.leaves == 32 && c.depth == 32,
+          "leaves=" + std::to_string(c.leaves) + " depth=" + std::to_string(c.depth));
+    delete manager;
+    gGeoManager = nullptr;
+  }
+
   // 5. The parity audit's own control: hand it a list with a crossing removed and require the
   //    midpoint Contains() check to contradict it.
   {
@@ -916,6 +1389,16 @@ int main(int argc, char** argv)
     return selfTest();
   }
 
+  if (!opt.ladderSpec.empty()) {
+    json ladder = runLadder(opt);
+    if (!opt.jsonOut.empty()) {
+      std::ofstream out(opt.jsonOut);
+      out << json{{"ladder", std::move(ladder)}}.dump(1);
+      std::printf("\nreport: %s\n", opt.jsonOut.c_str());
+    }
+    return 0;
+  }
+
   std::vector<Beam> beams;
   std::vector<Part> parts;
   try {
@@ -935,6 +1418,221 @@ int main(int argc, char** argv)
   }
 
   json report = json::array();
+
+  // ---- --perf: the representation cost/memory comparison ---------------------------------
+  if (opt.perf) {
+    std::printf("Per-call costs are WARM-CACHE, single-threaded, median of %d passes after %d "
+                "warmup passes.\nEvery representation of a part answers the SAME sample set.\n\n",
+                opt.perfPasses, opt.perfWarmup);
+    for (const auto& part : parts) {
+      std::printf("=== %s (%s) ===\n", part.id.c_str(), part.model.c_str());
+      Point3D lo{};
+      Point3D hi{};
+      std::string bboxSource;
+      if (!resolveBoundingBox(part, opt, lo, hi, bboxSource)) {
+        std::printf("  skip: no representation could supply a bounding box\n");
+        continue;
+      }
+      const Raster raster = buildRaster(lo, hi, opt.raster, beams, opt.margin);
+
+      // The sample set is built ONCE, from the first representation present in the order
+      // surface -> mesh -> shape, and every representation is then asked exactly it. The order is
+      // a preference for the representation whose Contains() is exact, not an accident: the
+      // partition is a fixed label, so it wants to come from the most trustworthy classifier
+      // available, and it is reported either way.
+      QuerySamples samples;
+      std::string partitionedBy;
+      for (const auto& candidate : {std::string("surface"), std::string("mesh"), std::string("shape")}) {
+        const std::string& source = candidate == "surface" ? part.surfaces
+                                    : candidate == "mesh"  ? part.facets
+                                                           : part.shape;
+        if (!opt.representations.count(candidate) || !fileExists(source)) {
+          continue;
+        }
+        LoadedRep rep = loadRepresentation(candidate, source, part.id);
+        if (rep.ok) {
+          // Points are drawn in the PART frame; a placed shape classifies them in its own.
+          QuerySamples inFrame =
+            buildQuerySamples(rep.shape, candidate, lo, hi, opt.perfPoints, opt.perfRays);
+          if (rep.placement) {
+            // Undo the frame so the stored set is the part frame's, as every other consumer
+            // expects. Drawing in the shape frame and unmapping is equivalent and simpler than
+            // threading the matrix through the generator.
+            for (auto& p : inFrame.points) {
+              Point3D q;
+              rep.placement->LocalToMaster(p.data(), q.data());
+              p = q;
+            }
+            for (auto* rays : {&inFrame.outsideRays, &inFrame.insideRays}) {
+              for (auto& r : *rays) {
+                Point3D o;
+                Point3D d;
+                rep.placement->LocalToMaster(r.origin.data(), o.data());
+                rep.placement->LocalToMasterVect(r.dir.data(), d.data());
+                r.origin = o;
+                r.dir = d;
+              }
+            }
+          }
+          samples = std::move(inFrame);
+          partitionedBy = candidate;
+        }
+        delete rep.manager;
+        gGeoManager = nullptr;
+        if (!partitionedBy.empty()) {
+          break;
+        }
+      }
+      if (partitionedBy.empty()) {
+        std::printf("  skip: no representation loaded\n");
+        continue;
+      }
+      samples.partitionedBy = partitionedBy;
+      std::printf("  samples: %zu points (%.1f%% inside), %zu outside rays, %zu inside rays, "
+                  "partitioned by '%s'; raster %d x %d x %zu beams = %zu rays\n",
+                  samples.points.size(),
+                  100. * static_cast<double>(samples.insidePoints) /
+                    static_cast<double>(std::max<size_t>(1, samples.points.size())),
+                  samples.outsideRays.size(), samples.insideRays.size(), partitionedBy.c_str(),
+                  raster.n, raster.n, raster.beams.size(), raster.rays.size());
+
+      json partJson;
+      partJson["id"] = part.id;
+      partJson["model"] = part.model;
+      partJson["partitionedBy"] = partitionedBy;
+      partJson["insideFraction"] = static_cast<double>(samples.insidePoints) /
+                                   static_cast<double>(std::max<size_t>(1, samples.points.size()));
+      partJson["bboxSource"] = bboxSource;
+      json repsJson = json::array();
+
+      for (const auto& candidate : {std::string("surface"), std::string("mesh"), std::string("shape")}) {
+        const std::string& source = candidate == "surface" ? part.surfaces
+                                    : candidate == "mesh"  ? part.facets
+                                                           : part.shape;
+        if (!opt.representations.count(candidate) || !fileExists(source)) {
+          continue;
+        }
+        LoadedRep rep = loadRepresentation(candidate, source, part.id);
+        if (!rep.ok) {
+          std::printf("  [skip %s] would not load from %s\n", candidate.c_str(), source.c_str());
+          delete rep.manager;
+          gGeoManager = nullptr;
+          continue;
+        }
+        const QuerySamples local = toShapeFrame(samples, rep.placement.get());
+        std::printf("  --- %-8s %-22s (%lld %s, load %.3f s + close %.3f s) ---\n", candidate.c_str(),
+                    rep.shape->ClassName(), rep.structural.primitives,
+                    candidate == "mesh" ? "triangles" : (candidate == "surface" ? "patches" : "leaves"),
+                    rep.loadSeconds, rep.closeSeconds);
+
+        const TimingStat contains = timeContainsPass(rep.shape, local, opt.perfWarmup, opt.perfPasses);
+        const TimingStat safety = timeSafetyPass(rep.shape, local, opt.perfWarmup, opt.perfPasses);
+        const TimingStat distOut = timeDistOutPass(rep.shape, local, opt.perfWarmup, opt.perfPasses);
+        const TimingStat distIn = timeDistInPass(rep.shape, local, opt.perfWarmup, opt.perfPasses);
+        printTiming("Contains", contains);
+        printTiming("Safety", safety);
+        printTiming("DistFromOutside", distOut);
+        printTiming("DistFromInside", distIn);
+
+        // Full geantino transport over the raster, timed the same way: several complete passes,
+        // median reported. This is the number a simulation actually pays, and it is the only one
+        // that composes the four kernels in the order a transport does.
+        Robustness statsTransport;
+        long long crossings = 0;
+        const TimingStat transport =
+          timePasses(static_cast<long long>(raster.rays.size()), opt.perfWarmup, opt.perfPasses, [&]() {
+            uint64_t acc = 0;
+            Robustness s;
+            long long found = 0;
+            for (const auto& ray : raster.rays) {
+              Point3D o;
+              Point3D d;
+              toShapeFrame(rep.placement.get(), ray.origin, ray.dir, o, d);
+              const auto list = stepWithShapeApi(rep.shape, o, d, ray.tMax, opt.step, s);
+              found += static_cast<long long>(list.size());
+              acc += list.size();
+            }
+            statsTransport = s;
+            crossings = found;
+            return acc;
+          });
+        // `crossings` is set from the last pass; every pass sees the same rays, so it is the
+        // per-pass crossing count and the ns/crossing below is exact rather than averaged over a
+        // varying denominator. It is counted from the returned lists rather than from the
+        // Robustness bookkeeping, which only fills in `crossings` when the per-ray audit runs --
+        // and the audit is deliberately NOT run inside a timed pass, because Contains() at every
+        // interval midpoint would put a fifth kernel into a transport measurement.
+        const double nsPerCrossing =
+          crossings > 0 ? transport.medianNsPerCall * static_cast<double>(raster.rays.size()) /
+                            static_cast<double>(crossings)
+                        : 0.;
+        std::printf("      %-14s %9.1f ns/ray   [%9.1f .. %9.1f, spread %5.1f%%]  %.1f ns/crossing "
+                    "(%lld crossings, %lld steps)\n",
+                    "transport", transport.medianNsPerCall, transport.minNsPerCall,
+                    transport.maxNsPerCall, 100. * transport.spread, nsPerCrossing, crossings,
+                    statsTransport.steps);
+
+        const MemorySnapshot total{rep.loadDelta.residentBytes + rep.closeDelta.residentBytes,
+                                   rep.loadDelta.heapInUseBytes + rep.closeDelta.heapInUseBytes};
+        std::printf("      memory: structural %lld B (%s)\n"
+                    "              sidecar on disk %lld B | measured heap +%lld B (load %lld + close "
+                    "%lld) | resident +%lld B\n",
+                    rep.structural.bytes, rep.structural.formula.c_str(),
+                    rep.structural.sidecarBytes, total.heapInUseBytes, rep.loadDelta.heapInUseBytes,
+                    rep.closeDelta.heapInUseBytes, total.residentBytes);
+        if (candidate == "mesh" && !rep.meshClosedBody) {
+          std::printf("      *** meshClosedBody = FALSE: this mesh is INVALID, not merely "
+                      "inaccurate. Read no accuracy column of this row as a safety statement. ***\n");
+        }
+
+        json repJson;
+        repJson["name"] = candidate;
+        repJson["source"] = source;
+        repJson["shapeClass"] = rep.shape->ClassName();
+        repJson["primitives"] = rep.structural.primitives;
+        repJson["loadSeconds"] = rep.loadSeconds;
+        repJson["closeSeconds"] = rep.closeSeconds;
+        repJson["structuralBytes"] = rep.structural.bytes;
+        repJson["structuralFormula"] = rep.structural.formula;
+        repJson["sidecarBytes"] = rep.structural.sidecarBytes;
+        repJson["heapBytesLoad"] = rep.loadDelta.heapInUseBytes;
+        repJson["heapBytesClose"] = rep.closeDelta.heapInUseBytes;
+        repJson["heapBytesTotal"] = total.heapInUseBytes;
+        repJson["residentBytesTotal"] = total.residentBytes;
+        repJson["capacity"] = rep.shape->Capacity();
+        repJson["placed"] = (rep.placement != nullptr);
+        repJson["contains"] = timingToJson(contains);
+        repJson["safety"] = timingToJson(safety);
+        repJson["distFromOutside"] = timingToJson(distOut);
+        repJson["distFromInside"] = timingToJson(distIn);
+        repJson["transport"] = timingToJson(transport);
+        repJson["transportNsPerCrossing"] = nsPerCrossing;
+        repJson["transportCrossings"] = crossings;
+        repJson["transportSteps"] = statsTransport.steps;
+        repJson["transportUnterminated"] = statsTransport.unterminated;
+        repJson["transportParityMismatch"] = statsTransport.parityMismatchIntervals;
+        if (candidate == "mesh") {
+          repJson["meshClosedBody"] = rep.meshClosedBody;
+        }
+        if (rep.surfaceSolid != nullptr) {
+          repJson["localise"] = localiseSurfaceSolid(rep.surfaceSolid, local, opt.perfWarmup,
+                                                     opt.perfPasses);
+        }
+        repsJson.push_back(std::move(repJson));
+        delete rep.manager;
+        gGeoManager = nullptr;
+      }
+      partJson["representations"] = std::move(repsJson);
+      report.push_back(std::move(partJson));
+      std::printf("\n");
+    }
+    if (!opt.jsonOut.empty()) {
+      std::ofstream out(opt.jsonOut);
+      out << report.dump(1);
+      std::printf("\nreport: %s\n", opt.jsonOut.c_str());
+    }
+    return 0;
+  }
 
   for (const auto& part : parts) {
     std::printf("=== %s (%s) ===\n", part.id.c_str(), part.model.c_str());
