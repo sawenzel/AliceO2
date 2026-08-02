@@ -730,6 +730,13 @@ I have edited none of these; they are for central reconciliation.
 - **`Stream_O` §7's rollup, "15 of 16 fully covered"**, is a converter-side edge count and remains
   correct as such. It must not be read as "15 solids would emit": with the naive conjunction the
   number is **1**, and with a sampled cell set **13**.
+- **[`NEXT.md`](NEXT.md) item 3** — *"a per-edge census puts 15 of the 16 solids entirely in that
+  bucket — 443 edges, none needing a fit. The route is an implicit / co-surface trim, not a fitted
+  B-spline."* The route survives; the arithmetic behind "15 of the 16 solids" does not carry over to
+  emission. With the rule that phrasing invites — one sense per neighbouring surface — the number is
+  **1 of 15**, and it takes a cell set *and* an exact cell enumeration to reach 13. Item 3 should say
+  that the trim generalisation is a per-face, converter-verified option, and that its gating work
+  item is the cell enumeration (§9.3), not the record format.
 - **[`Stream_F_EdgeIdentity.md`](Stream_F_EdgeIdentity.md) §8's caveat** — identity certifies that
   the topology survived, not each face's geometry — gets a partial answer for co-surface-trimmed
   faces: reciprocity (§6.5) is a geometric check that identity currently lacks, alongside
