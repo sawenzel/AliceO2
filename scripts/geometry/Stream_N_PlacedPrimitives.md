@@ -387,7 +387,45 @@ Bagger run below is the one that transports through a placed shape.
 
 ### 7.2 `Bagger.step` (12 parts) — the run that exercises the placement
 
-<!-- Bagger figures -->
+`BasePin` is the placed `TGeoTube`; the six rams are unplaced composites.
+
+```
+    shape    (a) shape  steps=2564290  zeroStep=0 noAdv=0 unstick=0 capHit=0 unterm=0 oddList=0
+                        nonAlt=0 dupXing=0 parity=0 parityNB=0 noTrans=0 outWorld=0 orgIn=0
+    shape    (b) nav    steps=2564290  (every counter 0, as above)
+             mode (a) vs mode (b): 0 of 1548288 rays disagree
+    shape    (a) vs OCCT: 1548288/1548288 rays identical, LOST=0 extra=0 displaced=0 kind=0
+                          worst dt=1.852e-10 cm   (7/7 part(s) fully clean)
+    shape    (b) vs OCCT: 1548288/1548288 rays identical, LOST=0 extra=0 displaced=0 kind=0
+                          worst dt=1.856e-10 cm   (7/7 part(s) fully clean)
+
+    surface  2654208/2654208 rays identical, LOST=0 extra=0 displaced=0, every counter 0,
+             12/12 parts fully clean, both modes, 0 of 2654208 rays disagree between them
+    mesh     1998259/2654208 identical, LOST=59925 extra=10429 displaced=1309104, 0/12 clean
+```
+
+**Mode (a) and mode (b) implement the placement differently and agree on every one of 1 548 288
+rays.** Mode (a) transforms each ray into the shape's frame by hand; mode (b) leaves the rays in
+the part frame and puts the matrix on the `TGeoNode`, so ROOT performs the transform. A wrong
+placement in either would show up as a mode-(a)-vs-(b) disagreement *and* as LOST crossings against
+OpenCascade. Both are zero.
+
+### 7.3 `BasePin` alone, 96 beams × 24² — the placed part, isolated
+
+Run against the post-change gate DB with `--reuse-db --parts BasePin`, so the three
+representations of one part are directly comparable:
+
+| repr | class | rays identical vs OCCT | LOST / extra / displaced | worst dt | robustness counters | chord V (cm³) | Capacity vs exact |
+| --- | --- | ---: | ---: | ---: | --- | ---: | ---: |
+| `surface` | `O2BVHSurfaceSolid` | 55296/55296 | 0 / 0 / 0 | 5.15e-13 cm | all zero | 31.463495 | −9.047e-16 |
+| **`shape`** | **`TGeoTube`** | **55296/55296** | **0 / 0 / 0** | **4.72e-13 cm** | **all zero** | **31.463495** | **−6.785e-16** |
+| `mesh` | `O2Tessellated` | 19781/55296 | 8 / 0 / 63625 | 2.56e-02 cm | all zero | 31.449424 | −4.144e-04 |
+
+Mode (a) vs mode (b): **0 of 55296 rays disagree** on every representation. The exact solid and the
+placed primitive agree on the chord volume to **7.3e-15** against OCCT's own chord integral over
+the same rays — i.e. the two independent exact representations of this part now land on the same
+number, which they could not be said to do while one of them was a composite with a sampled
+capacity.
 
 ---
 
