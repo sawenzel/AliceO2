@@ -78,7 +78,7 @@ not reporting it entering B — cannot be expressed by any counter it has.
 
 ```bash
 cd $HOME/alisw/O2
-python3 scripts/geometry/assemblyOracle.py --self-test      # 26 checks, no model, no build dir
+python3 scripts/geometry/assemblyOracle.py --self-test      # 28 checks, no model, no build dir
 python3 scripts/geometry/overlapCensus.py  --self-test      # 14 checks, no model, no build dir
 
 python3 scripts/geometry/overlapCensus.py --step scripts/geometry/STEP_examples/Bagger.step
@@ -173,7 +173,7 @@ G = [20,24] and H = [23,27] interpenetrating over [23,24]
 | **Fibonacci fan, 1152 rays** | every part's crossings alternate enter/exit; every crossing's `occ` equals its segment's occupancy | **pass** (2) |
 | **negative + positive control** | a touching-only pair reports **no** multiple occupancy; nudging one box 0.1 cm into the other **does** fire the flag | **pass** (2) |
 
-**26 checks, 0 failures.** They passed on the first run, which is precisely when to distrust them —
+**28 checks, 0 failures.** They passed on the first run, which is precisely when to distrust them —
 hence the two mutation controls (the coarse merge tolerance and the 0.1 cm nudge), which are the
 only reason the other 24 mean anything.
 
@@ -394,6 +394,29 @@ correctly excluded rather than scored.
 `BasePin`\|`Base` in particular: **215 touching transitions, 0 ambiguous occupancy** — an
 independent refutation of ROOT's phantom for that pair, on top of the sagitta arithmetic below.
 
+**ALICE3's 29 coincident pairs, same treatment: 237568 rays, 4527 touching transitions, 7
+OCCT-ambiguous rays.** 28 of the 29 clean. One —
+`ST0923290_018` \| `ST0923290_024` — reported **1 ray** with two occupants, which is exactly the
+false negative this check exists to find. It is not one:
+
+| raster | rays | double-occupancy rays | **of which not OCCT-ambiguous** | `amb` |
+| --- | ---: | ---: | ---: | ---: |
+| 32 × 16² | 8 192 | 1 | **0** | 4 |
+| 64 × 24² | 36 864 | 0 | **0** | 3 |
+| 96 × 32² | 98 304 | 3 | **0** | 9 |
+
+**Every one of them is a ray OCCT declined to classify.** The oracle *inherits* an `ON` midpoint's
+occupancy from the previous segment rather than guessing, and on a ray grazing a shared boundary
+that inheritance can manufacture a two-occupant segment out of nothing. So the pair really is only
+touching, the boolean was right, and **the oracle had a reportable defect**: it was quoting a
+number that includes rays it had already flagged as unscoreable.
+
+That is now fixed rather than annotated. `crossings()` returns **`ovlClean`** — double occupancy on
+a ray OCCT did not decline anywhere — and that is the field to quote; two self-test checks pin it
+(the synthetic interpenetration must be `ovlClean`, a grazing ray must never be). **Every
+interpenetration number in this document is unaffected**: all five headline pairs ran with `amb` =
+0, so `ovl` and `ovlClean` are equal on them.
+
 And note where Bagger's single curved contact is: `BasePin` \| `Base` — **the same pair
 `TGeoManager::CheckOverlaps` reports a phantom overlap for** (§3.6), which turns out not to be a
 coincidence at all: at ROOT's default settings that phantom is *exactly* the sagitta of a 24-gon on
@@ -572,7 +595,7 @@ I do not edit `NEXT.md` or `Tutorial.md`. These are the claims in them this stre
   should now be read next to the statement that **neither corpus composes into a legal world**.
   Every correctness number on this branch is about parts; none was ever about the assembly.
 * **`NEXT.md` open item 5, "Assembly-level transport"** — the oracle half is done
-  (`assemblyOracle.py`, 26 analytic checks), and the estimate in `Stream_J_XRay.md` §9 that "the
+  (`assemblyOracle.py`, 28 analytic checks), and the estimate in `Stream_J_XRay.md` §9 that "the
   oracle change is the small half" holds. What that item did not anticipate is that **the geometry
   it would be run on is illegal**, so the C++ half now has a prerequisite: there is no correct
   navigator behaviour to compare against inside an overlap region.
@@ -594,7 +617,7 @@ I do not edit `NEXT.md` or `Tutorial.md`. These are the claims in them this stre
 
 | path | what |
 | --- | --- |
-| `scripts/geometry/assemblyOracle.py` | the occupancy-annotated crossing-list oracle; `--self-test` = 26 analytic checks |
+| `scripts/geometry/assemblyOracle.py` | the occupancy-annotated crossing-list oracle; `--self-test` = 28 analytic checks |
 | `scripts/geometry/overlapCensus.py` | the pairwise legality census; `--self-test` = 14 analytic checks; `--inject` = the positive control on any model |
 
 Neither writes into `STEP_examples/`; both take `--out` for JSON. All artefacts of this session were
