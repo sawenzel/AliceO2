@@ -583,6 +583,31 @@ def measure_face(face, fidx, anc, model_of, face_model, scale_to_cm, args, solid
             rec[tag + "MedBoundaryDistCm"] = 0.0
             rec[tag + "MaxDepthCm"] = 0.0
 
+    # ---- independent verification of the ground truth on the disagreeing points --------------
+    # `BRepTopAdaptor_FClass2d` decides in the face's (u, v) domain. `BRepExtrema_DistShapeShape`
+    # decides in 3D against the trimmed face as a shape and shares no code with it. A point the
+    # conjunction accepts and FClass2d calls OUT must be a measurable distance from the face; if
+    # it is not, the disagreement is FClass2d's and not the rule's.
+    if args.verify:
+        from OCC.Core.BRepExtrema import BRepExtrema_DistShapeShape
+        from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeVertex
+        idx = np.where(fp)[0]
+        if len(idx) > args.verify:
+            idx = idx[np.linspace(0, len(idx) - 1, args.verify).astype(int)]
+        dists = []
+        for i in idx:
+            v = BRepBuilderAPI_MakeVertex(gp_Pnt(*[float(x) for x in P[i]])).Vertex()
+            ext = BRepExtrema_DistShapeShape(v, face)
+            if ext.IsDone() and ext.NbSolution() > 0:
+                dists.append(float(ext.Value()) * s)
+        if dists:
+            rec["fpVerifiedMinDistToFaceCm"] = float(min(dists))
+            rec["fpVerifiedMedDistToFaceCm"] = float(np.median(dists))
+            rec["fpVerifiedN"] = len(dists)
+            # agreement: a genuine OUT point must be further from the face than the face's own
+            # declared tolerance
+            rec["fpVerifiedAgree"] = int(sum(1 for d in dists if d > 10.0 * tol_face * s))
+
     # ---- per-surface sense consistency: does any single surface cut the interior? -------------
     amb = 0
     amb_worst = 0.0
@@ -760,6 +785,9 @@ def main():
                     help="NEGATIVE CONTROL: invert stored sense #k on every face")
     ap.add_argument("--perturb-radius", type=float, default=0.0,
                     help="NEGATIVE CONTROL: move every trimming surface by this many cm")
+    ap.add_argument("--verify", type=int, default=0,
+                    help="re-check up to this many false-positive samples per face against "
+                         "BRepExtrema_DistShapeShape (an independent OCCT ground truth)")
     ap.add_argument("--solid-crosscheck", type=int, default=0,
                     help="cross-check the FClass2d ground truth against BRepClass3d_SolidClassifier "
                          "on this many samples per face")
