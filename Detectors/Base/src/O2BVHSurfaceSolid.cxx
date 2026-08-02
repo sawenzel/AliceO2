@@ -90,6 +90,60 @@ const std::array<Vec3, 5>& reshootDirections()
 bool gRayTMaxPruning = true;
 // Per-thread diagnostic counter of leaf surface patches visited by the BVH distance queries.
 thread_local long long gRayCandidateCount = 0;
+// ... and by the nearest-patch queries behind Safety and ComputeNormal; see
+// O2BVHSurfaceSolid::ResetSafetyCandidateCounter.
+thread_local long long gSafetyCandidateCount = 0;
+// Deliberately unsound node bound for the nearest-patch traversal; see
+// O2BVHSurfaceSolid::SetSafetyBoundUnsoundForTest. Never true outside a test.
+bool gSafetyBoundUnsound = false;
+
+/// Squared distance from \a point to a BVH node's bounding box, evaluated in double from the
+/// float box corners (which convert exactly), and then shrunk by a relative guard.
+///
+/// This is *the* quantity the nearest-patch traversal prunes on, so its error direction is the
+/// whole safety argument. It must never come out **larger** than the true distance from the point
+/// to any patch inside the node, or a nearer patch is discarded and Safety() answers too much --
+/// the one failure mode that lets a navigator step through a wall. Two things could push it up
+/// and both are held down here:
+///
+///  * the box arithmetic. Three subtractions, three squarings and two additions carry at most
+///    about 4 ulps of relative error, so the result is scaled by (1 - 1e-12), three orders of
+///    magnitude of headroom over that. Scaling *down* a lower bound keeps it a lower bound; it
+///    costs only pruning, never correctness.
+///  * the box itself, which is inflated by kBVHBoxTolerance and rounded outward in float by
+///    buildBVH, i.e. it is a superset of the patch's conservative bounds. A larger box is nearer,
+///    so that too errs downward.
+///
+/// The corresponding statement about the patch is in nearestPatchDistanceSq.
+inline double boxDistanceSq(const BVHBBox& box, const Vec3& point)
+{
+  const double coordinates[3] = {point.xCoord, point.yCoord, point.zCoord};
+  double distanceSq = 0.;
+  for (int dimension = 0; dimension < 3; ++dimension) {
+    const double lower = static_cast<double>(box.min[dimension]);
+    const double upper = static_cast<double>(box.max[dimension]);
+    const double value = coordinates[dimension];
+    if (value < lower) {
+      distanceSq += (lower - value) * (lower - value);
+    } else if (value > upper) {
+      distanceSq += (value - upper) * (value - upper);
+    }
+  }
+  if (gSafetyBoundUnsound) {
+    // The negative control: the distance to the box *centre* is not a lower bound on anything,
+    // it is larger than the box distance whenever the box has any extent at all, so it prunes
+    // nodes that hold the true nearest patch. Enabled only by SetSafetyBoundUnsoundForTest.
+    double centreDistanceSq = 0.;
+    for (int dimension = 0; dimension < 3; ++dimension) {
+      const double centre =
+        0.5 * (static_cast<double>(box.min[dimension]) + static_cast<double>(box.max[dimension]));
+      const double gap = coordinates[dimension] - centre;
+      centreDistanceSq += gap * gap;
+    }
+    return centreDistanceSq;
+  }
+  return distanceSq * (1. - 1.e-12);
+}
 
 /// Convert a double ray bound to the float the BVH traversal compares against, rounding *up* so
 /// the float bound can never be smaller than the double one. Traversal in float must never
@@ -692,6 +746,137 @@ struct O2BVHSurfaceSolid::Impl {
       }
     }
     return false;
+  }
+
+  /// The brute-force nearest patch: the squared distanceSqToPatch minimum over *every* surface,
+  /// and the index that realises it. The oracle for nearestPatchDistanceSq, and the definition of
+  /// what Safety() and ComputeNormal() answer -- the accelerated traversal is required to return
+  /// this number and this index bit for bit, not merely something close.
+  ///
+  /// The tie-break is part of the definition: a strict `<` means the *lowest-indexed* patch wins
+  /// an exact tie, which is routine rather than exotic (the centre of a box is exactly equidistant
+  /// from all six faces). ComputeNormal turns the winner into a normal, so a different winner is a
+  /// different answer.
+  double nearestPatchDistanceSqLoop(const Vec3& point, size_t* closestIndex) const
+  {
+    double bestDistanceSq = std::numeric_limits<double>::infinity();
+    size_t bestIndex = surfaces.size();
+    for (size_t index = 0; index < surfaces.size(); ++index) {
+      const double patchDistanceSq = surfaces[index]->distanceSqToPatch(point);
+      if (patchDistanceSq < bestDistanceSq) {
+        bestDistanceSq = patchDistanceSq;
+        bestIndex = index;
+      }
+    }
+    if (closestIndex != nullptr) {
+      *closestIndex = bestIndex;
+    }
+    return bestDistanceSq;
+  }
+
+  /// Same answer as nearestPatchDistanceSqLoop, reached through the BVH.
+  ///
+  /// Ordered depth-first traversal with a running best: a node is entered only if the distance
+  /// from the point to its bounding box -- a lower bound on the distance to every patch in its
+  /// subtree -- is still competitive, and children are visited nearer-box-first so the best
+  /// tightens as early as possible. Each stack entry carries the bound it was pushed with and is
+  /// re-tested on pop, so a node queued before a better patch was found is still dropped.
+  ///
+  /// **Why the bound is a lower bound, patch side.** Every distanceSqToPatch in BoundedSurface.h
+  /// is realised at a point of the patch's *untrimmed* window -- the polygon or curve wire itself
+  /// for the planar families, the full rim band for a cylinder or cone, the full sphere, the full
+  /// torus -- and each family's conservativeBounds() encloses exactly that window. So the point
+  /// realising distanceSqToPatch lies inside the surface's own leaf box, and the distance to the
+  /// box cannot exceed it. Note that for a wire-trimmed quadric distanceSqToPatch is itself only a
+  /// lower bound on the true distance to the trimmed patch; that is the existing, documented
+  /// behaviour of the kernel and it errs the safe way. This traversal reproduces the loop's answer
+  /// exactly, whatever that answer is; it does not inherit a second source of error.
+  ///
+  /// **Direction of every inequality here.** Both the node bound (boxDistanceSq) and the patch
+  /// distance err *downward* against the true geometric distance, so Safety() can only ever come
+  /// out too small. Too small costs a navigator an extra boundary computation; too large lets it
+  /// walk through a wall.
+  ///
+  /// \a TrackIndex selects the pruning that ComputeNormal needs. Without it a node whose bound
+  /// equals the current best is dropped, which cannot change the minimum. With it such a node must
+  /// still be entered, because it may hold an equally-near patch of *lower index*, which the
+  /// tie-break would prefer.
+  template <bool TrackIndex>
+  double nearestPatchDistanceSq(const Vec3& point, size_t* closestIndex) const
+  {
+    if (bvh == nullptr) {
+      return nearestPatchDistanceSqLoop(point, closestIndex);
+    }
+
+    struct StackEntry {
+      size_t node;
+      double lowerBoundSq;
+    };
+    // reused across calls so the hot path allocates nothing; capacity is paid once per thread
+    static thread_local std::vector<StackEntry> nodeStack;
+    nodeStack.clear();
+
+    double bestDistanceSq = std::numeric_limits<double>::infinity();
+    size_t bestIndex = surfaces.size();
+
+    auto pruned = [](double lowerBoundSq, double bestSoFarSq) {
+      return TrackIndex ? lowerBoundSq > bestSoFarSq : lowerBoundSq >= bestSoFarSq;
+    };
+
+    nodeStack.push_back({0, boxDistanceSq(bvh->nodes[0].get_bbox(), point)});
+    while (!nodeStack.empty()) {
+      const StackEntry entry = nodeStack.back();
+      nodeStack.pop_back();
+      if (pruned(entry.lowerBoundSq, bestDistanceSq)) {
+        continue;
+      }
+      const auto& node = bvh->nodes[entry.node];
+      if (node.is_leaf()) {
+        const auto beginPrimitive = node.index.first_id();
+        const auto endPrimitive = beginPrimitive + node.index.prim_count();
+        for (auto primitive = beginPrimitive; primitive < endPrimitive; ++primitive) {
+          const size_t index = bvh->prim_ids[primitive];
+          ++gSafetyCandidateCount;
+          const double patchDistanceSq = surfaces[index]->distanceSqToPatch(point);
+          if (patchDistanceSq < bestDistanceSq) {
+            bestDistanceSq = patchDistanceSq;
+            bestIndex = index;
+          } else if (TrackIndex && patchDistanceSq == bestDistanceSq && index < bestIndex) {
+            bestIndex = index;
+          }
+        }
+        continue;
+      }
+      const size_t firstChild = node.index.first_id();
+      const size_t secondChild = firstChild + 1;
+      if (secondChild >= bvh->nodes.size()) {
+        if (firstChild < bvh->nodes.size()) {
+          nodeStack.push_back({firstChild, boxDistanceSq(bvh->nodes[firstChild].get_bbox(), point)});
+        }
+        continue;
+      }
+      double nearBound = boxDistanceSq(bvh->nodes[firstChild].get_bbox(), point);
+      double farBound = boxDistanceSq(bvh->nodes[secondChild].get_bbox(), point);
+      size_t nearChild = firstChild;
+      size_t farChild = secondChild;
+      if (farBound < nearBound) {
+        std::swap(nearBound, farBound);
+        std::swap(nearChild, farChild);
+      }
+      // farther child first: the stack is LIFO, so the nearer one is popped -- and tightens the
+      // best -- before the farther one is re-tested
+      if (!pruned(farBound, bestDistanceSq)) {
+        nodeStack.push_back({farChild, farBound});
+      }
+      if (!pruned(nearBound, bestDistanceSq)) {
+        nodeStack.push_back({nearChild, nearBound});
+      }
+    }
+
+    if (closestIndex != nullptr) {
+      *closestIndex = bestIndex;
+    }
+    return bestDistanceSq;
   }
 };
 
@@ -1910,21 +2095,61 @@ long long O2BVHSurfaceSolid::GetRayCandidateCount()
   return gRayCandidateCount;
 }
 
+void O2BVHSurfaceSolid::ResetSafetyCandidateCounter()
+{
+  gSafetyCandidateCount = 0;
+}
+
+long long O2BVHSurfaceSolid::GetSafetyCandidateCount()
+{
+  return gSafetyCandidateCount;
+}
+
+void O2BVHSurfaceSolid::SetSafetyBoundUnsoundForTest(bool enable)
+{
+  gSafetyBoundUnsound = enable;
+}
+
+bool O2BVHSurfaceSolid::GetSafetyBoundUnsoundForTest()
+{
+  return gSafetyBoundUnsound;
+}
+
+/// The safety is the distance to the nearest patch, rounded *down* by one ulp.
+///
+/// The rounding is asymmetric on purpose and predates this traversal: a safety a hair too small
+/// costs the navigator one boundary computation it could have skipped, a safety a hair too large
+/// lets it step through a wall. Every bound inside nearestPatchDistanceSq errs the same way.
 Double_t O2BVHSurfaceSolid::Safety(const Double_t* point, Bool_t) const
 {
   if (fImpl == nullptr || fImpl->surfaces.empty()) {
     return TGeoShape::Big();
   }
+  const double bestDistanceSq = fImpl->nearestPatchDistanceSq<false>(makeVec3(point), nullptr);
+  return std::nextafter(std::sqrt(bestDistanceSq), 0.);
+}
 
-  const Vec3 testPoint = makeVec3(point);
-  double bestDistanceSq = std::numeric_limits<double>::infinity();
-  for (const auto& surface : fImpl->surfaces) {
-    bestDistanceSq = std::min(bestDistanceSq, surface->distanceSqToPatch(testPoint));
+Double_t O2BVHSurfaceSolid::Safety_Loop(const Double_t* point, Bool_t) const
+{
+  if (fImpl == nullptr || fImpl->surfaces.empty()) {
+    return TGeoShape::Big();
   }
+  const double bestDistanceSq = fImpl->nearestPatchDistanceSqLoop(makeVec3(point), nullptr);
   return std::nextafter(std::sqrt(bestDistanceSq), 0.);
 }
 
 void O2BVHSurfaceSolid::ComputeNormal(const Double_t* point, const Double_t* dir, Double_t* norm) const
+{
+  computeNormalFrom(point, dir, norm, false);
+}
+
+void O2BVHSurfaceSolid::ComputeNormal_Loop(const Double_t* point, const Double_t* dir, Double_t* norm) const
+{
+  computeNormalFrom(point, dir, norm, true);
+}
+
+void O2BVHSurfaceSolid::computeNormalFrom(const Double_t* point, const Double_t* dir, Double_t* norm,
+                                          bool useLoop) const
 {
   if (fImpl == nullptr || fImpl->surfaces.empty()) {
     norm[0] = 1.;
@@ -1934,24 +2159,21 @@ void O2BVHSurfaceSolid::ComputeNormal(const Double_t* point, const Double_t* dir
   }
 
   const Vec3 testPoint = makeVec3(point);
-  const BoundedSurface* closestSurface = nullptr;
-  double bestDistanceSq = std::numeric_limits<double>::infinity();
-  for (const auto& surface : fImpl->surfaces) {
-    const double surfaceDistanceSq = surface->distanceSqToPatch(testPoint);
-    if (surfaceDistanceSq < bestDistanceSq) {
-      bestDistanceSq = surfaceDistanceSq;
-      closestSurface = surface.get();
-    }
+  size_t closestIndex = fImpl->surfaces.size();
+  if (useLoop) {
+    fImpl->nearestPatchDistanceSqLoop(testPoint, &closestIndex);
+  } else {
+    fImpl->nearestPatchDistanceSq<true>(testPoint, &closestIndex);
   }
 
-  if (closestSurface == nullptr) {
+  if (closestIndex >= fImpl->surfaces.size()) {
     norm[0] = 1.;
     norm[1] = 0.;
     norm[2] = 0.;
     return;
   }
 
-  Vec3 normal = closestSurface->normalAt(testPoint);
+  Vec3 normal = fImpl->surfaces[closestIndex]->normalAt(testPoint);
   if (dir != nullptr) {
     const Vec3 direction = makeVec3(dir);
     if (dot(normal, direction) < 0.) {
