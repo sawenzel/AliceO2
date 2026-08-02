@@ -17,19 +17,25 @@ what is missing"*. Start there. This file is only the hand-over on top of it.
 
 | | |
 | --- | --- |
-| `ctest -R BVHSurfaceSolid` | **97 cases**, green |
-| ladder fixtures | **9/9 scored** — of **10** leaf solids; `oblique_cut_cyl` has no sidecar and never has |
-| `Bagger.step` | **12/12 shipped**, 9/12 surface, 1 unscored (`Bucket`, ships as mesh) |
+| `ctest -R BVHSurfaceSolid` | **108 cases**, green |
+| ladder fixtures | **10/10 scored** of 10 leaf solids — `oblique_cut_cyl` emits since the ellipse trim |
+| `Bagger.step` | **13/13 scored, 13/13 pass, gate exits 0** |
 | unexplained oracle disagreements | **0/0/0/0** on `surface`, both corpora; **0/0/0/0** on `shape` |
 | `runOracleGate.py --self-test` | 17/17 |
-| `O2_CADtoTGeo.py --self-test` | **26 checks**, 0 failures (18 recognition + 8 placement) |
+| `O2_CADtoTGeo.py --self-test` | **36 checks**, 0 failures (18 recognition + 8 placement + 10 planar trim) |
 | `csg/emit.py --self-test` | 33/33 |
-| `o2-bench-detectorsbase-xray --self-test` | 17 checks, 0 failures |
+| `o2-bench-detectorsbase-xray --self-test` | **34 checks**, 0 failures |
 
 **Gate totals and disagreement counts are separate numbers. Never quote one without the other.**
 
-Bagger now converts as a **mixture**: CSG 7, exact surfaces 5, tessellated 1, of 13 leaf solids —
-every CSG part exact (`dV_sym = 0`) and oracle-clean. That was the MVP and it is done.
+**Bagger is now represented entirely exactly: CSG 7, exact surfaces 6, tessellated 0**, of 13 leaf
+solids. Every CSG part is exact (`dV_sym = 0`) and every part is oracle-clean. The gate exit code is
+`0` for the first time. The MVP was a *mixture* including one mesh; this is past it.
+
+`Bucket` was the last mesh part, and it was never about its spheres and tori — it has 69 planes,
+22 cylinders, 4 spheres, 2 tori and exactly **two** unsupported faces, both planes bounded by an
+**ellipse**. A conic *is* a rational quadratic B-spline, exactly, and the sidecar's planar B-spline
+record is rational, so widening one set literal was the whole fix. See `Stream_Q_EllipseTrim.md`.
 
 ## What landed today, in order
 
