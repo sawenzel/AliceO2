@@ -35,6 +35,7 @@ Usage
 import argparse
 import itertools
 import json
+import re
 import math
 import sys
 import time
@@ -461,6 +462,9 @@ def main():
                         help="cap the pairs examined after AABB rejection (bounded runs)")
     parser.add_argument("--max-parts", type=int, default=0)
     parser.add_argument("--parts", type=str, default="")
+    parser.add_argument("--parts-regex", type=str, default="",
+                        help="keep instances whose name matches this regex -- the way to select a "
+                             "replicated prototype, whose copies are named NAME, NAME#1, NAME#2")
     parser.add_argument("--pad", type=float, default=0.1,
                         help="AABB inflation in cm: decides which DISJOINT pairs get their\n                             separation measured (default 0.1 cm)")
     parser.add_argument("--no-deep", action="store_true",
@@ -481,6 +485,9 @@ def main():
     if args.parts:
         wanted = set(args.parts.split(","))
         parts = [p for p in parts if p.name in wanted]
+    if args.parts_regex:
+        pattern = re.compile(args.parts_regex)
+        parts = [p for p in parts if pattern.search(p.name)]
     if args.max_parts:
         parts = parts[:args.max_parts]
     print(f"  {args.step.name}: {len(parts)} placed solids, {scale} cm/unit "
