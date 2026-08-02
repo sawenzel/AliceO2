@@ -50,6 +50,9 @@ not work:
   points` for every surface solid in the world — the sampler is starved (default 1000 mesh points
   against 1694–6172 display vertices), and `TGeoShape::GetPointsOnSegments` **returns without
   filling its buffer**. Whatever verdict comes out is not computed from points on the shapes.
+* one of the four overlaps it reports by default is identifiable exactly: `BasePin | Base` at
+  **0.00855504 cm** is `1 − cos(π/24)` on that pin's radius-1 cm cylinder to five significant
+  figures — **a 24-gon's chord error on a press fit that is exact in the CAD**, not an overlap.
 * raise `SetNmeshPoints` above the largest mesh and the errors stop and **the verdict changes** —
   and two of its five entries contradict an exact distance computation. It reports
   `BucketLink2 | BucketCylinderInner` as a **0.41 cm overlap** when `BRepExtrema_DistShapeShape`
@@ -375,9 +378,9 @@ the finding that these are **not** whole-face contacts.)
 exactly the population that has no exact sidecar (`NEXT.md` open item 4).
 
 And note where Bagger's single curved contact is: `BasePin` \| `Base` — **the same pair
-`TGeoManager::CheckOverlaps` reports a 0.87–0.91 cm phantom overlap for** (§3.6). That is a
-suggestive coincidence and it is reported as one; the mechanism is not established, and a chord
-sagitta on a pin of that size does not obviously account for 9 mm.
+`TGeoManager::CheckOverlaps` reports a phantom overlap for** (§3.6), which turns out not to be a
+coincidence at all: at ROOT's default settings that phantom is *exactly* the sagitta of a 24-gon on
+`BasePin`'s radius-1 cm cylinder, to five significant figures.
 
 ### 3.6 `TGeoManager::CheckOverlaps` — a third instrument, and it is broken here
 
@@ -415,6 +418,20 @@ calling `appendDisplayMesh` once **per bounded surface**, each appending its own
 a *soup of per-face patches with no vertices shared between surfaces*. `GetNmeshVertices` counts
 the duplicates. That explains the starvation; it does not explain the phantom overlaps, and I could
 not go further without touching C++.
+
+**And one of those four entries can be identified exactly.** `BasePin` is a perfect cylinder —
+bounding box 2 × 2 × 10 cm, volume 31.415927 cm³ = π·1²·10 to eight digits — seated in a matching
+bore in `Base`, which is why §3.5 finds it to be the assembly's only *cylindrical* contact. The
+sagitta of an N-gon approximation of a radius-1 cm circle is `1 − cos(π/N)`:
+
+| N | 20 | 22 | **24** | 26 | 28 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| sagitta (cm) | 0.01231166 | 0.01017856 | **0.00855514** | 0.00729113 | 0.00628779 |
+
+**ROOT reports 0.00855504 cm.** That is the 24-gon sagitta to five significant figures. The
+`BasePin | Base` entry is not an overlap at all — it is the chord error of a 24-segment
+polygonisation of a press fit that is exact in the CAD, and the census is right to call the pair
+touching.
 
 **Feed the sampler properly and the verdict changes:**
 
