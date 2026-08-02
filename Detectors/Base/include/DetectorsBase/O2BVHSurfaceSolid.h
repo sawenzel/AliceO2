@@ -312,6 +312,25 @@ class O2BVHSurfaceSolid : public TGeoBBox
   static void ResetRayCandidateCounter();
   static long long GetRayCandidateCount();
 
+  /// Per-thread counter of surface patches handed to distanceSqToPatch by the BVH-accelerated
+  /// nearest-patch traversal behind Safety() and ComputeNormal() since the last reset. Against
+  /// GetNsurfaces() this is exactly how much the pruning avoids. Diagnostic only; not incremented
+  /// by Safety_Loop()/ComputeNormal_Loop(), which visit every surface by construction.
+  static void ResetSafetyCandidateCounter();
+  static long long GetSafetyCandidateCount();
+
+  /// Test-only sabotage of the nearest-patch pruning: replaces the distance from the query point
+  /// to a node's bounding *box* -- a genuine lower bound on the distance to every patch in that
+  /// subtree -- with the distance to the box *centre*, which bounds nothing. It is larger than the
+  /// box distance for any box with extent, so it prunes subtrees that hold the true nearest patch
+  /// and Safety() comes out **too large**, which is the one failure mode that matters.
+  ///
+  /// It exists because a cross-check that cannot fail has not passed: with this on, the
+  /// accelerated kernels must disagree with their _Loop twins, and the test asserts that they do.
+  /// Process-wide, not thread safe, and never enabled outside a test.
+  static void SetSafetyBoundUnsoundForTest(bool enable);
+  static bool GetSafetyBoundUnsoundForTest();
+
   /// One crossing of the containment parity ray, as seen by Contains().
   struct ContainsCrossing {
     double distance = 0.;      ///< ray parameter of the hit
@@ -552,6 +571,13 @@ class O2BVHSurfaceSolid : public TGeoBBox
                                Double_t stepmax = TGeoShape::Big()) const;
   Double_t Safety(const Double_t* point, Bool_t in = kTRUE) const override;
   void ComputeNormal(const Double_t* point, const Double_t* dir, Double_t* norm) const override;
+  /// Trivial non-BVH Safety/ComputeNormal looping over all surfaces: the oracle the accelerated
+  /// nearest-patch traversal is cross-validated against, and the baseline its speedup is measured
+  /// against. Bit-identical agreement is the contract, not approximate agreement -- both minimise
+  /// the same distanceSqToPatch over the same patches under the same tie-break, only the visiting
+  /// order differs (see O2Tessellated::Contains_Loop for the convention).
+  Double_t Safety_Loop(const Double_t* point, Bool_t in = kTRUE) const;
+  void ComputeNormal_Loop(const Double_t* point, const Double_t* dir, Double_t* norm) const;
   Double_t Capacity() const override;
 
   /// The Add*Surface calls this solid was built from, in order. Public and const so that the
@@ -566,6 +592,11 @@ class O2BVHSurfaceSolid : public TGeoBBox
   /// set. Both public entry points route through here so that the re-shoot policy can never make
   /// them differ -- their bit-identical agreement is the branch's strongest self-check.
   bool containsByParity(const Double_t* point, bool useBVH) const;
+
+  /// The normal answer shared by ComputeNormal() and ComputeNormal_Loop(): \a useLoop selects the
+  /// all-surfaces scan over the BVH traversal. Both entry points route through here so the choice
+  /// of the closest patch is the only thing that can ever differ between them.
+  void computeNormalFrom(const Double_t* point, const Double_t* dir, Double_t* norm, bool useLoop) const;
 
   /// Discard the derived state and replay fRecords through the Add*Surface methods, then
   /// CloseShape(). Used by the Streamer when reading. Returns false (having left the solid

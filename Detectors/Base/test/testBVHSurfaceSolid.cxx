@@ -6112,3 +6112,471 @@ BOOST_AUTO_TEST_CASE(RepBenchBooleanLadderCostGrowsWithLeafCount)
   gGeoManager = nullptr;
 }
 // --- Stream P: representation cost/memory benchmark ---
+
+// --- Stream S: BVH-accelerated Safety and ComputeNormal ---
+//
+// Safety() and ComputeNormal() answer the same question -- which trimmed patch is nearest to this
+// point -- and both used to answer it with a bare loop over every patch, which on ALICE3's
+// 965-patch solid cost 812 us per call (Stream_P_RepresentationBench.md S2.3). They now walk the
+// BVH that was already there. The oracle is the loop they replaced, kept as Safety_Loop() /
+// ComputeNormal_Loop(), and the contract against it is *exact equality*, not agreement to a
+// tolerance: both minimise the same distanceSqToPatch over the same patches under the same
+// tie-break, so any difference at all is a traversal or pruning bug.
+
+namespace
+{
+// A deterministic 64-bit LCG, so a failure is reproducible from the seed alone.
+struct SampleStream {
+  explicit SampleStream(std::uint64_t seed) : state(seed | 1u) {}
+  std::uint64_t state;
+  double uniform()
+  {
+    state = state * 6364136223846793005ull + 1442695040888963407ull;
+    return static_cast<double>(state >> 11) / static_cast<double>(1ull << 53);
+  }
+  double symmetric(double extent) { return (2. * uniform() - 1.) * extent; }
+};
+
+/// Points in every regime the two kernels have to survive, for one solid of half-extent \a extent.
+///
+/// The regimes are not decoration. Pruning is trivially correct where one patch is far nearer than
+/// all others and only bites where several are comparably near, which is exactly *on* the surface;
+/// and a point far outside the bounding box is the case where the node bound is large and a
+/// rounding error in it would prune the whole tree. So the sample is deliberately loaded towards
+/// the surface and towards infinity rather than being uniform in the box.
+std::vector<std::array<double, 3>> nearestPatchSample(const SurfaceSolid& solid, double extent, int count)
+{
+  SampleStream stream(0x5EAFE7Full);
+  std::vector<std::array<double, 3>> points;
+  points.reserve(static_cast<size_t>(count));
+  for (int index = 0; index < count; ++index) {
+    std::array<double, 3> point{stream.symmetric(extent), stream.symmetric(extent), stream.symmetric(extent)};
+    switch (index % 5) {
+      case 0: // wherever it landed: inside or outside, generic
+        break;
+      case 1: { // walked onto the surface along its own normal, i.e. distance ~ 0
+        std::array<double, 3> normal{0., 0., 0.};
+        const double safety = solid.Safety_Loop(point.data(), solid.Contains(point.data()));
+        solid.ComputeNormal_Loop(point.data(), nullptr, normal.data());
+        const double sign = solid.Contains(point.data()) ? 1. : -1.;
+        for (int dimension = 0; dimension < 3; ++dimension) {
+          point[dimension] += sign * safety * normal[dimension];
+        }
+        break;
+      }
+      case 2: { // a hair off the surface, at the scale where several patches compete
+        std::array<double, 3> normal{0., 0., 0.};
+        const double safety = solid.Safety_Loop(point.data(), solid.Contains(point.data()));
+        solid.ComputeNormal_Loop(point.data(), nullptr, normal.data());
+        const double sign = solid.Contains(point.data()) ? 1. : -1.;
+        const double offset = safety - sign * 1.e-9 * std::max(1., extent);
+        for (int dimension = 0; dimension < 3; ++dimension) {
+          point[dimension] += sign * offset * normal[dimension];
+        }
+        break;
+      }
+      case 3: // well outside the bounding box
+        for (auto& coordinate : point) {
+          coordinate *= 40.;
+        }
+        break;
+      case 4: // very far away, where the node bound is large and its rounding is worst
+        for (auto& coordinate : point) {
+          coordinate *= 1.e7;
+        }
+        break;
+    }
+    points.push_back(point);
+  }
+  // and the exact centre, where every face of a box is equidistant: the tie the tie-break decides
+  points.push_back({0., 0., 0.});
+  return points;
+}
+
+/// Compare the accelerated nearest-patch kernels against their loop twins at one point. Returns
+/// the number of disagreements, so a caller can both assert zero and count.
+int countNearestPatchDisagreements(const SurfaceSolid& solid, const std::array<double, 3>& point,
+                                   double* worstSafetyGap = nullptr)
+{
+  int disagreements = 0;
+  for (const bool inside : {true, false}) {
+    const double accelerated = solid.Safety(point.data(), inside);
+    const double reference = solid.Safety_Loop(point.data(), inside);
+    if (accelerated != reference) {
+      ++disagreements;
+    }
+    if (worstSafetyGap != nullptr) {
+      *worstSafetyGap = std::max(*worstSafetyGap, accelerated - reference);
+    }
+  }
+  // with and without a direction, since the direction flips the sign of the chosen patch's normal
+  // and a wrong patch can hide behind that flip
+  const std::array<double, 3> direction = unitDirection(0.37, -0.82, 0.44);
+  for (const double* dir : {static_cast<const double*>(nullptr), direction.data()}) {
+    std::array<double, 3> accelerated{0., 0., 0.};
+    std::array<double, 3> reference{0., 0., 0.};
+    solid.ComputeNormal(point.data(), dir, accelerated.data());
+    solid.ComputeNormal_Loop(point.data(), dir, reference.data());
+    for (int dimension = 0; dimension < 3; ++dimension) {
+      if (accelerated[dimension] != reference[dimension]) {
+        ++disagreements;
+      }
+    }
+  }
+  return disagreements;
+}
+
+// A solid with many patches whose boxes overlap heavily: eight boxes on a line is the easy case
+// for pruning, a shell of small boxes around a sphere is not.
+std::unique_ptr<SurfaceSolid> makeManyPatchSolid(const char* name, int ringCount)
+{
+  auto solid = std::make_unique<SurfaceSolid>(name);
+  for (int ring = 0; ring < ringCount; ++ring) {
+    const double angle = surf::kTwoPi * ring / ringCount;
+    addBoxSurfaces(*solid, 0.4, 0.4, 0.4, {3. * std::cos(angle), 3. * std::sin(angle), 0.});
+  }
+  solid->CloseShape();
+  return solid;
+}
+
+// A quarter of a circle of radius r about (cu, cv) in a parametric domain, as a rational quadratic
+// B-spline -- the public-API twin of the kernel-level quarterCircleBSpline above.
+BoundaryCurve quarterCircleBoundary(double cu, double cv, double r, double a0)
+{
+  const double a1 = a0 + surf::kHalfPi;
+  const double aMid = 0.5 * (a0 + a1);
+  std::vector<Point2D> poles{{cu + r * std::cos(a0), cv + r * std::sin(a0)},
+                             {cu + r * std::sqrt(2.) * std::cos(aMid), cv + r * std::sqrt(2.) * std::sin(aMid)},
+                             {cu + r * std::cos(a1), cv + r * std::sin(a1)}};
+  return BoundaryCurve::makeBSpline(2, std::move(poles), {1., std::sqrt(0.5), 1.}, {0., 0., 0., 1., 1., 1.});
+}
+
+// Four cylindrical windows cut by B-spline wires in (phi, h), plus two disks. Not a closed solid --
+// it is not meant to be navigated -- but it is the *trim* family Stream P measured at 2-6 us per
+// candidate patch, whose distanceSqToPatch walks a flattened polyline. That is where pruning has
+// the most to save and where a wrong bound would cost the most, so the cross-check has to cover it.
+std::unique_ptr<SurfaceSolid> makeWireTrimmedSolid(const char* name)
+{
+  auto solid = std::make_unique<SurfaceSolid>(name);
+  for (int window = 0; window < 4; ++window) {
+    const double centrePhi = surf::kHalfPi * window + 0.3;
+    BOOST_REQUIRE(solid->AddCylindricalSurface(
+      {0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, 2., -1., 1., 0., surf::kTwoPi, false,
+      {quarterCircleBoundary(centrePhi, 0., 0.5, 0.), quarterCircleBoundary(centrePhi, 0., 0.5, surf::kHalfPi),
+       quarterCircleBoundary(centrePhi, 0., 0.5, surf::kPi),
+       quarterCircleBoundary(centrePhi, 0., 0.5, 3. * surf::kHalfPi)}));
+  }
+  BOOST_REQUIRE(addDiskSurface(*solid, {0., 0., 1.}, {1., 0., 0.}, {0., 1., 0.}, 2.));
+  BOOST_REQUIRE(addDiskSurface(*solid, {0., 0., -1.}, {1., 0., 0.}, {0., -1., 0.}, 2.));
+  solid->CloseShape();
+  return solid;
+}
+
+struct NearestPatchFixture {
+  std::unique_ptr<SurfaceSolid> solid;
+  double extent;
+};
+
+std::vector<NearestPatchFixture> nearestPatchFixtures()
+{
+  std::vector<NearestPatchFixture> fixtures;
+  fixtures.push_back({makeBoxSolid("safetyBox", 1., 2., 3.), 4.});
+  fixtures.push_back({makeTubeSolid("safetyTube", 0., 2., 3.), 4.});
+  fixtures.push_back({makeTubeSolid("safetyHollowTube", 1., 2., 3.), 4.});
+  fixtures.push_back({makeConeSolid("safetyCone", 2., 1., 3.), 4.});
+  fixtures.push_back({makeSphereSolid("safetySphere", 2.5), 3.5});
+  fixtures.push_back({makeTorusSolid("safetyTorus", 3., 1.), 4.5});
+  fixtures.push_back({makeCapsuleSolid("safetyCapsule", 1., 1.5), 3.});
+  fixtures.push_back({makeManyPatchSolid("safetyRing", 12), 4.5});
+  fixtures.push_back({makeWireTrimmedSolid("safetyWireTrim"), 3.});
+  return fixtures;
+}
+} // namespace
+
+/// The invariant the whole acceleration rests on, pinned at the level it is a property of.
+///
+/// A node is pruned when the distance from the query point to its bounding box already exceeds the
+/// best patch distance found so far. That is only sound if the box distance is a **lower** bound on
+/// the distance to every patch inside it -- and the box is built from each surface's own
+/// conservativeBounds(), so per surface the statement is
+///
+///     distance(point, conservativeBounds) <= sqrt(distanceSqToPatch(point))       for every point.
+///
+/// It holds because every distanceSqToPatch in BoundedSurface.h is realised on the patch's
+/// *untrimmed* window -- the wire itself for the planar families, the full rim band for a cylinder
+/// or cone, the full sphere, the full torus -- and each family's conservativeBounds() encloses
+/// exactly that window. Reading the code says so; this measures it, on every surface family, from
+/// points in every regime. If a future surface family returned a distance realised outside its own
+/// bounds, Safety() would silently start answering too much and only this case would say so.
+BOOST_AUTO_TEST_CASE(StreamS_PatchDistanceIsNeverBelowTheDistanceToItsOwnBoundingBox)
+{
+  using surf::Vec2;
+  using surf::Vec3;
+  std::string error;
+
+  surf::PlanarBoundedSurface polygon;
+  const std::vector<Vec2> rectangle{{0., 0.}, {2., 0.}, {2., 3.}, {0., 3.}};
+  BOOST_REQUIRE(polygon.initialize({0., 0., 0.}, {1., 0., 0.}, {0., 1., 0.}, rectangle, {}, error));
+  surf::CurvedPlanarBoundedSurface disk;
+  BOOST_REQUIRE(disk.initialize({0., 0., 0.5}, {1., 0., 0.}, {0., 1., 0.},
+                                {surf::Curve2D::makeCircle({0., 0.}, 1.5)}, {}, error));
+  // a B-spline trim wire on a second planar face: the trim family Stream P found to dominate the
+  // per-patch cost, and the one whose distanceSqToPatch walks a flattened polyline rather than a
+  // closed form -- so the lower-bound claim has to hold for an approximated boundary too
+  surf::CurvedPlanarBoundedSurface splineFace;
+  BOOST_REQUIRE(splineFace.initialize({0.2, -0.3, 1.1}, {1., 0., 0.}, {0., 1., 0.},
+                                      {quarterCircleBSpline(0., 0., 1.2, 0.),
+                                       quarterCircleBSpline(0., 0., 1.2, surf::kHalfPi),
+                                       quarterCircleBSpline(0., 0., 1.2, surf::kPi),
+                                       quarterCircleBSpline(0., 0., 1.2, 3. * surf::kHalfPi)},
+                                      {}, error));
+  surf::CylindricalBoundedSurface cylinder;
+  BOOST_REQUIRE(cylinder.initialize({0.1, -0.2, 0.}, {0., 0., 1.}, {1., 0., 0.}, 2., -1., 1., 0.3,
+                                    1.7 * surf::kPi, false, error));
+  surf::ConicalBoundedSurface cone;
+  BOOST_REQUIRE(cone.initialize({0., 0., 0.}, {0., 1., 0.}, {1., 0., 0.}, 2., 0.5, -1., 1., 0., 1.1 * surf::kPi,
+                                false, error));
+  surf::SphericalBoundedSurface sphere;
+  BOOST_REQUIRE(sphere.initialize({0.3, 0.4, -0.5}, {0., 0., 1.}, {1., 0., 0.}, 1.7, 0.2, 2.4, 0.,
+                                  1.3 * surf::kPi, false, error));
+  surf::TorusBoundedSurface torus;
+  BOOST_REQUIRE(torus.initialize({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, 3., 0.8, 0., 1.4 * surf::kPi, 0.,
+                                 1.9 * surf::kPi, false, error));
+
+  const std::vector<const surf::BoundedSurface*> surfaces{&polygon, &disk,   &splineFace,
+                                                          &cylinder, &cone,  &sphere,
+                                                          &torus};
+
+  SampleStream stream(0xB0B0Dull);
+  size_t checked = 0;
+  for (const auto* surface : surfaces) {
+    Vec3 lower{TGeoShape::Big(), TGeoShape::Big(), TGeoShape::Big()};
+    Vec3 upper{-TGeoShape::Big(), -TGeoShape::Big(), -TGeoShape::Big()};
+    surface->conservativeBounds(lower, upper);
+    const double boxLower[3] = {lower.xCoord, lower.yCoord, lower.zCoord};
+    const double boxUpper[3] = {upper.xCoord, upper.yCoord, upper.zCoord};
+    // the box the BVH actually stores is this one inflated outward, which only lowers the bound
+    for (int sample = 0; sample < 4000; ++sample) {
+      const double scale = (sample % 4 == 3) ? 1.e6 : ((sample % 4 == 2) ? 20. : 5.);
+      const Vec3 point{stream.symmetric(scale), stream.symmetric(scale), stream.symmetric(scale)};
+      const double coordinates[3] = {point.xCoord, point.yCoord, point.zCoord};
+      double boxDistanceSq = 0.;
+      for (int dimension = 0; dimension < 3; ++dimension) {
+        if (coordinates[dimension] < boxLower[dimension]) {
+          const double gap = boxLower[dimension] - coordinates[dimension];
+          boxDistanceSq += gap * gap;
+        } else if (coordinates[dimension] > boxUpper[dimension]) {
+          const double gap = coordinates[dimension] - boxUpper[dimension];
+          boxDistanceSq += gap * gap;
+        }
+      }
+      const double patchDistanceSq = surface->distanceSqToPatch(point);
+      // the direction of this inequality is the whole safety argument; a tolerance would hide the
+      // failure it exists to catch, so it is asserted with the same relative guard the traversal
+      // itself applies (1e-12) and nothing more
+      BOOST_REQUIRE_LE(boxDistanceSq * (1. - 1.e-12), patchDistanceSq);
+      ++checked;
+    }
+  }
+  BOOST_CHECK_EQUAL(checked, 7u * 4000u);
+}
+
+/// Accelerated == brute force, exactly, for both kernels, over every fixture and every regime.
+BOOST_AUTO_TEST_CASE(StreamS_SafetyAndNormalAreIdenticalToTheAllSurfacesLoop)
+{
+  size_t comparedPoints = 0;
+  double worstSafetyGap = -std::numeric_limits<double>::infinity();
+  for (const auto& fixture : nearestPatchFixtures()) {
+    BOOST_TEST_CONTEXT("fixture = " << fixture.solid->GetName())
+    {
+      BOOST_REQUIRE(fixture.solid->HasBVH());
+      for (const auto& point : nearestPatchSample(*fixture.solid, fixture.extent, 2000)) {
+        BOOST_TEST_CONTEXT("point = (" << point[0] << ", " << point[1] << ", " << point[2] << ")")
+        {
+          BOOST_REQUIRE_EQUAL(countNearestPatchDisagreements(*fixture.solid, point, &worstSafetyGap), 0);
+        }
+        ++comparedPoints;
+      }
+    }
+  }
+  BOOST_CHECK_EQUAL(comparedPoints, 9u * 2001u);
+  // exact equality, so the gap is not merely non-positive but identically zero
+  BOOST_CHECK_EQUAL(worstSafetyGap, 0.);
+}
+
+/// The traversal must also be right before there is anything to traverse, and on a solid whose
+/// surface set is empty -- the two states where the accelerated path has to fall back rather than
+/// crash or answer something else.
+BOOST_AUTO_TEST_CASE(StreamS_SafetyFallsBackBeforeCloseShapeAndOnAnEmptySolid)
+{
+  SurfaceSolid open("safetyBeforeClose");
+  addBoxSurfaces(open, 1., 2., 3.);
+  BOOST_REQUIRE(!open.HasBVH()); // CloseShape not called: no acceleration structure yet
+  const std::array<double, 3> probe{0.3, -1.1, 2.2};
+  BOOST_CHECK_EQUAL(open.Safety(probe.data(), kTRUE), open.Safety_Loop(probe.data(), kTRUE));
+  std::array<double, 3> viaBVH{0., 0., 0.};
+  std::array<double, 3> viaLoop{0., 0., 0.};
+  open.ComputeNormal(probe.data(), nullptr, viaBVH.data());
+  open.ComputeNormal_Loop(probe.data(), nullptr, viaLoop.data());
+  BOOST_CHECK_EQUAL(viaBVH[0], viaLoop[0]);
+  BOOST_CHECK_EQUAL(viaBVH[1], viaLoop[1]);
+  BOOST_CHECK_EQUAL(viaBVH[2], viaLoop[2]);
+
+  SurfaceSolid empty("safetyEmpty");
+  empty.CloseShape();
+  BOOST_CHECK_EQUAL(empty.Safety(probe.data(), kTRUE), TGeoShape::Big());
+  BOOST_CHECK_EQUAL(empty.Safety_Loop(probe.data(), kTRUE), TGeoShape::Big());
+  empty.ComputeNormal(probe.data(), nullptr, viaBVH.data());
+  empty.ComputeNormal_Loop(probe.data(), nullptr, viaLoop.data());
+  BOOST_CHECK_EQUAL(viaBVH[0], viaLoop[0]);
+}
+
+/// ComputeNormal's tie-break, isolated. At the exact centre of a box all six faces are the same
+/// distance away, so which one wins is decided entirely by the loop's strict `<` -- the first, i.e.
+/// the lowest-indexed, patch. A traversal that visits patches in BVH order would legitimately pick
+/// a different face and return a different normal, so the accelerated path carries the index
+/// tie-break explicitly and declines to prune a node whose bound merely *equals* the current best.
+///
+/// This is a real configuration, not a contrived one: the centre of a box, the axis of a tube and
+/// the centre of a sphere all produce exact ties, and a navigator that asks for a normal there gets
+/// an answer that must not depend on how the tree happened to be built.
+BOOST_AUTO_TEST_CASE(StreamS_ComputeNormalKeepsTheLowestIndexTieBreak)
+{
+  const auto box = makeBoxSolid("tieBreakBox", 2., 2., 2.);
+  const std::array<double, 3> centre{0., 0., 0.};
+  std::array<double, 3> viaBVH{0., 0., 0.};
+  std::array<double, 3> viaLoop{0., 0., 0.};
+  box->ComputeNormal(centre.data(), nullptr, viaBVH.data());
+  box->ComputeNormal_Loop(centre.data(), nullptr, viaLoop.data());
+  // all six faces are exactly 2 away, and the loop's strict `<` keeps the first of them
+  BOOST_CHECK_EQUAL(box->Safety(centre.data(), kTRUE), box->Safety_Loop(centre.data(), kTRUE));
+  BOOST_CHECK_EQUAL(viaBVH[0], viaLoop[0]);
+  BOOST_CHECK_EQUAL(viaBVH[1], viaLoop[1]);
+  BOOST_CHECK_EQUAL(viaBVH[2], viaLoop[2]);
+  // ... and it is genuinely a tie, i.e. the case has something to protect
+  BOOST_CHECK_EQUAL(std::abs(viaLoop[0]) + std::abs(viaLoop[1]) + std::abs(viaLoop[2]), 1.);
+
+  // the same on the axis of a hollow tube, where the inner wall and both caps compete
+  const auto tube = makeTubeSolid("tieBreakTube", 1., 2., 1.);
+  tube->ComputeNormal(centre.data(), nullptr, viaBVH.data());
+  tube->ComputeNormal_Loop(centre.data(), nullptr, viaLoop.data());
+  BOOST_CHECK_EQUAL(viaBVH[0], viaLoop[0]);
+  BOOST_CHECK_EQUAL(viaBVH[1], viaLoop[1]);
+  BOOST_CHECK_EQUAL(viaBVH[2], viaLoop[2]);
+}
+
+/// The negative control. A cross-check that cannot fail has not passed, so the pruning bound is
+/// deliberately replaced by one that is not a lower bound -- the distance to the node's bounding
+/// box *centre*, which is larger than the distance to the box for any box with extent -- and the
+/// comparison against the loop must then break.
+///
+/// It must break in a stated direction: an over-large bound prunes subtrees that hold the true
+/// nearest patch, so the accelerated Safety comes out **too large**. That is the failure mode that
+/// matters (a valid safety may never exceed the true distance to the boundary), and it is the one
+/// the sabotage reproduces, so the healthy case is being watched by a test that has been shown to
+/// see exactly the thing it is there to see.
+BOOST_AUTO_TEST_CASE(StreamS_BreakingThePruningBoundIsCaught)
+{
+  BOOST_REQUIRE(!SurfaceSolid::GetSafetyBoundUnsoundForTest()); // sound by default
+
+  const auto fixtures = nearestPatchFixtures();
+  size_t caughtOnFixtures = 0;
+  size_t prunableFixtures = 0;
+  size_t sabotagedDisagreements = 0;
+  size_t safetyTooLarge = 0;
+  size_t safetyTooSmall = 0;
+  for (const auto& fixture : fixtures) {
+    // A solid of one patch has nothing to prune: its BVH is a single leaf, every bound sound or
+    // not is applied to a node that must be entered anyway, and the sabotage is invisible. That is
+    // not a weakness of the control, it is the statement that pruning is what the control tests --
+    // so those fixtures are excluded by an explicit criterion rather than by a fudged count.
+    if (fixture.solid->GetNsurfaces() > 1) {
+      ++prunableFixtures;
+    }
+    const auto points = nearestPatchSample(*fixture.solid, fixture.extent, 400);
+    size_t disagreementsHere = 0;
+    SurfaceSolid::SetSafetyBoundUnsoundForTest(true);
+    for (const auto& point : points) {
+      const double sabotaged = fixture.solid->Safety(point.data(), kTRUE);
+      SurfaceSolid::SetSafetyBoundUnsoundForTest(false);
+      const double reference = fixture.solid->Safety_Loop(point.data(), kTRUE);
+      SurfaceSolid::SetSafetyBoundUnsoundForTest(true);
+      if (sabotaged != reference) {
+        ++disagreementsHere;
+        (sabotaged > reference) ? ++safetyTooLarge : ++safetyTooSmall;
+      }
+      disagreementsHere += static_cast<size_t>(countNearestPatchDisagreements(*fixture.solid, point));
+    }
+    SurfaceSolid::SetSafetyBoundUnsoundForTest(false);
+    sabotagedDisagreements += disagreementsHere;
+    if (disagreementsHere > 0) {
+      ++caughtOnFixtures;
+      BOOST_TEST_MESSAGE("sabotaged bound caught on " << fixture.solid->GetName() << ": " << disagreementsHere
+                                                      << " disagreements over " << points.size() << " points");
+    } else {
+      BOOST_TEST_MESSAGE("sabotaged bound NOT caught on " << fixture.solid->GetName() << " ("
+                                                          << fixture.solid->GetNsurfaces() << " patches)");
+      BOOST_CHECK_EQUAL(fixture.solid->GetNsurfaces(), 1); // ... and only for want of anything to prune
+    }
+  }
+
+  // every fixture that has anything to prune is sensitive to it, not just one lucky one
+  BOOST_CHECK_EQUAL(caughtOnFixtures, prunableFixtures);
+  BOOST_CHECK_EQUAL(prunableFixtures, 7u);
+  BOOST_CHECK_GT(sabotagedDisagreements, 100u);
+  // and it fails the dangerous way: too much safety, never too little
+  BOOST_CHECK_GT(safetyTooLarge, 0u);
+  BOOST_CHECK_EQUAL(safetyTooSmall, 0u);
+
+  // with the sabotage off again the same sample is clean, so the disagreements above are the
+  // sabotage and not the fixtures
+  for (const auto& fixture : fixtures) {
+    for (const auto& point : nearestPatchSample(*fixture.solid, fixture.extent, 400)) {
+      BOOST_REQUIRE_EQUAL(countNearestPatchDisagreements(*fixture.solid, point), 0);
+    }
+  }
+  BOOST_CHECK(!SurfaceSolid::GetSafetyBoundUnsoundForTest());
+}
+
+/// What the acceleration actually buys, in the currency the defect was measured in: patches handed
+/// to distanceSqToPatch per call. The loop's number is GetNsurfaces() by construction; the
+/// traversal's is what this counts. The bounds below are deliberately far looser than the measured
+/// values so the case pins the *existence* of pruning rather than becoming a performance trap.
+BOOST_AUTO_TEST_CASE(StreamS_SafetyVisitsFarFewerPatchesThanTheLoop)
+{
+  const auto ring = makeManyPatchSolid("candidateRing", 24); // 24 boxes, 144 patches
+  BOOST_REQUIRE_EQUAL(ring->GetNsurfaces(), 144);
+  const auto points = nearestPatchSample(*ring, 5., 500);
+
+  SurfaceSolid::ResetSafetyCandidateCounter();
+  for (const auto& point : points) {
+    ring->Safety(point.data(), kTRUE);
+  }
+  const long long acceleratedCandidates = SurfaceSolid::GetSafetyCandidateCount();
+  const double perCall = static_cast<double>(acceleratedCandidates) / points.size();
+
+  BOOST_TEST_MESSAGE("Safety candidates per call: " << perCall << " of " << ring->GetNsurfaces() << " patches");
+  BOOST_CHECK_GT(acceleratedCandidates, 0);
+  BOOST_CHECK_LT(perCall, 0.4 * ring->GetNsurfaces());
+
+  // the counter is not touched by the loop twin, which visits everything by construction
+  SurfaceSolid::ResetSafetyCandidateCounter();
+  for (const auto& point : points) {
+    ring->Safety_Loop(point.data(), kTRUE);
+    std::array<double, 3> normal{0., 0., 0.};
+    ring->ComputeNormal_Loop(point.data(), nullptr, normal.data());
+  }
+  BOOST_CHECK_EQUAL(SurfaceSolid::GetSafetyCandidateCount(), 0);
+
+  // ComputeNormal prunes too, only slightly less: it may not drop a node whose bound ties the
+  // current best, because such a node can hold an equally near patch of lower index
+  SurfaceSolid::ResetSafetyCandidateCounter();
+  for (const auto& point : points) {
+    std::array<double, 3> normal{0., 0., 0.};
+    ring->ComputeNormal(point.data(), nullptr, normal.data());
+  }
+  const double normalPerCall = static_cast<double>(SurfaceSolid::GetSafetyCandidateCount()) / points.size();
+  BOOST_TEST_MESSAGE("ComputeNormal candidates per call: " << normalPerCall);
+  BOOST_CHECK_LT(normalPerCall, 0.4 * ring->GetNsurfaces());
+  BOOST_CHECK_GE(normalPerCall, perCall);
+}
