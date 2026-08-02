@@ -472,9 +472,11 @@ def write_fixture_shapes(manifest: dict):
     """Write `shape_<VOL>_<LID>.root` next to the sidecar for every fixture that has a builder.
 
     The file format is the convention documented in DetectorsBase/O2SolidHarness.h: one object
-    inheriting from TGeoShape, under the key "shape", in cm, in the part's local frame. This is
-    the same single `WriteTObject(shape, "shape")` that `harness::saveShapeToRootFile` performs;
-    the C++ side is the authority and the unit test round-trips through it.
+    inheriting from TGeoShape, under the key "shape", in cm. These two fixtures are already stated
+    in the part's own frame, so no `placement` key is written -- and its absence *is* the identity
+    (`Stream_N_PlacedPrimitives.md`), so nothing has to be added here to keep meaning what it
+    meant. This is the same `WriteTObject(shape, "shape")` that `harness::saveShapeToRootFile`
+    performs; the C++ side is the authority and the unit test round-trips through it.
     """
     import ROOT
     ROOT.gROOT.SetBatch(True)

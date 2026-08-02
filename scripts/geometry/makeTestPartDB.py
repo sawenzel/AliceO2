@@ -189,6 +189,21 @@ def _read_cascade(out_dir: Path):
     return by_suffix, by_lid, meta
 
 
+def _shape_placement(suffix: str, lid, cascade_by_suffix: dict, cascade_by_lid: dict):
+    """The shape's rigid placement, 3x4 row-major `[R | t]` (local -> part), or None for identity.
+
+    Taken from `csg_report.json`, which is where the converter states it; the `TGeoHMatrix` in
+    `shape_<part>.root` is the same transform written for the C++ side. Two spellings of one
+    number, produced by one function (`csg.primitives.placement_for_candidate`), because the ROOT
+    file is not readable from an OCC-only interpreter and the JSON is not readable from the C++
+    harness.
+    """
+    row = cascade_by_suffix.get(suffix)
+    if row is None and lid is not None:
+        row = cascade_by_lid.get(lid)
+    return None if row is None else row.get("shapePlacement")
+
+
 def _shipped_entry(suffix: str, lid, cascade_by_suffix: dict, cascade_by_lid: dict,
                    cascade_meta: dict, out_dir: Path):
     """What representation this part ships in, and where that statement came from.
@@ -303,15 +318,22 @@ def _index_parts(model_name: str, slug: str, out_dir: Path, report: dict):
         if brep_path.exists():
             part["brep"] = str(brep_path)
         # A third representation of the same part: one ROOT-serialised TGeoShape, under the key
-        # "shape", in cm and in the part's own local frame -- the same frame as the sidecar, the
-        # mesh and the .brep. This is the hand-over format for the CSG emitter (TGeoTube /
-        # TGeoBBox / TGeoCompositeShape trees); nothing writes it today, so it is optional and a
-        # part without one is indexed exactly as before. The harness also derives the same path
-        # from the sidecar's, so dropping the file in after the fact and re-scoring with
-        # --skip-convert works without re-indexing. See scripts/geometry/Stream_G_AnyShape.md.
+        # "shape", in cm -- either in the part's own local frame (the same frame as the sidecar,
+        # the mesh and the .brep) or in its own canonical frame, with the rigid transform between
+        # them stored beside it under the key "placement". This is the hand-over format for the
+        # CSG emitter (TGeoTube / TGeoBBox / TGeoCompositeShape trees); it is optional and a part
+        # without one is indexed exactly as before. The harness also derives the same path from
+        # the sidecar's, so dropping the file in after the fact and re-scoring with
+        # --skip-convert works without re-indexing. See scripts/geometry/Stream_G_AnyShape.md and
+        # Stream_N_PlacedPrimitives.md.
         shape_path = out_dir / f"shape_{suffix}.root"
         if shape_path.exists():
             part["shape"] = str(shape_path)
+            # Mirrored from the converter's own record so a Python consumer never has to open the
+            # ROOT file. Absent means identity -- the same convention the file itself uses.
+            placement = _shape_placement(suffix, lid, cascade_by_suffix, cascade_by_lid)
+            if placement is not None:
+                part["shapePlacement"] = placement
         # Which of those representations the converter actually dispatched this part to. The gate
         # computes its verdict on this one; see Stream_I_Verdict.md.
         part["shipped"] = _shipped_entry(suffix, lid, cascade_by_suffix, cascade_by_lid,

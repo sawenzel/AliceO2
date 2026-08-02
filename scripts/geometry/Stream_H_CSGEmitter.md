@@ -126,6 +126,12 @@ environment intact.
 
 ### 2.2 No `TGeoShape` in ROOT can carry a rigid transform
 
+> **Superseded in part, 2026-08-02.** Everything measured below still holds — ROOT still has no
+> shape that carries a transform, and the self-union really is set-theoretically the primitive. The
+> *conclusion* that a placed primitive must therefore be written as a composite no longer holds:
+> the shape is now emitted in its own canonical frame with the transform stored beside it. See
+> `Stream_N_PlacedPrimitives.md`. This section is kept as the record of what that session measured.
+
 This is the real finding of the emission step, and it shapes the output format.
 
 Bagger's leaf solids are **not** at the origin and their axes are **not** coordinate axes:

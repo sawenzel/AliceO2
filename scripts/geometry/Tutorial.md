@@ -64,7 +64,7 @@ And, alongside it, the thing that makes any of this trustworthy:
 | `surfaces_<part>.bin` | converter, `--exact-surfaces` | the exact sidecar: surface records + trim wires + (v3) edge identity |
 | `facets_<part>.bin` | converter, `--mesh` | `uint32 nTriangles` then 9 × float32 per triangle |
 | `brep_<part>.brep` | converter, `--dump-brep` | the OCCT solid the sidecar was extracted from — the oracle's input, **not** used at run time |
-| `shape_<part>.root` | converter, `--csg` | one object inheriting `TGeoShape` under key `shape`, in cm, in the part's local frame → the CSG representation |
+| `shape_<part>.root` | converter, `--csg` | one object inheriting `TGeoShape` under key `shape`, in cm, plus an optional `TGeoHMatrix` under key `placement` taking it into the part's local frame (absent = identity) → the CSG representation |
 | `csg_<part>.json`, `csg_report.json` | converter, `--csg` | the recognised description and its acceptance evidence, written whether or not the part was accepted |
 | `geom.C` | converter | ROOT macro exporting `get_builder_hook_unchecked()`; loads the binaries relative to itself |
 | `surface_report.json` | converter, `--surface-report` | per-face extraction result and why anything failed |
@@ -214,9 +214,13 @@ Bagger. Design in `CSG_Pipeline.md`, census in `Stream_A_CSG.md`, emitter in
 PyROOT then dies on `libffi.so.6`; that is why the hook always writes `csg_<part>.json` and
 completes deferred shapes via `emit.py --from-json`. (ii) **No `TGeoShape` in ROOT 6.36 can carry
 a rigid transform** — `TGeoBBox` has `fOrigin`, nothing else has anything, and only
-`TGeoCompositeShape` holds a matrix. A *placed* primitive is therefore emitted as its union with
-an identical copy under the same matrix, which is why a recognised plain tube can appear as a
-`TGeoCompositeShape` in `gate.json`.
+`TGeoCompositeShape` holds a matrix. That is still true; what it no longer implies is that a
+*placed* primitive must be a composite. Since **Stream N (placed primitives)** the shape is emitted in its own
+canonical frame and the transform travels beside it (a `TGeoHMatrix` under the key `placement` in
+`shape_<part>.root`, mirrored as a 3x4 array in `csg_*.json`, `manifest.json` and `gate.json`;
+**absent means identity**). A recognised plain tube is therefore a `TGeoTube` in `gate.json` again,
+with an analytic `Capacity()` and `capacityComparable=true`. Genuine multi-leaf booleans are still
+composites and still Monte-Carlo in capacity. `Stream_N_PlacedPrimitives.md`.
 
 **Important:** for Bagger-class geometry the emitter needs **no new O2 class**. `TGeoTube`,
 `TGeoBBox`, `TGeoCone` and `TGeoCompositeShape` already exist in ROOT. A dedicated `O2CSGSolid`
@@ -487,4 +491,5 @@ ALICE3 scale-up, the quartic fix, revolved/extruded profile solids. Each has its
 | `Workstreams.md` | the six parallel streams, the contract, file ownership |
 | `CodeReview_Fable.md`, `_v2.md` | the two deep reviews; the register of findings |
 | `Stream_A_CSG.md`, `Stream_C_Hygiene.md`, `Stream_E_Scale.md`, `Stream_F_EdgeIdentity.md`, `Stream_G_AnyShape.md`, `Stream_H_CSGEmitter.md` | wave 0/1 and MVP investigation records |
+| `Stream_N_PlacedPrimitives.md` | placed primitives: the artefact's `placement`, the `partPlacement * shapePlacement` composition, and the census of single primitives vs genuine booleans |
 | `NEXT.md` | the session-to-session hand-over; rewritten by whoever finishes |
