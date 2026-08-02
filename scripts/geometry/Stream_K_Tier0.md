@@ -43,6 +43,17 @@ where the remaining correctness risk sits, is §3.
 
 ## 2. Where the coverage actually is: the trim, not the surface
 
+> **Superseded in its conclusion (2026-08-02) — see [`Stream_O_ImplicitTrims.md`](Stream_O_ImplicitTrims.md).**
+> The diagnosis below is right: the 16 solids fail on the trim, not on recognition, and the edges
+> are not iso and not straight in (φ, other). The *conclusion* — "no exact representation is
+> available, therefore a fitted curve" — is not. A per-edge census with the neighbouring face's
+> surface in hand finds that **691 of the currently-rejected 763 edges are exactly the intersection
+> of two analytic surfaces we already recognise**, and that **15 of the 16 solids** are covered
+> entirely by that, on 443 edges, none of which needs a fit. The 1891 / 834 / 4 / 1053 table below
+> reproduces cell-for-cell **only against the pre-fix recogniser** (§5 landed after it was
+> measured, and removed 287 of the "free-form" edges along with `ST2487458_01`'s phantom cones);
+> against the shipping converter it is 1303 / 540 / — / 763.
+
 ALICE3 emits **20** sidecars while **36** solids are surface-eligible. The 16 missing solids do not
 fail on recognition. They fail *after* it, in `_recognized_quadric_wire_block`.
 
@@ -517,7 +528,13 @@ and this is now the one thing that exercises the sphere and cone branches' sign.
 
 ## 10. What this leaves open, in the order it is worth doing
 
-1. **The trim for recognized quadrics — the whole remaining coverage lever (§2).** 16 ALICE3 solids
+1. **The trim for recognized quadrics — the whole remaining coverage lever (§2).**
+   *(The "B-spline fit" prescription in this item is superseded — see
+   [`Stream_O_ImplicitTrims.md`](Stream_O_ImplicitTrims.md) and the box at the head of §2. The
+   acceptance-criterion advice in the last two sentences still stands, and its own measurement
+   confirms them: the natural bound really is the edge's own declared tolerance, and landing §5
+   first really did matter — 287 of §2's "free-form" edges were on `ST2487458_01`'s phantom
+   cones.)* 16 ALICE3 solids
    recognize completely and are then declined by one line, and they are the entire difference
    between `n_eligible = 36` and `emitted = 20`. It needs a B-spline **fit** in the recognized
    (phi, other) domain with the achieved 3D deviation of the reconstructed boundary measured

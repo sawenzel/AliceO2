@@ -1,9 +1,17 @@
-# Stream L diagnostic probes
+# Diagnostic probes
 
-Built to attribute the ALICE3 transport losses to individual source faces; kept because the
-measurement they make is not available anywhere else. Read
-[`../Stream_L_ALICE3Defect.md`](../Stream_L_ALICE3Defect.md) first — it is the result; these are
+Standalone instruments, none of them part of the build, each written because the measurement it
+makes is not available anywhere else. Read the stream document first — it is the result; these are
 the instruments.
+
+| group | probes | result document |
+| --- | --- | --- |
+| Stream L — ALICE3 transport | `faceNormalSamples.py`, `faceNormals.cxx`, `faceAttrib.cxx`, `torusQuartic.cxx` | [`../Stream_L_ALICE3Defect.md`](../Stream_L_ALICE3Defect.md), [`../Stream_M_Quartic.md`](../Stream_M_Quartic.md) |
+| Stream N — implicit trims | `trimEdgeCensus.py`, `trimEdgeCensusReport.py` | [`../Stream_O_ImplicitTrims.md`](../Stream_O_ImplicitTrims.md) |
+
+---
+
+## Stream L — transport-defect attribution
 
 Nothing here is part of the build. Each `.cxx` is a standalone probe compiled the way
 `Workstreams.md` §1 documents:
@@ -43,3 +51,36 @@ python3.10 faceNormalSamples.py --brep  <db>/brep_<part>.brep --out /tmp/samples
 **Self-check before trusting any of them**, which is how they were used: `faceNormals` must report
 0 inverted faces on a part that transports cleanly, and `faceAttrib` must reproduce the benchmark's
 own LOST / kind / unterminated counts for the part exactly.
+
+---
+
+## Stream N — why a recognised quadric's boundary edge is rejected
+
+Converter-side, pure python, no build products involved. Read
+[`../Stream_O_ImplicitTrims.md`](../Stream_O_ImplicitTrims.md) §2 for the full method.
+
+| probe | what it measures |
+| --- | --- |
+| `trimEdgeCensus.py` | for every boundary edge that `_recognized_quadric_wire_block` declines as non-iso: whether it is iso after all (**A**), whether it is exactly the intersection of two analytic surfaces (**B**, with the measured max distance from *both* implicit surfaces, absolutely and normalised by edge length, patch diagonal and the edge's own BRep tolerance), whether the neighbour is free-form (**C**), or something else, named (**D**). Rolls up to "which leaf solids would emit if implicit trims existed". Also censuses the *second* mechanism — planar faces declined for an elliptical boundary edge. |
+| `trimEdgeCensusReport.py` | turns that JSON into the document's tables; stdlib + numpy only, so it runs anywhere. `--compare LEGACY CURRENT` reproduces `Stream_K_Tier0.md` §2's 1891/834/1057 against the pre-fix recogniser. |
+
+```bash
+# env as above, PLUS pythonOCC prepended (see ../csg/occ_env.py)
+python3 trimEdgeCensus.py --model ../ALICE_3_example/CAD_noETA.stp --fixtures \
+        --json /tmp/n/all.json          # ~25 s for ALICE3
+python3 trimEdgeCensusReport.py /tmp/n/all.json
+```
+
+**Two self-checks it runs itself, and both must hold before any of its output means anything.**
+(i) It re-implements the shipped per-edge iso test so it can continue past the first bad edge; its
+predicted *face* verdict is compared against the shipping `recognize_and_extract_face` on every
+face and the mismatch count must be **0**. (ii) Its deviation instrument is calibrated on the edges
+the shipped test already *accepts* — rims and generators, which are known-exact
+quadric-meets-cap-plane intersections — because an instrument that only ever sees small numbers on
+the population it is arguing about has not been controlled. `--b-factor` exposes the resulting
+threshold and the summary prints the whole sweep.
+
+`--legacy-recognizer` runs the census against a verbatim copy of the pre-fix
+`_recognize_analytic_surface` (`git 237be7f81a^`). It exists solely to reproduce numbers measured
+before `Stream_K_Tier0.md` §5 landed; the production function is never modified and the default
+path calls the shipping one.
