@@ -1,9 +1,9 @@
 # Stream N — placed primitives: the self-union composite is gone
 
-> **Name collision, flagged rather than silently renamed.** Another session working in this same
-> tree is writing `Stream_N_ImplicitTrims.md` concurrently. Two documents are therefore lettered
-> **N** and they are about different things. Cite them by file name, never by the letter; the code
-> comments in this change all name the file.
+> **Name collision, since resolved.** This document and `Stream_O_ImplicitTrims.md` were written
+> concurrently by two sessions and both were originally lettered **N** — a briefing mistake, not a
+> disagreement. The trim census was renamed to **O** once both had landed. Cite streams by file
+> name, never by the letter; the code comments in this change all name the file.
 
 Date: 2026-08-02. Removes the *degenerate* `TGeoCompositeShape` — a recognised primitive unioned
 with an identical copy of itself under the same matrix — that every placed CSG part used to be
