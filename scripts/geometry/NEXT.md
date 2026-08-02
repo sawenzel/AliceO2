@@ -84,6 +84,12 @@ record is rational, so widening one set literal was the whole fix. See `Stream_Q
    inside a neighbour — and they are the same parts (`_013`, `_018`, `_019`) that `Stream_J_XRay.md`
    §7 named as ALICE3's only non-clean single-solid transports. `as1-oc-214.stp` is clean, 0/153.
 
+   **The *scale* on ALICE3 is unknown.** The full 206-instance / 1699-pair census was killed at 59
+   minutes without writing output; only the `ST0923290` sub-assembly is complete. The verdict does
+   not depend on it — 7 > 0 already — but nobody knows how many of the other 1641 pairs are also
+   bad. `Stream_T_AssemblyOracle.md` §5 calls this the highest-value hour left on that document.
+   Run it **detached**, writing to `--out`, not stdout.
+
    **Every "0 disagreements" number on this branch is a statement about solids in isolation.** They
    remain true and they do not add up to a valid world. Fixing the source geometry is the *model
    owner's* decision, not a conversion bug — do not silently repair it.
@@ -274,6 +280,13 @@ mechanism 1 of `Stream_L_ALICE3Defect.md` was.
 - Quick kernel probe: standalone `.cxx` against `$B/stage/lib -lO2DetectorsBase -lGeom` plus
   `-I$HOME/alisw/O2/Detectors/Base/src`. Most of this project's key measurements were written that
   way in minutes each — usually faster than adding a flag.
+- **A long run must write to `--out`, never rely on stdout, and use a uniquely-named path.** When
+  several sessions work this tree at once their scratch directory is **shared, not private**: one
+  session created a directory where another had a log file, the log vanished underneath a live
+  process, and a 59-minute census produced nothing. The process itself was never affected — only
+  its output. Detach anything over a few minutes.
+- **Only one `ninja` at a time.** The build directory is shared and two concurrent builds collide,
+  which is why parallel work here is split into one build-owning stream plus Python-only streams.
 
 ## Commands
 
