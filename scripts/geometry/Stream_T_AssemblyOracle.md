@@ -377,6 +377,23 @@ the finding that these are **not** whole-face contacts.)
 **15 of its 29 contacts involve a free-form face**, which is both the tessellation-fragile case and
 exactly the population that has no exact sidecar (`NEXT.md` open item 4).
 
+### The boolean's `coincident` verdict, cross-checked by rays
+
+A `BRepAlgoAPI_Common` that *succeeds* and returns an empty shape would be classified as touching —
+a false negative, and the direction that matters. The ray oracle shares no code path with the
+boolean, so it is the check. All 11 Bagger coincident pairs, 32 Fibonacci directions × 16 × 16 =
+8192 rays each:
+
+**0 rays with ambiguous occupancy, on every one of the 11 pairs — 90112 rays.** And the check was
+capable of firing: the same runs found **907 touching transitions** in total (7 to 317 per pair),
+so the rays are landing on the contacts rather than missing them. Three rays in 90112 came back
+`amb` (2 on `BucketCylinderInner`\|`BucketCylinderOuter`, 1 on `BoomCylinderOuter`\|`BoomCylinderInner`)
+— rays tangent to a shared cylindrical surface, which OCCT declines to classify and which are
+correctly excluded rather than scored.
+
+`BasePin`\|`Base` in particular: **215 touching transitions, 0 ambiguous occupancy** — an
+independent refutation of ROOT's phantom for that pair, on top of the sagitta arithmetic below.
+
 And note where Bagger's single curved contact is: `BasePin` \| `Base` — **the same pair
 `TGeoManager::CheckOverlaps` reports a phantom overlap for** (§3.6), which turns out not to be a
 coincidence at all: at ROOT's default settings that phantom is *exactly* the sagitta of a 24-gon on
@@ -514,7 +531,13 @@ result for a one-solid world is "no pairs".
    "coincident" is really "distance zero and empty intersection". A genuine interpenetration
    thinner than the parts' own B-rep tolerance would classify as coincident. Nothing here measures
    how close to that line the 11 Bagger and 29 ALICE3 coincident pairs sit.
-5. **Coincident contacts are legal but fragile, and §3.5 only half-answers it.** The chording
+5. **A silently-empty boolean would read as `coincident` — checked on Bagger, not on ALICE3.** The
+   census counts `failed` only when `BRepAlgoAPI_Common::IsDone()` is false; a `Common` that
+   *succeeds* and returns an empty shape on a hard B-rep would be classified as touching, which is
+   a **false negative** and the direction that matters. §3.5's ray cross-check clears all 11 Bagger
+   coincident pairs. **ALICE3's 29 have not been cross-checked**, and ALICE3 is where the B-reps
+   are hard enough for a boolean to give up quietly.
+6. **Coincident contacts are legal but fragile, and §3.5 only half-answers it.** The chording
    sagitta reaches **2.9e-02 cm** (`Stream_J_XRay.md` §4) — *larger* than two of Bagger's three
    real penetration depths (3.3e-03 and 2.25e-02 cm). So a pair that touches exactly in CAD can
    interpenetrate after tessellation **by more than the defects this census reports**, and the
@@ -522,18 +545,18 @@ result for a one-solid world is "no pairs".
    Bagger's touching is 10/11 planar (robust) and ALICE3's is 15/29 free-form (not) — but I never
    *measured* a post-tessellation census to confirm the mechanism. Converting with `--mesh` and
    re-running the census would settle it, and would cost one run.
-6. **The oracle has been run only on pairs, never on a whole assembly at useful density.** The
+7. **The oracle has been run only on pairs, never on a whole assembly at useful density.** The
    whole-Bagger run at 864 rays saw nothing. The occupancy-annotated crossing list is validated on
    the synthetic assembly and on named real pairs; it has never been asked to produce a full
    assembly's ground truth, and its cost at a density that would find a 0.2 cm defect across a 100 cm
    assembly is not measured.
-7. **`load_assembly` uses `TopLoc_Location` and never rebuilds geometry**, so N placements of a
+8. **`load_assembly` uses `TopLoc_Location` and never rebuilds geometry**, so N placements of a
    prototype share one B-rep. That is what makes ALICE3 affordable at all, but it means I have
    *assumed* the XCAF locations I compose are the same ones `O2_CADtoTGeo.py` writes into `geom.C`.
    The instance/definition counts match exactly (55/206 and 13/13) and ROOT's checker reproduces
    `Base`\|`BoomCylinderOuter` at 0.0443384 cm on the converted world, which is strong evidence —
    but it is evidence, not a proof, and a per-placement matrix diff would settle it.
-8. **The ROOT `CheckOverlaps` section is a finding I did not set out to make and did not fully
+9. **The ROOT `CheckOverlaps` section is a finding I did not set out to make and did not fully
    diagnose.** In particular I never established *how* the default-configuration run produced three
    correct pairs from an unfilled buffer. That is worth one hour from someone who can read
    `TGeoChecker.cxx`.
