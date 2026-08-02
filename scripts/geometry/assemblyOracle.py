@@ -44,6 +44,14 @@ occupancy sequence by construction.
 A midpoint OCCT classifies `ON` for some part is a position where OCCT itself has no answer; the
 ray is flagged `amb` and a consumer must exclude it rather than score it.
 
+Units -- read this before consuming the JSON
+--------------------------------------------
+Ray origins, directions and crossing distances are in the MODEL'S NATIVE UNITS (mm for every STEP
+file in this corpus), not cm. `scaleToCm` is carried in the document beside them and a consumer
+must apply it. The reason is not laziness: a `TopLoc_Location` must be rigid, so placing a part by
+its XCAF location costs nothing while *scaling* it would mean rebuilding every B-rep in the
+assembly -- which is what makes ALICE3's 206 placements of 55 prototypes affordable at all.
+
 Usage
 -----
   assemblyOracle.py --self-test                       # the synthetic assembly, analytic answers
