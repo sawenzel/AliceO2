@@ -9,6 +9,7 @@ the instruments.
 | Stream L — ALICE3 transport | `faceNormalSamples.py`, `faceNormals.cxx`, `faceAttrib.cxx`, `torusQuartic.cxx` | [`../Stream_L_ALICE3Defect.md`](../Stream_L_ALICE3Defect.md), [`../Stream_M_Quartic.md`](../Stream_M_Quartic.md) |
 | Stream N — implicit trims | `trimEdgeCensus.py`, `trimEdgeCensusReport.py` | [`../Stream_O_ImplicitTrims.md`](../Stream_O_ImplicitTrims.md) |
 | Stream R — co-surface trims | `implicitTrimValidate.py`, `implicitTrimValidateReport.py` | [`../Stream_R_CoSurfaceTrims.md`](../Stream_R_CoSurfaceTrims.md) |
+| Stream U — co-surface face merging | `coSurfaceMerge.py` | [`../Stream_U_CoSurfaceMerge.md`](../Stream_U_CoSurfaceMerge.md) |
 
 ---
 
@@ -113,3 +114,38 @@ positives against `BRepExtrema_DistShapeShape`, which shares no code with `FClas
 checked were confirmed genuinely off the face. (iii) `--solid-crosscheck N` compares the ground truth
 against `BRepClass3d_SolidClassifier`. Sweep `--grid` before believing any *positive* result: the
 instrument can prove a face wrong but not prove one right (§5.5).
+
+---
+
+## Stream U — is the exporter fragmenting one surface into several faces?
+
+Converter-side, pure python. Read [`../Stream_U_CoSurfaceMerge.md`](../Stream_U_CoSurfaceMerge.md)
+§2 for the full method. `Stream_R` §4 found that 56% of the target faces have a neighbour lying on
+their *own* analytic surface — a NURBS patch seam. This asks the consequence: if those faces were
+merged back into one, would the remaining boundary be iso, so that the **existing** parametric trim
+path already carries it?
+
+| probe | what it measures |
+| --- | --- |
+| `coSurfaceMerge.py` | (1) faces grouped by the analytic surface they lie on, per solid, and separately by *adjacent* co-surface component — the distinction matters, because six windows cut in one tube are one surface but must not become one face. (2) every currently-rejected boundary edge classified `seam` (neighbour on the same surface) or `true-boundary`. (3) the decisive simulation: dissolve every seam, re-run the shipped iso test on what is left in **one** frame for the merged face, and report which solids would then emit. (4) the merged domain — its boundary loops chained through shared vertices, its φ winding, whether it is a plain rectangle, whether it is a full 2π band with two rim loops (which the wire block rejects), and whether every dissolved seam was used exactly twice so that edge-identity closure stays balanced. |
+
+Surface identity is decided **geometrically, never by comparing parameter tuples**: points from one
+patch are projected onto the other's ideal surface in closed form and their distance measured, in
+cm, against the model's own declared BRep tolerance.
+
+```bash
+# env as for Stream N
+python3 coSurfaceMerge.py --synthetic          # the instrument's own control, first
+python3 coSurfaceMerge.py --model ALICE3:../ALICE_3_example/CAD_noETA.stp \
+        --coincidence-check --negative-control --json /tmp/u/alice3.json    # ~4 min
+```
+
+**Four self-checks, and the numbers mean nothing without them.** (i) `--synthetic` builds a cylinder
+deliberately split into four NURBS patches and a genuinely different cylinder beside it; the four
+must group and the fifth must not — 5 checks, 0 failures, populations 4.9e+15 apart. (ii) the
+per-edge iso verdict is compared against the shipped frame and the shipped traversal on every
+unmerged face: **0 mismatches over 4434 ALICE3 edges**. (iii) `--coincidence-check` cross-checks
+every seam verdict against `Stream_R`'s independent test — is the neighbour's implicit function
+identically zero on the face? — **4116 of 4116 agree**, with six orders between the populations.
+(iv) `--negative-control` names the nearest same-kind pair that was *not* merged, per solid;
+`--merge-factor` sweeps the threshold and the answer must not move (it does not, over 0.5 … 100).
