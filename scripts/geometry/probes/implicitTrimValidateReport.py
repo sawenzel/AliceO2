@@ -59,15 +59,19 @@ def headline(faces, title):
     print(f"  surface samples                    {samples}   (IN {nin} / OUT {nout})")
     print(f"  faces with NO outside sample       "
           f"{sum(1 for f in ok if f['nOut'] == 0)}  (the near field cannot over-accept there)")
-    print(f"  --- the naive conjunction ---")
-    print(f"  faces exact (0 FP, 0 FN)           {exact} / {n}")
-    print(f"  false positives (rule IN, truth OUT) {fp}")
-    print(f"  false negatives (rule OUT, truth IN) {fn}")
-    print(f"  --- the arrangement ---")
-    print(f"  faces whose region is ONE cell     {single} / {n}")
+    print(f"  --- rule R1: the naive conjunction INSIDE the record's own (u,v) box ---")
+    print(f"  faces exact (0 FP, 0 FN)           {exact} / {n}   "
+          f"({100.0 * exact / n:.1f}%)")
+    print(f"  false positives (rule IN, truth OUT) {fp}   ({100.0 * fp / max(nout, 1):.2f}% of OUT)")
+    print(f"  false negatives (rule OUT, truth IN) {fn}   ({100.0 * fn / max(nin, 1):.2f}% of IN)")
+    print(f"  --- rule R2: the cell set (a DNF over the same half-spaces) ---")
+    print(f"  faces whose region is ONE cell     {single} / {n}   "
+          f"(R2 == R1 there)")
     print(f"  ... one *major* cell (>=1% lobes)  {singlemaj} / {n}")
-    print(f"  faces with zero leak               {noleak} / {n}")
-    print(f"  leaking OUT samples                {leak} / {nout}")
+    print(f"  faces R2 gets exactly right        {noleak} / {n}   "
+          f"({100.0 * noleak / n:.1f}%)")
+    print(f"  R2 false positives (= the leak)    {leak} / {nout}   "
+          f"({100.0 * leak / max(nout, 1):.2f}% of OUT); R2 has no false negative by construction")
 
 
 def distributions(faces, title):
@@ -197,31 +201,43 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("json", nargs="+")
     ap.add_argument("--per-solid", action="store_true")
+    ap.add_argument("--solids", default=None, help="comma-separated leaf-solid names")
     ap.add_argument("--worst", type=int, default=20)
     ap.add_argument("--split-population", action="store_true",
                     help="report the recognised (candidate) and stored (control) faces apart")
     args = ap.parse_args()
 
     faces = load(args.json)
-    complete = [f for f in faces if f.get("implicitComplete")]
-    partial = [f for f in faces if f.get("status") == "ok" and not f.get("implicitComplete")]
-    headline(faces, "all corpora, every face with an analytic surface")
-    headline(complete, "all corpora, faces where EVERY boundary edge has an evaluable, "
-                       "non-coincident neighbour")
-    headline(partial, "all corpora, faces with at least one unrepresentable boundary edge "
-                      "(the idea does not apply)")
-    distributions(complete, "implicit-complete faces")
+    if args.solids:
+        want = set(args.solids.split(","))
+        faces = [f for f in faces if f["_solid"] in want]
+    # Three nested populations. P1 is the one the design is about: an edge whose neighbour is
+    # free-form has no co-surface trim and never will, but an edge shared with a face lying on
+    # the *same* surface (a NURBS patch seam, a periodic seam) is an iso bound and is carried by
+    # the quadric record's own (phi, h) box -- which is itself a conjunction of half-spaces.
+    P0 = [f for f in faces if f.get("status") == "ok"]
+    P1 = [f for f in P0 if f.get("nNonEvaluableNeighbours", 0) == 0]
+    P2 = [f for f in P1 if f.get("nEdgesUnrepresented", 0) == 0]
+    headline(P0, "P0 -- every face with an analytic surface")
+    headline(P1, "P1 -- no boundary edge has a free-form neighbour  (THE DESIGN POPULATION)")
+    headline(P2, "P2 -- P1 and no seam / coincident neighbour either "
+                 "(no reliance on the (u,v) box)")
+    headline([f for f in P0 if f.get("nNonEvaluableNeighbours", 0)],
+             "P0 \\ P1 -- at least one free-form neighbour (co-surface trims do not apply)")
+    distributions(P1, "P1")
     failure_modes(faces, "all corpora")
     if args.split_population:
         for pop in ("candidate", "control"):
-            sub = [f for f in complete if f.get("population") == pop]
-            headline(sub, f"implicit-complete, population = {pop}")
-            distributions(sub, f"implicit-complete, population = {pop}")
+            sub = [f for f in P1 if f.get("population") == pop]
+            headline(sub, f"P1, population = {pop} "
+                          f"({'recognised NURBS quadric' if pop == 'candidate' else 'stored analytic'})")
+            distributions(sub, f"P1, population = {pop}")
     by_model = defaultdict(list)
-    for f in complete:
+    for f in P1:
         by_model[f["_model"]].append(f)
     for mod, fs in sorted(by_model.items()):
-        headline(fs, f"model {mod}, implicit-complete faces")
+        headline(fs, f"model {mod}, P1")
+    complete = P1
     if args.per_solid:
         per_solid(complete)
     pairs(complete)
