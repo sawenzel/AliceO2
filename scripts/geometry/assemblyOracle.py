@@ -317,6 +317,14 @@ class AssemblyCrossingOracle:
           `amb`       OCCT declined to classify somewhere on this ray
           `ovl`       some segment had two or more occupants -- occupancy is AMBIGUOUS and no
                       single volume id can be assigned
+          `ovlClean`  the same, on a ray OCCT did NOT decline anywhere. **This is the one to
+                      quote.** A midpoint OCCT classifies ON is inherited from the previous
+                      segment rather than guessed, and on a ray that grazes a shared boundary that
+                      inheritance can manufacture a two-occupant segment out of nothing. Measured:
+                      on ALICE3's `ST0923290_018 | _024`, every one of the double-occupancy rays
+                      at three raster densities (143360 rays) was also `amb`, and none survived
+                      this filter -- the pair really is only touching. An `ovl` that is not
+                      `ovlClean` is an artefact of this oracle, not a property of the geometry.
           `thin`      number of vacuum runs shorter than `thin_vacuum`
           `contact`   number of distances at which one part is exited and another entered with no
                       vacuum in between (a touching transition)
@@ -401,6 +409,7 @@ class AssemblyCrossingOracle:
             "x": crossings,
             "amb": bool(ambiguous),
             "ovl": bool(overlap),
+            "ovlClean": bool(overlap and not ambiguous),
             "thin": thin,
             "contact": contact,
         }
@@ -571,6 +580,8 @@ def self_test() -> int:
     check("overlap: the shared slab is [23,24] i.e. t in [4,5]",
           any(len(o) > 1 and abs(t0 - 4.0) < 1e-9 and abs(t1 - 5.0) < 1e-9 for t0, t1, o in r["seg"]),
           str(r["seg"]))
+    check("overlap: it survives the ambiguity filter -- `ovlClean` is the number to quote",
+          r["ovlClean"] is True and r["amb"] is False, f"ovlClean={r['ovlClean']} amb={r['amb']}")
 
     # --- case 6: a ray STARTING INSIDE a part -------------------------------------------------
     r = oracle.crossings([1.0, 1.0, 1.0], [1.0, 0.0, 0.0], 6.0)
@@ -592,6 +603,13 @@ def self_test() -> int:
     check("grazing shared edge: the list still alternates per part",
           _alternates_per_part(r["x"]), str([(c["t"], c["part"], c["s"]) for c in r["x"]]))
     print(f"        grazing shared edge x=2,z=2: seg={r['seg']} amb={r['amb']}")
+    # An ON midpoint is INHERITED from the previous segment rather than guessed, and on a grazing
+    # ray that inheritance can manufacture a two-occupant segment out of nothing. Measured on
+    # ALICE3's ST0923290_018|_024: every double-occupancy ray at three raster densities (143360
+    # rays) was also `amb`, and none survived this filter. So a grazing ray must never report a
+    # CLEAN overlap.
+    check("grazing: an OCCT-ambiguous ray never reports a CLEAN overlap",
+          r["ovlClean"] is False, f"ovl={r['ovl']} ovlClean={r['ovlClean']} amb={r['amb']}")
 
     # --- case 8: the alternation invariant, on a Fibonacci fan over the whole assembly --------
     rays = raster_rays(parts, beams=32, n=6)
@@ -690,8 +708,8 @@ def main():
     print(f"  {len(rays)} rays ({args.beams} Fibonacci directions x {args.raster}^2)", flush=True)
 
     answers = []
-    stats = {"rays": 0, "crossings": 0, "amb": 0, "ovl": 0, "thin": 0, "contact": 0,
-             "insideStart": 0, "empty": 0}
+    stats = {"rays": 0, "crossings": 0, "amb": 0, "ovl": 0, "ovlClean": 0, "thin": 0,
+             "contact": 0, "insideStart": 0, "empty": 0}
     t0 = time.time()
     for k, (origin, d, tmax, beam) in enumerate(rays):
         r = oracle.crossings(origin, d, tmax)
@@ -701,6 +719,7 @@ def main():
         stats["crossings"] += len(r["x"])
         stats["amb"] += bool(r["amb"])
         stats["ovl"] += bool(r["ovl"])
+        stats["ovlClean"] += bool(r["ovlClean"])
         stats["thin"] += r["thin"]
         stats["contact"] += r["contact"]
         stats["insideStart"] += bool(r["s0"])
@@ -715,7 +734,8 @@ def main():
     if args.out:
         args.out.write_text(json.dumps(document))
     print(f"  {stats['rays']} rays, {stats['crossings']} crossings, {stats['contact']} touching "
-          f"transitions, {stats['ovl']} rays with ambiguous occupancy, {stats['thin']} thin "
+          f"transitions, {stats['ovlClean']} rays with ambiguous occupancy "
+          f"({stats['ovl']} before excluding OCCT-ambiguous rays), {stats['thin']} thin "
           f"vacuum runs, {stats['amb']} ambiguous ({time.time() - t0:.1f} s)")
     return 0
 
