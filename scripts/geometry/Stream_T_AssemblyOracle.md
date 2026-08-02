@@ -338,7 +338,33 @@ cause in how this sub-assembly was authored is not established here.
 0.06 cm. **29 coincident-face pairs**, including `_018` sharing faces with `_019`, `_022`, `_023`,
 `_024`, `_027` and `_028`.
 
-### 3.5 `TGeoManager::CheckOverlaps` — a third instrument, and it is broken here
+### 3.5 What actually touches, in the pairs the census calls `coincident`
+
+"Coincident" as the census defines it is *distance zero and empty boolean intersection*. That is
+not the same as "these two share a face", and it is worth knowing which, because **a plane
+tessellates exactly and a curved surface does not** — a touching pair on a curved face is the pair
+that turns into an overlap the moment anything in the pipeline chords it.
+
+`BRepExtrema_DistShapeShape` names the sub-shapes that realise the minimum, so this is a direct
+question rather than an inference. (The first attempt — testing whether a *face centroid* lies on
+the contact — returned "no face centroid on the boundary" for all 11 Bagger pairs, which is itself
+the finding that these are **not** whole-face contacts.)
+
+| corpus | pairs | contact realised on |
+| --- | ---: | --- |
+| Bagger | 11 | **10 × plane** + edges/vertices; **1 × cylinder** — `BasePin` \| `Base`, and nothing else |
+| ALICE3 `ST0923290` | 29 | **14 × plane** only; **14 × plane + B-spline**; **1 × B-spline** only |
+
+**Bagger's touching is almost entirely plane-on-plane and therefore robust.** ALICE3's is not:
+**15 of its 29 contacts involve a free-form face**, which is both the tessellation-fragile case and
+exactly the population that has no exact sidecar (`NEXT.md` open item 4).
+
+And note where Bagger's single curved contact is: `BasePin` \| `Base` — **the same pair
+`TGeoManager::CheckOverlaps` reports a 0.87–0.91 cm phantom overlap for** (§3.6). That is a
+suggestive coincidence and it is reported as one; the mechanism is not established, and a chord
+sagitta on a pin of that size does not obviously account for 9 mm.
+
+### 3.6 `TGeoManager::CheckOverlaps` — a third instrument, and it is broken here
 
 The converted Bagger world (`O2_CADtoTGeo.py --exact-surfaces auto`, **13/13 leaf solids emitted as
 exact `O2BVHSurfaceSolid`, 0 tessellated fallbacks**) run through ROOT's own overlap checker — the
@@ -450,14 +476,14 @@ result for a one-solid world is "no pairs".
    "coincident" is really "distance zero and empty intersection". A genuine interpenetration
    thinner than the parts' own B-rep tolerance would classify as coincident. Nothing here measures
    how close to that line the 11 Bagger and 29 ALICE3 coincident pairs sit.
-5. **Coincident faces are legal but fragile, and I did not quantify the fragility.** Under mesh
-   conversion the chording sagitta reaches **2.9e-02 cm** (`Stream_J_XRay.md` §4) — which is
-   *larger* than two of Bagger's three real penetration depths (3.3e-03 and 2.25e-02 cm) and within
-   an order of the third. **A pair that touches exactly in CAD can therefore interpenetrate after
-   tessellation, by more than the defects this census reports.** So the census on the STEP source
-   is a *lower bound* on the trouble in any tessellated world. The number that would settle it —
-   how many of the 40 coincident pairs share a *curved* face rather than a planar one — is not
-   measured. (It does not affect the shipped Bagger world, where all 13 solids are exact.)
+5. **Coincident contacts are legal but fragile, and §3.5 only half-answers it.** The chording
+   sagitta reaches **2.9e-02 cm** (`Stream_J_XRay.md` §4) — *larger* than two of Bagger's three
+   real penetration depths (3.3e-03 and 2.25e-02 cm). So a pair that touches exactly in CAD can
+   interpenetrate after tessellation **by more than the defects this census reports**, and the
+   census on the STEP source is a lower bound on the trouble in any tessellated world. §3.5 says
+   Bagger's touching is 10/11 planar (robust) and ALICE3's is 15/29 free-form (not) — but I never
+   *measured* a post-tessellation census to confirm the mechanism. Converting with `--mesh` and
+   re-running the census would settle it, and would cost one run.
 6. **The oracle has been run only on pairs, never on a whole assembly at useful density.** The
    whole-Bagger run at 864 rays saw nothing. The occupancy-annotated crossing list is validated on
    the synthetic assembly and on named real pairs; it has never been asked to produce a full
@@ -499,7 +525,7 @@ I do not edit `NEXT.md` or `Tutorial.md`. These are the claims in them this stre
   not certified) gains a sibling: **nothing in the pipeline certifies that two certified parts do
   not occupy the same space.**
 * **New, and not previously recorded anywhere**: `TGeoManager::CheckOverlaps` does not work on
-  `O2BVHSurfaceSolid` (§3.5). This belongs in the traps list.
+  `O2BVHSurfaceSolid` (§3.6). This belongs in the traps list.
 
 ---
 
