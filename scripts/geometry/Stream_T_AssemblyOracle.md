@@ -36,8 +36,8 @@ slip. And these are the *only 28 parts I could census in the time available* —
 run is §3.4.
 
 **The other assembly in the corpus is clean, and that is a measurement:** `as1-oc-214.stp`, 18
-placed solids, 153 pairs, **0 interpenetrating**, 32 pairs touching with zero shared volume. So the instrument
-does not report overlaps everywhere, and Bagger's 3 and ALICE3's 7 can be believed. §3.3 shows the
+placed solids, 153 pairs, **0 interpenetrating**, 32 pairs touching with zero shared volume.
+So the instrument does not report overlaps everywhere, and Bagger's 3 and ALICE3's 7 can be believed. §3.3 shows the
 same clean model turning dirty the moment a deliberate 0.2 cm interpenetration is injected — and
 the instrument recovering the injected displacement to six digits.
 
@@ -56,7 +56,7 @@ not work:
   says those two solids are **0.09 cm apart**, and `BasePin | Base` as a **0.87–0.91 cm** overlap
   when their boolean intersection has **zero volume**.
 
-Details and the full tables in §3.5. **This is a second, independent blocking item**: even once the
+Details and the full tables in §3.6. **This is a second, independent blocking item**: even once the
 CAD is fixed, there is currently no working overlap check on the representation this branch ships.
 
 ---
