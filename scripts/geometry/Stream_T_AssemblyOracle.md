@@ -554,12 +554,14 @@ result for a one-solid world is "no pairs".
    "coincident" is really "distance zero and empty intersection". A genuine interpenetration
    thinner than the parts' own B-rep tolerance would classify as coincident. Nothing here measures
    how close to that line the 11 Bagger and 29 ALICE3 coincident pairs sit.
-5. **A silently-empty boolean would read as `coincident` — checked on Bagger, not on ALICE3.** The
-   census counts `failed` only when `BRepAlgoAPI_Common::IsDone()` is false; a `Common` that
-   *succeeds* and returns an empty shape on a hard B-rep would be classified as touching, which is
-   a **false negative** and the direction that matters. §3.5's ray cross-check clears all 11 Bagger
-   coincident pairs. **ALICE3's 29 have not been cross-checked**, and ALICE3 is where the B-reps
-   are hard enough for a boolean to give up quietly.
+5. **A silently-empty boolean would read as `coincident`, and the cross-check has only been run on
+   the pairs already called `coincident`.** The census counts `failed` only when
+   `BRepAlgoAPI_Common::IsDone()` is false; a `Common` that *succeeds* and returns an empty shape
+   on a hard B-rep would be classified as touching, which is a **false negative** and the direction
+   that matters. §3.5's ray cross-check clears all 11 Bagger and all 29 ALICE3 `ST0923290`
+   coincident pairs (327680 rays, 5434 touching transitions). What it does **not** cover is the
+   `disjoint` verdicts: those are settled by a single `BRepExtrema_DistShapeShape` value with no
+   second opinion at all, and there are 6 + 22 of them here and 1699-worth on the full model.
 6. **Coincident contacts are legal but fragile, and §3.5 only half-answers it.** The chording
    sagitta reaches **2.9e-02 cm** (`Stream_J_XRay.md` §4) — *larger* than two of Bagger's three
    real penetration depths (3.3e-03 and 2.25e-02 cm). So a pair that touches exactly in CAD can
