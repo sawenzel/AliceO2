@@ -105,6 +105,21 @@ is the whole design, and every assembly-level situation falls out of it:
 | interpenetration | `{A} → {A,B} → {B}` | **nothing correct exists**; the oracle refuses to pick |
 | a ray starting inside | segment 0's occupancy is non-empty | reported as `s0` |
 
+The emitted JSON, one entry per crossing, from a real Bagger ray:
+
+```
+t=655.341823  part=Stick        sense=+1  occupancy-after=['Stick']        group=0
+t=669.581836  part=Stick        sense=-1  occupancy-after=[]               group=1
+t=691.489256  part=BucketLink1  sense=+1  occupancy-after=['BucketLink1']  group=2
+...
+seg = [[0, 655.34, []], [655.34, 669.58, ['Stick']], [669.58, 691.49, []], ...]
+```
+
+**Distances are in the model's native units (mm here), not cm**; `scaleToCm` travels in the
+document. That is deliberate — a `TopLoc_Location` must be rigid, so placing a part by its XCAF
+location is free while *scaling* it would mean rebuilding every B-rep, which is what makes ALICE3's
+206 placements of 55 prototypes affordable at all.
+
 Each crossing carries `{t, part, sense, occupancy-after, group}`. The **occupancy-after** field is
 the one that makes leaking detectable: a later C++ round can step a `TGeoNavigator` through the same
 assembly and compare not just *where* the boundaries are but *which volume the track is in between
