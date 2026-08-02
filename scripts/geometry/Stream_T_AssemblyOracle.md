@@ -316,8 +316,13 @@ same way `O2_CADtoTGeo.py` does.
 206 placed solids -> 21115 pairs; 1699 survive the AABB rejection (8.05 %)
 ```
 
-**The full 1699-pair run did not finish inside this session** (≈ 1.9 s/pair ⇒ ≈ 54 min, and it was
-still running when this was written). What *is* complete is the `ST0923290` sub-assembly — 28
+**The full 1699-pair run was attempted and did not complete.** It was killed at **59 minutes**
+having produced no output, so the only cost figure that can be quoted for it is a lower bound:
+**> 59 min single-threaded, and more than the 54 min the `ST0923290` rate (1.9 s/pair) predicts** —
+unsurprising, since that sub-assembly's parts are among the model's smaller ones and the full run
+must also chew through the 965-patch `ST1829909_002`. Budget an hour and a half, run it detached,
+and write its stdout somewhere it cannot be clobbered (see §7). What *is* complete is the
+`ST0923290` sub-assembly — 28
 instances, all 378 of its internal pairs:
 
 ```
@@ -536,10 +541,11 @@ result for a one-solid world is "no pairs".
 
 1. **The ALICE3 number is incomplete and the headline leans on 28 of 206 parts.** `ST0923290`'s 7
    interpenetrating pairs are complete and reproducible for that sub-assembly, but the full
-   1699-pair run had not finished. **If the remaining 1641 pairs are clean the verdict does not
-   change** (7 > 0 already), but the *scale* of the problem is unknown, and the 12-fold-placed
-   `ST2487458_01` in particular has not been checked against itself. Re-run:
-   `overlapCensus.py --step .../CAD_noETA.stp --out alice3.json` and quote the counts.
+   1699-pair run was killed at 59 minutes without completing (§3.4). **If the remaining 1641 pairs
+   are clean the verdict does not change** (7 > 0 already), but the *scale* of the problem is
+   unknown, and the 12-fold-placed `ST2487458_01` in particular has not been checked against
+   itself. **This is the single highest-value hour anyone can spend on this document.** Re-run
+   detached: `overlapCensus.py --step .../CAD_noETA.stp --out alice3.json` and quote the counts.
 2. **`--pad 0.1 cm` bounds the gap table, not the overlap table.** Every overlapping pair is found
    at pad 0; a *disjoint* pair further apart than the pad never appears. So "tightest gaps" tables
    are scoped to 1 mm and nothing in them is a claim about pairs beyond that.
@@ -624,3 +630,9 @@ I do not edit `NEXT.md` or `Tutorial.md`. These are the claims in them this stre
 
 Neither writes into `STEP_examples/`; both take `--out` for JSON. All artefacts of this session were
 written to a scratch directory and none are committed.
+
+**One environmental trap, paid for here.** `$CLAUDE_JOB_DIR/tmp` is *shared* between concurrently
+running agents, not private to one. Another session created a directory where this one had a log
+file and the log was removed underneath a running process — which is how the full ALICE3 census's
+stdout was lost while the process itself carried on for another half hour. Long runs should write
+their output to a uniquely-named path and rely on `--out` for the result rather than on stdout.
