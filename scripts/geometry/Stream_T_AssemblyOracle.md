@@ -10,6 +10,64 @@ Written by the session that built it; the integrating session folds it.
 
 ## 0. The verdict
 
+### ALICE3 builds the entire detector TWICE, at the same place
+
+This was found last and it dwarfs everything else in this document, so it goes first.
+
+**Every one of the 103 leaf volumes in the ALICE3 world is placed twice at an exactly identical
+world matrix.** Not "overlapping by a fraction of a millimetre" — *100 % coincident*, the most
+complete overlap that can exist. It is on the **production path**: the converter emits it into
+`geom.C`.
+
+The mechanism is a four-line fact about the STEP file. Its root assembly has **four** children:
+
+| root child | what it is | leaf instances under it |
+| --- | --- | ---: |
+| `ST2487728_01` | **the whole detector assembly** | **103** |
+| `ST2487730_01` | a sub-assembly — *and also a child of `ST2487728_01`* | 1 |
+| `ST1A38517_01` | a sub-assembly — *and also a child of `ST2487728_01`* | 74 |
+| `ST0923290_058` | a sub-assembly — *and also a child of `ST2487728_01`* | 28 |
+
+1 + 74 + 28 = 103. **The root lists the complete assembly and, as its siblings, that assembly's own
+three children.** Every placement is at identity, so both copies land on top of each other.
+
+Confirmed four independent ways:
+
+1. **From XCAF**, grouping all 206 instances by (definition, world transform) rounded to 1e-12:
+   **103 keys, every one carrying exactly 2 instances.** Multiplicity histogram `{2: 103}` — no
+   triples, no singletons. 103 redundant copies.
+2. **The traversal is not double-counting.** `GetFreeShapes` returns exactly **1** root, and the 12
+   instances of `ST2487458_01` have **12 distinct assembly paths** — six under `r0_0_1_*` and six
+   under `r0_2_*`.
+3. **The converter reproduces it**, in a conversion done for this document:
+   `asm__0_1_1_1->AddNode` is called for `asm__0_1_1_2`, `asm__0_1_1_3`, `asm__0_1_1_6` and
+   `asm__0_1_1_73`, while `asm__0_1_1_2->AddNode` is called for `asm__0_1_1_3`, `asm__0_1_1_6` and
+   `asm__0_1_1_73`. **All seven transforms are exactly the identity** — translation `(0,0,0)`,
+   rotation `{1,0,0, 0,1,0, 0,0,1}`.
+4. **The boolean agrees, expensively.** A census restricted to the 12 `ST2487458_01` placements
+   found **6 of 66 pairs surviving AABB rejection — precisely the 6 duplicate pairs** — and then
+   ran for 39 minutes without finishing them, because intersecting a solid with an exact copy of
+   itself is the pathological case for `BRepAlgoAPI_Common`: every face is coincident with a face.
+
+**What this means.** No Geant4 or TGeo transport through this geometry is meaningful: at every point
+inside the detector the navigator must choose between two volumes occupying the same space, and
+which one it picks is an implementation detail. It also means every per-instance count in this
+document is inflated 2× — the model has **103 distinct placed solids, not 206**, and 5253 distinct
+pairs, not 21115.
+
+**What it does not mean.** It is not established that the STEP file is *wrong*. A defensible reading
+is that a correct importer should place only the top-level assembly and ignore root children
+reachable from it, in which case this is a **converter defect** and the fix is in
+`O2_CADtoTGeo.py`'s `expand_definition` — which already has a `visited_defs` set that suppresses
+re-*expansion* but still appends a placement edge for every child. **That is the first thing to
+check, and it may be a one-line fix for the most severe geometry defect on this branch.** It also
+does not touch any per-leaf-solid result: `Stream_J_XRay.md` scores *definitions*, and every one of
+those numbers stands.
+
+---
+
+### And the CAD itself is illegal too, independently of the above
+
 **Neither `Bagger.step` nor ALICE3's `CAD_noETA.stp` is a legal TGeo/Geant4 geometry as it stands.**
 Both contain pairs of placed solids that genuinely interpenetrate — not touch, *interpenetrate*,
 with positive shared volume. Overlapping volumes are forbidden by both engines and produce silently
@@ -306,7 +364,9 @@ and the first is checkable on paper:
 are per-definition numbers and both are correct as such. But legality is a property of *instances*:
 `ST2487458_01` alone is placed **12** times, `ST1A38476_01` and the four `ST1A38494_*` six times
 each, and two placements of one prototype can perfectly well interpenetrate each other. The census
-is therefore over **206 instances and 21115 pairs**, not 55 and 1485.
+is therefore over **206 instances and 21115 pairs**, not 55 and 1485 — though see §0: 103 of those
+206 are exact duplicates, so the *distinct* geometry is 103 solids and 5253 pairs, and the census
+as run spends half its effort intersecting parts with copies of themselves.
 
 My loader reproduces the converter's own counts exactly — **55 unique definitions / 206 instances**
 for ALICE3, **13 / 13** for Bagger — which is the cross-check that it walks the XCAF assembly the
@@ -316,7 +376,12 @@ same way `O2_CADtoTGeo.py` does.
 206 placed solids -> 21115 pairs; 1699 survive the AABB rejection (8.05 %)
 ```
 
-**The full 1699-pair run was attempted and did not complete.** It was killed at **59 minutes**
+**The full 1699-pair run was attempted and did not complete.** §0 explains a large part of why:
+103 of the 206 instances are exact duplicates of another, so a substantial share of the AABB
+survivors are solid-versus-identical-copy pairs, which is the pathological case for
+`BRepAlgoAPI_Common` — 6 such pairs alone consumed 39 minutes without finishing. **Deduplicating
+placements before the census would cut both the pair count and the per-pair cost, and should be
+done before anyone re-runs it.** As run, it was killed at **59 minutes**
 having produced no output, so the only cost figure that can be quoted for it is a lower bound:
 **> 59 min single-threaded, and more than the 54 min the `ST0923290` rate (1.9 s/pair) predicts** —
 unsurprising, since that sub-assembly's parts are among the model's smaller ones and the full run
@@ -544,8 +609,9 @@ result for a one-solid world is "no pairs".
    1699-pair run was killed at 59 minutes without completing (§3.4). **If the remaining 1641 pairs
    are clean the verdict does not change** (7 > 0 already), but the *scale* of the problem is
    unknown, and the 12-fold-placed `ST2487458_01` in particular has not been checked against
-   itself. **This is the single highest-value hour anyone can spend on this document.** Re-run
-   detached: `overlapCensus.py --step .../CAD_noETA.stp --out alice3.json` and quote the counts.
+   itself — though §0 now answers that particular question exactly, and by a cheaper route.
+   **Re-run only after deduplicating placements** (§0), or half the pairs will be a solid against a
+   copy of itself: `overlapCensus.py --step .../CAD_noETA.stp --out alice3.json`.
 2. **`--pad 0.1 cm` bounds the gap table, not the overlap table.** Every overlapping pair is found
    at pad 0; a *disjoint* pair further apart than the pad never appears. So "tightest gaps" tables
    are scoped to 1 mm and nothing in them is a claim about pairs beyond that.
@@ -618,6 +684,11 @@ I do not edit `NEXT.md` or `Tutorial.md`. These are the claims in them this stre
   not occupy the same space.**
 * **New, and not previously recorded anywhere**: `TGeoManager::CheckOverlaps` does not work on
   `O2BVHSurfaceSolid` (§3.6). This belongs in the traps list.
+* **New, and the most severe item here**: `O2_CADtoTGeo.py` builds the whole ALICE3 detector
+  **twice at identity** (§0), because the STEP root lists the top assembly alongside its own
+  children and `expand_definition` appends a placement edge for each. This is a converter defect
+  before it is a CAD defect, it invalidates any assembly-level transport on ALICE3, and it should
+  displace whatever is currently first on `NEXT.md`'s open list.
 
 ---
 
