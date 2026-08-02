@@ -99,16 +99,24 @@ def process_solid(solid, name, tolerance=None, band_factor=1.0):
 def write_shape_root(cand, path):
     """Write the description as `shape_<part>.root`, per the Stream G convention.
 
-    One object inheriting from `TGeoShape`, under the key `shape`, in cm, in the part's local
-    frame. This is the same single `WriteTObject(shape, "shape")` that
-    `o2::base::harness::saveShapeToRootFile` performs -- the C++ side is the authority and the
-    unit test round-trips through it.
+    One object inheriting from `TGeoShape`, under the key `shape`, in cm; and -- since
+    `Stream_N_PlacedPrimitives.md` -- optionally a `TGeoHMatrix` under the key `placement`, the
+    rigid transform that takes the shape from its own canonical frame into the part's local
+    frame. **A file with no `placement` key means the identity**, which is what every file written
+    before that change means, so nothing older has to be rewritten and nothing older changes
+    meaning.
+
+    This is the same pair `o2::base::harness::saveShapeToRootFile` writes -- the C++ side is the
+    authority and the unit test round-trips through it.
     """
     import ROOT
     ROOT.gROOT.SetBatch(True)
-    shape = prim.build_root(cand, "shape")
+    shape, placement = prim.build_root(cand, "shape")
     out = ROOT.TFile.Open(str(path), "RECREATE")
     out.WriteTObject(shape, "shape")
+    matrix = prim.root_placement_matrix(placement, "placement")
+    if matrix is not None:
+        out.WriteTObject(matrix, "placement")
     out.Close()
     return shape
 
@@ -129,24 +137,43 @@ def _occ_bbox(shape):
 def crosscheck_bbox(cand, occ_shape=None):
     """Max deviation, in cm, between the ROOT realisation's bounding box and the OCCT one.
 
-    **Read this number knowing what it can and cannot say.** For a bare primitive it is exact and
-    a frame error moves it by the size of the error. For a `TGeoCompositeShape` it does not:
-    `TGeoBoolNode::ComputeBBox` takes each operand's own axis-aligned box, transforms its eight
-    corners and unions the results, so a leaf whose axis is not a coordinate axis contributes a
-    box strictly larger than itself. On the six Bagger rams that inflation is 0.13-0.62 cm and is
-    a property of ROOT's bounding box, not of the geometry -- the same effect Stream G §1 reports
-    for the surface representation's conservative per-face AABBs. Use `crosscheck_contains` for a
-    sharp check.
+    **Read this number knowing what it can and cannot say.** For an unplaced primitive it is exact
+    and a frame error moves it by the size of the error. Where a rigid transform is involved it is
+    not: the ROOT box has to be carried into the part frame by transforming its eight corners and
+    taking the axis-aligned hull of those, which for a rotated body is strictly larger than the
+    body. The same is true of a `TGeoCompositeShape`, whose `TGeoBoolNode::ComputeBBox` does
+    exactly that internally -- on the six Bagger rams the inflation is 0.13-0.62 cm and is a
+    property of ROOT's bounding box, not of the geometry. Use `crosscheck_contains` for a sharp
+    check.
     """
     occ_shape = occ_shape if occ_shape is not None else prim.build_occ(cand)
     xmin, ymin, zmin, xmax, ymax, zmax = _occ_bbox(occ_shape)
-    shape = prim.build_root(cand, "bboxprobe")
+    shape, placement = prim.build_root(cand, "bboxprobe")
     origin = [shape.GetOrigin()[i] for i in range(3)]
     half = [shape.GetDX(), shape.GetDY(), shape.GetDZ()]
+    lo_root = [origin[i] - half[i] for i in range(3)]
+    hi_root = [origin[i] + half[i] for i in range(3)]
+    if placement is not None:
+        lo_root, hi_root = _placed_box(placement, lo_root, hi_root)
     worst = 0.0
     for i, (lo, hi) in enumerate(((xmin, xmax), (ymin, ymax), (zmin, zmax))):
-        worst = max(worst, abs(origin[i] - half[i] - lo), abs(origin[i] + half[i] - hi))
+        worst = max(worst, abs(lo_root[i] - lo), abs(hi_root[i] - hi))
     return worst
+
+
+def _placed_box(placement, lo, hi):
+    """The axis-aligned hull, in the part frame, of a local box under a rigid placement."""
+    out_lo = [float("inf")] * 3
+    out_hi = [float("-inf")] * 3
+    for ix in (lo[0], hi[0]):
+        for iy in (lo[1], hi[1]):
+            for iz in (lo[2], hi[2]):
+                for i in range(3):
+                    v = (placement[i][0] * ix + placement[i][1] * iy + placement[i][2] * iz
+                         + placement[i][3])
+                    out_lo[i] = min(out_lo[i], v)
+                    out_hi[i] = max(out_hi[i], v)
+    return out_lo, out_hi
 
 
 def crosscheck_contains(cand, original, n_points=4000, seed=1234):
@@ -166,7 +193,7 @@ def crosscheck_contains(cand, original, n_points=4000, seed=1234):
 
     xmin, ymin, zmin, xmax, ymax, zmax = _occ_bbox(original)
     pad = 0.05 * max(xmax - xmin, ymax - ymin, zmax - zmin)
-    shape = prim.build_root(cand, "containsprobe")
+    shape, placement = prim.build_root(cand, "containsprobe")
     tol = max(model_tolerance_cm(original), 1.0e-9)
     classifier = BRepClass3d_SolidClassifier(original)
     rng = random.Random(seed)
@@ -180,7 +207,11 @@ def crosscheck_contains(cand, original, n_points=4000, seed=1234):
         if state == TopAbs_ON:
             continue
         scored += 1
-        if bool(shape.Contains(array("d", list(p)))) != (state == TopAbs_IN):
+        # The point is in the part frame; the shape answers in its own. Composing the placement
+        # here is the same composition every other consumer performs, so a wrong placement is a
+        # disagreement against the CAD body rather than a silent pass.
+        local = prim.placement_to_local(placement, p)
+        if bool(shape.Contains(array("d", list(local)))) != (state == TopAbs_IN):
             disagreements += 1
     return {"points": scored, "disagreements": disagreements}
 
@@ -392,7 +423,13 @@ def self_test(verbose=True, with_root=True):
         ROOT.gROOT.SetBatch(True)
         from array import array
         import random
-        shape = prim.build_root(moved_record["candidate"], "probe_moved")
+        shape, placement = prim.build_root(moved_record["candidate"], "probe_moved")
+        # `Stream_N_PlacedPrimitives.md`: a placed primitive is now the bare primitive plus a
+        # transform, not the self-union composite. Assert the class, because everything below
+        # would also pass on a composite and the class is the whole point of the change.
+        check("a rotated, translated tube emits a bare TGeoTube, not a TGeoCompositeShape",
+              shape.ClassName() == "TGeoTube" and placement is not None,
+              f"{shape.ClassName()}, placement {'present' if placement else 'absent'}")
         # closed form for the placed tube: transform the point into the tube's frame and test
         # 1 <= r <= 2, |z| <= 5. The frame is stated here from the *transform that built the
         # OCCT solid*, not from the description, so this is an independent statement.
@@ -405,13 +442,19 @@ def self_test(verbose=True, with_root=True):
             zc = prim._dot(rel, tuple(frame["z"]))
             rc = math.sqrt(max(prim._dot(rel, rel) - zc * zc, 0.0))
             want = (1.0 <= rc <= 2.0) and abs(zc) <= 5.0
-            got = bool(shape.Contains(array("d", list(p))))
+            got = bool(shape.Contains(array("d", list(prim.placement_to_local(placement, p)))))
             if want != got and min(abs(rc - 1.0), abs(rc - 2.0), abs(abs(zc) - 5.0)) > 1e-9:
                 bad += 1
         check("the emitted placed tube answers Contains like the closed form",
               bad == 0, f"{bad} disagreement(s) over 20000 points")
+        # An analytic Capacity() is what the composite cost us. pi (rmax^2 - rmin^2) 2 dz for
+        # rmin=1, rmax=2, dz=5, and it is invariant under the placement.
+        want_capacity = math.pi * (2.0 ** 2 - 1.0 ** 2) * 10.0
+        rel_capacity = abs(shape.Capacity() - want_capacity) / want_capacity
+        check("the placed tube's Capacity() is analytic", rel_capacity < 1.0e-14,
+              f"{shape.Capacity():.12f} vs {want_capacity:.12f}, rel {rel_capacity:.2e}")
         # negative control on that check itself
-        wrong = prim.build_root(prim.candidate("primitive", [prim.leaf(
+        wrong, wrong_pl = prim.build_root(prim.candidate("primitive", [prim.leaf(
             "TGeoTube", {"rmin": 1.0, "rmax": 2.05, "dz": 5.0}, frame)], "probe"), "probe_wrong")
         bad_wrong = 0
         random.seed(11)
@@ -421,10 +464,43 @@ def self_test(verbose=True, with_root=True):
             zc = prim._dot(rel, tuple(frame["z"]))
             rc = math.sqrt(max(prim._dot(rel, rel) - zc * zc, 0.0))
             want = (1.0 <= rc <= 2.0) and abs(zc) <= 5.0
-            if want != bool(wrong.Contains(array("d", list(p)))):
+            if want != bool(wrong.Contains(array("d", list(prim.placement_to_local(wrong_pl, p))))):
                 bad_wrong += 1
         check("the same check does report a wrong radius", bad_wrong > 0,
               f"{bad_wrong} disagreement(s) with rmax 2.05")
+        # ... and the placement itself must be load-bearing: transposing its rotation has to move
+        # the count. Without this the check above would pass on a shape whose placement is
+        # ignored, which is precisely the mistake a composition-order bug makes.
+        transposed = [[placement[r][c] for r in range(3)] + [placement[c][3]] for c in range(3)]
+        bad_transposed = 0
+        random.seed(11)
+        for _ in range(20000):
+            p = (random.uniform(-2, 8), random.uniform(-9, 1), random.uniform(0, 10))
+            rel = prim._sub(p, tuple(frame["origin"]))
+            zc = prim._dot(rel, tuple(frame["z"]))
+            rc = math.sqrt(max(prim._dot(rel, rel) - zc * zc, 0.0))
+            want = (1.0 <= rc <= 2.0) and abs(zc) <= 5.0
+            got = bool(shape.Contains(array("d", list(prim.placement_to_local(transposed, p)))))
+            if want != got:
+                bad_transposed += 1
+        check("a transposed placement rotation does move the count", bad_transposed > 0,
+              f"{bad_transposed} disagreement(s) with R^T")
+        # the round trip through the artefact: placement written, placement read back
+        placed_target = Path("/tmp/csg_selftest_placed.root")
+        write_shape_root(moved_record["candidate"], placed_target)
+        fp = ROOT.TFile.Open(str(placed_target))
+        back_shape = fp.Get("shape")
+        back_matrix = fp.Get("placement")
+        back_placement = prim.placement_from_root_matrix(back_matrix) if back_matrix else None
+        worst_pl = (max(abs(back_placement[r][c] - placement[r][c])
+                        for r in range(3) for c in range(4))
+                    if back_placement is not None else float("inf"))
+        check("shape_<part>.root round-trips the placement under the key \"placement\"",
+              back_shape is not None and back_shape.ClassName() == "TGeoTube"
+              and worst_pl < 1.0e-15,
+              f"read {back_shape.ClassName() if back_shape else 'nothing'}, worst placement "
+              f"element deviation {worst_pl:.3g}")
+        fp.Close()
         # the two-leaf union must round-trip through a file and keep its class
         target = Path("/tmp/csg_selftest_shape.root")
         written = write_shape_root(ram_record["candidate"], target)
@@ -444,13 +520,23 @@ def self_test(verbose=True, with_root=True):
         # 62560 placed six-plane boxes in oTOF), so it is worth asserting rather than assuming.
         box_record = process_solid(BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 2.0, 3.0, 4.0).Shape(),
                                    "box-emission")
-        box_shape = prim.build_root(box_record["candidate"], "boxprobe")
+        box_shape, box_placement = prim.build_root(box_record["candidate"], "boxprobe")
         origin = [box_shape.GetOrigin()[i] for i in range(3)]
         check("an axis-aligned box emits a bare TGeoBBox with its own origin",
-              box_shape.ClassName() == "TGeoBBox"
+              box_shape.ClassName() == "TGeoBBox" and box_placement is None
               and max(abs(origin[0] - 1.0), abs(origin[1] - 1.5), abs(origin[2] - 2.0)) < 1e-12
               and abs(box_shape.Capacity() - 24.0) < 1e-12,
-              f"{box_shape.ClassName()}, origin {origin}, capacity {box_shape.Capacity():.6f}")
+              f"{box_shape.ClassName()}, origin {origin}, capacity {box_shape.Capacity():.6f}, "
+              f"placement {'present' if box_placement else 'absent'}")
+
+        # A genuine multi-leaf boolean is out of scope for this change and must stay a composite,
+        # unplaced. Asserted so that "the composite is gone" can never quietly become true of the
+        # cases that legitimately need one.
+        ram_shape, ram_placement = prim.build_root(ram_record["candidate"], "ramprobe")
+        check("a genuine two-leaf union is still an unplaced TGeoCompositeShape",
+              ram_shape.ClassName() == "TGeoCompositeShape" and ram_placement is None,
+              f"{ram_shape.ClassName()}, placement "
+              f"{'present' if ram_placement else 'absent'}")
 
     n_ok = sum(1 for _n, ok, _d in checks if ok)
     if verbose:

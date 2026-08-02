@@ -25,11 +25,17 @@
 #include "TGeoBoolNode.h"
 #include "TGeoCompositeShape.h"
 #include "TGeoCone.h"
+#include "TGeoManager.h"
+#include "TGeoMaterial.h"
 #include "TGeoMatrix.h"
+#include "TGeoMedium.h"
+#include "TGeoNode.h"
 #include "TGeoShape.h"
 #include "TGeoSphere.h"
 #include "TGeoTorus.h"
 #include "TGeoTube.h"
+#include "TGeoVolume.h"
+#include "TMath.h"
 #include "TNamed.h"
 
 #include <array>
@@ -4848,11 +4854,16 @@ BOOST_AUTO_TEST_CASE(OracleValidatorsScoreAPlainRootShape)
 
 namespace
 {
-// Build the emitter's `placed(primitive, M)` idiom: no TGeoShape in ROOT 6.36 can carry a rigid
-// transform (TGeoBBox has fOrigin and nothing else does), and TGeoCompositeShape is the only
-// shape that holds a TGeoMatrix at all -- through its TGeoBoolNode, which needs two operands. So
-// a recognised tube that is not already on the z axis is written as the union of the primitive
-// with an identical copy of itself under the same matrix.
+// Build the emitter's former `placed(primitive, M)` idiom: no TGeoShape in ROOT 6.36 can carry a
+// rigid transform (TGeoBBox has fOrigin and nothing else does), and TGeoCompositeShape is the only
+// shape that holds a TGeoMatrix at all -- through its TGeoBoolNode, which needs two operands. So a
+// recognised tube that was not already on the z axis USED TO BE written as the union of the
+// primitive with an identical copy of itself under the same matrix.
+//
+// Since Stream N (placed primitives) it is written as the bare primitive plus a placement instead
+// (scripts/geometry/Stream_N_PlacedPrimitives.md). This helper stays, because the self-union is
+// still exactly the same point set and is therefore the reference the new emission is measured
+// against -- see PlacedPrimitiveAnswersExactlyLikeTheSelfUnionComposite.
 TGeoCompositeShape* makePlacedTube(const char* name, double rmin, double rmax, double dz,
                                    TGeoMatrix* matrixA, TGeoMatrix* matrixB)
 {
@@ -5631,3 +5642,323 @@ BOOST_AUTO_TEST_CASE(StreamK_InnerWallIsExactlyTheSignOfTheOutwardNormal)
   }
 }
 // --- Stream K: Tier 0, canonical recognition of NURBS-encoded quadrics ---
+
+// --- Stream N (placed primitives): placed primitives (scripts/geometry/Stream_N_PlacedPrimitives.md) -------------
+//
+// A recognised primitive whose frame is not the identity used to be emitted as a degenerate
+// TGeoCompositeShape -- the primitive unioned with an identical copy of itself under the same
+// matrix -- because no TGeoShape in ROOT 6.36 carries a rigid transform. That is still true of
+// ROOT; what changed is where the transform lives. The shape is now written in its OWN canonical
+// frame and the transform travels beside it, as a TGeoHMatrix under the key "placement" in
+// shape_<part>.root. These cases pin the three things that can go wrong with that:
+//
+//   1. the artefact: the placement must survive the round trip, and its ABSENCE must keep meaning
+//      the identity, so that every file written before this convention still loads and still
+//      scores exactly as it did;
+//   2. the equivalence: the bare primitive queried in its own frame must answer *exactly* like
+//      the composite it replaces, with a negative control that moves the count;
+//   3. the composition order in geom.C -- `partPlacement * shapePlacement`. That one is silent
+//      when wrong: the geometry still builds and the shape is still the right shape, it is simply
+//      somewhere else. It is checked by navigating, with a transposed rotation and a reversed
+//      product as the controls.
+
+namespace
+{
+/// The two matrices a placed tube is defined by in these cases: a rotation that is neither
+/// symmetric nor axis-aligned, off the origin.
+TGeoCombiTrans* makeStreamNPlacement()
+{
+  auto* rotation = new TGeoRotation("streamNRot", 0., 0., 0.);
+  rotation->RotateX(30.);
+  rotation->RotateZ(17.);
+  rotation->RotateY(-41.);
+  return new TGeoCombiTrans(0.3, 5.916, 2.0, rotation);
+}
+} // namespace
+
+BOOST_AUTO_TEST_CASE(ShapeSidecarRoundTripsAPlacement)
+{
+  namespace harness = o2::base::harness;
+  const auto dir = std::filesystem::temp_directory_path();
+  const std::string path = (dir / "o2_shape_placed.root").string();
+
+  const TGeoTube tube("shape", 0.4, 1.0, 5.0);
+  std::unique_ptr<TGeoCombiTrans> placement(makeStreamNPlacement());
+
+  std::string error;
+  BOOST_REQUIRE_MESSAGE(harness::saveShapeToRootFile(path, tube, placement.get(), &error), error);
+
+  std::unique_ptr<TGeoShape> loaded(harness::loadShapeFromRootFile(path, &error));
+  BOOST_REQUIRE_MESSAGE(loaded != nullptr, error);
+  BOOST_CHECK_EQUAL(std::string(loaded->ClassName()), std::string("TGeoTube"));
+
+  std::unique_ptr<TGeoHMatrix> back(harness::loadShapePlacementFromRootFile(path));
+  BOOST_REQUIRE(back != nullptr);
+  for (int i = 0; i < 9; ++i) {
+    BOOST_CHECK_EQUAL(back->GetRotationMatrix()[i], placement->GetRotationMatrix()[i]);
+  }
+  for (int i = 0; i < 3; ++i) {
+    BOOST_CHECK_EQUAL(back->GetTranslation()[i], placement->GetTranslation()[i]);
+  }
+  // The point of storing it: a point of the part frame reaches the same place through the file as
+  // through the original matrix.
+  const Point3D master{0.9, 6.2, 3.1};
+  Point3D viaFile{};
+  Point3D viaOriginal{};
+  back->MasterToLocal(master.data(), viaFile.data());
+  placement->MasterToLocal(master.data(), viaOriginal.data());
+  for (int i = 0; i < 3; ++i) {
+    BOOST_CHECK_EQUAL(viaFile[i], viaOriginal[i]);
+  }
+  std::filesystem::remove(path);
+}
+
+BOOST_AUTO_TEST_CASE(AbsentPlacementMeansIdentity)
+{
+  namespace harness = o2::base::harness;
+  const auto dir = std::filesystem::temp_directory_path();
+  const TGeoTube tube("shape", 0.4, 1.0, 5.0);
+  std::string error;
+
+  // 1. The historical two-argument overload -- the one every existing shape_*.root was written
+  //    with -- must record no placement at all.
+  const std::string legacy = (dir / "o2_shape_legacy.root").string();
+  BOOST_REQUIRE_MESSAGE(harness::saveShapeToRootFile(legacy, tube, &error), error);
+  BOOST_CHECK(harness::loadShapePlacementFromRootFile(legacy) == nullptr);
+
+  // 2. An identity placement is deliberately NOT written, so that "no key" stays the one and only
+  //    spelling of the identity.
+  const std::string identity = (dir / "o2_shape_identity.root").string();
+  TGeoHMatrix unit("unit");
+  BOOST_REQUIRE_MESSAGE(harness::saveShapeToRootFile(identity, tube, &unit, &error), error);
+  BOOST_CHECK(harness::loadShapePlacementFromRootFile(identity) == nullptr);
+
+  // 3. A file that is not there is the same answer, and must not throw or complain: a part with
+  //    no shape sidecar at all is the overwhelmingly common case.
+  BOOST_CHECK(harness::loadShapePlacementFromRootFile((dir / "o2_shape_nothing.root").string()) ==
+              nullptr);
+
+  std::filesystem::remove(legacy);
+  std::filesystem::remove(identity);
+}
+
+BOOST_AUTO_TEST_CASE(PlacedPrimitiveAnswersExactlyLikeTheSelfUnionComposite)
+{
+  // The equivalence the change rests on: the bare primitive queried in its own frame answers like
+  // the composite it replaces, on all four scored queries, exactly.
+  constexpr double kRmin = 0.4;
+  constexpr double kRmax = 1.0;
+  constexpr double kDz = 5.0;
+
+  std::unique_ptr<TGeoCombiTrans> placement(makeStreamNPlacement());
+  const TGeoTube placedPrimitive("streamNTube", kRmin, kRmax, kDz);
+  // The old emission, built here so the two are compared rather than one being trusted.
+  std::unique_ptr<TGeoCompositeShape> composite(
+    makePlacedTube("streamNComposite", kRmin, kRmax, kDz, new TGeoCombiTrans(*placement),
+                   new TGeoCombiTrans(*placement)));
+
+  std::size_t probes = 0;
+  std::size_t inside = 0;
+  std::size_t disagreements = 0;
+  // The negative control travels with the check: the same loop against a 5% fatter tube must
+  // disagree, or the loop is not measuring anything.
+  const TGeoTube wrong("streamNWrong", kRmin, kRmax * 1.05, kDz);
+  std::size_t controlDisagreements = 0;
+
+  for (int ix = -8; ix <= 8; ++ix) {
+    for (int iy = -8; iy <= 8; ++iy) {
+      for (int iz = -8; iz <= 8; ++iz) {
+        const Point3D master{0.3 + 0.37 * ix, 5.916 + 0.41 * iy, 2.0 + 0.43 * iz};
+        Point3D local{};
+        placement->MasterToLocal(master.data(), local.data());
+        const double r = std::hypot(local[0], local[1]);
+        if (std::fabs(r - kRmin) < 1.e-9 || std::fabs(r - kRmax) < 1.e-9 ||
+            std::fabs(r - kRmax * 1.05) < 1.e-9 || std::fabs(std::fabs(local[2]) - kDz) < 1.e-9) {
+          continue;
+        }
+        ++probes;
+        const bool wanted = composite->Contains(master.data());
+        if (placedPrimitive.Contains(local.data()) != wanted) {
+          ++disagreements;
+        }
+        if (wrong.Contains(local.data()) != wanted) {
+          ++controlDisagreements;
+        }
+        if (wanted) {
+          ++inside;
+        }
+        BOOST_REQUIRE_CLOSE_FRACTION(placedPrimitive.Safety(local.data(), wanted),
+                                     composite->Safety(master.data(), wanted), 1.e-12);
+        for (const auto& dir : {Point3D{1., 0., 0.}, Point3D{0., 1., 0.}, Point3D{0., 0., 1.},
+                                Point3D{0.5773502691896258, 0.5773502691896258,
+                                        0.5773502691896258}}) {
+          Point3D localDir{};
+          placement->MasterToLocalVect(dir.data(), localDir.data());
+          if (wanted) {
+            BOOST_REQUIRE_CLOSE_FRACTION(placedPrimitive.DistFromInside(local.data(),
+                                                                        localDir.data(), 3),
+                                         composite->DistFromInside(master.data(), dir.data(), 3),
+                                         1.e-12);
+          } else {
+            const double got = placedPrimitive.DistFromOutside(local.data(), localDir.data(), 3);
+            const double want = composite->DistFromOutside(master.data(), dir.data(), 3);
+            if (want > 1.e20) {
+              BOOST_REQUIRE_GT(got, 1.e20);
+            } else {
+              BOOST_REQUIRE_CLOSE_FRACTION(got, want, 1.e-12);
+            }
+          }
+        }
+      }
+    }
+  }
+  BOOST_CHECK_EQUAL(disagreements, 0u);
+  BOOST_CHECK_GT(controlDisagreements, 0u);
+  BOOST_CHECK_GT(inside, 100u);
+  BOOST_CHECK_GT(probes, 3000u);
+}
+
+BOOST_AUTO_TEST_CASE(PlacedPrimitiveRecoversTheAnalyticCapacity)
+{
+  // What the degenerate composite cost, stated as a measurement rather than as a claim.
+  constexpr double kRmin = 0.4;
+  constexpr double kRmax = 1.0;
+  constexpr double kDz = 5.0;
+  const double analytic = TMath::Pi() * (kRmax * kRmax - kRmin * kRmin) * 2. * kDz;
+
+  const TGeoTube tube("streamNCapTube", kRmin, kRmax, kDz);
+  BOOST_CHECK_CLOSE_FRACTION(tube.Capacity(), analytic, 1.e-14);
+  // Deterministic: asked twice, the same bits.
+  BOOST_CHECK_EQUAL(tube.Capacity(), tube.Capacity());
+
+  std::unique_ptr<TGeoCombiTrans> placement(makeStreamNPlacement());
+  std::unique_ptr<TGeoCompositeShape> composite(
+    makePlacedTube("streamNCapComposite", kRmin, kRmax, kDz, new TGeoCombiTrans(*placement),
+                   new TGeoCombiTrans(*placement)));
+  // ... whereas TGeoCompositeShape::Capacity() throws 10000 Monte-Carlo points into the bounding
+  // box, so two calls on the same object return different numbers. That is the reason the gate
+  // marks a composite `capacityComparable=false`, and the reason a placed primitive that is no
+  // longer a composite gets its capacity column back.
+  const double first = composite->Capacity();
+  const double second = composite->Capacity();
+  BOOST_CHECK_NE(first, second);
+  BOOST_CHECK_GT(std::fabs(first - analytic) / analytic, 1.e-6);
+}
+
+BOOST_AUTO_TEST_CASE(NodeMatrixIsPartPlacementTimesShapePlacement)
+{
+  // The composition geom.C emits, decided by NAVIGATION rather than by reading the code.
+  //
+  // The reference is built without ever forming the product: a point of the assembly frame is
+  // carried into the part frame by the part placement, then into the shape's frame by the shape
+  // placement, and the tube membership is evaluated there. If `partPlacement * shapePlacement` is
+  // the right node matrix, ROOT's navigator must reach the same verdict for every point.
+  constexpr double kRmin = 0.4;
+  constexpr double kRmax = 1.0;
+  constexpr double kDz = 5.0;
+
+  std::unique_ptr<TGeoCombiTrans> shapePlacementOwned(makeStreamNPlacement());
+  const TGeoHMatrix shapePlacement(*shapePlacementOwned);
+  auto* partRotation = new TGeoRotation("streamNPartRot", 37., 24., 61.);
+  const TGeoCombiTrans partPlacement(-2.0, 7.0, 1.5, partRotation);
+
+  const auto reference = [&](const Point3D& master, bool& onWall) {
+    Point3D partFrame{};
+    Point3D shapeFrame{};
+    partPlacement.MasterToLocal(master.data(), partFrame.data());
+    shapePlacement.MasterToLocal(partFrame.data(), shapeFrame.data());
+    const double r = std::hypot(shapeFrame[0], shapeFrame[1]);
+    onWall = std::fabs(r - kRmin) < 1.e-9 || std::fabs(r - kRmax) < 1.e-9 ||
+             std::fabs(std::fabs(shapeFrame[2]) - kDz) < 1.e-9;
+    return r >= kRmin && r <= kRmax && std::fabs(shapeFrame[2]) <= kDz;
+  };
+
+  // Every candidate node matrix, including the three ways of getting it wrong. `partOnly` is the
+  // bug this test is really for: forgetting to compose at all.
+  TGeoHMatrix correct(partPlacement);
+  correct.Multiply(&shapePlacement);
+  TGeoHMatrix reversed(shapePlacement);
+  reversed.Multiply(&partPlacement);
+  TGeoHMatrix transposedRotation(shapePlacement);
+  {
+    double rt[9];
+    const double* r = shapePlacement.GetRotationMatrix();
+    for (int i = 0; i < 3; ++i) {
+      for (int j = 0; j < 3; ++j) {
+        rt[3 * i + j] = r[3 * j + i];
+      }
+    }
+    transposedRotation.SetRotation(rt);
+    transposedRotation.SetBit(TGeoMatrix::kGeoRotation);
+  }
+  TGeoHMatrix withTransposed(partPlacement);
+  withTransposed.Multiply(&transposedRotation);
+  const TGeoHMatrix partOnly(partPlacement);
+
+  const std::vector<std::pair<std::string, const TGeoHMatrix*>> candidates{
+    {"part*shape", &correct},
+    {"shape*part", &reversed},
+    {"part*shape^T", &withTransposed},
+    {"part only", &partOnly}};
+
+  // The lattice is centred where the solid actually is -- the translation of the CORRECT node
+  // matrix -- and spans more than the tube's own extent. Guessing the centre by adding the two
+  // translations put every probe outside the solid, and the controls then reported zero
+  // disagreements while being structurally incapable of reporting anything else.
+  const double* centre = correct.GetTranslation();
+
+  std::vector<size_t> disagreements(candidates.size(), 0);
+  size_t probes = 0;
+  size_t insideProbes = 0;
+
+  for (size_t c = 0; c < candidates.size(); ++c) {
+    // One manager per candidate, and everything inside it allocated with new: a TGeoShape and a
+    // TGeoVolume register themselves with gGeoManager, which frees them.
+    auto* manager = new TGeoManager(("streamN_" + std::to_string(c)).c_str(), "composition order");
+    auto* material = new TGeoMaterial("Vacuum", 0., 0., 0.);
+    auto* medium = new TGeoMedium("Vacuum", 1, material);
+    auto* world = new TGeoVolume("TOP", new TGeoBBox("streamNWorld", 30., 30., 30.), medium);
+    auto* part = new TGeoVolume("PART", new TGeoTube("streamNNodeTube", kRmin, kRmax, kDz), medium);
+    world->AddNode(part, 1, new TGeoHMatrix(*candidates[c].second));
+    manager->SetTopVolume(world);
+    manager->CloseGeometry();
+
+    size_t localProbes = 0;
+    size_t localInside = 0;
+    for (int ix = -14; ix <= 14; ++ix) {
+      for (int iy = -14; iy <= 14; ++iy) {
+        for (int iz = -14; iz <= 14; ++iz) {
+          const Point3D master{centre[0] + 0.45 * ix, centre[1] + 0.47 * iy,
+                               centre[2] + 0.43 * iz};
+          bool onWall = false;
+          const bool wanted = reference(master, onWall);
+          if (onWall) {
+            continue;
+          }
+          ++localProbes;
+          if (wanted) {
+            ++localInside;
+          }
+          TGeoNode* node = manager->FindNode(master[0], master[1], master[2]);
+          const bool got = node != nullptr && std::string(node->GetVolume()->GetName()) == "PART";
+          if (got != wanted) {
+            ++disagreements[c];
+          }
+        }
+      }
+    }
+    probes = localProbes;
+    insideProbes = localInside;
+    delete manager;
+    gGeoManager = nullptr;
+  }
+
+  // The sampling has to be capable of failing: enough points, and enough of them inside.
+  BOOST_CHECK_GT(probes, 5000u);
+  BOOST_CHECK_GT(insideProbes, 200u);
+  BOOST_CHECK_EQUAL(disagreements[0], 0u);  // partPlacement * shapePlacement
+  BOOST_CHECK_GT(disagreements[1], 0u);     // reversed product
+  BOOST_CHECK_GT(disagreements[2], 0u);     // transposed shape rotation
+  BOOST_CHECK_GT(disagreements[3], 0u);     // shape placement dropped
+}
+// --- Stream N (placed primitives): placed primitives ---

@@ -51,9 +51,11 @@ import argparse
 import csv
 import json
 import math
+import random
 import re
 import struct
 import sys
+from array import array
 from dataclasses import dataclass
 from pathlib import Path as _Path
 from typing import Dict, List, Optional, Pattern, Tuple
@@ -1913,6 +1915,203 @@ def run_recognition_self_test() -> int:
     return failures
 
 
+def run_placement_self_test() -> int:
+    """Assert the placed-primitive emission and, above all, the COMPOSITION ORDER in `geom.C`.
+
+    `Stream_N_PlacedPrimitives.md`: a recognised primitive whose frame is not the identity is
+    emitted in its own canonical frame with the rigid transform beside it, so the volume's node
+    matrix in the assembly has to be `partPlacement * shapePlacement`. Getting that wrong is
+    silent -- the geometry still builds, the shape is still the right shape, it is simply
+    somewhere else -- so
+    it is checked here by *navigating*: the point is classified by `gGeoManager` in the assembly
+    frame and compared against OpenCascade's classification of the same point carried into the
+    part frame by the part placement alone. The reference therefore knows nothing about the shape
+    placement, which is what makes it a test of the composition rather than a restatement of it.
+
+    Three negative controls, because the positive case passes for a shape that is accidentally
+    where it should be: the transposed shape rotation, the reversed product, and the placement
+    dropped entirely. Each must move the disagreement count off zero.
+
+    Returns the number of failures; prints one line per check. Needs PyROOT *and* pythonOCC in one
+    interpreter, which the O2 environment provides (Stream_H_CSGEmitter.md section 2.1).
+    """
+    failures = 0
+    checks = 0
+
+    def report(ok: bool, label: str, detail: str = ""):
+        nonlocal failures, checks
+        checks += 1
+        if not ok:
+            failures += 1
+        print(f"  [{'ok ' if ok else 'FAIL'}] {label}{(' -- ' + detail) if detail else ''}")
+
+    print("\nPlaced-primitive emission and geom.C composition order "
+          "(Stream_N_PlacedPrimitives.md)")
+    try:
+        import ROOT
+    except Exception as exc:                                         # noqa: BLE001
+        print(f"  [FAIL] PyROOT is not importable in this interpreter ({exc}); the placement "
+              "checks cannot run. Use the O2 environment.")
+        print("\n1 checks, 1 failure(s)")
+        return 1
+    ROOT.gROOT.SetBatch(True)
+
+    from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Cut
+    from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Transform
+    from OCC.Core.BRepClass3d import BRepClass3d_SolidClassifier
+    from OCC.Core.BRepGProp import brepgprop
+    from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeCylinder
+    from OCC.Core.GProp import GProp_GProps
+    from OCC.Core.TopAbs import TopAbs_IN, TopAbs_ON
+    from OCC.Core.gp import gp_Ax1, gp_Ax2, gp_Dir, gp_Pnt, gp_Trsf, gp_Vec
+
+    import_csg_hook()   # same import guard the converter uses; makes `csg` importable by path
+    sys.path.insert(0, str(_Path(__file__).resolve().parent))
+    from csg import emit as csg_emit, primitives as prim          # noqa: E402
+
+    # --- the specimen: a tube SEGMENT, rotated and translated off every coordinate axis --------
+    axis = gp_Ax2(gp_Pnt(0, 0, -5), gp_Dir(0, 0, 1))
+    wedge = BRepPrimAPI_MakeCylinder(axis, 2.0, 10.0, math.radians(75.0)).Shape()
+    bore = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, -6), gp_Dir(0, 0, 1)), 1.0, 12.0).Shape()
+    seg = BRepAlgoAPI_Cut(wedge, bore).Shape()
+    spin = gp_Trsf()
+    spin.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(1, 2, 3)), 0.9)
+    shift = gp_Trsf()
+    shift.SetTranslation(gp_Vec(3.0, -4.0, 5.0))
+    placed = BRepBuilderAPI_Transform(seg, shift.Multiplied(spin), True).Shape()
+
+    record = csg_emit.process_solid(placed, "selftest-placed-tubeseg")
+    if not record["accepted"]:
+        report(False, "a rotated, translated tube segment is recognised and accepted",
+               f"{record['reason']}")
+        print(f"\n{checks} checks, {failures} failure(s)")
+        return failures
+    report(True, "a rotated, translated tube segment is recognised and accepted",
+           f"{record['recogniser']}: {record['description']}")
+
+    shape, placement = prim.build_root(record["candidate"], "selftest")
+    report(shape.ClassName() == "TGeoTubeSeg" and placement is not None,
+           "it emits a TGeoTubeSeg with a placement, not a TGeoCompositeShape",
+           f"{shape.ClassName()}, placement {'present' if placement else 'absent'}")
+
+    # --- the win: an analytic Capacity() again, checked against OCCT's own volume -------------
+    props = GProp_GProps()
+    brepgprop.VolumeProperties(placed, props)
+    occ_volume = props.Mass()
+    rel = abs(shape.Capacity() - occ_volume) / occ_volume
+    report(rel < 1.0e-12, "its Capacity() is analytic and agrees with the OCCT volume",
+           f"ROOT {shape.Capacity():.12g} vs OCCT {occ_volume:.12g}, rel {rel:.2e}")
+    # ... and the same comparison must fail on a shape that is 1% too fat.
+    fat = dict(record["candidate"]["leaves"][0]["params"])
+    fat["rmax"] *= 1.01
+    fat_cand = prim.candidate("primitive", [prim.leaf(
+        "TGeoTubeSeg", fat, record["candidate"]["leaves"][0]["frame"])], "selftest-negative")
+    fat_shape, _ = prim.build_root(fat_cand, "selftest_fat")
+    rel_fat = abs(fat_shape.Capacity() - occ_volume) / occ_volume
+    report(rel_fat > 1.0e-3, "the same capacity comparison does reject a 1% wrong radius",
+           f"rel {rel_fat:.2e}")
+
+    # --- the composition order, decided by navigation ------------------------------------------
+    # An arbitrary, deliberately non-symmetric part placement: this is what `emit_placement_cpp`
+    # writes for an AddNode, and the shape placement is what LoadShapePlacement returns.
+    part_rot = ROOT.TGeoRotation("selftest_partrot", 37.0, 24.0, 61.0)
+    ROOT.SetOwnership(part_rot, False)
+    part_placement = ROOT.TGeoCombiTrans(-2.0, 7.0, 1.5, part_rot)
+    ROOT.SetOwnership(part_placement, False)
+    shape_placement = prim.root_placement_matrix(placement, "selftest_shapeplace")
+
+    def compose(order):
+        """The node matrix under a given composition rule."""
+        if order == "part*shape":
+            m = ROOT.TGeoHMatrix(part_placement)
+            m.Multiply(shape_placement)
+        elif order == "shape*part":
+            m = ROOT.TGeoHMatrix(shape_placement)
+            m.Multiply(part_placement)
+        elif order == "part*shapeT":
+            t = [[placement[r][c] for r in range(3)] + [placement[c][3]] for c in range(3)]
+            m = ROOT.TGeoHMatrix(part_placement)
+            m.Multiply(prim.root_placement_matrix(t, "selftest_shapeplaceT"))
+        else:  # the placement dropped on the floor -- the bug this test is really for
+            m = ROOT.TGeoHMatrix(part_placement)
+        return m
+
+    # The probes: points of the ASSEMBLY frame, each with OpenCascade's own verdict about the CAD
+    # body, obtained by undoing the part placement ONLY. Computed once, because the reference does
+    # not depend on which composition rule is being tried -- that is the point of it.
+    #
+    # They are drawn in the part frame over the solid's own padded bounding box and then carried
+    # into the assembly frame, so roughly a third of them are inside. Drawing them in the assembly
+    # frame over a box big enough to be safe put ~0.3% of them inside, and the negative controls
+    # then moved the count by single digits -- true, but a feeble control.
+    classifier = BRepClass3d_SolidClassifier(placed)
+    tolerance = max(csg_emit.model_tolerance_cm(placed), 1.0e-9)
+    bnd = Bnd_Box()
+    brepbndlib.Add(placed, bnd)
+    bnd.SetGap(0.0)
+    bxmin, bymin, bzmin, bxmax, bymax, bzmax = bnd.Get()
+    bpad = 0.1 * max(bxmax - bxmin, bymax - bymin, bzmax - bzmin)
+    rng = random.Random(4242)
+    probes = []
+    master = array("d", [0.0, 0.0, 0.0])
+    for _ in range(3000):
+        part_point = (rng.uniform(bxmin - bpad, bxmax + bpad),
+                      rng.uniform(bymin - bpad, bymax + bpad),
+                      rng.uniform(bzmin - bpad, bzmax + bpad))
+        classifier.Perform(gp_Pnt(*part_point), tolerance)
+        state = classifier.State()
+        if state == TopAbs_ON:
+            continue
+        part_placement.LocalToMaster(array("d", list(part_point)), master)
+        probes.append(((master[0], master[1], master[2]), state == TopAbs_IN))
+    n_inside = sum(1 for _p, inside in probes if inside)
+    print(f"        ({len(probes)} probes, {n_inside} of them inside the CAD body)")
+
+    def _keep(obj):
+        """Everything below is registered with the TGeoManager, which frees it. Handing ownership
+        to Python as well is a double free -- the same rule csg/primitives.py follows."""
+        ROOT.SetOwnership(obj, False)
+        return obj
+
+    _keep(shape)
+    _keep(fat_shape)
+
+    def disagreements(order):
+        # A fresh manager per variant. Constructing one DELETES the previous geometry, which is
+        # why nothing created here may be owned by Python as well.
+        manager = _keep(ROOT.TGeoManager(f"selftest_{order}", "placement composition self-test"))
+        vacuum = _keep(ROOT.TGeoMaterial("Vacuum", 0., 0., 0.))
+        medium = _keep(ROOT.TGeoMedium("Vacuum", 1, vacuum))
+        world = _keep(ROOT.TGeoVolume("TOP", _keep(ROOT.TGeoBBox("selftestWorld", 40., 40., 40.)),
+                                      medium))
+        # A fresh copy of the shape per manager, for the same reason.
+        local_shape, _ = prim.build_root(record["candidate"], f"selftest_{order}_shape")
+        part = _keep(ROOT.TGeoVolume("PART", _keep(local_shape), medium))
+        world.AddNode(part, 1, _keep(compose(order)))
+        manager.SetTopVolume(world)
+        manager.CloseGeometry()
+        bad = 0
+        for p, want in probes:
+            node = manager.FindNode(p[0], p[1], p[2])
+            inside = node is not None and node.GetVolume().GetName() == "PART"
+            if inside != want:
+                bad += 1
+        return bad, len(probes)
+
+    bad_ok, scored = disagreements("part*shape")
+    report(bad_ok == 0 and scored > 500,
+           "geom.C's node matrix partPlacement * shapePlacement puts the solid where the CAD "
+           "body is", f"{bad_ok} disagreement(s) over {scored} navigated points")
+    for order, label in (("shape*part", "the reversed product"),
+                         ("part*shapeT", "a transposed shape rotation"),
+                         ("part-only", "dropping the shape placement")):
+        bad, _n = disagreements(order)
+        report(bad > 0, f"{label} does move the count", f"{bad} disagreement(s)")
+
+    print(f"\n{checks} checks, {failures} failure(s)")
+    return failures
+
+
 def _recognized_inner_wall(face, rec) -> Optional[bool]:
     """Decide, by measurement, which side of a RECOGNIZED quadric is outside the solid.
 
@@ -2809,6 +3008,9 @@ static void LoadFacets(const std::string& file, TGeoTessellated* solid, bool che
 }
 """
     if csg_shapes:
+        # TGeoHMatrix comes in through TGeoManager.h today, but the CSG loader names it directly
+        # and must not depend on that.
+        prelude += "#include <TGeoMatrix.h>\n"
         prelude += import_csg_hook().CPP_LOADER
     if not exact_surfaces:
         return prelude
@@ -3329,11 +3531,28 @@ def extract_graph(
 # ROOT macro emission
 # -------------------------------
 
-def emit_placement_cpp(parent_def: str, child_def: str, trsf: gp_Trsf, copy_no: int, scale_to_cm: float) -> str:
+def emit_placement_cpp(parent_def: str, child_def: str, trsf: gp_Trsf, copy_no: int, scale_to_cm: float,
+                       csg_lids: Optional[set] = None) -> str:
+    """One `AddNode`, with the child's own shape placement composed in when it has one.
+
+    A CSG child's `TGeoShape` may be expressed in its own canonical frame rather than the part's
+    (Stream_N_PlacedPrimitives.md), because no `TGeoShape` in ROOT can carry a rigid transform. The
+    node matrix therefore has to be `partPlacement * shapePlacement` -- the part placement first,
+    since a point travels shape -> part -> parent. The composition is emitted for **every**
+    placement of such a child, so a prototype placed n times gets n correctly composed matrices
+    rather than one shared, mutated one.
+    """
     parent_cpp = cpp_var_for_def(parent_def)
     child_cpp = cpp_var_for_def(child_def)
     tr_name = f"tr_{sanitize_cpp_name(parent_def)}_{sanitize_cpp_name(child_def)}_{copy_no}"
-    return trsf_to_tgeo(trsf, tr_name, scale_to_cm) + f"  {parent_cpp}->AddNode({child_cpp}, {copy_no}, {tr_name});\n"
+    out = trsf_to_tgeo(trsf, tr_name, scale_to_cm)
+    node_matrix = tr_name
+    if csg_lids and child_def in csg_lids:
+        hook = import_csg_hook()
+        node_matrix = f"{tr_name}_placed"
+        out += hook.emit_csg_composed_placement_cpp(
+            tr_name, hook.csg_placement_var(child_def, sanitize_cpp_name), node_matrix) + "\n"
+    return out + f"  {parent_cpp}->AddNode({child_cpp}, {copy_no}, {node_matrix});\n"
 
 
 
@@ -3670,16 +3889,26 @@ def emit_root_macro(
     for lid in sorted(assemblies):
         cpp.append(emit_assembly_cpp(lid, def_names.get(lid, "")))
 
+    csg_lids = set(csg_files)
     for idx, (parent, child, trsf) in enumerate(placements, start=1):
-        cpp.append(emit_placement_cpp(parent, child, trsf, idx, scale_to_cm))
+        cpp.append(emit_placement_cpp(parent, child, trsf, idx, scale_to_cm, csg_lids))
 
-    if len(top_defs) == 1:
+    # A top-level volume has no AddNode of its own, so a CSG shape placement would be dropped on
+    # the floor there. Wrapping it in a one-node assembly is the only place to put the matrix, and
+    # it is emitted only when there is a matrix to put.
+    placed_tops = sorted(lid for lid in top_defs if lid in csg_lids)
+    if len(top_defs) == 1 and not placed_tops:
         top = next(iter(top_defs))
         cpp.append(f"  return {cpp_var_for_def(top)};")
     else:
+        hook = import_csg_hook() if placed_tops else None
         cpp.append('  TGeoVolumeAssembly *asm_WORLD = new TGeoVolumeAssembly("WORLD");')
         for i, node in enumerate(sorted(top_defs), start=1):
-            cpp.append(f"  asm_WORLD->AddNode({cpp_var_for_def(node)}, {i});")
+            if node in csg_lids:
+                cpp.append(f"  asm_WORLD->AddNode({cpp_var_for_def(node)}, {i}, "
+                           f"{hook.csg_placement_var(node, sanitize_cpp_name)});")
+            else:
+                cpp.append(f"  asm_WORLD->AddNode({cpp_var_for_def(node)}, {i});")
         cpp.append("  return asm_WORLD;")
 
     cpp.append("}")
@@ -3794,7 +4023,7 @@ def main():
     args = ap.parse_args()
 
     if args.self_test:
-        sys.exit(1 if run_recognition_self_test() else 0)
+        sys.exit(1 if (run_recognition_self_test() + run_placement_self_test()) else 0)
     if args.step is None:
         ap.error("the following arguments are required: step (or pass --self-test)")
 
