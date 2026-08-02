@@ -68,10 +68,19 @@ and none of these has been tried:
 - **Mesh both sides of a shared edge from the same discretisation.** OCCT's incremental mesher can
   be driven so that adjacent faces reuse the edge polygon. If the 8-ulp instability is what it looks
   like, this is the direct fix for it.
-- **Repair the triangle soup.** CGAL's `Polygon_mesh_processing` (`stitch_borders`,
-  `orient_polygon_soup`, `polygon_soup_to_polygon_mesh`, `remove_self_intersections`) or MeshLab /
-  libigl equivalents. Powerful and well-tested, but a new external dependency in O2 is a real cost
-  and should not be paid before the OCCT-side options are shown to be insufficient.
+- **Repair the triangle soup.** CGAL's `Polygon_mesh_processing`, or MeshLab / libigl equivalents.
+
+  **CGAL is already a direct O2 dependency** — `alidist/o2.sh` lists `cgal` in O2's `requires`, and
+  `cgal/4.12.2` is loaded into the O2 build environment on this machine. Its
+  `include/CGAL/Polygon_mesh_processing/` carries exactly the headers this needs:
+  `stitch_borders.h`, `orient_polygon_soup.h`, `polygon_soup_to_polygon_mesh.h`, `repair.h`,
+  `self_intersections.h`, and `corefinement.h`. So the "new external dependency" objection this
+  option would normally carry **does not apply here** — the cost is writing the call, not adopting
+  the library. That moves CGAL from third choice to a genuine contender, and it is worth a
+  one-afternoon prototype rather than a design discussion.
+
+  Caveat, unverified: 4.12.2 is from 2018 and parts of the PMP repair API landed in later releases.
+  Check which entry points that version actually exposes before promising any particular one.
 - **Refuse rather than repair.** The cheapest honest option: make `meshClosedBody = false` a hard
   failure of the converter, so an unclosed mesh is never shipped and the part is reported as
   unrepresentable instead of silently leaky. This is not a substitute for healing but it is a
