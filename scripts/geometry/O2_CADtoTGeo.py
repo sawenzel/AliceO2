@@ -56,6 +56,7 @@ import re
 import struct
 import sys
 from array import array
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path as _Path
 from typing import Dict, List, Optional, Pattern, Tuple
@@ -2387,6 +2388,181 @@ def run_planar_trim_self_test() -> int:
     return failures
 
 
+# -------------------------------
+# Self-test for coincident placements (`--self-test`, fourth block)
+# -------------------------------
+
+def _self_test_shape_tool():
+    """A fresh, empty in-memory XCAF document, and its shape tool.
+
+    In memory rather than through a STEP file on purpose: the structures under test here are
+    pathological (a root whose first child contains its own siblings), and building them directly
+    is the only way to be sure the fixture has the shape the test claims it has, rather than
+    whatever a STEP writer chose to normalise it into.
+    """
+    doc = TDocStd_Document("selftest-placements")
+    return doc, XCAFDoc_DocumentTool.ShapeTool(doc.Main())
+
+
+def _self_test_shift(dx: float = 0.0, dy: float = 0.0, dz: float = 0.0) -> gp_Trsf:
+    trsf = gp_Trsf()
+    if (dx, dy, dz) != (0.0, 0.0, 0.0):
+        trsf.SetTranslation(gp_Vec(dx, dy, dz))
+    return trsf
+
+
+def _self_test_leaf(shape_tool, side: float):
+    return shape_tool.AddShape(BRepPrimAPI_MakeBox(side, side, side).Shape(), False)
+
+
+def _self_test_assembly(shape_tool, components):
+    """`components` is a sequence of (child label, gp_Trsf)."""
+    label = shape_tool.NewShape()
+    for child, trsf in components:
+        shape_tool.AddComponent(label, child, TopLoc_Location(trsf))
+    return label
+
+
+def _self_test_convert(shape_tool):
+    """Run the production traversal over an in-memory assembly and report what it placed.
+
+    Returns (report, leaf occurrences), where the occurrences are (definition, world transform
+    signature) pairs -- measured by walking the emitted graph, not read back out of the rule.
+    """
+    reset_graph()
+    report = expand_free_shapes(shape_tool, meshparam=None, scale_to_cm=1.0)
+    leaves = [occ for occ in enumerate_occurrences(placements, top_defs)
+              if occ[0] in logical_volumes]
+    return report, leaves
+
+
+def run_duplicate_placement_self_test() -> int:
+    """Assert that one definition at one world transform is placed exactly ONCE -- and that one
+    definition at two *different* world transforms is still placed twice.
+
+    `Stream_W_DoublePlacement.md`. ALICE3's `CAD_noETA.stp` declares its 103 solids twice each, at
+    exactly coincident matrices, because its root assembly lists the whole detector and, as
+    siblings of it, that assembly's own three children. The converter reproduced that into
+    `geom.C`, so no transport through the result was meaningful.
+
+    The fix is only correct if it keys on the (definition, world transform) PAIR. A rule keyed on
+    the definition would collapse legitimate instancing -- ALICE3 places `ST2487458_01` twelve
+    times -- and silently delete most of the detector. The second fixture below is that negative
+    control, and it is the check this block exists for: if the fix is wrong, it reports 1 where the
+    CAD says 2.
+
+    Returns the number of failures; prints one line per check.
+    """
+    failures = 0
+    checks = 0
+
+    def report(ok: bool, label: str, detail: str = ""):
+        nonlocal failures, checks
+        checks += 1
+        if not ok:
+            failures += 1
+        print(f"  [{'ok ' if ok else 'FAIL'}] {label}{(' -- ' + detail) if detail else ''}")
+
+    print("\nCoincident placements: one definition, one world transform, one placement "
+          "(Stream_W_DoublePlacement.md)")
+
+    # --- 1. the ALICE3 shape: a root whose FIRST child contains its own siblings ---------------
+    _doc, st = _self_test_shape_tool()
+    leaves = [_self_test_leaf(st, 1.0 + i) for i in range(3)]
+    subs = [_self_test_assembly(st, [(leaf, _self_test_shift(dx=10.0 * i))])
+            for i, leaf in enumerate(leaves)]
+    detector = _self_test_assembly(st, [(sub, gp_Trsf()) for sub in subs])
+    # The root lists the detector AND, at the identity beside it, the detector's own three
+    # children -- entity for entity what CAD_noETA.stp's root does.
+    _self_test_assembly(st, [(detector, gp_Trsf())] + [(sub, gp_Trsf()) for sub in subs])
+    st.UpdateAssemblies()
+    rep, occ = _self_test_convert(st)
+
+    report(rep["declared_leaf_placements"] == 6 and rep["declared_multiplicity"] == {2: 3},
+           "the fixture really does declare the ALICE3 defect: 3 solids, each declared twice at "
+           "the same place",
+           f"{rep['declared_leaf_placements']} declared, multiplicity "
+           f"{rep['declared_multiplicity']}")
+    report(len(occ) == 3, "it converts to 3 leaf placements, not 6", f"{len(occ)} placed")
+    report(len(set(occ)) == 3 and len(occ) == len(set(occ)),
+           "and no two of them share a definition and a world transform",
+           f"{len(set(occ))} distinct (definition, world transform) pair(s)")
+    report(rep["n_suppressed_by_rule"]["root-containment"] == 3,
+           "the root-containment rule is what fires, and it drops exactly the 3 root edges",
+           f"{rep['n_suppressed_by_rule']}")
+
+    # --- 2. THE negative control: legitimate instancing at two DIFFERENT transforms ------------
+    # If the rule ever keys on the definition rather than on (definition, world transform), this
+    # is what catches it, and it is the difference between a fix and a much worse bug.
+    _doc, st = _self_test_shape_tool()
+    leaf = _self_test_leaf(st, 2.0)
+    module = _self_test_assembly(st, [(leaf, gp_Trsf())])
+    _self_test_assembly(st, [(module, _self_test_shift(dx=0.0)),
+                             (module, _self_test_shift(dx=100.0))])
+    st.UpdateAssemblies()
+    rep, occ = _self_test_convert(st)
+    report(len(occ) == 2, "one sub-assembly instanced twice at DIFFERENT transforms still gets "
+                          "two placements", f"{len(occ)} placed")
+    report(len(set(sig for _lid, sig in occ)) == 2,
+           "and they are at two different world transforms, as the CAD says",
+           f"{len(set(sig for _lid, sig in occ))} distinct world transform(s)")
+    report(sum(rep["n_suppressed_by_rule"].values()) == 0,
+           "nothing is suppressed there", f"{rep['n_suppressed_by_rule']}")
+
+    # ... and the same model with a THIRD, coincident instance bolted on must lose exactly one.
+    _doc, st = _self_test_shape_tool()
+    leaf = _self_test_leaf(st, 2.0)
+    module = _self_test_assembly(st, [(leaf, gp_Trsf())])
+    _self_test_assembly(st, [(module, _self_test_shift(dx=0.0)),
+                             (module, _self_test_shift(dx=100.0)),
+                             (module, _self_test_shift(dx=100.0))])
+    st.UpdateAssemblies()
+    rep, occ = _self_test_convert(st)
+    report(len(occ) == 2 and len(set(occ)) == 2 and rep["declared_leaf_placements"] == 3,
+           "a third instance that coincides with the second is the one that goes",
+           f"{rep['declared_leaf_placements']} declared -> {len(occ)} placed at "
+           f"{len(set(occ))} distinct transform(s)")
+
+    # --- 3. the same definition at the same transform down two different assembly paths --------
+    _doc, st = _self_test_shape_tool()
+    shared_leaf = _self_test_leaf(st, 3.0)
+    own_left, own_right = _self_test_leaf(st, 4.0), _self_test_leaf(st, 5.0)
+    shared = _self_test_assembly(st, [(shared_leaf, gp_Trsf())])
+    at = _self_test_shift(dz=7.0)
+    left = _self_test_assembly(st, [(shared, at), (own_left, _self_test_shift(dx=20.0))])
+    right = _self_test_assembly(st, [(shared, at), (own_right, _self_test_shift(dx=40.0))])
+    _self_test_assembly(st, [(left, gp_Trsf()), (right, gp_Trsf())])
+    st.UpdateAssemblies()
+    rep, occ = _self_test_convert(st)
+    report(rep["declared_leaf_placements"] == 4 and len(occ) == 3,
+           "the same sub-assembly at the same transform down two assembly paths is placed once",
+           f"{rep['declared_leaf_placements']} declared -> {len(occ)} placed")
+    report(len(set(occ)) == len(occ),
+           "and the two paths' own, distinct parts both survive",
+           f"{len(set(occ))} distinct (definition, world transform) pair(s)")
+    report(rep["n_suppressed_by_rule"]["coincident-occurrence"] == 1
+           and rep["n_suppressed_by_rule"]["root-containment"] == 0,
+           "here it is the defensive rule that fires, not the structural one",
+           f"{rep['n_suppressed_by_rule']}")
+
+    # --- 4. the invariant on a real corpus, not only on a fixture ------------------------------
+    # Bagger is the control that must never move: 13 solids, 13 distinct signatures, no
+    # duplication declared anywhere in it. A fix that costs Bagger a single part is not a fix.
+    bagger = _Path(__file__).resolve().parent / "STEP_examples" / "Bagger.step"
+    if not bagger.exists():
+        report(False, "the count invariant holds on a real corpus (Bagger.step)",
+               f"missing corpus: {bagger}")
+    else:
+        extract_graph(str(bagger), meshparam=None, scale_to_cm=0.1)
+        occ = [o for o in enumerate_occurrences(placements, top_defs) if o[0] in logical_volumes]
+        report(len(occ) == 13 and len(set(occ)) == 13,
+               "the count invariant holds on a real corpus: Bagger.step has 13 placed solids in "
+               "and 13 out", f"{len(occ)} placed, {len(set(occ))} distinct")
+
+    print(f"\n{checks} checks, {failures} failure(s)")
+    return failures
+
+
 def _recognized_inner_wall(face, rec) -> Optional[bool]:
     """Decide, by measurement, which side of a RECOGNIZED quadric is outside the solid.
 
@@ -3563,6 +3739,19 @@ top_defs = set()                         # top definition lids
 visited_defs = set()                     # expanded defs
 
 
+def reset_graph() -> None:
+    """Clear the definition graph. One place, so `extract_graph` and the self-test agree."""
+    global logical_volumes, def_names, def_volumes_cm3, def_shapes, assemblies, placements, top_defs, visited_defs
+    logical_volumes = {}
+    def_names = {}
+    def_volumes_cm3 = {}
+    def_shapes = {}
+    assemblies = set()
+    placements = []
+    top_defs = set()
+    visited_defs = set()
+
+
 def cpp_var_for_def(lid: str) -> str:
     safe = sanitize_cpp_name(lid)
     return f"asm_{safe}" if lid in assemblies else f"vol_{safe}"
@@ -3743,6 +3932,258 @@ def expand_definition(
     return def_key
 
 
+# -------------------------------
+# Coincident placements: one definition, one world transform, ONE placement
+# -------------------------------
+#
+# `Stream_W_DoublePlacement.md`. ALICE3's `CAD_noETA.stp` declares every one of its 103 solids
+# twice at an exactly identical world matrix, because its root assembly lists the whole detector
+# AND, as siblings of it, that assembly's own three children -- all four at the identity. The
+# traversal above reproduces that faithfully (`visited_defs` stops re-*expansion* but still
+# appends a placement edge per child), so the emitted `geom.C` builds the detector twice, on top
+# of itself.
+#
+# The rule below keys on the **(definition, world transform)** pair and on nothing else. That
+# distinction is the whole design: two placements of the same definition at DIFFERENT transforms
+# are what instancing IS -- ALICE3 places `ST2487458_01` twelve times -- and a rule keyed on the
+# definition alone would delete most of the detector. `run_duplicate_placement_self_test()` holds
+# that line with a fixture that instances one sub-assembly twice and must still get two.
+
+_PLACEMENT_SIG_DIGITS = 9
+
+
+def trsf_signature(trsf: gp_Trsf, ndigits: int = _PLACEMENT_SIG_DIGITS) -> tuple:
+    """A hashable stand-in for a world transform: the 12 matrix entries, rounded.
+
+    Rounded, because two routes through the assembly graph compose the same placement in a
+    different order and can land a few ulps apart. Rounding can only ever cost us a *missed*
+    duplicate, and a missed duplicate leaves geometry exactly where the CAD put it -- the safe
+    direction to be wrong in. The unsafe direction, deleting a real instance, is unreachable from
+    here because two genuinely distinct placements are never within 1e-9 model units of each other.
+    """
+    return tuple(round(trsf.Value(r, c), ndigits) for r in range(1, 4) for c in range(1, 5))
+
+
+_IDENTITY_TRSF_SIG = trsf_signature(gp_Trsf())
+
+
+def _placement_children(placements_list) -> Dict[str, List[tuple]]:
+    """parent def key -> [(edge index, child def key, local transform), ...], in emission order."""
+    kids: Dict[str, List[tuple]] = {}
+    for idx, (parent, child, trsf) in enumerate(placements_list):
+        kids.setdefault(parent, []).append((idx, child, trsf))
+    return kids
+
+
+def enumerate_occurrences(placements_list, tops, suppressed=frozenset(), limit=8_000_000):
+    """Every occurrence the geometry would contain, WITH multiplicity.
+
+    This is the *measurement*, deliberately independent of the de-duplication rule: it just walks
+    the graph and writes down what it finds, so it can be used both to state the defect (206
+    leaves, each pair coincident) and to confirm the fix (103 leaves, all distinct).
+
+    Returns a list of (def_key, world transform signature) in depth-first order.
+    """
+    kids = _placement_children(placements_list)
+    out: List[tuple] = []
+    stack = [(top, gp_Trsf()) for top in sorted(tops, reverse=True)]
+    while stack:
+        key, world = stack.pop()
+        out.append((key, trsf_signature(world)))
+        if len(out) > limit:
+            raise RuntimeError(
+                f"assembly graph expands past {limit} occurrences; it is probably cyclic")
+        for idx, child, trsf in reversed(kids.get(key, ())):
+            if idx in suppressed:
+                continue
+            stack.append((child, _compose_trsf(world, trsf)))
+    return out
+
+
+def _walk_distinct_occurrences(kids, tops, suppressed):
+    """Depth-first over DISTINCT (def_key, world signature) occurrences.
+
+    Returns (seen, discoverer) where `seen` maps each distinct occurrence to its world transform
+    and `discoverer` maps it to the index of the placement edge that first reached it. Marking
+    happens at *visit* time, not at push time, so the first child of a node is fully expanded
+    before its siblings are looked at -- which is what makes the surviving structure the deep one
+    rather than a flattened root.
+    """
+    seen: Dict[tuple, gp_Trsf] = {}
+    discoverer: Dict[tuple, int] = {}
+    stack = [(top, gp_Trsf(), _IDENTITY_TRSF_SIG, -1) for top in sorted(tops, reverse=True)]
+    while stack:
+        key, world, sig, via = stack.pop()
+        if (key, sig) in seen:
+            continue
+        seen[(key, sig)] = world
+        if via >= 0:
+            discoverer[(key, sig)] = via
+        for idx, child, trsf in reversed(kids.get(key, ())):
+            if idx in suppressed:
+                continue
+            cworld = _compose_trsf(world, trsf)
+            stack.append((child, cworld, trsf_signature(cworld), idx))
+    return seen, discoverer
+
+
+def _occurrence_reachable_below(kids, start_def, start_world, target, suppressed) -> bool:
+    """Is `target` == (def_key, world signature) placed strictly BELOW this occurrence?"""
+    visited = set()
+    stack = [(start_def, start_world, True)]
+    while stack:
+        key, world, is_start = stack.pop()
+        if not is_start:
+            sig = trsf_signature(world)
+            if (key, sig) in visited:
+                continue
+            visited.add((key, sig))
+            if (key, sig) == target:
+                return True
+        for idx, child, trsf in kids.get(key, ()):
+            if idx in suppressed:
+                continue
+            stack.append((child, _compose_trsf(world, trsf), False))
+    return False
+
+
+def deduplicate_placements(placements_list, tops, leaf_keys):
+    """Suppress the placement edges that would build one definition twice in the same place.
+
+    Two rules, applied in this order.
+
+    1. **Root containment** -- the structural one, and the one that names ALICE3's defect. A child
+       of a top-level definition that a *sibling* child of the same top-level definition already
+       places, at the same world transform, is not placed at top level a second time. It needs no
+       further safety argument: a top-level definition occurs exactly once, so dropping one of its
+       edges cannot remove a placement from some other instance of the same parent.
+
+    2. **Defensive (definition, world transform) de-duplication** -- for anything rule 1 misses,
+       e.g. one sub-assembly reached at the same place down two different paths. A placement edge
+       *every* one of whose occurrences lands on a pair that another edge already discovered
+       contributes nothing, and is dropped.
+
+       "Every one of whose occurrences" is load-bearing. `placements` is keyed by *definition*, so
+       an edge that is redundant under one instance of its parent but needed under another CANNOT
+       be dropped -- that would delete the needed one too. Such edges are reported and left alone;
+       removing them would need the parent definition split per instance, which is a bigger change
+       than this defect justifies, and no corpus has one.
+
+    Returns (kept placements, report dict).
+    """
+    kids = _placement_children(placements_list)
+    suppressed: set = set()
+    by_rule: Dict[str, List[int]] = {"root-containment": [], "coincident-occurrence": []}
+
+    # --- rule 1: a root child that another root child already contains -----------------------
+    for top in sorted(tops):
+        siblings = [(idx, child, trsf_signature(trsf), trsf) for idx, child, trsf in kids.get(top, ())]
+        for jdx, jchild, jsig, _jtrsf in siblings:
+            for idx, ichild, _isig, itrsf in siblings:
+                if idx == jdx or idx in suppressed:
+                    continue
+                if _occurrence_reachable_below(kids, ichild, itrsf, (jchild, jsig), suppressed):
+                    suppressed.add(jdx)
+                    by_rule["root-containment"].append(jdx)
+                    break
+
+    # --- rule 2: whatever is left that is still coincident, to a fixed point ------------------
+    partial: Dict[int, tuple] = {}
+    for _ in range(64):
+        seen, discoverer = _walk_distinct_occurrences(kids, tops, suppressed)
+        total = [0] * len(placements_list)
+        for (key, _sig), world in seen.items():
+            for idx, _child, _trsf in kids.get(key, ()):
+                if idx not in suppressed:
+                    total[idx] += 1
+        kept = [0] * len(placements_list)
+        for idx in discoverer.values():
+            kept[idx] += 1
+        newly, partial = set(), {}
+        for idx in range(len(placements_list)):
+            if idx in suppressed or total[idx] == 0:
+                continue
+            if kept[idx] == 0:
+                newly.add(idx)
+            elif kept[idx] < total[idx]:
+                partial[idx] = (kept[idx], total[idx])
+        if not newly:
+            break
+        suppressed |= newly
+        by_rule["coincident-occurrence"].extend(sorted(newly))
+    else:                                                        # pragma: no cover - pathological
+        raise RuntimeError("coincident-placement de-duplication did not converge")
+
+    declared = [occ for occ in enumerate_occurrences(placements_list, tops) if occ[0] in leaf_keys]
+    emitted = [occ for occ in enumerate_occurrences(placements_list, tops, suppressed)
+               if occ[0] in leaf_keys]
+    kept_placements = [p for idx, p in enumerate(placements_list) if idx not in suppressed]
+    report = {
+        "declared_leaf_placements": len(declared),
+        "distinct_leaf_placements": len(set(declared)),
+        "emitted_leaf_placements": len(emitted),
+        "declared_multiplicity": dict(sorted(Counter(Counter(declared).values()).items())),
+        "emitted_multiplicity": dict(sorted(Counter(Counter(emitted).values()).items())),
+        "suppressed_edges": [(placements_list[i][0], placements_list[i][1], rule)
+                             for rule, idxs in by_rule.items() for i in sorted(idxs)],
+        "n_suppressed_by_rule": {rule: len(idxs) for rule, idxs in by_rule.items()},
+        "partial_edges": [(placements_list[i][0], placements_list[i][1]) + v
+                          for i, v in sorted(partial.items())],
+    }
+    return kept_placements, report
+
+
+def report_duplicate_placements(report: dict, names: Optional[Dict[str, str]] = None) -> None:
+    """Say it out loud, every run. A model that declares coincident duplicates is telling us
+    something about the CAD, and silence here would hide the next one."""
+    names = names or {}
+    n_sup = sum(report["n_suppressed_by_rule"].values())
+    declared, distinct = report["declared_leaf_placements"], report["distinct_leaf_placements"]
+    if n_sup == 0 and declared == distinct:
+        print(f"Placement check: {declared} leaf placement(s), all at distinct world transforms.")
+        return
+
+    print(f"WARNING: this CAD model DECLARES {declared - distinct} leaf solid placement(s) that "
+          f"coincide exactly with another placement of the same solid.")
+    print(f"  The assembly structure in the file says so -- these are not an artefact of this "
+          f"traversal, which walks the STEP product structure edge for edge.")
+    print(f"  Leaf placements: {declared} declared "
+          f"(multiplicity {report['declared_multiplicity']}) -> {distinct} distinct.")
+    print(f"  Suppressed {n_sup} placement edge(s) so that no definition is built twice at the "
+          f"same world transform "
+          f"({', '.join(f'{n} by {rule}' for rule, n in report['n_suppressed_by_rule'].items())}):")
+    for parent, child, rule in report["suppressed_edges"]:
+        pn, cn = names.get(parent, "") or parent, names.get(child, "") or child
+        print(f"    dropped {pn} -> {cn}   [{rule}]")
+    print(f"  Emitting {report['emitted_leaf_placements']} leaf placement(s) "
+          f"(multiplicity {report['emitted_multiplicity']}).")
+    for parent, child, kept, total in report["partial_edges"]:
+        pn, cn = names.get(parent, "") or parent, names.get(child, "") or child
+        print(f"  WARNING: {pn} -> {cn} is coincident for {total - kept} of its {total} instances "
+              f"and NOT suppressed: the placement graph is keyed by definition, so dropping it "
+              f"would delete the {kept} instance(s) that are needed.")
+
+
+def verify_placement_invariant(placements_list, tops, leaf_keys) -> dict:
+    """The permanent check, run on every conversion: leaf placements in == leaf placements out,
+    and no two of them share a definition *and* a world transform.
+
+    Raises rather than warns. The requirement this enforces is not a preference -- a geometry with
+    two volumes in the same place has no defined transport through it, so emitting one is worse
+    than refusing to.
+    """
+    occ = [o for o in enumerate_occurrences(placements_list, tops) if o[0] in leaf_keys]
+    multiplicity = Counter(Counter(occ).values())
+    if set(multiplicity) - {1}:
+        worst = Counter(occ).most_common(1)[0]
+        raise RuntimeError(
+            f"placement invariant violated: {len(occ)} leaf placements hold only "
+            f"{len(set(occ))} distinct (definition, world transform) pairs "
+            f"(multiplicity {dict(sorted(multiplicity.items()))}); e.g. {worst[0][0]} is placed "
+            f"{worst[1]} times at the same world matrix")
+    return {"leaf_placements": len(occ), "multiplicity": dict(sorted(multiplicity.items()))}
+
+
 def extract_graph(
     step_path: str,
     meshparam=None,
@@ -3751,17 +4192,34 @@ def extract_graph(
     clip_deduplicate: str = "intact",
     name_filter: Optional[NameFilter] = None,
 ):
-    global logical_volumes, def_names, def_volumes_cm3, def_shapes, assemblies, placements, top_defs, visited_defs
-    logical_volumes = {}
-    def_names = {}
-    def_volumes_cm3 = {}
-    def_shapes = {}
-    assemblies = set()
-    placements = []
-    top_defs = set()
-    visited_defs = set()
-
+    reset_graph()
     doc, shape_tool = load_step_with_xcaf(step_path)
+    expand_free_shapes(
+        shape_tool,
+        meshparam=meshparam,
+        scale_to_cm=scale_to_cm,
+        clip_box=clip_box,
+        clip_deduplicate=clip_deduplicate,
+        name_filter=name_filter,
+    )
+    return doc, shape_tool
+
+
+def expand_free_shapes(
+    shape_tool,
+    meshparam=None,
+    scale_to_cm: float = 1.0,
+    clip_box: Optional[ClipBox] = None,
+    clip_deduplicate: str = "intact",
+    name_filter: Optional[NameFilter] = None,
+):
+    """Expand every XCAF free shape into the definition graph, then make the placements unique.
+
+    Split out of `extract_graph` so the self-test can drive exactly this traversal on an assembly
+    built in memory -- the pathological shapes it needs cannot be got at through a STEP file
+    without shipping one.
+    """
+    global placements
     clip_box_shape = make_clip_box_shape(clip_box) if clip_box is not None else None
 
     roots = TDF_LabelSequence()
@@ -3773,33 +4231,25 @@ def extract_graph(
         if shape_tool.IsReference(root):
             ref = TDF_Label()
             shape_tool.GetReferredShape(root, ref)
-            top = expand_definition(
-                ref,
-                shape_tool,
-                meshparam=meshparam,
-                scale_to_cm=scale_to_cm,
-                clip_box=clip_box,
-                clip_box_shape=clip_box_shape,
-                clip_deduplicate=clip_deduplicate,
-                name_filter=name_filter,
-                occ_path=root_occ_path,
-            )
-        else:
-            top = expand_definition(
-                root,
-                shape_tool,
-                meshparam=meshparam,
-                scale_to_cm=scale_to_cm,
-                clip_box=clip_box,
-                clip_box_shape=clip_box_shape,
-                clip_deduplicate=clip_deduplicate,
-                name_filter=name_filter,
-                occ_path=root_occ_path,
-            )
+            root = ref
+        top = expand_definition(
+            root,
+            shape_tool,
+            meshparam=meshparam,
+            scale_to_cm=scale_to_cm,
+            clip_box=clip_box,
+            clip_box_shape=clip_box_shape,
+            clip_deduplicate=clip_deduplicate,
+            name_filter=name_filter,
+            occ_path=root_occ_path,
+        )
         if top is not None:
             top_defs.add(top)
 
-    return doc, shape_tool
+    placements, dup_report = deduplicate_placements(placements, top_defs, set(logical_volumes))
+    report_duplicate_placements(dup_report, def_names)
+    verify_placement_invariant(placements, top_defs, set(logical_volumes))
+    return dup_report
 
 
 # -------------------------------
@@ -4299,7 +4749,8 @@ def main():
 
     if args.self_test:
         sys.exit(1 if (run_recognition_self_test() + run_placement_self_test()
-                       + run_planar_trim_self_test()) else 0)
+                       + run_planar_trim_self_test()
+                       + run_duplicate_placement_self_test()) else 0)
     if args.step is None:
         ap.error("the following arguments are required: step (or pass --self-test)")
 
