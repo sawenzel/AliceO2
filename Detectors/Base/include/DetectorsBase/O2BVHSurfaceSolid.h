@@ -537,6 +537,30 @@ class O2BVHSurfaceSolid : public TGeoBBox
   const TBuffer3D& GetBuffer3D(int reqSections, Bool_t localFrame) const override;
   void GetMeshNumbers(int& nvert, int& nsegs, int& npols) const override;
   int GetNmeshVertices() const override;
+
+  /// Fill \a array with \a npoints points **on this solid's boundary**, three doubles each.
+  ///
+  /// This is the sampling contract every ROOT tool that wants "points on this shape" goes through
+  /// -- `TGeoChecker::MakeCheckOverlap` above all, which is `TGeoManager::CheckOverlaps` and so is
+  /// the only overlap check most users will ever run. The inherited `TGeoBBox` implementation is
+  /// wrong here in a way that matters: it interpolates *along the display mesh's segments*, and a
+  /// chord of a curved patch does not lie on the patch. Measured on the converted Bagger world,
+  /// asking for 8000 points put 48-67 % of every surface solid's points off its own surface, by up
+  /// to **1.0 cm** -- which is where `CheckOverlaps`' phantom overlaps came from, not from any
+  /// property of the geometry. See scripts/geometry/Stream_V_OverlapCheck.md S1.
+  ///
+  /// Points generated here are projected back onto the exact trimmed patch they came from and are
+  /// on it to kSurfacePointTolerance; the display mesh is used only to decide *where* to sample,
+  /// never as the answer. Returns kFALSE, deliberately and silently, when \a npoints is below
+  /// GetNmeshVertices(): ROOT then falls back to SetPoints(), which hands it the *whole* display
+  /// vertex set -- more points than were asked for and every one of them exactly on a patch. That
+  /// is strictly the better answer, and it is also what the base class does, minus the error.
+  Bool_t GetPointsOnSegments(Int_t npoints, Double_t* array) const override;
+
+  /// The tolerance GetPointsOnSegments() holds its points to, in cm. A point further than this
+  /// from its own patch is replaced by an exact display-mesh vertex rather than emitted.
+  static constexpr double kSurfacePointTolerance = 1.e-11;
+
   void InspectShape() const override {}
   TBuffer3D* MakeBuffer3D() const override;
   void Print(Option_t* option = "") const override;
@@ -603,6 +627,12 @@ class O2BVHSurfaceSolid : public TGeoBBox
   /// undefined, i.e. NavigationReliability::Undetermined) when there is nothing to replay or when
   /// a record does not rebuild -- an unusable solid must never present itself as a usable one.
   bool RebuildFromRecords();
+
+  /// Walk \a point onto the trimmed patch \a surfaceIndex along the patch normal, iterating until
+  /// distanceSqToPatch is within kSurfacePointTolerance. False when it does not get there, which
+  /// is the caller's signal to fall back on a display-mesh vertex instead of emitting a point that
+  /// is not on the solid.
+  bool ProjectOntoPatch(int surfaceIndex, double* point) const;
 
   struct Impl;
   Impl* fImpl = nullptr; //! private bounded-surface implementation
