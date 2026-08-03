@@ -485,6 +485,67 @@ void O2Tessellated::GetMeshNumbers(int& nvert, int& nsegs, int& npols) const
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+/// Fill array with npoints points on the solid's boundary. See the header.
+
+Bool_t O2Tessellated::GetPointsOnSegments(Int_t npoints, Double_t* array) const
+{
+  if (array == nullptr || npoints <= 0 || fVertices.empty()) {
+    return kFALSE;
+  }
+  const int vertexCount = static_cast<int>(fVertices.size());
+  if (npoints < vertexCount) {
+    // Hand the caller back to SetPoints(), which gives it every vertex -- more points than asked
+    // for, all of them exactly on the shape.
+    return kFALSE;
+  }
+  for (int vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex) {
+    fVertices[vertexIndex].CopyTo(&array[3 * vertexIndex]);
+  }
+
+  const int extraCount = npoints - vertexCount;
+  const int facetCount = static_cast<int>(fFacets.size());
+  if (extraCount == 0) {
+    return kTRUE;
+  }
+  if (facetCount == 0) {
+    for (int extraIndex = 0; extraIndex < extraCount; ++extraIndex) {
+      fVertices[extraIndex % vertexCount].CopyTo(&array[3 * (vertexCount + extraIndex)]);
+    }
+    return kTRUE;
+  }
+
+  // The same deterministic R2 low-discrepancy pair O2BVHSurfaceSolid::GetPointsOnSegments uses:
+  // what a shape hands out must depend on the shape and on nothing else.
+  constexpr double kAlpha1 = 0.7548776662466927;
+  constexpr double kAlpha2 = 0.5698402909980532;
+  for (int extraIndex = 0; extraIndex < extraCount; ++extraIndex) {
+    const int facetIndex =
+      static_cast<int>((static_cast<long long>(extraIndex) * facetCount) / extraCount) % facetCount;
+    const TGeoFacet& facet = fFacets[facetIndex];
+    const int facetVertices = facet.GetNvert();
+    double first = std::fmod(0.5 + kAlpha1 * (extraIndex + 1), 1.);
+    double second = std::fmod(0.5 + kAlpha2 * (extraIndex + 1), 1.);
+    if (first + second > 1.) {
+      first = 1. - first;
+      second = 1. - second;
+    }
+    // A quad facet is two triangles sharing vertex 0; pick one by the parity of the sample index
+    // so both halves are covered.
+    const int cornerB = (facetVertices > 3 && (extraIndex & 1)) ? 2 : 1;
+    const int cornerC = (facetVertices > 3 && (extraIndex & 1)) ? 3 : ((facetVertices > 2) ? 2 : 1);
+    const Vertex_t& vertexA = fVertices[facet[0]];
+    const Vertex_t& vertexB = fVertices[facet[cornerB]];
+    const Vertex_t& vertexC = fVertices[facet[cornerC]];
+    const double weightA = 1. - first - second;
+    double* slot = &array[3 * (vertexCount + extraIndex)];
+    slot[0] = weightA * vertexA.x() + first * vertexB.x() + second * vertexC.x();
+    slot[1] = weightA * vertexA.y() + first * vertexB.y() + second * vertexC.y();
+    slot[2] = weightA * vertexA.z() + first * vertexB.z() + second * vertexC.z();
+  }
+  return kTRUE;
+}
+
+////////////////////////////////////////////////////////////////////////////////
 /// Creates a TBuffer3D describing *this* shape.
 /// Coordinates are in local reference frame.
 

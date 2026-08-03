@@ -32,6 +32,7 @@ o2_add_library(DetectorsBase
                        src/O2Tessellated.cxx
                        src/O2BVHSurfaceSolid.cxx
                        src/O2SurfaceSolidIO.cxx
+                       src/O2OverlapCheck.cxx
                        src/O2SolidHarness.cxx
                        src/TGeoGeometryUtils.cxx
                        src/CADGeometryUtils.cxx
@@ -98,6 +99,18 @@ o2_add_executable(
   SOURCES test/runXRayBenchmark.cxx
   IS_BENCHMARK
   PUBLIC_LINK_LIBRARIES O2::DetectorsBase ROOT::Geom ROOT::RIO
+                        nlohmann_json::nlohmann_json)
+
+# Assembly legality (scripts/geometry/Stream_V_OverlapCheck.md). A third binary rather than a mode
+# of the other two because it is the only instrument here whose subject is a *world* -- several
+# placed solids at once -- rather than one leaf solid, and because it must run on any TGeo geometry
+# file, including ones this project did not produce.
+o2_add_executable(
+  overlap
+  COMPONENT_NAME DetectorsBase
+  SOURCES test/runOverlapCensus.cxx
+  IS_BENCHMARK
+  PUBLIC_LINK_LIBRARIES O2::DetectorsBase ROOT::Geom ROOT::GeomPainter ROOT::RIO
                         nlohmann_json::nlohmann_json)
 
 if(BUILD_SIMULATION)

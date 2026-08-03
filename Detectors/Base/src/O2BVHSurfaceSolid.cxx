@@ -467,6 +467,12 @@ struct O2BVHSurfaceSolid::Impl {
   std::vector<std::unique_ptr<BoundedSurface>> surfaces;
   std::vector<Vec3> displayVertices;
   std::vector<std::array<int, 3>> displayTriangles;
+  /// Which surface each display triangle came from, parallel to displayTriangles. The display mesh
+  /// is assembled by calling appendDisplayMesh once per bounded surface, so the provenance is free
+  /// at build time -- and it is the only thing that lets a point sampled inside a triangle be put
+  /// back onto the *exact* patch that triangle approximates. Without it a sampled point is stuck
+  /// on the polygon. See GetPointsOnSegments.
+  std::vector<int> displayTriangleSurface;
   ClosureReport closure;
   /// closure.rimRecords in the public form, built once by CloseShape so the accessor can hand out
   /// a reference. The two are the same data; only the state enum and the Vec3 differ in type.
@@ -957,6 +963,7 @@ bool O2BVHSurfaceSolid::AddPlanarSurface(const Point3D& origin, const Point3D& a
   fImpl->surfaces.emplace_back(std::move(surface));
   fImpl->displayVertices.clear();
   fImpl->displayTriangles.clear();
+  fImpl->displayTriangleSurface.clear();
   return true;
 }
 
@@ -1019,6 +1026,7 @@ bool O2BVHSurfaceSolid::AddCurvedPlanarSurface(const Point3D& origin, const Poin
   fImpl->surfaces.emplace_back(std::move(surface));
   fImpl->displayVertices.clear();
   fImpl->displayTriangles.clear();
+  fImpl->displayTriangleSurface.clear();
   return true;
 }
 
@@ -1048,6 +1056,7 @@ bool O2BVHSurfaceSolid::AddCylindricalSurface(const Point3D& centerPoint, const 
   fImpl->surfaces.emplace_back(std::move(surface));
   fImpl->displayVertices.clear();
   fImpl->displayTriangles.clear();
+  fImpl->displayTriangleSurface.clear();
   return true;
 }
 
@@ -1088,6 +1097,7 @@ bool O2BVHSurfaceSolid::AddCylindricalSurface(const Point3D& centerPoint, const 
   fImpl->surfaces.emplace_back(std::move(surface));
   fImpl->displayVertices.clear();
   fImpl->displayTriangles.clear();
+  fImpl->displayTriangleSurface.clear();
   return true;
 }
 
@@ -1117,6 +1127,7 @@ bool O2BVHSurfaceSolid::AddSphericalSurface(const Point3D& center, const Point3D
   fImpl->surfaces.emplace_back(std::move(surface));
   fImpl->displayVertices.clear();
   fImpl->displayTriangles.clear();
+  fImpl->displayTriangleSurface.clear();
   return true;
 }
 
@@ -1157,6 +1168,7 @@ bool O2BVHSurfaceSolid::AddSphericalSurface(const Point3D& center, const Point3D
   fImpl->surfaces.emplace_back(std::move(surface));
   fImpl->displayVertices.clear();
   fImpl->displayTriangles.clear();
+  fImpl->displayTriangleSurface.clear();
   return true;
 }
 
@@ -1188,6 +1200,7 @@ bool O2BVHSurfaceSolid::AddConicalSurface(const Point3D& centerPoint, const Poin
   fImpl->surfaces.emplace_back(std::move(surface));
   fImpl->displayVertices.clear();
   fImpl->displayTriangles.clear();
+  fImpl->displayTriangleSurface.clear();
   return true;
 }
 
@@ -1229,6 +1242,7 @@ bool O2BVHSurfaceSolid::AddConicalSurface(const Point3D& centerPoint, const Poin
   fImpl->surfaces.emplace_back(std::move(surface));
   fImpl->displayVertices.clear();
   fImpl->displayTriangles.clear();
+  fImpl->displayTriangleSurface.clear();
   return true;
 }
 
@@ -1260,6 +1274,7 @@ bool O2BVHSurfaceSolid::AddToroidalSurface(const Point3D& centerPoint, const Poi
   fImpl->surfaces.emplace_back(std::move(surface));
   fImpl->displayVertices.clear();
   fImpl->displayTriangles.clear();
+  fImpl->displayTriangleSurface.clear();
   return true;
 }
 
@@ -1301,6 +1316,7 @@ bool O2BVHSurfaceSolid::AddToroidalSurface(const Point3D& centerPoint, const Poi
   fImpl->surfaces.emplace_back(std::move(surface));
   fImpl->displayVertices.clear();
   fImpl->displayTriangles.clear();
+  fImpl->displayTriangleSurface.clear();
   return true;
 }
 
@@ -1328,8 +1344,11 @@ void O2BVHSurfaceSolid::CloseShape(bool check)
 
   fImpl->displayVertices.clear();
   fImpl->displayTriangles.clear();
-  for (const auto& surface : fImpl->surfaces) {
-    surface->appendDisplayMesh(fImpl->displayVertices, fImpl->displayTriangles);
+  fImpl->displayTriangleSurface.clear();
+  for (size_t surfaceIndex = 0; surfaceIndex < fImpl->surfaces.size(); ++surfaceIndex) {
+    fImpl->surfaces[surfaceIndex]->appendDisplayMesh(fImpl->displayVertices, fImpl->displayTriangles);
+    // resize() only writes the entries it adds, so each surface stamps exactly its own triangles.
+    fImpl->displayTriangleSurface.resize(fImpl->displayTriangles.size(), static_cast<int>(surfaceIndex));
   }
 
   fImpl->closure = validateClosure(fImpl->surfaces, fModelTolerance);
@@ -1726,6 +1745,139 @@ void O2BVHSurfaceSolid::GetMeshNumbers(int& nvert, int& nsegs, int& npols) const
 int O2BVHSurfaceSolid::GetNmeshVertices() const
 {
   return fImpl == nullptr ? 0 : static_cast<int>(fImpl->displayVertices.size());
+}
+
+namespace
+{
+/// A deterministic, low-discrepancy pair in [0,1)^2 -- the R2 (generalised golden-ratio) sequence.
+/// Deterministic matters more here than it usually does: the point set a shape hands out decides
+/// what an overlap check sees, so two runs that disagree must be a geometry difference and never a
+/// seed difference. Low-discrepancy matters because a triangle receives only a handful of samples
+/// and a pseudo-random pair clumps at that count.
+void r2Pair(long long index, double& firstCoordinate, double& secondCoordinate)
+{
+  constexpr double kAlpha1 = 0.7548776662466927; // 1 / plastic number
+  constexpr double kAlpha2 = 0.5698402909980532; // 1 / plastic number^2
+  const double shifted = static_cast<double>(index + 1);
+  firstCoordinate = std::fmod(0.5 + kAlpha1 * shifted, 1.);
+  secondCoordinate = std::fmod(0.5 + kAlpha2 * shifted, 1.);
+}
+} // namespace
+
+/// Newton on the patch distance along the patch normal. Two steps suffice on every family in the
+/// corpus (a plane converges in one, exactly), but the loop is cheap and the *verdict* is what is
+/// returned: a caller must not emit a point this could not put on the surface.
+bool O2BVHSurfaceSolid::ProjectOntoPatch(int surfaceIndex, double* point) const
+{
+  if (fImpl == nullptr || surfaceIndex < 0 || static_cast<size_t>(surfaceIndex) >= fImpl->surfaces.size()) {
+    return false;
+  }
+  const BoundedSurface& surface = *fImpl->surfaces[surfaceIndex];
+  constexpr double kToleranceSquared = kSurfacePointTolerance * kSurfacePointTolerance;
+
+  Vec3 current = makeVec3(point);
+  double currentDistanceSq = surface.distanceSqToPatch(current);
+  for (int iteration = 0; iteration < 8 && currentDistanceSq > kToleranceSquared; ++iteration) {
+    const double distance = std::sqrt(currentDistanceSq);
+    const Vec3 normal = surface.normalAt(current);
+    const Vec3 inward{current.xCoord - distance * normal.xCoord, current.yCoord - distance * normal.yCoord,
+                      current.zCoord - distance * normal.zCoord};
+    const Vec3 outward{current.xCoord + distance * normal.xCoord, current.yCoord + distance * normal.yCoord,
+                       current.zCoord + distance * normal.zCoord};
+    const double inwardDistanceSq = surface.distanceSqToPatch(inward);
+    const double outwardDistanceSq = surface.distanceSqToPatch(outward);
+    const double bestDistanceSq = std::min(inwardDistanceSq, outwardDistanceSq);
+    // Not converging: the nearest point of the patch is not along its own normal from here, which
+    // happens when the sample falls outside the trim and the nearest point is on the trim wire.
+    // Say so rather than emit whatever the last iterate happened to be.
+    if (!(bestDistanceSq < currentDistanceSq)) {
+      return false;
+    }
+    current = (inwardDistanceSq < outwardDistanceSq) ? inward : outward;
+    currentDistanceSq = bestDistanceSq;
+  }
+
+  if (currentDistanceSq > kToleranceSquared) {
+    return false;
+  }
+  point[0] = current.xCoord;
+  point[1] = current.yCoord;
+  point[2] = current.zCoord;
+  return true;
+}
+
+Bool_t O2BVHSurfaceSolid::GetPointsOnSegments(Int_t npoints, Double_t* array) const
+{
+  if (array == nullptr || npoints <= 0 || fImpl == nullptr || fImpl->displayVertices.empty()) {
+    return kFALSE;
+  }
+  const int vertexCount = static_cast<int>(fImpl->displayVertices.size());
+  // Below the mesh size, hand the caller back to SetPoints(): it gets *more* points than it asked
+  // for and every one of them is a patch sample rather than something this method invented. The
+  // base class returns kFALSE here too; it just shouts about it first, on every shape, every run.
+  if (npoints < vertexCount) {
+    return kFALSE;
+  }
+
+  auto writeVertex = [&](int slot, const Vec3& vertex) {
+    array[3 * slot + 0] = vertex.xCoord;
+    array[3 * slot + 1] = vertex.yCoord;
+    array[3 * slot + 2] = vertex.zCoord;
+  };
+
+  for (int vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex) {
+    writeVertex(vertexIndex, fImpl->displayVertices[vertexIndex]);
+  }
+
+  const int extraCount = npoints - vertexCount;
+  const int triangleCount = static_cast<int>(fImpl->displayTriangles.size());
+  if (extraCount == 0) {
+    return kTRUE;
+  }
+  if (triangleCount == 0 || fImpl->displayTriangleSurface.size() != fImpl->displayTriangles.size()) {
+    // No triangles (or a mesh built before the provenance existed): repeat vertices rather than
+    // leave the tail of the buffer uninitialised, which the caller would read as coordinates.
+    for (int extraIndex = 0; extraIndex < extraCount; ++extraIndex) {
+      writeVertex(vertexCount + extraIndex, fImpl->displayVertices[extraIndex % vertexCount]);
+    }
+    return kTRUE;
+  }
+
+  for (int extraIndex = 0; extraIndex < extraCount; ++extraIndex) {
+    // Stride over the triangles rather than walking them in order, so a request that cannot cover
+    // every triangle still spreads over the whole solid instead of over its first few faces.
+    const int triangleIndex =
+      static_cast<int>((static_cast<long long>(extraIndex) * triangleCount) / extraCount) % triangleCount;
+    const auto& triangle = fImpl->displayTriangles[triangleIndex];
+    const Vec3& cornerA = fImpl->displayVertices[triangle[0]];
+    const Vec3& cornerB = fImpl->displayVertices[triangle[1]];
+    const Vec3& cornerC = fImpl->displayVertices[triangle[2]];
+
+    double firstCoordinate = 0.;
+    double secondCoordinate = 0.;
+    r2Pair(extraIndex, firstCoordinate, secondCoordinate);
+    if (firstCoordinate + secondCoordinate > 1.) {
+      firstCoordinate = 1. - firstCoordinate;
+      secondCoordinate = 1. - secondCoordinate;
+    }
+    const double weightA = 1. - firstCoordinate - secondCoordinate;
+    double candidate[3] = {weightA * cornerA.xCoord + firstCoordinate * cornerB.xCoord + secondCoordinate * cornerC.xCoord,
+                           weightA * cornerA.yCoord + firstCoordinate * cornerB.yCoord + secondCoordinate * cornerC.yCoord,
+                           weightA * cornerA.zCoord + firstCoordinate * cornerB.zCoord + secondCoordinate * cornerC.zCoord};
+
+    if (!ProjectOntoPatch(fImpl->displayTriangleSurface[triangleIndex], candidate)) {
+      // The honest fallback is a vertex of the very triangle the sample came from: it is on the
+      // patch by construction, so the point set stays exactly on the solid even where the
+      // projection gives up.
+      candidate[0] = cornerA.xCoord;
+      candidate[1] = cornerA.yCoord;
+      candidate[2] = cornerA.zCoord;
+    }
+    array[3 * (vertexCount + extraIndex) + 0] = candidate[0];
+    array[3 * (vertexCount + extraIndex) + 1] = candidate[1];
+    array[3 * (vertexCount + extraIndex) + 2] = candidate[2];
+  }
+  return kTRUE;
 }
 
 TBuffer3D* O2BVHSurfaceSolid::MakeBuffer3D() const
