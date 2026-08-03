@@ -88,6 +88,17 @@ class O2Tessellated : public TGeoBBox
   const TBuffer3D& GetBuffer3D(int reqSections, Bool_t localFrame) const override;
   void GetMeshNumbers(int& nvert, int& nsegs, int& npols) const override;
   int GetNmeshVertices() const override { return fNvert; }
+
+  /// Fill \a array with \a npoints points on this solid's boundary, three doubles each.
+  ///
+  /// The inherited TGeoBBox implementation interpolates along the mesh *segments*, so on a facet
+  /// it samples only the edges and, worse, ROOT's `nperseg = ipoints` on the final segment piles
+  /// the entire remainder onto one edge. A tessellated solid's facets *are* its boundary, so
+  /// sampling their interiors is both exact and the only way to cover the shape. Same contract and
+  /// same kFALSE-below-the-mesh-size convention as O2BVHSurfaceSolid::GetPointsOnSegments; see
+  /// scripts/geometry/Stream_V_OverlapCheck.md.
+  Bool_t GetPointsOnSegments(Int_t npoints, Double_t* array) const override;
+
   void InspectShape() const override {}
   TBuffer3D* MakeBuffer3D() const override;
   void Print(Option_t* option = "") const override;
