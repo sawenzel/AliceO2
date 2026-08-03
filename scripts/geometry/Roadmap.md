@@ -97,6 +97,49 @@ sit behind an interface thin enough that the engine is swappable, and any Embree
 **optional** — this branch is developed on aarch64, where the SIMD story differs. Worth keeping in
 mind while doing (c), since sub-surface indexing is a change to the same layer.
 
+### (e) Two mesh-precision knobs, and then vary them by physics relevance
+
+> *"We can easily make it separate for linear and angular and have 2 separate knobs. Then we can keep
+> in mind a physics perspective: Precision should be greater where it matters for us: Close to the
+> interaction point or within some small pseudo-rapidity. A tessellated far away in the experimental
+> pit does not need to be precise."*
+
+**The first half is half-done and the measurement behind it is the interesting part.** `--mesh-prec`
+currently sets `lin_defl` **and** `ang_defl` to the same value, and
+`Stream_P_RepresentationBench.md` §5 decoupled them experimentally (via a `remeshFromBrep.py` probe)
+and found that **`--mesh-prec` is an angular knob in disguise**: a 20× change in `lin_defl` at fixed
+`ang_defl` moved nothing measurable on Bagger. So splitting the flag is not cosmetic — one of the
+two was never doing anything, and anyone who has ever "tuned the mesh precision" on this project was
+tuning the angle.
+
+That matters for the second half, because the two knobs scale differently and the physics wants the
+one that is currently inert:
+
+- `lin_defl` is an **absolute** sagitta bound in cm. It means the same thing everywhere.
+- `ang_defl` is an **angle**, so it refines *relative* to curvature — on a large-radius surface far
+  from the IP it permits a large absolute error, which is exactly the regime this idea is about.
+
+So a physics-driven scheme most likely wants **`lin_defl` set per volume** as a function of position
+(distance from the IP, or |η|), with `ang_defl` held merely loose-enough to avoid degenerate
+faceting. Setting it the other way round would make the far-field *worse* than intended.
+
+**It would also fix the meshing memory problem directly.** ALICE3 cannot be meshed at the default
+0.1 — one **2 m sphere** reached 22.9 GB resident and was killed. That sphere is precisely a
+"far away, does not need precision" volume, so a spatially-varying scheme is not only a physics
+optimisation but the thing that makes meshing the full model tractable at all.
+
+**Two cautions, both measured, for whoever builds it:**
+
+1. **Mesh validity is non-monotone in precision.** Refining `BucketLink2` from 0.1 to 0.05 took it
+   from 6600 to **10697** LOST crossings and 673 → 1843 unterminated. "Coarser far away" therefore
+   cannot be assumed safe either — a per-volume precision scheme has to be **validated per volume**,
+   not signed off globally from a single deviation number. See [`MeshHealing.md`](MeshHealing.md).
+2. **Far from the IP, chordal deviation is the wrong acceptance criterion.** Those volumes are there
+   for their **material budget**, not their position, so what must be bounded is the volume error —
+   which the gate already computes as `capacityRelativeDeviation`, and which a coarse mesh degrades
+   in a way a sagitta bound does not describe. Suggest: near field gated on deviation, far field
+   gated on capacity, with the crossover stated explicitly rather than implied by a formula.
+
 ---
 
 ## Deferred, with the reason
