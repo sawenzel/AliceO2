@@ -1,0 +1,9 @@
+This BOM assigns ONE material to the whole oTOF module, per the integration-test brief:
+low Z (few secondaries) at moderate density (not air, not a stopper) -> POLYSTYRENE,
+i.e. plastic scintillator, which is also physically plausible for a TOF.
+The two part numbers below match every oTOF prototype by substring ('Module v1' matches
+'Module v1_s1' ... '_s17'; 'oTOF v2 v1' matches its 3 shell solids).
+Rows are in the design-team BOM format the converter parses: first column 'CAD',
+second 'Mechanical/Part'; mass left empty so density comes from the G4 NIST DB.
+CAD,Mechanical/Part,oTOF v2 v1,A,oTOF outer shell,,POLYSTYRENE
+CAD,Mechanical/Part,Module v1,A,oTOF module,,POLYSTYRENE

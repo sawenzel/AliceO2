@@ -3575,25 +3575,21 @@ static void LoadFacets(const std::string& file, TGeoTessellated* solid, bool che
         return prelude
 
     # Exact-surface solids need the O2 DetectorsBase library. The macro stays loadable in
-    # ROOT interpreted mode: O2BVHSurfaceSolid.h is part of the ROOT dictionary module so
-    # it can be included textually, while O2SurfaceSolidIO.h is not -- its single free
-    # function is declared by prototype instead (the symbol resolves from
-    # libO2DetectorsBase). Do not export ROOT_INCLUDE_PATH for this; R__ADD_INCLUDE_PATH
-    # keeps ROOT's C++ modules intact.
+    # ROOT interpreted mode, and it must ALSO survive o2::base::buildCADVolumeFromMacro,
+    # which wraps the whole macro body in a unique namespace (ExternalModule's loader). A
+    # `namespace o2 { namespace base { ... } }` block re-opened here would become
+    # `<wrapper>::o2::base` under that wrapping, and every later `o2::base::` reference in
+    # the macro would resolve to it -- an inner namespace that contains only what the macro
+    # declared -- instead of the real one from the headers. So: no namespace re-opening;
+    # both the class and the loader prototype come from public headers, textually included.
+    # Do not export ROOT_INCLUDE_PATH for this; R__ADD_INCLUDE_PATH keeps ROOT's C++
+    # modules intact.
     prelude += """
 // --- exact-surface solid support (requires the ALICE O2 environment) ---
 R__ADD_INCLUDE_PATH($O2_ROOT/include)
 R__LOAD_LIBRARY(libO2DetectorsBase)
 #include "DetectorsBase/O2BVHSurfaceSolid.h"
-// O2SurfaceSolidIO.h is not part of the ROOT dictionary module; declare the loader
-// prototype directly (the symbol resolves from libO2DetectorsBase).
-namespace o2
-{
-namespace base
-{
-bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid);
-} // namespace base
-} // namespace o2
+#include "DetectorsBase/O2SurfaceSolidIO.h"
 
 static void LoadSurfaces(const std::string& file, o2::base::O2BVHSurfaceSolid* solid, bool check=false)
 {
@@ -3607,6 +3603,66 @@ static void LoadSurfaces(const std::string& file, o2::base::O2BVHSurfaceSolid* s
 }
 """
     return prelude
+
+
+def validate_surface_sidecars(surface_files: Dict[str, str], def_names: Dict[str, str]) -> Dict[str, str]:
+    """Load every emitted sidecar through the real O2 loader; demote the ones that fail.
+
+    `--exact-surfaces auto` promises "exact where possible, tessellated fallback otherwise" --
+    but until this pass, "possible" was judged at extraction time only, and a sidecar the
+    *loader* rejects (e.g. the fixed 1e-06 cm wire-join tolerance against a model whose own
+    edges declare 1e-04, Stream_L mechanism 3) shipped anyway and threw at geometry build
+    time, killing the whole module. This runs exactly the check the generated geom.C runs
+    (LoadSurfaceSolid + CloseShape + IsClosed/IsOrientationConsistent), so a part that
+    survives here cannot fail there.
+
+    Returns {lid: reason} for the demoted parts, and removes them from `surface_files` in
+    place. Degrades gracefully (validate nothing, warn loudly) when PyROOT or
+    libO2DetectorsBase is unavailable in this interpreter.
+    """
+    if not surface_files:
+        return {}
+    try:
+        import ROOT
+        ROOT.gROOT.SetBatch(True)
+        if ROOT.gSystem.Load("libO2DetectorsBase") < 0:
+            raise RuntimeError("libO2DetectorsBase not loadable")
+        include_dir = _Path(__file__).resolve().parent.parent.parent / "Detectors" / "Base" / "include"
+        if include_dir.is_dir():
+            ROOT.gInterpreter.AddIncludePath(str(include_dir))
+        ok = ROOT.gInterpreter.Declare(
+            '#include "DetectorsBase/O2BVHSurfaceSolid.h"\n'
+            '#include "DetectorsBase/O2SurfaceSolidIO.h"\n')
+        if not ok:
+            raise RuntimeError("DetectorsBase headers not resolvable")
+    except Exception as exc:
+        print(f"WARNING: sidecar load-validation SKIPPED ({exc}); an emitted exact part that "
+              f"the loader rejects will only fail at geometry build time.")
+        return {}
+
+    demoted: Dict[str, str] = {}
+    for lid in sorted(surface_files):
+        path = surface_files[lid]
+        solid = ROOT.o2.base.O2BVHSurfaceSolid(f"validate_{sanitize_cpp_name(lid)}")
+        ROOT.SetOwnership(solid, False)
+        reason = None
+        if not ROOT.o2.base.LoadSurfaceSolid(str(path), solid):
+            reason = "loader rejected the sidecar"
+        else:
+            solid.CloseShape(True)
+            if not solid.IsClosed():
+                reason = "solid not closed after load"
+            elif not solid.IsOrientationConsistent():
+                reason = "orientation inconsistent after load"
+        if reason is not None:
+            demoted[lid] = reason
+    for lid, reason in demoted.items():
+        del surface_files[lid]
+        print(f"  DEMOTED to tessellated: {def_names.get(lid) or lid} [{lid}] -- {reason}")
+    if demoted:
+        print(f"Sidecar load-validation: {len(demoted)} part(s) demoted to the tessellated "
+              f"fallback; {len(surface_files)} exact part(s) verified loadable.")
+    return demoted
 
 
 def emit_materials_cpp(
@@ -4641,6 +4697,24 @@ def emit_root_macro(
                   f"{summary['n_eligible_but_not_emitted']} surface-eligible solid(s) declined at "
                   f"extraction; {summary['n_emitted_carrying_recognized_faces']} emitted solid(s) "
                   f"carry recognized faces")
+
+        # An emitted sidecar the loader rejects must not ship (it would throw at geometry
+        # build time and kill the whole module); demote it to the tessellated fallback now.
+        demoted_sidecars = validate_surface_sidecars(surface_files, def_names)
+        if demoted_sidecars and exact_mode == "required":
+            raise ValueError(
+                "--exact-surfaces required: emitted sidecar(s) failed load-validation: "
+                + "; ".join(f"{def_names.get(lid) or lid} [{lid}]: {r}"
+                            for lid, r in sorted(demoted_sidecars.items())))
+        if demoted_sidecars and report is not None:
+            for lid, reason in demoted_sidecars.items():
+                vol = report["volumes"].get(lid)
+                if vol is not None:
+                    vol["emitted"] = False
+                    vol["load_validation"] = reason
+            report["summary"]["n_emitted"] = len(surface_files)
+            report["summary"]["n_demoted_by_load_validation"] = len(demoted_sidecars)
+            report_path.write_text(json.dumps(report, indent=1))
 
     # --- CSG recognition (--csg auto|required) -- the one CSG hook ------------------------
     #
