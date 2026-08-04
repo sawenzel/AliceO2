@@ -71,7 +71,7 @@ from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Transform
 from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh
 from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeBox
 from OCC.Core.BRepTools import breptools, BRepTools_WireExplorer
-from OCC.Core.BRep import BRep_Tool
+from OCC.Core.BRep import BRep_Tool, BRep_Builder
 from OCC.Core.Geom2dAdaptor import Geom2dAdaptor_Curve
 from OCC.Core.Geom import Geom_TrimmedCurve
 from OCC.Core.Geom2d import Geom2d_TrimmedCurve
@@ -87,9 +87,12 @@ from OCC.Core.GeomAbs import (
 )
 from OCC.Core.TopExp import TopExp_Explorer, topexp
 from OCC.Core.TopLoc import TopLoc_Location
-from OCC.Core.TopAbs import TopAbs_REVERSED, TopAbs_WIRE, TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
+from OCC.Core.TopAbs import (
+    TopAbs_REVERSED, TopAbs_WIRE, TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX,
+    TopAbs_SOLID, TopAbs_COMPOUND, TopAbs_COMPSOLID,
+)
 from OCC.Core.TopTools import TopTools_IndexedMapOfShape
-from OCC.Core.TopoDS import topods
+from OCC.Core.TopoDS import topods, TopoDS_Compound
 from OCC.Extend.TopologyUtils import TopologyExplorer
 
 from OCC.Core.STEPCAFControl import STEPCAFControl_Reader
@@ -2563,6 +2566,111 @@ def run_duplicate_placement_self_test() -> int:
     return failures
 
 
+# -------------------------------
+# Self-test for compound simple-shapes (`--self-test`, fifth block)
+# -------------------------------
+#
+# oTOF (`oTOF System V3-R92cm.step`) stores its geometry in XCAF *simple-shape* labels whose
+# TopoDS shape is a COMPOUND: 'oTOF v2 v1' holds 3 solids, 'Module v1' holds 17, and 'A Side'
+# holds nothing at all. One label therefore does not mean one solid. A traversal that assumes it
+# does sees 3 "leaf solids" where the STEP file places 62628, and dies in `triangulate_asbbox`
+# on the empty label (`Bnd_Box is void`). These fixtures pin the expansion rule: a multi-solid
+# compound expands to one leaf per solid under a synthetic assembly node, a single-solid
+# compound unwraps to its solid, and an empty label is skipped -- on every visit, not only the
+# first.
+
+def _self_test_compound_leaf(shape_tool, sides):
+    """A simple-shape label whose TopoDS shape is a compound of len(sides) boxes.
+
+    Stored with makeAssembly=False, which is exactly what a STEP writer that packs a whole
+    sub-assembly's geometry into one shape representation produces.
+    """
+    builder = BRep_Builder()
+    comp = TopoDS_Compound()
+    builder.MakeCompound(comp)
+    for i, side in enumerate(sides):
+        box = BRepPrimAPI_MakeBox(gp_Pnt(10.0 * i, 0.0, 0.0), side, side, side).Shape()
+        builder.Add(comp, box)
+    return shape_tool.AddShape(comp, False)
+
+
+def run_compound_leaf_self_test() -> int:
+    failures = 0
+    checks = 0
+
+    def report(ok: bool, label: str, detail: str = ""):
+        nonlocal failures, checks
+        checks += 1
+        if not ok:
+            failures += 1
+        print(f"  [{'ok ' if ok else 'FAIL'}] {label}{(' -- ' + detail) if detail else ''}")
+
+    print("\nCompound simple-shapes: one XCAF label is not one solid (the oTOF traversal defect)")
+
+    # --- 1. a 3-solid compound, instanced twice ------------------------------------------------
+    _doc, st = _self_test_shape_tool()
+    comp_def = _self_test_compound_leaf(st, [1.0, 2.0, 3.0])
+    _self_test_assembly(st, [(comp_def, gp_Trsf()), (comp_def, _self_test_shift(dx=100.0))])
+    st.UpdateAssemblies()
+    try:
+        _rep, occ = _self_test_convert(st)
+        report(len(occ) == 6, "a 3-solid compound instanced twice places 6 leaf solids",
+               f"{len(occ)} placed")
+        sub_defs = sorted(set(k for k, _sig in occ))
+        report(len(sub_defs) == 3, "over 3 sub-leaf definitions", f"{len(sub_defs)} definitions")
+        vols = sorted(def_volumes_cm3.get(k, 0.0) for k in sub_defs)
+        want = [1.0, 8.0, 27.0]
+        report(all(abs(v - w) < 1e-6 for v, w in zip(vols, want)) and len(vols) == 3,
+               "and each sub-leaf carries its own solid's volume", f"{vols}")
+        comp_key = label_id(comp_def)
+        report(comp_key in assemblies, "the compound label itself becomes an assembly node",
+               f"'{comp_key}' in assemblies: {comp_key in assemblies}")
+    except Exception as exc:
+        report(False, "a 3-solid compound converts at all", f"raised {type(exc).__name__}: {exc}")
+
+    # --- 2. a single-solid compound unwraps ----------------------------------------------------
+    _doc, st = _self_test_shape_tool()
+    comp_def = _self_test_compound_leaf(st, [2.0])
+    _self_test_assembly(st, [(comp_def, gp_Trsf())])
+    st.UpdateAssemblies()
+    try:
+        _rep, occ = _self_test_convert(st)
+        comp_key = label_id(comp_def)
+        report(len(occ) == 1 and occ[0][0] == comp_key,
+               "a single-solid compound stays one leaf under its own label",
+               f"{len(occ)} placed, def '{occ[0][0] if occ else '-'}'")
+        shp = def_shapes.get(comp_key)
+        report(shp is not None and shp.ShapeType() == TopAbs_SOLID,
+               "and its stored shape is the SOLID, not the compound wrapper",
+               f"type {shp.ShapeType() if shp is not None else '-'}")
+    except Exception as exc:
+        report(False, "a single-solid compound converts at all",
+               f"raised {type(exc).__name__}: {exc}")
+
+    # --- 3. an empty compound is skipped, on every visit ---------------------------------------
+    # 'A Side' is this case; before the fix it died meshing a void bounding box. Placed twice, so
+    # the second visit exercises the visited-defs early return as well as the first expansion.
+    _doc, st = _self_test_shape_tool()
+    empty_def = _self_test_compound_leaf(st, [])
+    box_def = _self_test_leaf(st, 1.0)
+    _self_test_assembly(st, [(empty_def, gp_Trsf()),
+                             (box_def, _self_test_shift(dx=10.0)),
+                             (empty_def, _self_test_shift(dx=20.0))])
+    st.UpdateAssemblies()
+    try:
+        _rep, occ = _self_test_convert(st)
+        report(len(occ) == 1, "an empty simple-shape label is skipped on both of its placements",
+               f"{len(occ)} placed")
+        report(len(logical_volumes) == 1, "and registers no logical volume",
+               f"{len(logical_volumes)} registered")
+    except Exception as exc:
+        report(False, "a model with an empty simple-shape label converts at all",
+               f"raised {type(exc).__name__}: {exc}")
+
+    print(f"\n{checks} checks, {failures} failure(s)")
+    return failures
+
+
 def _recognized_inner_wall(face, rec) -> Optional[bool]:
     """Decide, by measurement, which side of a RECOGNIZED quadric is outside the solid.
 
@@ -3737,11 +3845,12 @@ assemblies = set()                       # def_lid
 placements = []                          # (parent_def_lid, child_def_lid, gp_Trsf local)
 top_defs = set()                         # top definition lids
 visited_defs = set()                     # expanded defs
+skipped_defs = set()                     # defs with no solid content: every visit returns None
 
 
 def reset_graph() -> None:
     """Clear the definition graph. One place, so `extract_graph` and the self-test agree."""
-    global logical_volumes, def_names, def_volumes_cm3, def_shapes, assemblies, placements, top_defs, visited_defs
+    global logical_volumes, def_names, def_volumes_cm3, def_shapes, assemblies, placements, top_defs, visited_defs, skipped_defs
     logical_volumes = {}
     def_names = {}
     def_volumes_cm3 = {}
@@ -3750,6 +3859,26 @@ def reset_graph() -> None:
     placements = []
     top_defs = set()
     visited_defs = set()
+    skipped_defs = set()
+
+
+def _solids_of_simple_shape(shape) -> list:
+    """The solids inside one XCAF simple-shape label's TopoDS shape.
+
+    A STEP writer may pack a whole sub-assembly's geometry into ONE simple-shape label whose
+    shape is a compound -- oTOF's three simple labels hold 3, 17 and 0 solids. Anything that is
+    not a compound is returned as-is (the traversal has always treated such a label as one leaf).
+    A solid explored out of a compound carries its cumulative location, so placing it at the
+    identity under the label's frame preserves the CAD's placement.
+    """
+    if shape.ShapeType() not in (TopAbs_COMPOUND, TopAbs_COMPSOLID):
+        return [shape]
+    out = []
+    ex = TopExp_Explorer(shape, TopAbs_SOLID)
+    while ex.More():
+        out.append(ex.Current())
+        ex.Next()
+    return out
 
 
 def cpp_var_for_def(lid: str) -> str:
@@ -3808,7 +3937,9 @@ def expand_definition(
 
     def_key = f"{def_lid}@{occ_path}" if clip_enabled else def_lid
     if not clip_enabled and def_lid in visited_defs:
-        return def_lid
+        # A def skipped on first expansion (no solid content) must stay skipped: returning the
+        # lid here would hand the parent a placement edge to a volume that was never registered.
+        return None if def_lid in skipped_defs else def_lid
     if not clip_enabled:
         visited_defs.add(def_lid)
 
@@ -3907,25 +4038,54 @@ def expand_definition(
         if name_filter is not None and name_filter.has_include and not subtree_included:
             return None
 
-        if def_key not in logical_volumes:
-            shape = shape_tool.GetShape(def_label)
+        do_meshing = (meshparam is not None) and meshparam.get("do_meshing", None) is True
 
-            # store volume (for density estimation)
+        def register_leaf(key: str, leaf_shape) -> bool:
+            """Volume, shape and triangles for one leaf solid; False when clipped away."""
             try:
-                volume_cm3 = volume_cm3_of_shape(shape, scale_to_cm=scale_to_cm)
+                volume_cm3 = volume_cm3_of_shape(leaf_shape, scale_to_cm=scale_to_cm)
             except Exception:
                 volume_cm3 = 0.0
-
             if clip_enabled:
-                shape = clip_shape_to_box(shape, clip_box, clip_box_shape, world_trsf, def_lid)
-                if shape is None:
+                leaf_shape = clip_shape_to_box(leaf_shape, clip_box, clip_box_shape, world_trsf, key)
+                if leaf_shape is None:
+                    return False
+            def_volumes_cm3[key] = volume_cm3
+            def_shapes[key] = leaf_shape
+            logical_volumes[key] = (triangulate_CAD_solid(leaf_shape, meshparam=meshparam, scale_to_cm=scale_to_cm)
+                                    if do_meshing else triangulate_asbbox(leaf_shape, scale_to_cm=scale_to_cm))
+            return True
+
+        if def_key not in logical_volumes and def_key not in assemblies:
+            shape = shape_tool.GetShape(def_label)
+            # One simple-shape label is not necessarily one solid (`_solids_of_simple_shape`).
+            solids = _solids_of_simple_shape(shape)
+
+            if len(solids) == 0:
+                print(f"WARNING: simple-shape '{nm or def_lid}' ({def_lid}) contains no solid; skipped.")
+                skipped_defs.add(def_lid)
+                return None
+            if len(solids) == 1:
+                if not register_leaf(def_key, solids[0]):
                     return None
-
-            def_volumes_cm3[def_key] = volume_cm3
-            def_shapes[def_key] = shape
-
-            do_meshing = (meshparam is not None) and meshparam.get("do_meshing", None) is True
-            logical_volumes[def_key] = triangulate_CAD_solid(shape, meshparam=meshparam, scale_to_cm=scale_to_cm) if do_meshing else triangulate_asbbox(shape, scale_to_cm=scale_to_cm)
+            else:
+                # A synthetic assembly node with one child leaf per contained solid, each at the
+                # identity: the solids' own locations already place them within the label's frame.
+                assemblies.add(def_key)
+                kept = 0
+                for i, solid in enumerate(solids):
+                    sub_key = f"{def_key}:s{i + 1}"
+                    if sub_key not in def_names:
+                        def_names[sub_key] = f"{nm}_s{i + 1}" if nm else ""
+                    if not register_leaf(sub_key, solid):
+                        continue
+                    placements.append((def_key, sub_key, gp_Trsf()))
+                    kept += 1
+                if kept == 0:
+                    assemblies.discard(def_key)
+                    if not clip_enabled:  # clipping is per occurrence; only content-emptiness is global
+                        skipped_defs.add(def_lid)
+                    return None
         return def_key
 
     assemblies.add(def_key)
@@ -4750,7 +4910,8 @@ def main():
     if args.self_test:
         sys.exit(1 if (run_recognition_self_test() + run_placement_self_test()
                        + run_planar_trim_self_test()
-                       + run_duplicate_placement_self_test()) else 0)
+                       + run_duplicate_placement_self_test()
+                       + run_compound_leaf_self_test()) else 0)
     if args.step is None:
         ap.error("the following arguments are required: step (or pass --self-test)")
 
