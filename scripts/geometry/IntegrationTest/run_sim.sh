@@ -33,6 +33,7 @@ REPR=${3:?repr: exact|mesh}
 
 : "${B:?source the sim environment first (B, stage-first LD_LIBRARY_PATH, VMCWORKDIR)}"
 SEED=424242
+NEV=${NEV:-5}   # events for pions/steplog; override via environment
 COMMON=(--detectorList "INTEG:$WORK/sim/detlist.json" -m A3IRIS OTOF
         --extGeomFile "$WORK/sim/extgeom_$REPR.json" --seed $SEED)
 
@@ -46,13 +47,13 @@ case "$MODE" in
       "${COMMON[@]}" -o "$MODE" > run.log 2>&1
     ;;
   pions)
-    /usr/bin/time -v "$B/stage/bin/o2-sim-serial" -n 5 -e TGeant4 -g boxgen \
+    /usr/bin/time -v "$B/stage/bin/o2-sim-serial" -n $NEV -e TGeant4 -g boxgen \
       "${COMMON[@]}" -o "$MODE" > run.log 2>&1
     ;;
   steplog)
     MCSL="$HOME/alisw/sw/ubuntu2404_aarch64/MCStepLogger/latest/lib/libMCStepLoggerInterceptSteps.so"
     [ -f "$MCSL" ] || { echo "MCStepLogger not found: $MCSL"; exit 3; }
-    LD_PRELOAD="$MCSL" /usr/bin/time -v "$B/stage/bin/o2-sim-serial" -n 5 -e TGeant4 -g boxgen \
+    LD_PRELOAD="$MCSL" /usr/bin/time -v "$B/stage/bin/o2-sim-serial" -n $NEV -e TGeant4 -g boxgen \
       "${COMMON[@]}" -o "$MODE" > run.log 2>&1
     ;;
   matbudget)
