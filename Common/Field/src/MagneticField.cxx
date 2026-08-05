@@ -20,9 +20,6 @@
 #include <TString.h>           // for TString
 #include <TSystem.h>           // for TSystem, gSystem
 #include <fairlogger/Logger.h> // for FairLogger
-#include "FairParamList.h"
-#include "FairRun.h"
-#include "FairRuntimeDb.h"
 
 using namespace o2::field;
 
@@ -123,37 +120,6 @@ MagneticField::MagneticField(const char* name, const char* title, Double_t facto
    * Constructor for human readable params
    */
   setDataFileName(path.c_str());
-  if (!gOriginBias) {
-    checkOriginBias();
-  }
-  CreateField();
-}
-
-MagneticField::MagneticField(const MagFieldParam& param)
-  : FairField(param.GetName(), param.GetTitle()),
-    mMeasuredMap(nullptr),
-    mFastField(nullptr),
-    mMapType(param.GetMapType()),
-    mSolenoid(0),
-    mBeamType(param.GetBeamType()),
-    mBeamEnergy(param.GetBeamEnergy()),
-    mDefaultIntegration(param.GetDefInt()),
-    mPrecisionInteg(1),
-    mMultipicativeFactorSolenoid(param.GetFactorSol()), // temporary
-    mMultipicativeFactorDipole(param.GetFactorDip()),   // temporary
-    mMaxField(param.GetMaxField()),
-    mDipoleOnOffFlag(param.GetFactorDip() == 0.),
-    mQuadrupoleGradient(0),
-    mDipoleField(0),
-    mCompensatorField2C(0),
-    mCompensatorField1A(0),
-    mCompensatorField2A(0),
-    mParameterNames("", "")
-{
-  /*
-   * Constructor for FairParam derived params
-   */
-  setDataFileName(param.GetMapPath());
   if (!gOriginBias) {
     checkOriginBias();
   }
@@ -715,16 +681,6 @@ void MagneticField::Print(Option_t* opt) const
               << " GeV): QGrad: " << mQuadrupoleGradient << " Dipole: " << mDipoleField;
     LOG(info) << "MagneticField::Print: Uses " << getParameterName() << "  of " << getDataFileName();
   }
-}
-
-void MagneticField::FillParContainer()
-{
-  // fill field parameters
-  FairRun* fRun = FairRun::Instance();
-  FairRuntimeDb* rtdb = fRun->GetRuntimeDb();
-  MagFieldParam* par = static_cast<MagFieldParam*>(rtdb->getContainer("MagFieldParam"));
-  par->SetParam(this);
-  par->setChanged();
 }
 
 //_____________________________________________________________________________

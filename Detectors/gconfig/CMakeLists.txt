@@ -11,27 +11,27 @@
 
 o2_add_library(G3Setup
                SOURCES src/G3Config.cxx
-               PUBLIC_LINK_LIBRARIES MC::Geant3 FairRoot::Base O2::SimulationDataFormat O2::Generators O2::SimSetup
+               PUBLIC_LINK_LIBRARIES MC::Geant3 O2::FairRootBase O2::SimulationDataFormat O2::Generators O2::SimSetup
 )
 
 o2_add_library(G4Setup
                SOURCES src/G4Config.cxx
-               PUBLIC_LINK_LIBRARIES MC::Geant4VMC MC::Geant4 FairRoot::Base O2::SimulationDataFormat O2::Generators O2::SimSetup
+               PUBLIC_LINK_LIBRARIES MC::Geant4VMC MC::Geant4 O2::FairRootBase O2::SimulationDataFormat O2::Generators O2::SimSetup
 )
 
 o2_add_library(FLUKASetup
                SOURCES src/FlukaConfig.cxx
-               PUBLIC_LINK_LIBRARIES FairRoot::Base O2::SimulationDataFormat O2::Generators O2::SimSetup
+               PUBLIC_LINK_LIBRARIES O2::FairRootBase O2::SimulationDataFormat O2::Generators O2::SimSetup
 )
 
 o2_add_library(MCReplaySetup
                SOURCES src/MCReplayConfig.cxx
-               PUBLIC_LINK_LIBRARIES MC::MCReplay FairRoot::Base O2::SimulationDataFormat O2::Generators O2::SimSetup
+               PUBLIC_LINK_LIBRARIES MC::MCReplay O2::FairRootBase O2::SimulationDataFormat O2::Generators O2::SimSetup
 )
 
 o2_add_library(O2TrivialMCEngineSetup
                SOURCES src/O2TrivialMCConfig.cxx
-               PUBLIC_LINK_LIBRARIES O2::O2TrivialMC FairRoot::Base O2::SimulationDataFormat O2::Generators O2::SimSetup
+               PUBLIC_LINK_LIBRARIES O2::O2TrivialMC O2::FairRootBase O2::SimulationDataFormat O2::Generators O2::SimSetup
 )
 
 o2_add_library(SimSetup
