@@ -902,9 +902,8 @@ void Pipe::ConstructGeometry()
   // where there is no field at all. They were built entirely from the field-free
   // media, which is right for the far placements and wrong for the near ones:
   // a 1-2 GeV secondary crossing them at z ~ 480 cm was being transported in a
-  // straight line through several kGauss. One logical volume can only carry one
-  // answer, and it has to be the field-carrying one: integrating a zero field is
-  // merely slower than skipping it, while skipping a real one is wrong.
+  // straight line through several kGauss. Now that the far placements have their
+  // own volumes, these can describe the field they are actually in.
   TGeoVolume* voRB24B1BellowM = new TGeoVolume("RB24B1BellowM", shRB24B1BellowM, kMedVac);
   voRB24B1BellowM->SetVisibility(0);
   //
@@ -1608,9 +1607,18 @@ void Pipe::ConstructGeometry()
   voRB24C->AddNode(voRB24CuTubeF, 1, new TGeoTranslation(0., 0., z));
   //   z = +kRB24cCuTubeL / 2 - kRB24CuTubeFL / 2.;
   //   voRB24C->AddNode(voRB24CuTubeF, 2, new TGeoTranslation(0., 0., z));
-  // VMABC close to compensator magnet
+  // VMABC close to compensator magnet.
+  //
+  // This module is installed three times: once inside the barrel at z ~ 415 cm,
+  // where the solenoid fringe still reaches 4.6 kGauss, and twice beyond the
+  // solenoid at z ~ 890 cm and z ~ 1900 cm, where the map returns exactly zero
+  // out to r = 300 cm. Because a tracking medium belongs to a logical volume
+  // and not to a placement, the two cannot share one set of volumes and still
+  // describe the field correctly. The far placements therefore get a clone
+  // whose media declare no field; the in-barrel one keeps the originals.
+  TGeoVolume* voRB24VMABCRBNF = matmgr.cloneSubtreeWithMediumSuffix(voRB24VMABCRB);
   z = -kRB24cCuTubeL / 2. - (kRB24VMABCL - kRB24VMABCRBT1L / 2) + 1.;
-  voRB24C->AddNode(voRB24VMABCRB, 2, new TGeoTranslation(0., 0., z));
+  voRB24C->AddNode(voRB24VMABCRBNF, 2, new TGeoTranslation(0., 0., z));
   // <-
 
   // Bellow
@@ -1671,8 +1679,13 @@ void Pipe::ConstructGeometry()
   voRB242->AddNode(voRB24CuTubeF, 3, new TGeoTranslation(0., 0., z));
   z = +kRB242CuTubeL / 2 - kRB24CuTubeFL / 2.;
   voRB242->AddNode(voRB24CuTubeF, 4, new TGeoTranslation(0., 0., z));
+  // The transition module sits twice in RB24/2. The far one spans z = 920-940
+  // cm, entirely inside the field-free stretch between the solenoid fringe and
+  // the machine-field band; the near one reaches into that band and keeps the
+  // originals.
   z = 135. + 10.;
-  voRB242->AddNode(voRB242CuOvTransMo, 1, new TGeoCombiTrans(0., 0., z, rot180));
+  voRB242->AddNode(matmgr.cloneSubtreeWithMediumSuffix(voRB242CuOvTransMo), 1,
+                   new TGeoCombiTrans(0., 0., z, rot180));
   z = -135. - 10.;
   voRB242->AddNode(voRB242CuOvTransMo, 2, new TGeoTranslation(0., 0., z));
   z = -135. - 30.;
@@ -1703,8 +1716,13 @@ void Pipe::ConstructGeometry()
   voRB243A->AddNode(voRB24CuTubeF, 5, new TGeoTranslation(0., 0., z));
   z = +kRB243CuTubeL / 2 - kRB24CuTubeFL / 2.;
   voRB243A->AddNode(voRB24CuTubeF, 6, new TGeoTranslation(0., 0., z));
+  // RB24/3 spans z = 1250-1910 cm, the longest field-free stretch of the whole
+  // machine: 660 cm in which the map returns exactly zero out to r = 300 cm.
+  // Only the two shared modules inside it need a second logical volume -- the
+  // bellow here and the warm module below; the tubes and flanges around them
+  // are placed nowhere else and already carry field-free media.
   z = +kRB243CuTubeL / 2;
-  voRB243A->AddNode(voRB24B1BellowM, 2, new TGeoTranslation(0., 0., z));
+  voRB243A->AddNode(matmgr.cloneSubtreeWithMediumSuffix(voRB24B1BellowM), 2, new TGeoTranslation(0., 0., z));
 
   z = -kRB243CuTubeL / 2. - kRB24B1L;
   voRB243->AddNode(voRB243A, 1, new TGeoTranslation(0., 0., z));
@@ -1712,7 +1730,7 @@ void Pipe::ConstructGeometry()
   voRB243->AddNode(voRB243A, 2, new TGeoTranslation(0., 0., z));
 
   z = -2. * (kRB243CuTubeL + kRB24B1L) - (kRB24VMABCL - kRB24VMABCRBT1L / 2) + 1.;
-  voRB243->AddNode(voRB24VMABCRB, 3, new TGeoTranslation(0., 0., z));
+  voRB243->AddNode(voRB24VMABCRBNF, 3, new TGeoTranslation(0., 0., z));
 
   z = -kRB24cCuTubeL / 2 - kRB24VMABCL - kRB242CuTubeL - 1.2;
   voRB24C->AddNode(voRB243, 1, new TGeoTranslation(0., 0., z));
