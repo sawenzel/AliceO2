@@ -88,6 +88,18 @@ record is rational, so widening one set literal was the whole fix. See `Stream_Q
 
 ## Open, in the order I would take them
 
+0a. **(2026-08-09) `surfaces_ST1829909_01…bin` — ALICE3's largest exact sidecar (1.46 MB) — fails
+   `LoadSurfaceSolid` validation**: `surface 1006: wire edge 1 end does not join the next edge
+   start (gap 5.41e-06 cm, tolerance 1e-06 cm)`. Nobody had loaded this sidecar standalone
+   before, so the failure predates Stream X and is not caused by it. Two candidate causes, in
+   the order to check: (1) the loader judges join gaps against the fixed fallback
+   `kWireJoinTolerance = 1e-6 cm` (`O2SurfaceSolidIO.cxx:279`) even when the sidecar (v2+)
+   declares the model's own tolerance — the constant's own doc block calls it "a fallback, not a
+   measurement of the model", and `GetRimMatchTolerance` already prefers the declared tolerance
+   for the same kind of decision; (2) the converter emitted genuinely non-joining edges for this
+   face and should share endpoints exactly. Decide on evidence (read the sidecar's declared
+   tolerance, measure the gap's effect on containment), not by widening a constant.
+
 0. **THE MODELS ARE NOT LEGAL FOR GEANT4, AND THIS BLOCKS THE STATED NEXT GOAL.** Neither
    `Bagger.step` nor ALICE3 composes into a world TGeo or Geant4 will accept: both contain placed
    solids with **positive shared volume**. Bagger has **3 of 78** pairs — `Base`∩`BoomCylinderOuter`
