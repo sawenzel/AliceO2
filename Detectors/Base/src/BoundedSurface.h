@@ -823,6 +823,63 @@ inline double angularTolerance(double radius)
   return kTolerance / std::max(radius, kTolerance);
 }
 
+/// Widest angular span of one sub-patch cover box (see BoundedSurface::appendCoverBoxes): pi/4
+/// keeps a chunk's box within (1 - cos(pi/8)) ~ 8% of hugging its arc while a full sweep still
+/// costs only eight boxes.
+inline constexpr double kCoverChunkAngle = kPi / 4.;
+
+/// The number of kCoverChunkAngle chunks covering an angular span: at least one, and never more
+/// than a full turn takes, since a sweep may overshoot 2pi by a rounding hair.
+inline int coverChunkCount(double span)
+{
+  constexpr int fullTurnChunks = static_cast<int>(kTwoPi / kCoverChunkAngle); // eight
+  return std::max(1, std::min(fullTurnChunks, static_cast<int>(std::ceil(span / kCoverChunkAngle))));
+}
+
+/// Range of a cos(t) + b sin(t) over [t0, t1] (t1 >= t0, span at most a full turn): the endpoint
+/// values, widened to +/- the amplitude where the crest or trough falls inside the interval.
+/// Exact, so a per-chunk cover box is the box of its geometry and carries no sampling slack.
+inline void sinusoidRange(double a, double b, double t0, double t1, double& minimum, double& maximum)
+{
+  const double atStart = a * std::cos(t0) + b * std::sin(t0);
+  const double atEnd = a * std::cos(t1) + b * std::sin(t1);
+  minimum = std::min(atStart, atEnd);
+  maximum = std::max(atStart, atEnd);
+  const double amplitude = std::hypot(a, b);
+  const double crest = std::atan2(b, a);
+  // shifted into [t0, t0 + 2pi), where a span of at most a full turn makes "<= t1" exactly the
+  // test for falling inside the interval
+  const double crestInRange = crest - kTwoPi * std::floor((crest - t0) / kTwoPi);
+  if (crestInRange <= t1) {
+    maximum = amplitude;
+  }
+  const double trough = crest + kPi;
+  const double troughInRange = trough - kTwoPi * std::floor((trough - t0) / kTwoPi);
+  if (troughInRange <= t1) {
+    minimum = -amplitude;
+  }
+}
+
+/// One end alone of the sinusoidRange above, for the doubly-swept covers (sphere, torus) that
+/// compose an outer sweep with an inner one and need only one end of each inner range.
+/// @{
+inline double sinusoidMinimum(double a, double b, double t0, double t1)
+{
+  double minimum = 0.;
+  double maximum = 0.;
+  sinusoidRange(a, b, t0, t1, minimum, maximum);
+  return minimum;
+}
+
+inline double sinusoidMaximum(double a, double b, double t0, double t1)
+{
+  double minimum = 0.;
+  double maximum = 0.;
+  sinusoidRange(a, b, t0, t1, minimum, maximum);
+  return maximum;
+}
+/// @}
+
 /// True if \a angle lies within the angular range [start, start + sweep] (sweep in (0, 2pi]),
 /// allowing \a tolerance on both ends and treating a >= 2pi sweep as the full circle.
 inline bool angleInSweepRange(double angle, double start, double sweep, double tolerance)
@@ -2830,6 +2887,32 @@ class BoundedSurface
   /// Accumulate a conservative axis-aligned bounding box of the trimmed patch.
   virtual void conservativeBounds(Vec3& lower, Vec3& upper) const = 0;
 
+  /// One axis-aligned cover box of the sub-patch BVH, as a (lower corner, upper corner) pair.
+  using CoverBox = std::pair<Vec3, Vec3>;
+
+  /// Append the surface's cover boxes: axis-aligned boxes whose union contains both the trimmed
+  /// patch (every ray hit and every on-surface point) and every point that can realise
+  /// distanceSqToPatch. The two containments are what let one BVH serve both query families: the
+  /// ray traversal may skip a surface none of whose boxes the ray crosses, and the nearest-patch
+  /// traversal may prune a subtree whose boxes are all farther than the best patch found so far.
+  ///
+  /// The realisation set is the larger of the two and differs per family: a cylinder or cone
+  /// realises inside its own sweep window (at the query's azimuth, or on a seam edge), but a
+  /// sphere realises on the whole sphere and a torus on the whole torus, however small the
+  /// trimmed patch -- their kernels project radially / through the meridian and never look at
+  /// the trim. So those two must cover the full surface of revolution.
+  ///
+  /// The default is the single conservativeBounds() box, which satisfies both containments by
+  /// construction; the swept quadrics override this with several exact per-chunk boxes.
+  virtual void appendCoverBoxes(std::vector<CoverBox>& boxes) const
+  {
+    // conservativeBounds only accumulates, so the corners start beyond any geometry
+    constexpr double kBig = std::numeric_limits<double>::max();
+    CoverBox box{Vec3{kBig, kBig, kBig}, Vec3{-kBig, -kBig, -kBig}};
+    conservativeBounds(box.first, box.second);
+    boxes.push_back(box);
+  }
+
   /// True if the 3D point lies on the trimmed patch within tolerance.
   virtual bool containsPointOnSurface(const Vec3& point) const = 0;
 
@@ -3443,6 +3526,34 @@ class CurvedPlanarBoundedSurface final : public BoundedSurface
   std::vector<CurveWire> mInnerWires;
 };
 
+/// Cover boxes of a surface-of-revolution band between two rim circles (the lateral window of a
+/// cylinder or cone): the phi window in kCoverChunkAngle chunks, each chunk the exact box of its
+/// two rim arcs. A generator segment is a convex combination of its two rim points, so the box of
+/// the two arcs contains the chunk of the band between them. Both radii must be non-negative.
+inline void appendArcBandCoverBoxes(const Vec3& center, const Vec3& axisU, const Vec3& axisV, const Vec3& axisW,
+                                    double phiStart, double phiSweep, double heightMin, double heightMax,
+                                    double radiusAtMin, double radiusAtMax,
+                                    std::vector<BoundedSurface::CoverBox>& boxes)
+{
+  const int chunks = coverChunkCount(phiSweep);
+  for (int chunk = 0; chunk < chunks; ++chunk) {
+    const double phiLow = phiStart + phiSweep * chunk / chunks;
+    const double phiHigh = phiStart + phiSweep * (chunk + 1) / chunks;
+    double lower[3];
+    double upper[3];
+    for (int dimension = 0; dimension < 3; ++dimension) {
+      double radialLow = 0.;
+      double radialHigh = 0.;
+      sinusoidRange(component(axisU, dimension), component(axisV, dimension), phiLow, phiHigh, radialLow, radialHigh);
+      const double centerAtMin = component(center, dimension) + heightMin * component(axisW, dimension);
+      const double centerAtMax = component(center, dimension) + heightMax * component(axisW, dimension);
+      lower[dimension] = std::min(centerAtMin + radiusAtMin * radialLow, centerAtMax + radiusAtMax * radialLow);
+      upper[dimension] = std::max(centerAtMin + radiusAtMin * radialHigh, centerAtMax + radiusAtMax * radialHigh);
+    }
+    boxes.push_back({Vec3{lower[0], lower[1], lower[2]}, Vec3{upper[0], upper[1], upper[2]}});
+  }
+}
+
 /// A bounded cylindrical surface: an infinite cylinder of given radius around an axis, trimmed
 /// to a parametric rectangle (phi angular sweep x height range).
 ///
@@ -3727,6 +3838,16 @@ class CylindricalBoundedSurface final : public BoundedSurface
         }
       }
     }
+  }
+
+  /// Sub-patch cover boxes: the sweep window in angular chunks. distanceSqToPatch realises inside
+  /// the window -- at the query's own azimuth when that is in sweep (an on-axis query is
+  /// azimuth-free and realises the same value at every azimuth), else on one of the two seam
+  /// edges -- so the window chunks cover the realisation set as well as the trimmed patch.
+  void appendCoverBoxes(std::vector<CoverBox>& boxes) const override
+  {
+    appendArcBandCoverBoxes(mCenter, mAxisU, mAxisV, mAxisW, mPhiStart, mPhiSweep, mHeightMin, mHeightMax, mRadius,
+                            mRadius, boxes);
   }
 
   /// Number of chord segments used for rim sampling, consistent with CurveWire::sampledBoundary
@@ -4073,6 +4194,41 @@ class SphericalBoundedSurface final : public BoundedSurface
     upper.xCoord = std::max(upper.xCoord, mCenter.xCoord + mRadius);
     upper.yCoord = std::max(upper.yCoord, mCenter.yCoord + mRadius);
     upper.zCoord = std::max(upper.zCoord, mCenter.zCoord + mRadius);
+  }
+
+  /// Sub-patch cover boxes: distanceSqToPatch projects the query radially and never looks at the
+  /// trim, so the cover must be the whole sphere whatever the patch window is. It is emitted as
+  /// an exact (theta, phi) grid of chunks, which still beats the single whole-ball box for every
+  /// ray that crosses the ball while missing the shell.
+  void appendCoverBoxes(std::vector<CoverBox>& boxes) const override
+  {
+    const int thetaChunks = coverChunkCount(kPi);
+    const int phiChunks = coverChunkCount(kTwoPi);
+    for (int thetaChunk = 0; thetaChunk < thetaChunks; ++thetaChunk) {
+      const double thetaLow = kPi * thetaChunk / thetaChunks;
+      const double thetaHigh = kPi * (thetaChunk + 1) / thetaChunks;
+      for (int phiChunk = 0; phiChunk < phiChunks; ++phiChunk) {
+        const double phiLow = kTwoPi * phiChunk / phiChunks;
+        const double phiHigh = kTwoPi * (phiChunk + 1) / phiChunks;
+        double lower[3];
+        double upper[3];
+        for (int dimension = 0; dimension < 3; ++dimension) {
+          double inPlaneLow = 0.;
+          double inPlaneHigh = 0.;
+          sinusoidRange(component(mAxisU, dimension), component(mAxisV, dimension), phiLow, phiHigh, inPlaneLow,
+                        inPlaneHigh);
+          // the coordinate is R (sin(theta) s(phi) + cos(theta) w) with sin(theta) >= 0 on
+          // [0, pi], so the chunk maximum is the theta sinusoid taken at s's own maximum and the
+          // minimum the one taken at s's minimum
+          const double axisComponent = component(mAxisW, dimension);
+          const double high = sinusoidMaximum(axisComponent, inPlaneHigh, thetaLow, thetaHigh);
+          const double low = sinusoidMinimum(axisComponent, inPlaneLow, thetaLow, thetaHigh);
+          lower[dimension] = component(mCenter, dimension) + mRadius * low;
+          upper[dimension] = component(mCenter, dimension) + mRadius * high;
+        }
+        boxes.push_back({Vec3{lower[0], lower[1], lower[2]}, Vec3{upper[0], upper[1], upper[2]}});
+      }
+    }
   }
 
   int phiSegments() const
@@ -4482,6 +4638,15 @@ class ConicalBoundedSurface final : public BoundedSurface
         }
       }
     }
+  }
+
+  /// Sub-patch cover boxes: as for the cylinder, the sweep window in angular chunks between the
+  /// two rim circles; the same realisation argument applies, with the rim radii taken from the
+  /// linear radius law (clamped at an apex).
+  void appendCoverBoxes(std::vector<CoverBox>& boxes) const override
+  {
+    appendArcBandCoverBoxes(mCenter, mAxisU, mAxisV, mAxisW, mPhiStart, mPhiSweep, mHeightMin, mHeightMax,
+                            std::max(0., radiusAt(mHeightMin)), std::max(0., radiusAt(mHeightMax)), boxes);
   }
 
   int rimSegments() const
@@ -4913,6 +5078,44 @@ class TorusBoundedSurface final : public BoundedSurface
       } else {
         lower.zCoord = std::min(lower.zCoord, centerValue - radialExtent);
         upper.zCoord = std::max(upper.zCoord, centerValue + radialExtent);
+      }
+    }
+  }
+
+  /// Sub-patch cover boxes: the meridian projection realises on the whole torus (see the
+  /// sphere), so the cover is the full (ring, tube) torus in exact angular chunks. The per-chunk
+  /// box math needs the ring factor R + r cos(v) to be non-negative, i.e. the usual ring torus;
+  /// a spindle torus falls back to the single conservative box.
+  void appendCoverBoxes(std::vector<CoverBox>& boxes) const override
+  {
+    if (mMajorRadius < mMinorRadius) {
+      BoundedSurface::appendCoverBoxes(boxes);
+      return;
+    }
+    const int ringChunks = coverChunkCount(kTwoPi);
+    const int tubeChunks = coverChunkCount(kTwoPi);
+    for (int ringChunk = 0; ringChunk < ringChunks; ++ringChunk) {
+      const double ringLow = kTwoPi * ringChunk / ringChunks;
+      const double ringHigh = kTwoPi * (ringChunk + 1) / ringChunks;
+      for (int tubeChunk = 0; tubeChunk < tubeChunks; ++tubeChunk) {
+        const double tubeLow = kTwoPi * tubeChunk / tubeChunks;
+        const double tubeHigh = kTwoPi * (tubeChunk + 1) / tubeChunks;
+        double lower[3];
+        double upper[3];
+        for (int dimension = 0; dimension < 3; ++dimension) {
+          double inPlaneLow = 0.;
+          double inPlaneHigh = 0.;
+          sinusoidRange(component(mAxisU, dimension), component(mAxisV, dimension), ringLow, ringHigh, inPlaneLow,
+                        inPlaneHigh);
+          // the coordinate is p(u) (R + r cos v) + w r sin v; with R + r cos v >= 0 it is
+          // monotone in p, so each extreme is a v sinusoid taken at p's own extreme
+          const double axisComponent = component(mAxisW, dimension);
+          const double high = sinusoidMaximum(inPlaneHigh, axisComponent, tubeLow, tubeHigh);
+          const double low = sinusoidMinimum(inPlaneLow, axisComponent, tubeLow, tubeHigh);
+          lower[dimension] = component(mCenter, dimension) + inPlaneLow * mMajorRadius + mMinorRadius * low;
+          upper[dimension] = component(mCenter, dimension) + inPlaneHigh * mMajorRadius + mMinorRadius * high;
+        }
+        boxes.push_back({Vec3{lower[0], lower[1], lower[2]}, Vec3{upper[0], upper[1], upper[2]}});
       }
     }
   }
