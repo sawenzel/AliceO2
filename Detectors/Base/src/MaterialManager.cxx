@@ -18,6 +18,9 @@
 #include "TString.h" // for TString
 #include <TGeoMedium.h>
 #include <TGeoManager.h>
+#include <TGeoMaterial.h>
+#include <TGeoNode.h>
+#include <TGeoVolume.h>
 #include <TList.h>
 #include <iostream>
 #include <utility>
@@ -32,6 +35,8 @@
 #include "rapidjson/ostreamwrapper.h"
 #include "rapidjson/prettywriter.h"
 #include <algorithm>
+#include <string>
+#include <vector>
 #include <SimConfig/SimParams.h>
 
 using namespace o2::base;
@@ -913,6 +918,108 @@ const char* MaterialManager::getMediumNameFromMediumID(int globalindex) const
     }
   }
   return "UNKNOWN";
+}
+
+TGeoMedium* MaterialManager::fieldFreeVariantOf(const TGeoMedium* med)
+{
+  if (med == nullptr) {
+    return nullptr;
+  }
+  if ((int)med->GetParam(1) == 0) {
+    return const_cast<TGeoMedium*>(med); // already declares no field
+  }
+
+  const std::string base = med->GetName();
+  // Two spellings are in use in the passive modules. A high-cut medium keeps
+  // the cut marker last (PIPE_VACUUM_HC -> PIPE_VACUUM_NFHC); everything else
+  // simply gains the marker (PIPE_INOX -> PIPE_INOX_NF).
+  std::vector<std::string> candidates;
+  if (base.size() > 3 && base.compare(base.size() - 3, 3, "_HC") == 0) {
+    candidates.push_back(base.substr(0, base.size() - 3) + "_NFHC");
+  }
+  candidates.push_back(base + "_NF");
+
+  for (const auto& c : candidates) {
+    if (auto* existing = gGeoManager->GetMedium(c.c_str())) {
+      return existing;
+    }
+  }
+
+  // No hand-written counterpart: build one that differs from the original in
+  // nothing but the field flag, so cuts, processes and the material itself stay
+  // exactly as the module defined them.
+  const std::string name = candidates.front();
+  const TGeoMaterial* mat = med->GetMaterial();
+  if (mat == nullptr) {
+    LOG(fatal) << "medium " << base << " has no material; cannot derive a field-free variant";
+    return nullptr;
+  }
+  const Int_t kmat = const_cast<TGeoMaterial*>(mat)->GetIndex();
+  const Int_t isvol = (Int_t)med->GetParam(0);
+  const Float_t fieldm = med->GetParam(2);
+  const Float_t tmaxfd = med->GetParam(3);
+  const Float_t stemax = med->GetParam(4);
+  const Float_t deemax = med->GetParam(5);
+  const Float_t epsil = med->GetParam(6);
+  const Float_t stmin = med->GetParam(7);
+
+  LOG(info) << "MaterialManager: deriving field-free medium " << name << " from " << base;
+  if (TVirtualMC::GetMC()) {
+    int kmed = -1;
+    TVirtualMC::GetMC()->Medium(kmed, name.c_str(), kmat, isvol, 0, fieldm, tmaxfd, stemax, deemax, epsil, stmin,
+                                (Float_t*)nullptr, 0);
+    insertMediumName(name.c_str(), kmed);
+  } else {
+    const auto uid = gGeoManager->GetListOfMedia()->GetSize();
+    gGeoManager->Medium(name.c_str(), uid, kmat, isvol, 0, fieldm, tmaxfd, stemax, deemax, epsil, stmin);
+    insertMediumName(name.c_str(), uid);
+  }
+  auto* created = gGeoManager->GetMedium(name.c_str());
+  if (created == nullptr) {
+    LOG(fatal) << "could not create field-free medium " << name;
+  }
+  return created;
+}
+
+TGeoVolume* MaterialManager::cloneSubtreeWithMediumSuffix(TGeoVolume* top, const char* suffix)
+{
+  if (top == nullptr) {
+    return nullptr;
+  }
+  const auto key = std::make_pair(top, std::string(suffix));
+  auto cached = mFieldFreeCloneMap.find(key);
+  if (cached != mFieldFreeCloneMap.end()) {
+    return cached->second;
+  }
+
+  const std::string name = std::string(top->GetName()) + suffix;
+  TGeoVolume* clone = nullptr;
+  if (top->IsAssembly()) {
+    clone = new TGeoVolumeAssembly(name.c_str());
+  } else {
+    auto* med = top->GetMedium();
+    if (med != nullptr && (int)med->GetParam(0) != 0) {
+      LOG(fatal) << "refusing to clone subtree containing sensitive volume " << top->GetName()
+                 << ": hits are recorded against geometry paths";
+      return nullptr;
+    }
+    // The shape is shared, not copied: it is owned by the geometry manager and
+    // is identical by construction for the two placements.
+    clone = new TGeoVolume(name.c_str(), top->GetShape(), fieldFreeVariantOf(med));
+    clone->SetVisibility(top->IsVisible());
+  }
+  // register before recursing, so a subtree that reaches the same volume twice
+  // resolves to one clone instead of two identically named ones
+  mFieldFreeCloneMap[key] = clone;
+
+  for (int i = 0; i < top->GetNdaughters(); ++i) {
+    auto* node = top->GetNode(i);
+    clone->AddNode(cloneSubtreeWithMediumSuffix(node->GetVolume(), suffix), node->GetNumber(), node->GetMatrix());
+  }
+  if (top->IsAssembly()) {
+    clone->GetShape()->ComputeBBox();
+  }
+  return clone;
 }
 
 /// print all tracking media inside a logical volume (specified by name)

@@ -20,8 +20,11 @@
 #include <unordered_map>
 #include <initializer_list>
 #include <iosfwd>
+#include <string>
+#include <utility>
 
 class TGeoMedium;
+class TGeoVolume;
 
 namespace o2
 {
@@ -211,6 +214,37 @@ class MaterialManager
   /// and all of its daughters
   static void printContainingMedia(std::string const& volumename);
 
+  /// Tracking medium that describes the same material as \a med but declares no
+  /// magnetic field (ifield = 0), created on first use and cached afterwards.
+  ///
+  /// The passive modules already hand-write such counterparts under a fixed
+  /// naming convention -- PIPE_INOX next to PIPE_INOX_NF, and for the
+  /// high-transport-cut flavours PIPE_VACUUM_HC next to PIPE_VACUUM_NFHC -- so
+  /// an existing medium is always preferred over a new one; that keeps the
+  /// medium count and the cut/process settings attached to those media exactly
+  /// as the module authors defined them. A medium that is already field-free is
+  /// returned unchanged.
+  TGeoMedium* fieldFreeVariantOf(const TGeoMedium* med);
+
+  /// Clone a volume subtree so that the copy declares no magnetic field.
+  ///
+  /// Shapes and placement matrices are shared with the original: only the
+  /// logical volumes and their media are new, and every medium is replaced by
+  /// its fieldFreeVariantOf() counterpart. Cloned volumes are named after the
+  /// original with \a suffix appended.
+  ///
+  /// This exists because a tracking medium is a property of a logical volume
+  /// while being inside the field is a property of a placement. Where the same
+  /// module is installed both inside and outside the field, the two cannot be
+  /// expressed at once without a second logical volume -- which is what this
+  /// produces, for the placements that a geometric argument puts outside the
+  /// field.
+  ///
+  /// Refuses (fatal) if the subtree contains a sensitive volume: hits are
+  /// recorded against geometry paths, and a second set of paths for the same
+  /// detector would silently change what alignment and digitisation see.
+  TGeoVolume* cloneSubtreeWithMediumSuffix(TGeoVolume* top, const char* suffix = "_NF");
+
  private:
   MaterialManager() = default;
 
@@ -244,6 +278,10 @@ class MaterialManager
 
   // a map allowing to lookup TGeoMedia from detector name and local medium index
   std::map<std::pair<std::string, int>, TGeoMedium*> mTGeoMediumMap;
+
+  // clones handed out by cloneSubtreeWithMediumSuffix, keyed by original volume
+  // and suffix, so that two overlapping requests share one cloned volume
+  std::map<std::pair<TGeoVolume*, std::string>, TGeoVolume*> mFieldFreeCloneMap; //!
 
   // finally, we'd like to keep track of tracking parameters and processes activated per medium
 
