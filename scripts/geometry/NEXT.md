@@ -88,17 +88,17 @@ record is rational, so widening one set literal was the whole fix. See `Stream_Q
 
 ## Open, in the order I would take them
 
-0a. **(2026-08-09) `surfaces_ST1829909_01…bin` — ALICE3's largest exact sidecar (1.46 MB) — fails
-   `LoadSurfaceSolid` validation**: `surface 1006: wire edge 1 end does not join the next edge
-   start (gap 5.41e-06 cm, tolerance 1e-06 cm)`. Nobody had loaded this sidecar standalone
-   before, so the failure predates Stream X and is not caused by it. Two candidate causes, in
-   the order to check: (1) the loader judges join gaps against the fixed fallback
-   `kWireJoinTolerance = 1e-6 cm` (`O2SurfaceSolidIO.cxx:279`) even when the sidecar (v2+)
-   declares the model's own tolerance — the constant's own doc block calls it "a fallback, not a
-   measurement of the model", and `GetRimMatchTolerance` already prefers the declared tolerance
-   for the same kind of decision; (2) the converter emitted genuinely non-joining edges for this
-   face and should share endpoints exactly. Decide on evidence (read the sidecar's declared
-   tolerance, measure the gap's effect on containment), not by widening a constant.
+*(Resolved same day: the `surfaces_ST1829909_01` load failure that briefly sat here as item 0a.
+It was cause (1): the sidecar declares modelTolerance = 4.7e-4 cm and the wire-join gate —
+loader **and** `CurveWire::initialize` behind `Add*Surface` — judged the 5.41e-6 cm gap against
+the fixed 1e-6 fallback anyway. The band is now `max(declared, 1e-6 floor)` threaded through
+both layers (not a widened constant: v1/undeclared files keep the floor, and a declared
+tolerance below the gap still rejects); the diagnostic names which tolerance applied and where
+it came from. The part now loads: 1052 surfaces, `reliable`, navigable, 0 BVH-vs-Loop
+mismatches; all 20 ALICE3 sidecars re-checked clean; 113 unit cases green; fixtures gate exit 0.
+Evidence and one documented residual — a within-tolerance gap placed exactly on a full-turn
+phi-wrap corner would still break rim chaining, not this corpus's case — in
+`Stream_Y_SidecarJoinTolerance.md`.)*
 
 0. **THE MODELS ARE NOT LEGAL FOR GEANT4, AND THIS BLOCKS THE STATED NEXT GOAL.** Neither
    `Bagger.step` nor ALICE3 composes into a world TGeo or Geant4 will accept: both contain placed

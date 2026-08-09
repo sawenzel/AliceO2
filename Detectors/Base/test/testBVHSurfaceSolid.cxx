@@ -2832,6 +2832,80 @@ BOOST_AUTO_TEST_CASE(TorusSidecarRoundTrip)
   checkClose(solid.Capacity(), reference.Capacity(), 1.e-7);
 }
 
+// Stream Y: wire-join gaps are judged against the tolerance the sidecar itself declares (the
+// version-2 model tolerance), with the extractor-precision constant as the floor -- not against
+// the bare constant when the model states it cannot do better. This is the ST1829909_01
+// rejection: surface 1006's bspline->line join gaps by 5.41e-6 cm on a model that declares
+// 4.7e-4 cm, and the 1e-6 constant "is a fallback, not a measurement of the model". The band
+// must hold in the loader *and* in the kernel's own wire construction, or the loader would
+// accept a wire that Add*Surface rejects moments later.
+BOOST_AUTO_TEST_CASE(StreamY_LoaderHonoursTheDeclaredModelTolerance)
+{
+  constexpr double radius = 2.;
+  constexpr double halfHeight = 3.;
+  // one seam offset purely in v (cm), so the 3D gap equals the offset on any cylinder:
+  // over the 1e-6 cm extractor floor, under the model tolerance the loading case declares
+  constexpr double joinGap = 5.e-6;
+
+  const auto cylinderBytes = [&](uint32_t version, double modelTolerance) {
+    std::vector<char> bytes;
+    appendSidecarHeader(bytes, 3, version, modelTolerance);
+    appendU32(bytes, 2);  // surfaceType cylinder
+    appendU32(bytes, 0);  // flags (outer wall)
+    appendU32(bytes, 14); // nParams
+    appendDoubles(bytes, {0., 0., 0., 0., 0., 1., 1., 0., 0., radius, -halfHeight, halfHeight, 0., 2. * surf::kPi});
+    appendU32(bytes, 1); // nWires
+    appendU32(bytes, 0); // outer wire role
+    appendU32(bytes, 5); // nEdges
+    // The bottom edge is split in two and the second half starts joinGap off the first half's
+    // end -- a mid-wire join like surface 1006's bspline->line seam. Deliberately *not* at the
+    // phi-wrap corner: the full-turn seam pair (u = 0 vs u = 2*pi) must stay exactly coincident
+    // to cancel in the rim chaining, and the real rejection's face spans only half a turn.
+    const std::array<std::array<double, 4>, 5> edges{
+      {{0., -halfHeight, surf::kPi, -halfHeight},
+       {surf::kPi, -halfHeight + joinGap, 2. * surf::kPi, -halfHeight}, // starts joinGap off edge 0's end
+       {2. * surf::kPi, -halfHeight, 2. * surf::kPi, halfHeight},
+       {2. * surf::kPi, halfHeight, 0., halfHeight},
+       {0., halfHeight, 0., -halfHeight}}};
+    for (const auto& edge : edges) {
+      appendU32(bytes, 0); // curveType line
+      appendU32(bytes, 4); // nCurveParams
+      appendDoubles(bytes, {edge[0], edge[1], edge[2], edge[3]});
+    }
+    appendDiskPlaneRecord(bytes, {0., 0., halfHeight}, {1., 0., 0.}, {0., 1., 0.}, radius);
+    appendDiskPlaneRecord(bytes, {0., 0., -halfHeight}, {1., 0., 0.}, {0., -1., 0.}, radius);
+    return bytes;
+  };
+  const auto loadFrom = [](const char* name, const std::vector<char>& bytes, SurfaceSolid& solid) {
+    const auto path = writeSidecarFile(name, bytes);
+    const bool ok = o2::base::LoadSurfaceSolid(path.string(), solid);
+    std::filesystem::remove(path);
+    return ok;
+  };
+
+  // a model declaring 1e-4 cm: the 5e-6 cm seam is within the model's own statement, so it loads,
+  // closes, and navigates like the gap-free tube (the kernel canonicalizes each seam on accept)
+  SurfaceSolid declared("sidecarJoinDeclared");
+  BOOST_REQUIRE(loadFrom("o2_sidecar_join_declared.bin", cylinderBytes(2, 1.e-4), declared));
+  BOOST_CHECK_EQUAL(declared.GetNsurfaces(), 3);
+  declared.CloseShape();
+  BOOST_CHECK(declared.IsClosed());
+  BOOST_CHECK(declared.IsOrientationConsistent());
+  TGeoTube reference("declaredToleranceTube", 0., radius, halfHeight);
+  compareContainsGrid(declared, reference, 4., 7);
+  compareDistance(declared, reference, {5., 0.5, 1.}, {-1., 0., 0.});
+
+  // a v1 file states nothing, so the extractor-precision floor stands and the same seam is open
+  SurfaceSolid silent("sidecarJoinSilent");
+  BOOST_CHECK(!loadFrom("o2_sidecar_join_silent.bin", cylinderBytes(1, 0.), silent));
+  BOOST_CHECK_EQUAL(silent.GetNsurfaces(), 0);
+
+  // a declared tolerance below the gap does not save it: the model itself calls the seam open
+  SurfaceSolid tight("sidecarJoinTight");
+  BOOST_CHECK(!loadFrom("o2_sidecar_join_tight.bin", cylinderBytes(2, 2.e-6), tight));
+  BOOST_CHECK_EQUAL(tight.GetNsurfaces(), 0);
+}
+
 namespace
 {
 // Append a plane record whose rectangular outer wire has its bottom edge as a degree-3 B-spline

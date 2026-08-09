@@ -70,7 +70,16 @@ inline constexpr double kClosureQuantum = 1.e-7;         ///< vertex quantizatio
 /// The residual gap is negligible for winding/area/navigation, which use kTolerance for
 /// on-boundary classification.
 inline constexpr double kWireJoinTolerance = 1.e-6;
-inline constexpr double kWireJoinToleranceSq = kWireJoinTolerance * kWireJoinTolerance;
+/// The wire-join acceptance band for a model that declares its own tolerance: the declared value
+/// when it is looser than the extractor floor, the floor otherwise. Same reasoning as
+/// kRimMatchTolerance below -- a model that states how closely its own edges meet knows better
+/// than a constant, and kWireJoinTolerance "is a fallback, not a measurement of the model". The
+/// floor stays because no declaration can make the extractor's endpoint sampling more precise
+/// than it is. A modelTolerance of 0 means "not stated" and yields the floor unchanged.
+inline constexpr double wireJoinToleranceFor(double modelTolerance)
+{
+  return modelTolerance > kWireJoinTolerance ? modelTolerance : kWireJoinTolerance;
+}
 /// How flat the adaptive B-spline sampler makes each chord, in the curve's own parametric units.
 /// A trim B-spline enters navigation as this polyline, so it *is* the boundary as far as winding
 /// and point-to-curve distance are concerned, and nothing downstream can be more accurate than
@@ -635,11 +644,13 @@ struct SurfaceWire {
 
   /// Build and validate the wire from an explicit ordered edge list, checking loop closure.
   ///
-  /// The join test is kWireJoinTolerance through \a metric, i.e. exactly the rule CurveWire uses.
+  /// The join test is \a joinTolerance through \a metric, i.e. exactly the rule CurveWire uses.
   /// The two used to differ -- 1e-9 here against 1e-5 there, in incompatible units -- although the
-  /// same extractor, with the same per-endpoint precision, feeds both (finding K12).
+  /// same extractor, with the same per-endpoint precision, feeds both (finding K12). The default
+  /// band is the extractor floor; a caller whose model declares its own tolerance passes
+  /// wireJoinToleranceFor(that) instead (Stream Y).
   bool initializeFromEdges(const std::vector<SurfaceEdge>& edges, WireRole wireRole, WireStatus& status,
-                           const ParametricMetric& metric = {})
+                           const ParametricMetric& metric = {}, double joinTolerance = kWireJoinTolerance)
   {
     if (edges.size() < 3) {
       status = WireStatus::TooFewVertices;
@@ -651,7 +662,7 @@ struct SurfaceWire {
         return false;
       }
       const Vec2& nextStart = edges[(edgeIndex + 1) % edges.size()].start;
-      if (metric.distanceSq(edges[edgeIndex].end, nextStart) > kWireJoinToleranceSq) {
+      if (metric.distanceSq(edges[edgeIndex].end, nextStart) > joinTolerance * joinTolerance) {
         status = WireStatus::Open;
         return false;
       }
@@ -2085,10 +2096,12 @@ struct CurveWire {
   }
 
   /// Build and validate the wire from an ordered, closed list of curves. \a metric turns the join
-  /// gaps into 3D lengths so that kWireJoinTolerance means one distance on every surface; the form
-  /// is evaluated at each join in turn, because it is not constant over the domain.
+  /// gaps into 3D lengths so that \a joinTolerance means one distance on every surface; the form
+  /// is evaluated at each join in turn, because it is not constant over the domain. The default
+  /// band is the extractor floor kWireJoinTolerance; a caller whose model declares its own
+  /// tolerance passes wireJoinToleranceFor(that) instead (Stream Y).
   bool initialize(const std::vector<Curve2D>& inputCurves, WireRole wireRole, WireStatus& status,
-                  const ParametricMetric& metric = {})
+                  const ParametricMetric& metric = {}, double joinTolerance = kWireJoinTolerance)
   {
     role = wireRole;
     curves = inputCurves;
@@ -2108,7 +2121,7 @@ struct CurveWire {
       }
       const Vec2 currentEnd = curves[index].endPoint();
       const Vec2 nextStart = curves[(index + 1) % curves.size()].startPoint();
-      if (metric.distanceSq(currentEnd, nextStart) > kWireJoinToleranceSq) {
+      if (metric.distanceSq(currentEnd, nextStart) > joinTolerance * joinTolerance) {
         status = WireStatus::Open;
         return false;
       }
@@ -2487,10 +2500,11 @@ double integrateOverCurveTrim(const CurveWire& outerWire, const std::vector<Curv
 inline bool buildCurveTrim(const std::vector<Curve2D>& outerTrim,
                            const std::vector<std::vector<Curve2D>>& innerTrims, CurveWire& outerWire,
                            std::vector<CurveWire>& innerWires, Vec2& lower, Vec2& upper,
-                           std::string& errorMessage, const ParametricMetric& metric = {})
+                           std::string& errorMessage, const ParametricMetric& metric = {},
+                           double joinTolerance = kWireJoinTolerance)
 {
   WireStatus status = WireStatus::Valid;
-  if (!outerWire.initialize(outerTrim, WireRole::Outer, status, metric)) {
+  if (!outerWire.initialize(outerTrim, WireRole::Outer, status, metric, joinTolerance)) {
     errorMessage = std::string("quadric outer trim wire invalid: ") + wireStatusMessage(status);
     return false;
   }
@@ -2499,7 +2513,7 @@ inline bool buildCurveTrim(const std::vector<Curve2D>& outerTrim,
   for (const auto& innerLoop : innerTrims) {
     CurveWire innerWire;
     WireStatus innerStatus = WireStatus::Valid;
-    if (!innerWire.initialize(innerLoop, WireRole::Inner, innerStatus, metric)) {
+    if (!innerWire.initialize(innerLoop, WireRole::Inner, innerStatus, metric, joinTolerance)) {
       errorMessage = std::string("quadric inner trim wire invalid: ") + wireStatusMessage(innerStatus);
       return false;
     }
@@ -3284,7 +3298,8 @@ class CurvedPlanarBoundedSurface final : public BoundedSurface
  public:
   bool initialize(const Vec3& surfaceOrigin, const Vec3& surfaceAxisU, const Vec3& surfaceAxisV,
                   const std::vector<Curve2D>& outerCurves,
-                  const std::vector<std::vector<Curve2D>>& innerCurves, std::string& errorMessage)
+                  const std::vector<std::vector<Curve2D>>& innerCurves, std::string& errorMessage,
+                  double joinTolerance = kWireJoinTolerance)
   {
     if (!finite(surfaceOrigin) || !finite(surfaceAxisU) || !finite(surfaceAxisV)) {
       errorMessage = "surface frame contains a non-finite value";
@@ -3303,7 +3318,7 @@ class CurvedPlanarBoundedSurface final : public BoundedSurface
 
     WireStatus outerStatus = WireStatus::Valid;
     const ParametricMetric metric = parametricMetricOf(*this);
-    if (!mOuterWire.initialize(outerCurves, WireRole::Outer, outerStatus, metric)) {
+    if (!mOuterWire.initialize(outerCurves, WireRole::Outer, outerStatus, metric, joinTolerance)) {
       errorMessage = std::string("outer wire invalid: ") + wireStatusMessage(outerStatus);
       return false;
     }
@@ -3314,7 +3329,7 @@ class CurvedPlanarBoundedSurface final : public BoundedSurface
     for (const auto& innerCurveLoop : innerCurves) {
       CurveWire innerWire;
       WireStatus innerStatus = WireStatus::Valid;
-      if (!innerWire.initialize(innerCurveLoop, WireRole::Inner, innerStatus, metric)) {
+      if (!innerWire.initialize(innerCurveLoop, WireRole::Inner, innerStatus, metric, joinTolerance)) {
         errorMessage = std::string("inner wire invalid: ") + wireStatusMessage(innerStatus);
         return false;
       }
@@ -3610,7 +3625,7 @@ class CylindricalBoundedSurface final : public BoundedSurface
   bool initialize(const Vec3& centerPoint, const Vec3& axis, const Vec3& referenceAxisU, double radius,
                   double heightMin, double heightMax, double phiStart, double phiSweep, bool innerWall,
                   const std::vector<Curve2D>& outerTrim, const std::vector<std::vector<Curve2D>>& innerTrims,
-                  std::string& errorMessage)
+                  std::string& errorMessage, double joinTolerance = kWireJoinTolerance)
   {
     if (!initialize(centerPoint, axis, referenceAxisU, radius, heightMin, heightMax, phiStart, phiSweep, innerWall,
                     errorMessage)) {
@@ -3618,7 +3633,7 @@ class CylindricalBoundedSurface final : public BoundedSurface
     }
     Vec2 lower, upper;
     if (!buildCurveTrim(outerTrim, innerTrims, mTrimOuter, mTrimInner, lower, upper, errorMessage,
-                        parametricMetricOf(*this))) {
+                        parametricMetricOf(*this), joinTolerance)) {
       return false;
     }
     mPhiStart = lower.uCoord;
@@ -3988,7 +4003,7 @@ class SphericalBoundedSurface final : public BoundedSurface
   bool initialize(const Vec3& center, const Vec3& polarAxis, const Vec3& referenceAxisU, double radius,
                   double thetaMin, double thetaMax, double phiStart, double phiSweep, bool innerWall,
                   const std::vector<Curve2D>& outerTrim, const std::vector<std::vector<Curve2D>>& innerTrims,
-                  std::string& errorMessage)
+                  std::string& errorMessage, double joinTolerance = kWireJoinTolerance)
   {
     if (!initialize(center, polarAxis, referenceAxisU, radius, thetaMin, thetaMax, phiStart, phiSweep, innerWall,
                     errorMessage)) {
@@ -3996,7 +4011,7 @@ class SphericalBoundedSurface final : public BoundedSurface
     }
     Vec2 lower, upper;
     if (!buildCurveTrim(outerTrim, innerTrims, mTrimOuter, mTrimInner, lower, upper, errorMessage,
-                        parametricMetricOf(*this))) {
+                        parametricMetricOf(*this), joinTolerance)) {
       return false;
     }
     mPhiStart = lower.uCoord;
@@ -4394,7 +4409,8 @@ class ConicalBoundedSurface final : public BoundedSurface
   bool initialize(const Vec3& centerPoint, const Vec3& axis, const Vec3& referenceAxisU, double radiusAtMin,
                   double radiusAtMax, double heightMin, double heightMax, double phiStart, double phiSweep,
                   bool innerWall, const std::vector<Curve2D>& outerTrim,
-                  const std::vector<std::vector<Curve2D>>& innerTrims, std::string& errorMessage)
+                  const std::vector<std::vector<Curve2D>>& innerTrims, std::string& errorMessage,
+                  double joinTolerance = kWireJoinTolerance)
   {
     if (!initialize(centerPoint, axis, referenceAxisU, radiusAtMin, radiusAtMax, heightMin, heightMax, phiStart,
                     phiSweep, innerWall, errorMessage)) {
@@ -4402,7 +4418,7 @@ class ConicalBoundedSurface final : public BoundedSurface
     }
     Vec2 lower, upper;
     if (!buildCurveTrim(outerTrim, innerTrims, mTrimOuter, mTrimInner, lower, upper, errorMessage,
-                        parametricMetricOf(*this))) {
+                        parametricMetricOf(*this), joinTolerance)) {
       return false;
     }
     mPhiStart = lower.uCoord;
@@ -4805,7 +4821,8 @@ class TorusBoundedSurface final : public BoundedSurface
   bool initialize(const Vec3& centerPoint, const Vec3& axis, const Vec3& referenceAxisU, double majorRadius,
                   double minorRadius, double phiStart, double phiSweep, double tubeStart, double tubeSweep,
                   bool innerWall, const std::vector<Curve2D>& outerTrim,
-                  const std::vector<std::vector<Curve2D>>& innerTrims, std::string& errorMessage)
+                  const std::vector<std::vector<Curve2D>>& innerTrims, std::string& errorMessage,
+                  double joinTolerance = kWireJoinTolerance)
   {
     if (!initialize(centerPoint, axis, referenceAxisU, majorRadius, minorRadius, phiStart, phiSweep, tubeStart,
                     tubeSweep, innerWall, errorMessage)) {
@@ -4813,7 +4830,7 @@ class TorusBoundedSurface final : public BoundedSurface
     }
     Vec2 lower, upper;
     if (!buildCurveTrim(outerTrim, innerTrims, mTrimOuter, mTrimInner, lower, upper, errorMessage,
-                        parametricMetricOf(*this))) {
+                        parametricMetricOf(*this), joinTolerance)) {
       return false;
     }
     if (upper.vCoord - lower.vCoord > kTwoPi + kTolerance) {
