@@ -292,8 +292,9 @@ class O2BVHSurfaceSolid : public TGeoBBox
   bool HasBVH() const;
   /// Fill the BVH root-node bounding box; returns false when no BVH has been built.
   bool GetBVHRootBounds(Point3D& lower, Point3D& upper) const;
-  /// Diagnostic/test hook: number of candidate surface patches whose BVH leaf boxes the given
-  /// ray traverses (counted with multiplicity per leaf primitive). Returns -1 without a BVH.
+  /// Diagnostic/test hook: number of distinct candidate surface patches whose sub-patch cover
+  /// boxes the given ray traverses (each surface counted once however many of its boxes the ray
+  /// crosses). Returns -1 without a BVH.
   int CountBVHRayCandidates(const Point3D& point, const Point3D& direction) const;
 
   /// Ray tmax tightening in the BVH-accelerated distance queries: as a hit is found the
@@ -330,6 +331,18 @@ class O2BVHSurfaceSolid : public TGeoBBox
   /// Process-wide, not thread safe, and never enabled outside a test.
   static void SetSafetyBoundUnsoundForTest(bool enable);
   static bool GetSafetyBoundUnsoundForTest();
+
+  /// Approximate-safety mode: with a positive \a slack, Safety() may stop its BVH traversal
+  /// early -- possibly without evaluating any patch at all, e.g. a far point is answered by the
+  /// root box alone -- and return a guaranteed *underestimate* no smaller than (1 - slack) times
+  /// the exact nearest-patch distance. Underestimating is the safe direction (the navigator takes
+  /// a shorter free step and asks again); the slack bounds what that costs in extra steps. 0 (the
+  /// default) keeps the exact, Safety_Loop-identical behaviour; values are clamped to [0, 0.9].
+  /// Only Safety() consults it -- ComputeNormal() stays exact, since a normal taken from the
+  /// wrong patch is wrong in kind, not merely short. Process-wide and not thread safe to flip
+  /// while queries run, like the other measurement knobs.
+  static void SetSafetySlack(double slack);
+  static double GetSafetySlack();
 
   /// One crossing of the containment parity ray, as seen by Contains().
   struct ContainsCrossing {

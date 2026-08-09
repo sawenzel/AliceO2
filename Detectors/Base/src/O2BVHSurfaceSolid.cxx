@@ -96,6 +96,48 @@ thread_local long long gSafetyCandidateCount = 0;
 // Deliberately unsound node bound for the nearest-patch traversal; see
 // O2BVHSurfaceSolid::SetSafetyBoundUnsoundForTest. Never true outside a test.
 bool gSafetyBoundUnsound = false;
+// Relative slack of the approximate-safety mode; see O2BVHSurfaceSolid::SetSafetySlack. 0 keeps
+// Safety() exact.
+double gSafetySlack = 0.;
+
+// Per-thread backing store of SurfaceVisitMarker, one stamp per surface index plus the epoch the
+// live marker stamps with; see the class below.
+thread_local std::vector<unsigned long long> gSurfaceVisitStamps;
+thread_local unsigned long long gSurfaceVisitEpoch = 0;
+
+/// Per-query dedup of the surfaces a sub-patch traversal has already handed on. With several
+/// cover boxes per surface a query can reach the same surface through more than one leaf, and a
+/// second appendIntersections call would duplicate its hits -- flipping crossing parity and
+/// corrupting the graze clustering -- while a second distanceSqToPatch would only waste time. So
+/// each traversal opens a marker and hands each surface on exactly once. Epoch-stamped over a
+/// thread_local array: no clearing, no allocation on the hot path, and queries on different
+/// threads cannot see each other. Traversals never nest (no kernel under a leaf callback starts
+/// another traversal), which is what makes one stamp array per thread enough.
+class SurfaceVisitMarker
+{
+ public:
+  explicit SurfaceVisitMarker(size_t surfaceCount) : mStamps(gSurfaceVisitStamps), mEpoch(++gSurfaceVisitEpoch)
+  {
+    if (mStamps.size() < surfaceCount) {
+      mStamps.resize(surfaceCount, 0);
+    }
+  }
+
+  /// True exactly once per surface index and marker lifetime.
+  bool firstVisit(size_t index)
+  {
+    if (mStamps[index] == mEpoch) {
+      return false;
+    }
+    mStamps[index] = mEpoch;
+    return true;
+  }
+
+ private:
+  /// bound once per query rather than looked up per visit, which is the hot path
+  std::vector<unsigned long long>& mStamps;
+  unsigned long long mEpoch;
+};
 
 /// Squared distance from \a point to a BVH node's bounding box, evaluated in double from the
 /// float box corners (which convert exactly), and then shrunk by a relative guard.
@@ -478,50 +520,112 @@ struct O2BVHSurfaceSolid::Impl {
   /// a reference. The two are the same data; only the state enum and the Vec3 differ in type.
   std::vector<RimReport> rimReports;
   bool defined = false;
-  std::unique_ptr<BVH> bvh; //!< acceleration structure over the surface AABBs (built in CloseShape)
+  std::unique_ptr<BVH> bvh; //!< acceleration structure over the sub-patch cover boxes (built in CloseShape)
+  /// Which surface owns each BVH primitive, indexed by the builder's primitive id. With the
+  /// sub-patch BVH a surface owns several primitives (its cover boxes), so the leaf callbacks
+  /// translate through this table and dedup with a SurfaceVisitMarker.
+  std::vector<int> coverSurface;
+  /// A few exact on-patch points (subsampled display vertices), seeding the nearest-patch
+  /// traversal's upper bound the way VecGeom's tessellated safety seeds its BVH query from its
+  /// precomputed test points. See anchorSeedDistanceSq.
+  std::vector<Vec3> safetyAnchors;
 
-  /// Build the BVH over per-surface conservative AABBs. Boxes are expanded by the documented
-  /// kBVHBoxTolerance and then rounded outward during the double->float conversion so no
-  /// tolerance-level boundary hit can be missed by the float traversal.
+  /// Build the BVH over the surfaces' sub-patch cover boxes (BoundedSurface::appendCoverBoxes):
+  /// several tight boxes per curved surface instead of one conservative box, so a swept quadric
+  /// no longer turns every ray through its whole-circle box into a paid analytic intersection.
+  /// Boxes are expanded by the documented kBVHBoxTolerance and then rounded outward during the
+  /// double->float conversion so no tolerance-level boundary hit can be missed by the float
+  /// traversal.
   void buildBVH()
   {
     bvh.reset();
+    coverSurface.clear();
     if (surfaces.empty()) {
       return;
     }
 
     std::vector<BVHBBox> primitiveBoxes;
     std::vector<BVHVec3> primitiveCenters;
-    primitiveBoxes.reserve(surfaces.size());
-    primitiveCenters.reserve(surfaces.size());
-    for (const auto& surface : surfaces) {
-      Vec3 lowerCorner{TGeoShape::Big(), TGeoShape::Big(), TGeoShape::Big()};
-      Vec3 upperCorner{-TGeoShape::Big(), -TGeoShape::Big(), -TGeoShape::Big()};
-      surface->conservativeBounds(lowerCorner, upperCorner);
-      BVHBBox primitiveBox;
-      for (int dimension = 0; dimension < 3; ++dimension) {
-        primitiveBox.min[dimension] = std::nextafterf(
-          static_cast<float>(component(lowerCorner, dimension) - kBVHBoxTolerance),
-          -std::numeric_limits<float>::infinity());
-        primitiveBox.max[dimension] = std::nextafterf(
-          static_cast<float>(component(upperCorner, dimension) + kBVHBoxTolerance),
-          std::numeric_limits<float>::infinity());
+    std::vector<BoundedSurface::CoverBox> coverBoxes;
+    for (size_t surfaceIndex = 0; surfaceIndex < surfaces.size(); ++surfaceIndex) {
+      coverBoxes.clear();
+      surfaces[surfaceIndex]->appendCoverBoxes(coverBoxes);
+      for (const auto& coverBox : coverBoxes) {
+        BVHBBox primitiveBox;
+        for (int dimension = 0; dimension < 3; ++dimension) {
+          primitiveBox.min[dimension] = std::nextafterf(
+            static_cast<float>(component(coverBox.first, dimension) - kBVHBoxTolerance),
+            -std::numeric_limits<float>::infinity());
+          primitiveBox.max[dimension] = std::nextafterf(
+            static_cast<float>(component(coverBox.second, dimension) + kBVHBoxTolerance),
+            std::numeric_limits<float>::infinity());
+        }
+        primitiveBoxes.push_back(primitiveBox);
+        primitiveCenters.emplace_back(primitiveBox.get_center());
+        coverSurface.push_back(static_cast<int>(surfaceIndex));
       }
-      primitiveBoxes.push_back(primitiveBox);
-      primitiveCenters.emplace_back(primitiveBox.get_center());
     }
 
     typename bvh::v2::DefaultBuilder<BVHNode>::Config config;
     config.quality = bvh::v2::DefaultBuilder<BVHNode>::Quality::High;
-    // One analytic patch per leaf: patch intersections are far more expensive than node box
-    // tests (unlike triangles), and the bvh2 traversal enters a leaf start node without a box
-    // test, so a default-sized (up to 8 primitives) single-leaf tree would defeat all pruning
-    // for small solids.
+    // One cover box per leaf: patch intersections are far more expensive than node box tests
+    // (unlike triangles), and the bvh2 traversal enters a leaf start node without a box test, so
+    // a default-sized (up to 8 primitives) single-leaf tree would defeat all pruning for small
+    // solids.
     config.max_leaf_size = 1;
     bvh = std::make_unique<BVH>(bvh::v2::DefaultBuilder<BVHNode>::build(primitiveBoxes, primitiveCenters, config));
   }
 
-  /// Visit every surface whose BVH leaf box is traversed by the (unbounded) ray.
+  /// The surface a BVH primitive belongs to. A primitive is one cover box and a surface owns
+  /// several of them, so every leaf callback goes through here and then through a
+  /// SurfaceVisitMarker.
+  size_t surfaceOfPrimitive(size_t primitive) const
+  {
+    return static_cast<size_t>(coverSurface[bvh->prim_ids[primitive]]);
+  }
+
+  /// Subsample the display vertices as safety anchors. Display vertices lie exactly on their
+  /// patches (they are emitted by each surface's own pointAt / wire sampling), so the distance
+  /// from a query point to any of them is an upper bound on the distance to the boundary.
+  void collectSafetyAnchors()
+  {
+    constexpr size_t kAnchorCount = 24;
+    safetyAnchors.clear();
+    if (displayVertices.empty()) {
+      return;
+    }
+    const size_t stride = std::max<size_t>(1, displayVertices.size() / kAnchorCount);
+    for (size_t index = 0; index < displayVertices.size() && safetyAnchors.size() < kAnchorCount; index += stride) {
+      safetyAnchors.push_back(displayVertices[index]);
+    }
+  }
+
+  /// The anchor seed of the nearest-patch traversals: the squared distance to the nearest safety
+  /// anchor, inflated by a hair. It is an upper bound on the exact answer (each anchor lies on a
+  /// patch, and distanceSqToPatch never exceeds the true distance to its own patch), so starting
+  /// the running best from it only prunes nodes that cannot win -- the winner's own leaf box
+  /// stays at least the kBVHBoxTolerance inflation below its patch distance, far more than the
+  /// inflation here, so the winner is still visited and the returned value and index stay exactly
+  /// the loop's. Infinity when there are no anchors, which restores the unseeded traversal.
+  double anchorSeedDistanceSq(const Vec3& point) const
+  {
+    double bestDistanceSq = std::numeric_limits<double>::infinity();
+    for (const auto& anchor : safetyAnchors) {
+      bestDistanceSq = std::min(bestDistanceSq, normSq(point - anchor));
+    }
+    if (!std::isfinite(bestDistanceSq)) {
+      return bestDistanceSq;
+    }
+    // relative term: dominates every rounding of the anchor distance and of distanceSqToPatch
+    // itself (a few ulps each) at any scale; absolute term: dominates the display vertices'
+    // on-patch tolerance. Both stay far below the kBVHBoxTolerance the winner-visit argument
+    // rests on.
+    const double inflated = std::sqrt(bestDistanceSq) * (1. + 1.e-12) + 1.e-10;
+    return inflated * inflated;
+  }
+
+  /// Visit every surface one of whose cover-box leaves is traversed by the (unbounded) ray,
+  /// each exactly once however many of its boxes the ray crosses.
   template <typename SurfaceVisitor>
   void visitRayCandidates(const Vec3& rayOrigin, const Vec3& rayDirection, SurfaceVisitor&& visitor) const
   {
@@ -530,11 +634,15 @@ struct O2BVHSurfaceSolid::Impl {
                std::numeric_limits<BVHScalar>::max());
     static constexpr bool useRobustTraversal = true;
     bvh::v2::GrowingStack<BVH::Index> stack;
+    SurfaceVisitMarker marker(surfaces.size());
     bvh->intersect<false, useRobustTraversal>(ray, bvh->get_root().index, stack,
                                               [&](size_t beginPrimitive, size_t endPrimitive) {
                                                 for (size_t primitive = beginPrimitive; primitive < endPrimitive;
                                                      ++primitive) {
-                                                  visitor(*surfaces[bvh->prim_ids[primitive]]);
+                                                  const size_t surfaceIndex = surfaceOfPrimitive(primitive);
+                                                  if (marker.firstVisit(surfaceIndex)) {
+                                                    visitor(*surfaces[surfaceIndex]);
+                                                  }
                                                 }
                                                 return false; // keep traversing
                                               });
@@ -581,12 +689,17 @@ struct O2BVHSurfaceSolid::Impl {
       static constexpr bool useRobustTraversal = true;
 
       bvh::v2::GrowingStack<BVH::Index> stack;
+      SurfaceVisitMarker marker(surfaces.size());
       // ray is captured by reference on purpose: bvh2 takes it as const Ray&, but the object
       // itself is ours and mutable, and the traversal reads tmax afresh at every node test.
       bvh->intersect<false, useRobustTraversal>(
         ray, bvh->get_root().index, stack, [&](size_t beginPrimitive, size_t endPrimitive) {
           for (size_t primitive = beginPrimitive; primitive < endPrimitive; ++primitive) {
-            const BoundedSurface& surface = *surfaces[bvh->prim_ids[primitive]];
+            const size_t surfaceIndex = surfaceOfPrimitive(primitive);
+            if (!marker.firstVisit(surfaceIndex)) {
+              continue;
+            }
+            const BoundedSurface& surface = *surfaces[surfaceIndex];
             ++gRayCandidateCount;
             surfaceHits.clear();
             // the per-surface bound keeps a margin past the current candidate, so the candidate's
@@ -727,6 +840,7 @@ struct O2BVHSurfaceSolid::Impl {
   bool visitPointCandidates(const Vec3& point, SurfaceVisitor&& visitor) const
   {
     const BVHVec3 testPoint(point.xCoord, point.yCoord, point.zCoord);
+    SurfaceVisitMarker marker(surfaces.size());
     std::vector<size_t> nodeStack{0}; // start from the root node
     while (!nodeStack.empty()) {
       const auto& node = bvh->nodes[nodeStack.back()];
@@ -738,7 +852,8 @@ struct O2BVHSurfaceSolid::Impl {
         const auto beginPrimitive = node.index.first_id();
         const auto endPrimitive = beginPrimitive + node.index.prim_count();
         for (auto primitive = beginPrimitive; primitive < endPrimitive; ++primitive) {
-          if (visitor(*surfaces[bvh->prim_ids[primitive]])) {
+          const size_t surfaceIndex = surfaceOfPrimitive(primitive);
+          if (marker.firstVisit(surfaceIndex) && visitor(*surfaces[surfaceIndex])) {
             return true;
           }
         }
@@ -822,8 +937,14 @@ struct O2BVHSurfaceSolid::Impl {
     static thread_local std::vector<StackEntry> nodeStack;
     nodeStack.clear();
 
-    double bestDistanceSq = std::numeric_limits<double>::infinity();
+    // The anchor seed (VecGeom's tessellated-safety trick): start the running best from an upper
+    // bound instead of infinity, so pruning works from the first node instead of after the first
+    // leaf. The seed can never displace the true winner -- see anchorSeedDistanceSq -- and no
+    // patch index travels with it, so a seed that survives to the end means "no patch was nearer
+    // than an anchor", which cannot happen (the anchor's own patch always is).
+    double bestDistanceSq = anchorSeedDistanceSq(point);
     size_t bestIndex = surfaces.size();
+    SurfaceVisitMarker marker(surfaces.size());
 
     auto pruned = [](double lowerBoundSq, double bestSoFarSq) {
       return TrackIndex ? lowerBoundSq > bestSoFarSq : lowerBoundSq >= bestSoFarSq;
@@ -841,14 +962,17 @@ struct O2BVHSurfaceSolid::Impl {
         const auto beginPrimitive = node.index.first_id();
         const auto endPrimitive = beginPrimitive + node.index.prim_count();
         for (auto primitive = beginPrimitive; primitive < endPrimitive; ++primitive) {
-          const size_t index = bvh->prim_ids[primitive];
+          const size_t surfaceIndex = surfaceOfPrimitive(primitive);
+          if (!marker.firstVisit(surfaceIndex)) {
+            continue;
+          }
           ++gSafetyCandidateCount;
-          const double patchDistanceSq = surfaces[index]->distanceSqToPatch(point);
+          const double patchDistanceSq = surfaces[surfaceIndex]->distanceSqToPatch(point);
           if (patchDistanceSq < bestDistanceSq) {
             bestDistanceSq = patchDistanceSq;
-            bestIndex = index;
-          } else if (TrackIndex && patchDistanceSq == bestDistanceSq && index < bestIndex) {
-            bestIndex = index;
+            bestIndex = surfaceIndex;
+          } else if (TrackIndex && patchDistanceSq == bestDistanceSq && surfaceIndex < bestIndex) {
+            bestIndex = surfaceIndex;
           }
         }
         continue;
@@ -883,6 +1007,76 @@ struct O2BVHSurfaceSolid::Impl {
       *closestIndex = bestIndex;
     }
     return bestDistanceSq;
+  }
+
+  /// The approximate nearest-patch distance behind O2BVHSurfaceSolid::SetSafetySlack.
+  ///
+  /// A best-first traversal (smallest node bound first, the shape of O2Tessellated::SafetyKernel)
+  /// that stops as soon as the smallest outstanding bound proves the answer cannot improve by
+  /// more than the slack -- possibly before any patch is evaluated, when the root box alone
+  /// already answers within it. What is returned is always a *lower bound* on the exact answer:
+  /// either the exact minimum itself (the heap drained) or the first skipped node bound, which
+  /// bounds every patch not looked at while every patch looked at was at least the stop
+  /// threshold. So the result sits in [(1 - slack)^2 * exact, exact] in the squared domain --
+  /// never above the exact answer, because too-large is the failure mode Safety() must not have.
+  double nearestPatchDistanceSqApprox(const Vec3& point, double slack) const
+  {
+    if (bvh == nullptr) {
+      return nearestPatchDistanceSqLoop(point, nullptr);
+    }
+
+    const double keepFactorSq = (1. - slack) * (1. - slack);
+    const double anchorUpperSq = anchorSeedDistanceSq(point);
+    double bestEvaluatedSq = std::numeric_limits<double>::infinity();
+
+    struct HeapEntry {
+      size_t node;
+      double lowerBoundSq;
+    };
+    const auto farther = [](const HeapEntry& left, const HeapEntry& right) {
+      return left.lowerBoundSq > right.lowerBoundSq;
+    };
+    // reused across calls so the hot path allocates nothing, like the depth-first traversal's stack
+    static thread_local std::vector<HeapEntry> nodeHeap;
+    nodeHeap.clear();
+    SurfaceVisitMarker marker(surfaces.size());
+
+    nodeHeap.push_back({0, boxDistanceSq(bvh->nodes[0].get_bbox(), point)});
+    while (!nodeHeap.empty()) {
+      std::pop_heap(nodeHeap.begin(), nodeHeap.end(), farther);
+      const HeapEntry entry = nodeHeap.back();
+      nodeHeap.pop_back();
+      const double upperSq = std::min(anchorUpperSq, bestEvaluatedSq);
+      if (entry.lowerBoundSq >= keepFactorSq * upperSq) {
+        // the heap pops in increasing bound order, so this bound underestimates everything not
+        // yet expanded: stopping here and returning it (or a better evaluated patch) is sound
+        return std::min(bestEvaluatedSq, entry.lowerBoundSq);
+      }
+      const auto& node = bvh->nodes[entry.node];
+      if (node.is_leaf()) {
+        const auto beginPrimitive = node.index.first_id();
+        const auto endPrimitive = beginPrimitive + node.index.prim_count();
+        for (auto primitive = beginPrimitive; primitive < endPrimitive; ++primitive) {
+          const size_t surfaceIndex = surfaceOfPrimitive(primitive);
+          if (!marker.firstVisit(surfaceIndex)) {
+            continue;
+          }
+          ++gSafetyCandidateCount;
+          bestEvaluatedSq = std::min(bestEvaluatedSq, surfaces[surfaceIndex]->distanceSqToPatch(point));
+        }
+        continue;
+      }
+      const size_t firstChild = node.index.first_id();
+      for (const size_t child : {firstChild, firstChild + 1}) {
+        if (child < bvh->nodes.size()) {
+          nodeHeap.push_back({child, boxDistanceSq(bvh->nodes[child].get_bbox(), point)});
+          std::push_heap(nodeHeap.begin(), nodeHeap.end(), farther);
+        }
+      }
+    }
+    // the heap drained without an early stop: every reachable patch was evaluated, so this is
+    // the exact minimum
+    return bestEvaluatedSq;
   }
 };
 
@@ -1340,8 +1534,8 @@ void O2BVHSurfaceSolid::CloseShape(bool check)
   }
 
   ComputeBBox();
-  fImpl->buildBVH();
 
+  // the display mesh feeds the safety anchors, so it is assembled before the BVH machinery
   fImpl->displayVertices.clear();
   fImpl->displayTriangles.clear();
   fImpl->displayTriangleSurface.clear();
@@ -1350,6 +1544,8 @@ void O2BVHSurfaceSolid::CloseShape(bool check)
     // resize() only writes the entries it adds, so each surface stamps exactly its own triangles.
     fImpl->displayTriangleSurface.resize(fImpl->displayTriangles.size(), static_cast<int>(surfaceIndex));
   }
+  fImpl->collectSafetyAnchors();
+  fImpl->buildBVH();
 
   fImpl->closure = validateClosure(fImpl->surfaces, fModelTolerance);
   fImpl->rimReports.clear();
@@ -2267,6 +2463,16 @@ bool O2BVHSurfaceSolid::GetSafetyBoundUnsoundForTest()
   return gSafetyBoundUnsound;
 }
 
+void O2BVHSurfaceSolid::SetSafetySlack(double slack)
+{
+  gSafetySlack = std::isfinite(slack) ? std::min(std::max(slack, 0.), 0.9) : 0.;
+}
+
+double O2BVHSurfaceSolid::GetSafetySlack()
+{
+  return gSafetySlack;
+}
+
 /// The safety is the distance to the nearest patch, rounded *down* by one ulp.
 ///
 /// The rounding is asymmetric on purpose and predates this traversal: a safety a hair too small
@@ -2277,7 +2483,9 @@ Double_t O2BVHSurfaceSolid::Safety(const Double_t* point, Bool_t) const
   if (fImpl == nullptr || fImpl->surfaces.empty()) {
     return TGeoShape::Big();
   }
-  const double bestDistanceSq = fImpl->nearestPatchDistanceSq<false>(makeVec3(point), nullptr);
+  const double bestDistanceSq = gSafetySlack > 0.
+                                  ? fImpl->nearestPatchDistanceSqApprox(makeVec3(point), gSafetySlack)
+                                  : fImpl->nearestPatchDistanceSq<false>(makeVec3(point), nullptr);
   return std::nextafter(std::sqrt(bestDistanceSq), 0.);
 }
 

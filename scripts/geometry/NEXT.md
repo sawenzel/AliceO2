@@ -1,10 +1,24 @@
 # NEXT — session-start instruction for the CAD → TGeo work
 
 This file is the current hand-over. Whoever finishes a session should **rewrite it**.
-Last updated 2026-08-03, after an overnight run: placed primitives, the ellipse trim, the
-representation benchmark, the Safety BVH, two closed coverage routes, and the overlap census.
+Last updated 2026-08-09, after the sub-patch BVH session; the bulk of the file below is still the
+2026-08-03 hand-over and its numbers predate Stream X.
 
 Branch `swenzel/bvhsurfacesolid`. Everything below is committed.
+
+**(2026-08-09) The sub-patch BVH, the safety anchor seed, and approximate safety** — one BVH leaf
+per *cover box* instead of per surface (a full cylinder is 8 phi-chunk boxes, a sphere a 4×8 grid
+of the whole ball — the sphere/torus `distanceSqToPatch` realises on the whole surface, so their
+covers must too), per-query surface dedup keeps every answer bit-identical to the `_Loop` twins.
+ALICE3 `ST1829909_002`: Safety candidates 8.63 → **3.94**/call, distout 4.2 → **1.7**, transport
+−8 %; both gates re-run clean (fixtures 10/10, Bagger 13/13, exit 0). `Safety()` is seeded from
+24 on-patch anchor points (VecGeom master's tessellated trick) and gained an opt-in approximate
+mode `SetSafetySlack(s)` — a guaranteed underestimate within (1−s) of exact; a far point answers
+from the root box in **127 ns instead of 39 µs, zero patches evaluated**. Unit suite now
+**112 cases**. `Stream_X_SubPatchBVH.md` has the measurements and the soundness argument.
+(Also noted there: `surfaces_ST1829909_01…bin`, the largest ALICE3 sidecar, fails validation at
+load with a 5.4e-6 cm wire-join gap — a converter-side item, visible only now that someone tried
+to load it.)
 
 ## Read this first, and possibly only this
 

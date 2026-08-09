@@ -6486,13 +6486,11 @@ BOOST_AUTO_TEST_CASE(StreamS_BreakingThePruningBoundIsCaught)
   size_t safetyTooLarge = 0;
   size_t safetyTooSmall = 0;
   for (const auto& fixture : fixtures) {
-    // A solid of one patch has nothing to prune: its BVH is a single leaf, every bound sound or
-    // not is applied to a node that must be entered anyway, and the sabotage is invisible. That is
-    // not a weakness of the control, it is the statement that pruning is what the control tests --
-    // so those fixtures are excluded by an explicit criterion rather than by a fudged count.
-    if (fixture.solid->GetNsurfaces() > 1) {
-      ++prunableFixtures;
-    }
+    // With the sub-patch BVH every fixture here has something to prune: a multi-surface solid has
+    // one leaf per cover box across its surfaces, and even a single full sphere or torus owns a
+    // whole grid of cover-box leaves. (Before sub-patching, single-patch solids were a single
+    // unprunable leaf and had to be excluded here; that blind spot is gone by construction.)
+    ++prunableFixtures;
     const auto points = nearestPatchSample(*fixture.solid, fixture.extent, 400);
     size_t disagreementsHere = 0;
     SurfaceSolid::SetSafetyBoundUnsoundForTest(true);
@@ -6516,13 +6514,12 @@ BOOST_AUTO_TEST_CASE(StreamS_BreakingThePruningBoundIsCaught)
     } else {
       BOOST_TEST_MESSAGE("sabotaged bound NOT caught on " << fixture.solid->GetName() << " ("
                                                           << fixture.solid->GetNsurfaces() << " patches)");
-      BOOST_CHECK_EQUAL(fixture.solid->GetNsurfaces(), 1); // ... and only for want of anything to prune
     }
   }
 
-  // every fixture that has anything to prune is sensitive to it, not just one lucky one
+  // every fixture is sensitive to the sabotage, not just one lucky one
   BOOST_CHECK_EQUAL(caughtOnFixtures, prunableFixtures);
-  BOOST_CHECK_EQUAL(prunableFixtures, 7u);
+  BOOST_CHECK_EQUAL(prunableFixtures, fixtures.size());
   BOOST_CHECK_GT(sabotagedDisagreements, 100u);
   // and it fails the dangerous way: too much safety, never too little
   BOOST_CHECK_GT(safetyTooLarge, 0u);
@@ -6580,3 +6577,347 @@ BOOST_AUTO_TEST_CASE(StreamS_SafetyVisitsFarFewerPatchesThanTheLoop)
   BOOST_CHECK_LT(normalPerCall, 0.4 * ring->GetNsurfaces());
   BOOST_CHECK_GE(normalPerCall, perCall);
 }
+
+/// @name Stream X -- the sub-patch BVH
+///
+/// One conservative box per surface makes every swept quadric a giant leaf: a full cylinder's box
+/// is the box of its two full rim circles, a sphere's is the whole ball, and every ray through
+/// that box pays an analytic patch intersection that mostly reports nothing. The sub-patch BVH
+/// lets each surface contribute several tighter boxes (appendCoverBoxes) and dedups the surfaces
+/// a query actually tests, so the leaf boxes hug the geometry and the answers stay bit-identical
+/// to the loop twins.
+/// @{
+
+namespace
+{
+using CoverBox = surf::BoundedSurface::CoverBox;
+
+// Squared distance from a point to an axis-aligned box, zero inside; double throughout, so the
+// test's bound carries no float rounding of its own.
+double coverBoxDistanceSq(const CoverBox& box, const surf::Vec3& point)
+{
+  double distanceSq = 0.;
+  const double coordinates[3] = {point.xCoord, point.yCoord, point.zCoord};
+  const double lower[3] = {box.first.xCoord, box.first.yCoord, box.first.zCoord};
+  const double upper[3] = {box.second.xCoord, box.second.yCoord, box.second.zCoord};
+  for (int dimension = 0; dimension < 3; ++dimension) {
+    const double gap = std::max({lower[dimension] - coordinates[dimension],
+                                 coordinates[dimension] - upper[dimension], 0.});
+    distanceSq += gap * gap;
+  }
+  return distanceSq;
+}
+
+double minCoverBoxDistanceSq(const std::vector<CoverBox>& boxes, const surf::Vec3& point)
+{
+  double best = std::numeric_limits<double>::infinity();
+  for (const auto& box : boxes) {
+    best = std::min(best, coverBoxDistanceSq(box, point));
+  }
+  return best;
+}
+
+bool anyCoverBoxContains(const std::vector<CoverBox>& boxes, const surf::Vec3& point, double slack)
+{
+  for (const auto& box : boxes) {
+    if (point.xCoord >= box.first.xCoord - slack && point.xCoord <= box.second.xCoord + slack &&
+        point.yCoord >= box.first.yCoord - slack && point.yCoord <= box.second.yCoord + slack &&
+        point.zCoord >= box.first.zCoord - slack && point.zCoord <= box.second.zCoord + slack) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// The two properties every surface's cover boxes owe the traversal, checked against the surface's
+// own kernels: (lower bound) the nearest cover box is never farther than distanceSqToPatch, which
+// is what makes pruning on a box distance sound for Safety; (coverage) every point of the trimmed
+// patch lies in some box, which is what makes a ray traversal that skips the other boxes complete.
+void checkCoverBoxProperties(const surf::BoundedSurface& surface, const std::vector<surf::Vec3>& patchPoints,
+                             const char* label)
+{
+  std::vector<CoverBox> boxes;
+  surface.appendCoverBoxes(boxes);
+  BOOST_TEST_CONTEXT("surface = " << label)
+  {
+    BOOST_REQUIRE(!boxes.empty());
+    for (const auto& point : patchPoints) {
+      BOOST_TEST_CONTEXT("patch point = (" << point.xCoord << ", " << point.yCoord << ", " << point.zCoord << ")")
+      {
+        BOOST_CHECK(anyCoverBoxContains(boxes, point, 1.e-9));
+      }
+    }
+    SampleStream stream(0xC0FEB0C5ull);
+    // near the patch, a few radii out, and far away, so the bound is exercised where the box and
+    // the patch nearly coincide and where the whole surface is a speck
+    constexpr double kProbeScales[3] = {1.5, 8., 300.};
+    for (int index = 0; index < 400; ++index) {
+      const double scale = kProbeScales[index % 3];
+      const surf::Vec3 point{stream.symmetric(scale), stream.symmetric(scale), stream.symmetric(scale)};
+      const double patchDistanceSq = surface.distanceSqToPatch(point);
+      const double boxDistanceSq = minCoverBoxDistanceSq(boxes, point);
+      BOOST_TEST_CONTEXT("point = (" << point.xCoord << ", " << point.yCoord << ", " << point.zCoord << ")")
+      {
+        BOOST_CHECK_LE(boxDistanceSq, patchDistanceSq * (1. + 1.e-9) + 1.e-18);
+      }
+    }
+  }
+}
+
+// A curved family must actually sub-patch: one conservative box would satisfy both properties
+// above and tighten nothing, which is the state this whole stream exists to leave behind.
+void checkEmitsSeveralCoverBoxes(const surf::BoundedSurface& surface, const char* label)
+{
+  std::vector<CoverBox> boxes;
+  surface.appendCoverBoxes(boxes);
+  BOOST_TEST_CONTEXT("surface = " << label)
+  {
+    BOOST_CHECK_GT(boxes.size(), 1u);
+  }
+}
+} // namespace
+
+/// The cover boxes of every family, against that family's own kernels. The curved families must
+/// emit more than one box -- a single conservative box passes the two properties trivially and
+/// tightens nothing -- and the properties must hold on awkward frames, partial sweeps and wire
+/// trims, not just on the axis-aligned full-sweep cases.
+BOOST_AUTO_TEST_CASE(StreamX_CoverBoxesAreATightLowerBoundEnvelopePerFamily)
+{
+  using surf::Vec3;
+  std::string error;
+
+  const Vec3 skewCenter{0.4, -0.2, 0.1};
+  const Vec3 skewAxis{0.2, 0.3, 1.};
+  const Vec3 referenceU{1., 0., 0.};
+
+  {
+    surf::CylindricalBoundedSurface cylinder;
+    BOOST_REQUIRE(cylinder.initialize(skewCenter, skewAxis, referenceU, 1.7, -0.8, 1.2, 0.4, 1.9, false, error));
+    std::vector<Vec3> patchPoints;
+    for (int stepPhi = 0; stepPhi <= 12; ++stepPhi) {
+      for (int stepH = 0; stepH <= 4; ++stepH) {
+        patchPoints.push_back(cylinder.pointAt(0.4 + 1.9 * stepPhi / 12., -0.8 + 2. * stepH / 4.));
+      }
+    }
+    checkCoverBoxProperties(cylinder, patchPoints, "partial cylinder, skew axis");
+    checkEmitsSeveralCoverBoxes(cylinder, "partial cylinder, skew axis");
+  }
+  {
+    surf::CylindricalBoundedSurface cylinder;
+    BOOST_REQUIRE(cylinder.initialize({0., 0., 0.}, {0., 0., 1.}, referenceU, 2., -1., 1., 0., surf::kTwoPi,
+                                      false, error));
+    std::vector<Vec3> patchPoints;
+    for (int stepPhi = 0; stepPhi <= 24; ++stepPhi) {
+      patchPoints.push_back(cylinder.pointAt(surf::kTwoPi * stepPhi / 24., -1. + 2. * (stepPhi % 5) / 4.));
+    }
+    checkCoverBoxProperties(cylinder, patchPoints, "full cylinder");
+    checkEmitsSeveralCoverBoxes(cylinder, "full cylinder");
+  }
+  {
+    surf::CylindricalBoundedSurface cylinder;
+    BOOST_REQUIRE(cylinder.initialize({0., 0., 0.}, {0., 0., 1.}, referenceU, 2., -1., 1., 0., surf::kTwoPi, false,
+                                      paramRectWireCurves(0.3, 2.1, -0.5, 0.7), {}, error));
+    std::vector<Vec3> patchPoints;
+    for (int stepPhi = 0; stepPhi <= 10; ++stepPhi) {
+      for (int stepH = 0; stepH <= 4; ++stepH) {
+        const double phi = 0.3 + 1.8 * stepPhi / 10.;
+        const double height = -0.5 + 1.2 * stepH / 4.;
+        if (cylinder.pointInTrim(phi, height)) {
+          patchPoints.push_back(cylinder.pointAt(phi, height));
+        }
+      }
+    }
+    BOOST_REQUIRE(!patchPoints.empty());
+    checkCoverBoxProperties(cylinder, patchPoints, "wire-trimmed cylinder");
+  }
+  {
+    surf::SphericalBoundedSurface sphere;
+    BOOST_REQUIRE(sphere.initialize(skewCenter, skewAxis, referenceU, 2.5, 0., surf::kPi, 0., surf::kTwoPi,
+                                    false, error));
+    std::vector<Vec3> patchPoints;
+    for (int stepTheta = 0; stepTheta <= 8; ++stepTheta) {
+      for (int stepPhi = 0; stepPhi < 16; ++stepPhi) {
+        patchPoints.push_back(sphere.pointAt(surf::kPi * stepTheta / 8., surf::kTwoPi * stepPhi / 16.));
+      }
+    }
+    checkCoverBoxProperties(sphere, patchPoints, "full sphere, skew frame");
+    checkEmitsSeveralCoverBoxes(sphere, "full sphere, skew frame");
+  }
+  {
+    // a polar cap: distanceSqToPatch realises on the *whole* sphere (radial projection), so the
+    // cover boxes must still cover the full ball surface, not merely the cap
+    surf::SphericalBoundedSurface cap;
+    BOOST_REQUIRE(cap.initialize({0., 0., 0.}, {0., 0., 1.}, referenceU, 2., 0., 0.6, 0.2, 1.1, false, error));
+    std::vector<Vec3> patchPoints;
+    for (int stepTheta = 0; stepTheta <= 4; ++stepTheta) {
+      for (int stepPhi = 0; stepPhi <= 6; ++stepPhi) {
+        patchPoints.push_back(cap.pointAt(0.6 * stepTheta / 4., 0.2 + 1.1 * stepPhi / 6.));
+      }
+    }
+    checkCoverBoxProperties(cap, patchPoints, "spherical cap");
+  }
+  {
+    surf::ConicalBoundedSurface cone;
+    BOOST_REQUIRE(cone.initialize(skewCenter, skewAxis, referenceU, 2., 0.5, -0.9, 1.1, 0.7, 2.3, false, error));
+    std::vector<Vec3> patchPoints;
+    for (int stepPhi = 0; stepPhi <= 10; ++stepPhi) {
+      for (int stepH = 0; stepH <= 4; ++stepH) {
+        patchPoints.push_back(cone.pointAt(0.7 + 2.3 * stepPhi / 10., -0.9 + 2. * stepH / 4.));
+      }
+    }
+    checkCoverBoxProperties(cone, patchPoints, "partial cone, skew axis");
+    checkEmitsSeveralCoverBoxes(cone, "partial cone, skew axis");
+  }
+  {
+    surf::TorusBoundedSurface torus;
+    BOOST_REQUIRE(torus.initialize(skewCenter, skewAxis, referenceU, 2.4, 0.7, 0.3, 2.1, -0.4, 1.7, false, error));
+    std::vector<Vec3> patchPoints;
+    for (int stepRing = 0; stepRing <= 10; ++stepRing) {
+      for (int stepTube = 0; stepTube <= 6; ++stepTube) {
+        patchPoints.push_back(torus.pointAt(0.3 + 2.1 * stepRing / 10., -0.4 + 1.7 * stepTube / 6.));
+      }
+    }
+    checkCoverBoxProperties(torus, patchPoints, "partial torus, skew axis");
+    checkEmitsSeveralCoverBoxes(torus, "partial torus, skew axis");
+  }
+  {
+    surf::TorusBoundedSurface torus;
+    BOOST_REQUIRE(torus.initialize({0., 0., 0.}, {0., 0., 1.}, referenceU, 3., 1., 0., surf::kTwoPi, 0.,
+                                   surf::kTwoPi, false, error));
+    std::vector<Vec3> patchPoints;
+    for (int stepRing = 0; stepRing < 16; ++stepRing) {
+      for (int stepTube = 0; stepTube < 8; ++stepTube) {
+        patchPoints.push_back(torus.pointAt(surf::kTwoPi * stepRing / 16., surf::kTwoPi * stepTube / 8.));
+      }
+    }
+    checkCoverBoxProperties(torus, patchPoints, "full torus");
+  }
+  {
+    surf::PlanarBoundedSurface polygon;
+    const std::vector<surf::Vec2> rectangle{{0., 0.}, {2., 0.}, {2., 3.}, {0., 3.}};
+    BOOST_REQUIRE(polygon.initialize({0.2, -0.4, 0.5}, {1., 0.2, 0.}, {-0.1, 1., 0.3}, rectangle, {}, error));
+    std::vector<Vec3> patchPoints;
+    patchPoints.push_back(polygon.toGlobal({0.01, 0.01}));
+    patchPoints.push_back(polygon.toGlobal({1.9, 2.9}));
+    checkCoverBoxProperties(polygon, patchPoints, "planar polygon");
+  }
+}
+
+/// Rays that cross a swept quadric's old conservative box while missing the surface itself must
+/// reach no patch at all once the leaves are sub-patch boxes. Each case here is a ray the single
+/// per-surface box turns into a paid analytic intersection and the sub-patch boxes reject on the
+/// box test alone.
+BOOST_AUTO_TEST_CASE(StreamX_RaysThroughEmptyBoxRegionsReachNoPatch)
+{
+  // corner of the ball box, well outside the sphere: rho = |(2.2, 2.2)| = 3.11 > 2.5
+  const auto sphere = makeSphereSolid("subBoxSphere", 2.5);
+  BOOST_CHECK_EQUAL(sphere->CountBVHRayCandidates({2.2, 2.2, -5.}, {0., 0., 1.}), 0);
+  BOOST_CHECK_GE(sphere->CountBVHRayCandidates({0., 0., -5.}, {0., 0., 1.}), 1);
+
+  // along the axis of a solid tube: the barrel patch cannot be hit, only the two caps can
+  const auto tube = makeTubeSolid("subBoxTube", 0., 2., 1.);
+  BOOST_CHECK_EQUAL(tube->CountBVHRayCandidates({0., 0., -5.}, {0., 0., 1.}), 2);
+
+  // corner of the torus box, outside the outer equator: rho = |(3.4, 3.4)| = 4.8 > R + r = 4
+  const auto torus = makeTorusSolid("subBoxTorus", 3., 1.);
+  BOOST_CHECK_EQUAL(torus->CountBVHRayCandidates({3.4, 3.4, -5.}, {0., 0., 1.}), 0);
+  BOOST_CHECK_GE(torus->CountBVHRayCandidates({3., 0., -5.}, {0., 0., 1.}), 1);
+
+  // behind the back of a quarter cylinder: the full rim circles' box is crossed, the sweep band
+  // is nowhere near. Not closed (a bare patch), which the BVH does not require.
+  SurfaceSolid quarter("subBoxQuarterCylinder");
+  BOOST_REQUIRE(quarter.AddCylindricalSurface({0., 0., 0.}, {0., 0., 1.}, {1., 0., 0.}, 2., -1., 1.,
+                                              -surf::kPi / 4., surf::kHalfPi));
+  quarter.CloseShape(false);
+  BOOST_REQUIRE(quarter.HasBVH());
+  BOOST_CHECK_EQUAL(quarter.CountBVHRayCandidates({-1.9, -5., 0.}, {0., 1., 0.}), 0);
+  BOOST_CHECK_GE(quarter.CountBVHRayCandidates({5., 0., 0.}, {-1., 0., 0.}), 1);
+}
+
+/// With several boxes per surface a ray can enter the same surface's leaves more than once, and a
+/// duplicated appendIntersections call would flip parity and corrupt the graze clustering. So the
+/// dedup is not an optimization but a correctness requirement, and the sharpest way to pin it is
+/// the crossing lists themselves: same multiset, both traversals, on the curved fixtures whose
+/// surfaces now own many boxes.
+BOOST_AUTO_TEST_CASE(StreamX_CurvedFixturesStayIdenticalToTheLoop)
+{
+  struct Fixture {
+    std::unique_ptr<SurfaceSolid> solid;
+    double extent;
+  };
+  std::vector<Fixture> fixtures;
+  fixtures.push_back({makeSphereSolid("subBoxSweepSphere", 2.5), 3.5});
+  fixtures.push_back({makeTorusSolid("subBoxSweepTorus", 3., 1.), 4.5});
+  fixtures.push_back({makeCapsuleSolid("subBoxSweepCapsule", 1., 1.5), 3.});
+  fixtures.push_back({makeConeSolid("subBoxSweepCone", 2., 1., 3.), 4.});
+  fixtures.push_back({makeWireTrimmedSolid("subBoxSweepWireTrim"), 3.});
+
+  for (const auto& fixture : fixtures) {
+    BOOST_TEST_CONTEXT("fixture = " << fixture.solid->GetName())
+    {
+      sweepDistanceAgainstLoop(*fixture.solid, fixture.extent, 4);
+      for (const auto& point : probeGrid(fixture.extent, 4)) {
+        BOOST_TEST_CONTEXT("point = (" << point[0] << ", " << point[1] << ", " << point[2] << ")")
+        {
+          BOOST_CHECK_EQUAL(fixture.solid->Contains(point.data()), fixture.solid->Contains_Loop(point.data()));
+          std::vector<SurfaceSolid::ContainsCrossing> bvhCrossings;
+          std::vector<SurfaceSolid::ContainsCrossing> loopCrossings;
+          fixture.solid->DescribeContainsCrossings({point[0], point[1], point[2]}, bvhCrossings, loopCrossings);
+          BOOST_REQUIRE_EQUAL(bvhCrossings.size(), loopCrossings.size());
+          for (size_t index = 0; index < bvhCrossings.size(); ++index) {
+            BOOST_CHECK_EQUAL(bvhCrossings[index].distance, loopCrossings[index].distance);
+          }
+        }
+      }
+    }
+  }
+}
+
+/// The approximate-safety mode: Safety() may stop the traversal early -- possibly before touching
+/// any leaf -- and return a guaranteed underestimate no smaller than (1 - slack) times the exact
+/// answer. Underestimating is the safe direction (the navigator takes a shorter free step); the
+/// slack bounds how much performance is allowed to cost in step count. Off by default, and off
+/// means bit-identical to the loop.
+BOOST_AUTO_TEST_CASE(StreamX_ApproximateSafetyIsBoundedCheapAndOptIn)
+{
+  struct SlackGuard {
+    ~SlackGuard() { SurfaceSolid::SetSafetySlack(0.); }
+  } guard;
+
+  BOOST_CHECK_EQUAL(SurfaceSolid::GetSafetySlack(), 0.);
+
+  constexpr double slack = 0.15;
+  for (const auto& fixture : nearestPatchFixtures()) {
+    BOOST_TEST_CONTEXT("fixture = " << fixture.solid->GetName())
+    {
+      const auto points = nearestPatchSample(*fixture.solid, fixture.extent, 300);
+      for (const auto& point : points) {
+        const double exact = fixture.solid->Safety_Loop(point.data(), kTRUE);
+        SurfaceSolid::SetSafetySlack(slack);
+        const double approximate = fixture.solid->Safety(point.data(), kTRUE);
+        SurfaceSolid::SetSafetySlack(0.);
+        const double exactAgain = fixture.solid->Safety(point.data(), kTRUE);
+        BOOST_TEST_CONTEXT("point = (" << point[0] << ", " << point[1] << ", " << point[2] << ")")
+        {
+          // never above the exact answer (beyond rounding), never more than the slack below it
+          BOOST_CHECK_LE(approximate, exact * (1. + 1.e-9) + 1.e-15);
+          BOOST_CHECK_GE(approximate, (1. - slack) * exact * (1. - 1.e-9) - 1.e-15);
+          // and switching the mode off restores the exact contract bit for bit
+          BOOST_CHECK_EQUAL(exactAgain, exact);
+        }
+      }
+    }
+  }
+
+  // far away the root box alone already answers within any slack: no patch is evaluated at all
+  const auto sphere = makeSphereSolid("approxFarSphere", 2.);
+  SurfaceSolid::SetSafetySlack(slack);
+  SurfaceSolid::ResetSafetyCandidateCounter();
+  const double farPoint[3] = {400., -300., 250.};
+  const double farSafety = sphere->Safety(farPoint, kFALSE);
+  BOOST_CHECK_EQUAL(SurfaceSolid::GetSafetyCandidateCount(), 0);
+  BOOST_CHECK_GT(farSafety, 0.);
+  BOOST_CHECK_LE(farSafety, sphere->Safety_Loop(farPoint, kFALSE));
+}
+
+/// @}
