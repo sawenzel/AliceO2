@@ -1208,7 +1208,7 @@ bool O2BVHSurfaceSolid::AddCurvedPlanarSurface(const Point3D& origin, const Poin
   auto surface = std::make_unique<CurvedPlanarBoundedSurface>();
   std::string errorMessage;
   if (!surface->initialize(makeVec3(origin), makeVec3(axisU), makeVec3(axisV), outerCurves, innerCurves,
-                           errorMessage)) {
+                           errorMessage, wireJoinToleranceFor(fModelTolerance))) {
     Error("AddCurvedPlanarSurface", "%s", errorMessage.c_str());
     return false;
   }
@@ -1278,7 +1278,8 @@ bool O2BVHSurfaceSolid::AddCylindricalSurface(const Point3D& centerPoint, const 
   auto surface = std::make_unique<CylindricalBoundedSurface>();
   std::string errorMessage;
   if (!surface->initialize(makeVec3(centerPoint), makeVec3(axis), makeVec3(referenceAxisU), radius, heightMin,
-                           heightMax, phiStart, phiSweep, innerWall, outerCurves, innerCurves, errorMessage)) {
+                           heightMax, phiStart, phiSweep, innerWall, outerCurves, innerCurves, errorMessage,
+                           wireJoinToleranceFor(fModelTolerance))) {
     Error("AddCylindricalSurface", "%s", errorMessage.c_str());
     return false;
   }
@@ -1349,7 +1350,8 @@ bool O2BVHSurfaceSolid::AddSphericalSurface(const Point3D& center, const Point3D
   auto surface = std::make_unique<SphericalBoundedSurface>();
   std::string errorMessage;
   if (!surface->initialize(makeVec3(center), makeVec3(polarAxis), makeVec3(referenceAxisU), radius, thetaMin,
-                           thetaMax, phiStart, phiSweep, innerWall, outerCurves, innerCurves, errorMessage)) {
+                           thetaMax, phiStart, phiSweep, innerWall, outerCurves, innerCurves, errorMessage,
+                           wireJoinToleranceFor(fModelTolerance))) {
     Error("AddSphericalSurface", "%s", errorMessage.c_str());
     return false;
   }
@@ -1423,7 +1425,7 @@ bool O2BVHSurfaceSolid::AddConicalSurface(const Point3D& centerPoint, const Poin
   std::string errorMessage;
   if (!surface->initialize(makeVec3(centerPoint), makeVec3(axis), makeVec3(referenceAxisU), radiusAtMin,
                            radiusAtMax, heightMin, heightMax, phiStart, phiSweep, innerWall, outerCurves,
-                           innerCurves, errorMessage)) {
+                           innerCurves, errorMessage, wireJoinToleranceFor(fModelTolerance))) {
     Error("AddConicalSurface", "%s", errorMessage.c_str());
     return false;
   }
@@ -1497,7 +1499,7 @@ bool O2BVHSurfaceSolid::AddToroidalSurface(const Point3D& centerPoint, const Poi
   std::string errorMessage;
   if (!surface->initialize(makeVec3(centerPoint), makeVec3(axis), makeVec3(referenceAxisU), majorRadius, minorRadius,
                            phiStart, phiSweep, tubeStart, tubeSweep, innerWall, outerCurves, innerCurves,
-                           errorMessage)) {
+                           errorMessage, wireJoinToleranceFor(fModelTolerance))) {
     Error("AddToroidalSurface", "%s", errorMessage.c_str());
     return false;
   }

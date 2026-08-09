@@ -250,15 +250,20 @@ struct RecordMetric {
 /// \a anyArc when the wire carries at least one circular-arc edge.
 ///
 /// \a metric is the surface's first fundamental form, built from the record's own parameters by
-/// RecordMetric above. The join gap is judged as a 3D length in cm against exactly the
-/// kernel's kWireJoinTolerance -- the loader used to apply a bare 1e-5 to a mixed rad/cm
-/// separation, a different rule from the one the kernel would apply to the same wire moments
-/// later, which is finding S10 (and the reason the known ST1829909_01 rejection happened at all:
-/// six joins drifting under 3e-5 rad on cylinder trims, a negligible arc length, read as three
-/// times over tolerance).
+/// RecordMetric above. The join gap is judged as a 3D length in cm against exactly the band the
+/// kernel will apply to the same wire moments later -- the loader used to apply a bare 1e-5 to a
+/// mixed rad/cm separation, a different rule, which is finding S10 (and the reason the known
+/// ST1829909_01 rejection happened at all: six joins drifting under 3e-5 rad on cylinder trims,
+/// a negligible arc length, read as three times over tolerance).
+///
+/// \a joinTolerance is wireJoinToleranceFor(the sidecar's declared model tolerance): the model's
+/// own statement of how closely its edges meet when it makes one, the extractor-precision
+/// constant as the floor. Judging a declared-4.7e-4-cm model at the bare 1e-6 fallback re-created
+/// the same class of rejection with correct units (surface 1006 again, a 5.41e-6 cm seam).
+/// \a toleranceOrigin says which of the two the band is, for the diagnostic.
 bool wireToCurves(const std::string& file, size_t surfaceIndex, const SidecarWire& wire,
                   std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>& curves, bool& anyArc,
-                  const surface::ParametricMetric& metric)
+                  const surface::ParametricMetric& metric, double joinTolerance, const char* toleranceOrigin)
 {
   using Curve = O2BVHSurfaceSolid::PlanarBoundaryCurve;
   curves.clear();
@@ -276,10 +281,11 @@ bool wireToCurves(const std::string& file, size_t surfaceIndex, const SidecarWir
       return false;
     }
     const double joinGapSq = metric.distanceSq({end[0], end[1]}, {nextStart[0], nextStart[1]});
-    if (joinGapSq > surface::kWireJoinToleranceSq) {
+    if (joinGapSq > joinTolerance * joinTolerance) {
       ::Error("LoadSurfaceSolid",
-              "%s: surface %zu: wire edge %zu end does not join the next edge start (gap %.3g cm, tolerance %.3g cm)",
-              file.c_str(), surfaceIndex, e, std::sqrt(joinGapSq), surface::kWireJoinTolerance);
+              "%s: surface %zu: wire edge %zu end does not join the next edge start (gap %.3g cm, tolerance %.3g cm, "
+              "%s)",
+              file.c_str(), surfaceIndex, e, std::sqrt(joinGapSq), joinTolerance, toleranceOrigin);
       return false;
     }
     if (edge.curveType == kCircularArc) {
@@ -307,13 +313,13 @@ bool wireToCurves(const std::string& file, size_t surfaceIndex, const SidecarWir
 bool collectQuadricTrim(const std::string& file, size_t surfaceIndex, const std::vector<SidecarWire>& wires,
                         std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>& outer,
                         std::vector<std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>>& inners,
-                        const surface::ParametricMetric& metric)
+                        const surface::ParametricMetric& metric, double joinTolerance, const char* toleranceOrigin)
 {
   bool haveOuter = false;
   bool anyArc = false; // quadric domains accept both line and arc trim edges
   for (const auto& wire : wires) {
     std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve> curves;
-    if (!wireToCurves(file, surfaceIndex, wire, curves, anyArc, metric)) {
+    if (!wireToCurves(file, surfaceIndex, wire, curves, anyArc, metric, joinTolerance, toleranceOrigin)) {
       return false;
     }
     if (wire.role == 0) {
@@ -440,6 +446,15 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
     solid.SetModelTolerance(kSidecarV1FallbackTolerance);
   }
 
+  // The wire-join acceptance band, fixed once from the header: the model's own declared tolerance
+  // when it is looser than the extractor floor, the floor otherwise -- exactly the band the
+  // kernel's Add*Surface will re-apply to the same wires (which is why the loader must not judge
+  // more strictly than it, nor less).
+  const double joinTolerance = surface::wireJoinToleranceFor(solid.GetModelTolerance());
+  const char* toleranceOrigin = joinTolerance > surface::kWireJoinTolerance
+                                  ? "declared by the model"
+                                  : "the extractor-precision fallback";
+
   for (size_t s = 0; s < nSurfaces; ++s) {
     uint32_t surfaceType = 0, flags = 0, nParams = 0;
     if (!readU32(in, surfaceType) || !readU32(in, flags) || !readU32(in, nParams)) {
@@ -537,7 +552,7 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
         bool anyArc = false;
         for (const auto& wire : wires) {
           std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve> curves;
-          if (!wireToCurves(file, s, wire, curves, anyArc, recordMetric.metric())) {
+          if (!wireToCurves(file, s, wire, curves, anyArc, recordMetric.metric(), joinTolerance, toleranceOrigin)) {
             return false;
           }
           if (wire.role == 0) {
@@ -587,7 +602,7 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
         } else {
           std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve> outer;
           std::vector<std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>> inners;
-          if (!collectQuadricTrim(file, s, wires, outer, inners, recordMetric.metric())) {
+          if (!collectQuadricTrim(file, s, wires, outer, inners, recordMetric.metric(), joinTolerance, toleranceOrigin)) {
             return false;
           }
           added = solid.AddCylindricalSurface(point3(p, 0), point3(p, 3), point3(p, 6), p[9], p[10], p[11], p[12],
@@ -606,7 +621,7 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
         } else {
           std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve> outer;
           std::vector<std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>> inners;
-          if (!collectQuadricTrim(file, s, wires, outer, inners, recordMetric.metric())) {
+          if (!collectQuadricTrim(file, s, wires, outer, inners, recordMetric.metric(), joinTolerance, toleranceOrigin)) {
             return false;
           }
           added = solid.AddConicalSurface(point3(p, 0), point3(p, 3), point3(p, 6), p[9], p[10], p[11], p[12], p[13],
@@ -626,7 +641,7 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
         } else {
           std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve> outer;
           std::vector<std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>> inners;
-          if (!collectQuadricTrim(file, s, wires, outer, inners, recordMetric.metric())) {
+          if (!collectQuadricTrim(file, s, wires, outer, inners, recordMetric.metric(), joinTolerance, toleranceOrigin)) {
             return false;
           }
           added = solid.AddSphericalSurface(point3(p, 0), point3(p, 3), point3(p, 6), p[9], p[10], p[11], p[12],
@@ -646,7 +661,7 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid)
         } else {
           std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve> outer;
           std::vector<std::vector<O2BVHSurfaceSolid::PlanarBoundaryCurve>> inners;
-          if (!collectQuadricTrim(file, s, wires, outer, inners, recordMetric.metric())) {
+          if (!collectQuadricTrim(file, s, wires, outer, inners, recordMetric.metric(), joinTolerance, toleranceOrigin)) {
             return false;
           }
           added = solid.AddToroidalSurface(point3(p, 0), point3(p, 3), point3(p, 6), p[9], p[10], p[11], p[12], p[13],
