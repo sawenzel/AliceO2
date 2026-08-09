@@ -1662,10 +1662,13 @@ void Pipe::ConstructGeometry()
     dovZ += 2.;
   }
   //
+  // Both placements of this short tube (z = 900-920 and z = 1230-1250 cm) lie
+  // in field-free stretches, so no split is needed -- the media are simply
+  // wrong for every placement there is.
   TGeoVolume* voRB242CuTubeM =
-    new TGeoVolume("voRB242CuTubeM", new TGeoTube(0., kRB24CuTubeRo, 10.), kMedVacHC);
+    new TGeoVolume("voRB242CuTubeM", new TGeoTube(0., kRB24CuTubeRo, 10.), kMedVacNFHC);
   TGeoVolume* voRB242CuTube =
-    new TGeoVolume("voRB242CuTube", new TGeoTube(kRB24CuTubeRi, kRB24CuTubeRo, 10.), kMedCuHC);
+    new TGeoVolume("voRB242CuTube", new TGeoTube(kRB24CuTubeRi, kRB24CuTubeRo, 10.), kMedCuNFHC);
   voRB242CuTubeM->AddNode(voRB242CuTube, 1, gGeoIdentity);
   TGeoVolume* voRB242CuOvalM =
     new TGeoVolume("voRB242CuOvalM", new TGeoEltu(3.375, 4.75, 135.), kMedCuHC);
@@ -2470,14 +2473,19 @@ void Pipe::ConstructGeometry()
   shRB26s5Compensator->DefineSection(5, kRB26s5CompL - 8., 0., kRB26s5DetailZR);
   shRB26s5Compensator->DefineSection(6, kRB26s5CompL - 8., 0., kRB26s5CompTubeOuterR);
   shRB26s5Compensator->DefineSection(7, kRB26s5CompL, 0., kRB26s5CompTubeOuterR);
-  TGeoVolume* voRB26s5Compensator = new TGeoVolume("RB26s5Compensator", shRB26s5Compensator, kMedVacHC);
+  // The RB26/5 compensator sits at z = -1910 to -1882 cm, past the far end of
+  // the muon dipole, where the map is exactly zero out to r = 300 cm. Unlike
+  // the RB24 modules it has only this one placement, so its media can simply be
+  // corrected instead of split. Its neighbours in RB26/4 do reach into the
+  // dipole and are deliberately left alone.
+  TGeoVolume* voRB26s5Compensator = new TGeoVolume("RB26s5Compensator", shRB26s5Compensator, kMedVacNFHC);
 
   //
   // [Pos 1] Bellow
   //
   //
   TGeoVolume* voRB26s5Bellow =
-    new TGeoVolume("RB26s5Bellow", new TGeoTube(kRB26s5BellowRi, kRB26s5BellowRo, kRB26s5BellowUndL / 2.), kMedVacHC);
+    new TGeoVolume("RB26s5Bellow", new TGeoTube(kRB26s5BellowRi, kRB26s5BellowRo, kRB26s5BellowUndL / 2.), kMedVacNFHC);
   //
   //  Upper part of the undulation
   //
@@ -2488,7 +2496,7 @@ void Pipe::ConstructGeometry()
   shRB26s5PlieTubeU->SetName("RB26s5TubeU");
   TGeoCompositeShape* shRB26s5UpperPlie = new TGeoCompositeShape("RB26s5UpperPlie", "RB26s5TorusU*RB26s5TubeU");
 
-  TGeoVolume* voRB26s5WiggleU = new TGeoVolume("RB26s5UpperPlie", shRB26s5UpperPlie, kMedSteelHC);
+  TGeoVolume* voRB26s5WiggleU = new TGeoVolume("RB26s5UpperPlie", shRB26s5UpperPlie, kMedSteelNFHC);
   //
   // Lower part of the undulation
   TGeoTorus* shRB26s5PlieTorusL =
@@ -2498,13 +2506,13 @@ void Pipe::ConstructGeometry()
   shRB26s5PlieTubeL->SetName("RB26s5TubeL");
   TGeoCompositeShape* shRB26s5LowerPlie = new TGeoCompositeShape("RB26s5LowerPlie", "RB26s5TorusL*RB26s5TubeL");
 
-  TGeoVolume* voRB26s5WiggleL = new TGeoVolume("RB26s5LowerPlie", shRB26s5LowerPlie, kMedSteelHC);
+  TGeoVolume* voRB26s5WiggleL = new TGeoVolume("RB26s5LowerPlie", shRB26s5LowerPlie, kMedSteelNFHC);
 
   //
   // Connection between upper and lower part of undulation
   TGeoVolume* voRB26s5WiggleC1 = new TGeoVolume(
     "RB26s5PlieConn1",
-    new TGeoTube(kRB26s5BellowRi + kRB26s5PlieR, kRB26s5BellowRo - kRB26s5PlieR, kRB26s5PlieThickness / 2.), kMedSteelHC);
+    new TGeoTube(kRB26s5BellowRi + kRB26s5PlieR, kRB26s5BellowRo - kRB26s5PlieR, kRB26s5PlieThickness / 2.), kMedSteelNFHC);
   //
   // One wiggle
   TGeoVolumeAssembly* voRB26s5Wiggle = new TGeoVolumeAssembly("RB26s5Wiggle");
@@ -2539,7 +2547,7 @@ void Pipe::ConstructGeometry()
   shRB26s5CompLeftTube->DefineSection(1, z0, kRB26s5CompTubeInnerR, kRB26s5CompTubeOuterR);
   z0 += (kRB26s5ConnectionR - kRB26s5CompTubeOuterR);
   shRB26s5CompLeftTube->DefineSection(2, z0, kRB26s5ConnectionR - 0.15, kRB26s5ConnectionR);
-  TGeoVolume* voRB26s5CompLeftTube = new TGeoVolume("RB26s5CompLeftTube", shRB26s5CompLeftTube, kMedSteelHC);
+  TGeoVolume* voRB26s5CompLeftTube = new TGeoVolume("RB26s5CompLeftTube", shRB26s5CompLeftTube, kMedSteelNFHC);
   voRB26s5Compensator->AddNode(voRB26s5CompLeftTube, 1, gGeoIdentity);
   //
   // [Pos 3] Right Welding Tube
@@ -2559,21 +2567,21 @@ void Pipe::ConstructGeometry()
   shRB26s5CompRightTube->DefineSection(9, 3.50, kRB26s5CompTubeInnerR, kRB26s5CompTubeOuterR);
   shRB26s5CompRightTube->DefineSection(10, 2. * kRB26s5WeldingTubeRightL, kRB26s5CompTubeInnerR, kRB26s5CompTubeOuterR);
 
-  TGeoVolume* voRB26s5CompRightTube = new TGeoVolume("RB26s5CompRightTube", shRB26s5CompRightTube, kMedSteelHC);
+  TGeoVolume* voRB26s5CompRightTube = new TGeoVolume("RB26s5CompRightTube", shRB26s5CompRightTube, kMedSteelNFHC);
   voRB26s5Compensator->AddNode(voRB26s5CompRightTube, 1,
                                new TGeoTranslation(0., 0., kRB26s5CompL - 2. * kRB26s5WeldingTubeRightL));
   //
   // [Pos 4] Ring
   //
   TGeoTube* shRB26s5CompRing = new TGeoTube(kRB26s5RingInnerR, kRB26s5RingOuterR, kRB26s5RingL);
-  TGeoVolume* voRB26s5CompRing = new TGeoVolume("RB26s5CompRing", shRB26s5CompRing, kMedSteelHC);
+  TGeoVolume* voRB26s5CompRing = new TGeoVolume("RB26s5CompRing", shRB26s5CompRing, kMedSteelNFHC);
   voRB26s5Compensator->AddNode(voRB26s5CompRing, 1, new TGeoTranslation(0., 0., kRB26s5RingZ + kRB26s5RingL));
 
   //
   // [Pos 5] Outer Protecting Tube
   //
   TGeoTube* shRB26s5CompProtTube = new TGeoTube(kRB26s5RingOuterR, kRB26s5ProtOuterR, kRB26s5ProtL);
-  TGeoVolume* voRB26s5CompProtTube = new TGeoVolume("RB26s5CompProtTube", shRB26s5CompProtTube, kMedSteelHC);
+  TGeoVolume* voRB26s5CompProtTube = new TGeoVolume("RB26s5CompProtTube", shRB26s5CompProtTube, kMedSteelNFHC);
   voRB26s5Compensator->AddNode(voRB26s5CompProtTube, 1, new TGeoTranslation(0., 0., kRB26s5ProtZ + kRB26s5ProtL));
 
   ///////////////////////////////////////
@@ -2664,10 +2672,10 @@ void Pipe::ConstructGeometry()
   shRB26s5RFlange->DefineSection(6, z0, kRB26s5RFlangeRi1, kRB26s5RFlangeRo);
   z0 += kRB26s5RFlangeD1;
   shRB26s5RFlange->DefineSection(7, z0, kRB26s5RFlangeRi1, kRB26s5RFlangeRo);
-  TGeoVolume* voRB26s5RFlange = new TGeoVolume("RB26s5RFlange", shRB26s5RFlange, kMedSteelHC);
+  TGeoVolume* voRB26s5RFlange = new TGeoVolume("RB26s5RFlange", shRB26s5RFlange, kMedSteelNFHC);
 
   TGeoVolume* voRB26s5RFlangeM =
-    new TGeoVolume("RB26s5RFlangeM", MakeMotherFromTemplate(shRB26s5RFlange, 4, 7), kMedVacHC);
+    new TGeoVolume("RB26s5RFlangeM", MakeMotherFromTemplate(shRB26s5RFlange, 4, 7), kMedVacNFHC);
   voRB26s5RFlangeM->AddNode(voRB26s5RFlange, 1, gGeoIdentity);
 
   //

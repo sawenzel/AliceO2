@@ -1078,7 +1078,11 @@ void Shil::ConstructGeometry()
   //  HalfWidth
   Float_t dzSaa2SteelRing = 2.;
   TGeoTube* shSaa2SteelRing = new TGeoTube(41.6, 47.6, dzSaa2SteelRing);
-  TGeoVolume* voSaa2SteelRing = new TGeoVolume("YSAA2_SteelRing", shSaa2SteelRing, kMedSteel);
+  // z = -1799 to -1795 cm: past the muon dipole, where the map is exactly zero.
+  // SHIL has no hand-written field-free media, so the counterpart is derived
+  // from the original -- same material, same cuts, no field.
+  TGeoVolume* voSaa2SteelRing =
+    new TGeoVolume("YSAA2_SteelRing", shSaa2SteelRing, matmgr.fieldFreeVariantOf(kMedSteel));
 
   ///////////////////////////////////
   //    SAA2 Outer Shape           //
@@ -1168,15 +1172,20 @@ void Shil::ConstructGeometry()
   shSaa3InnerRegion->SetName("Saa3InnerRegion");
 
   TGeoCompositeShape* shSaa3CCBlock = new TGeoCompositeShape("Saa3CCBlock", "Saa3CCBlockO-Saa3InnerRegion");
-  TGeoVolume* voSaa3CCBlock = new TGeoVolume("YSAA3CCBlock", shSaa3CCBlock, kMedConcSh);
+  // The whole of SAA3 (z = -1881 to -1801 cm) is beyond the dipole and sees no
+  // field at any radius, and it has a single placement, so its media are simply
+  // corrected rather than split.
+  TGeoVolume* voSaa3CCBlock = new TGeoVolume("YSAA3CCBlock", shSaa3CCBlock, matmgr.fieldFreeVariantOf(kMedConcSh));
 
   voSaa3->AddNode(voSaa3CCBlock, 1, gGeoIdentity);
 
   //    Plate 1: 240 cm x 80 cm x  80 cm (x 2)
   TGeoVolume* voSaa3SteelPlate1 =
-    new TGeoVolume("YSAA3SteelPlate1", new TGeoBBox(240. / 2., 80. / 2., 80. / 2.), kMedSteelSh);
+    new TGeoVolume("YSAA3SteelPlate1", new TGeoBBox(240. / 2., 80. / 2., 80. / 2.),
+                   matmgr.fieldFreeVariantOf(kMedSteelSh));
   TGeoVolume* voSaa3SteelPlate11 =
-    new TGeoVolume("YSAA3SteelPlate11", new TGeoBBox(240. / 2., 80. / 2., 10. / 2.), kMedSteel);
+    new TGeoVolume("YSAA3SteelPlate11", new TGeoBBox(240. / 2., 80. / 2., 10. / 2.),
+                   matmgr.fieldFreeVariantOf(kMedSteel));
   voSaa3SteelPlate11->SetVisContainers(kTRUE);
   voSaa3SteelPlate1->SetVisibility(kTRUE);
   voSaa3SteelPlate1->AddNode(voSaa3SteelPlate11, 1, new TGeoTranslation(0., 0., -35.));
@@ -1185,9 +1194,11 @@ void Shil::ConstructGeometry()
 
   //    Plate 2:  80 cm x 80 cm x  80 cm (x 2)
   TGeoVolume* voSaa3SteelPlate2 =
-    new TGeoVolume("YSAA3SteelPlate2", new TGeoBBox(80. / 2., 80. / 2., 80. / 2.), kMedSteelSh);
+    new TGeoVolume("YSAA3SteelPlate2", new TGeoBBox(80. / 2., 80. / 2., 80. / 2.),
+                   matmgr.fieldFreeVariantOf(kMedSteelSh));
   TGeoVolume* voSaa3SteelPlate21 =
-    new TGeoVolume("YSAA3SteelPlate21", new TGeoBBox(80. / 2., 80. / 2., 10. / 2.), kMedSteel);
+    new TGeoVolume("YSAA3SteelPlate21", new TGeoBBox(80. / 2., 80. / 2., 10. / 2.),
+                   matmgr.fieldFreeVariantOf(kMedSteel));
   voSaa3SteelPlate2->AddNode(voSaa3SteelPlate21, 1, new TGeoTranslation(0., 0., -35.));
   voSaa3->AddNode(voSaa3SteelPlate2, 1, new TGeoTranslation(+80, 0., 0.));
   voSaa3->AddNode(voSaa3SteelPlate2, 2, new TGeoTranslation(-80, 0., 0.));
