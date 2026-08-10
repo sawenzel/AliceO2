@@ -345,6 +345,11 @@ inline int Stack::getCurrentPrimaryIndex() const { return mPrimaryParticles.size
 
 inline int Stack::getMotherTrackId(int trackid) const
 {
+  // primaries are not kept in mParticles, and mTrackIDtoParticlesEntry does not
+  // describe them, so they have to be answered from their own container
+  if (trackid < mNumberOfPrimaryParticles) {
+    return mPrimaryParticles[trackid].GetFirstMother();
+  }
   const auto entryinParticles = mTrackIDtoParticlesEntry[trackid];
   return mParticles[entryinParticles].getMotherTrackId();
 }
