@@ -61,7 +61,6 @@
 #include <Configuration/ConfigurationInterface.h>
 #include <Configuration/ConfigurationFactory.h>
 #include <Monitoring/MonitoringFactory.h>
-#include <Monitoring/ProcessMonitor.h>
 #include "Framework/Signpost.h"
 
 #include <fairmq/Device.h>
@@ -123,12 +122,8 @@ o2::framework::ServiceSpec CommonServices::monitoringSpec()
 
       // Re-arm process monitoring: .stop takes the final measurement and stops
       // the sampling thread, so without this a device would report nothing at
-      // all from its second run onwards. A no-op while already running.
-      auto interval = services.get<DeviceSpec const>().resourceMonitoringInterval;
-      if (ResourcesMonitoringHelper::isResourcesMonitoringEnabled(interval)) {
-        using o2::monitoring::PmMeasurement;
-        monitoring->enableProcessMonitoring(interval, {PmMeasurement::Cpu, PmMeasurement::Mem, PmMeasurement::Smaps});
-      }
+      // all from its second run onwards.
+      ResourcesMonitoringHelper::armProcessMonitoring(*monitoring, services.get<DeviceSpec const>().resourceMonitoringInterval);
 
       auto extRunNumber = services.get<RawDeviceService>().device()->fConfig->GetProperty<std::string>("runNumber", "unspecified");
       if (extRunNumber == "unspecified") {

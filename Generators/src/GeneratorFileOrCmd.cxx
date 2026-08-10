@@ -23,6 +23,7 @@
 // For filesystem operations
 #include <filesystem>
 // Waits
+#include <chrono>
 #include <thread>
 // Log messages
 #include <fairlogger/Logger.h>
@@ -155,8 +156,7 @@ bool GeneratorFileOrCmd::terminateCmd(unsigned int graceMillis)
   // which only reaches RUSAGE_CHILDREN through that reap.
   constexpr unsigned int pollMillis = 10;
   for (unsigned int waited = 0; waited < graceMillis; waited += pollMillis) {
-    int status;
-    pid_t reaped = waitpid(mCmdPid, &status, WNOHANG);
+    pid_t reaped = waitpid(mCmdPid, nullptr, WNOHANG);
     if (reaped == mCmdPid) {
       LOG(info) << "Command with process ID " << mCmdPid << " exited by itself";
       mCmdPid = -1;
@@ -183,6 +183,15 @@ bool GeneratorFileOrCmd::terminateCmd(unsigned int graceMillis)
 
   mCmdPid = -1; // Reset the process ID
   return true;
+}
+// -----------------------------------------------------------------
+void GeneratorFileOrCmd::stopCmd()
+{
+  if (mCmd.empty()) {
+    return;
+  }
+  constexpr unsigned int graceMillis = 5000;
+  terminateCmd(graceMillis);
 }
 // -----------------------------------------------------------------
 bool GeneratorFileOrCmd::makeTemp(const bool& fromName)

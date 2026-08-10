@@ -74,7 +74,7 @@ class GeneratorTParticle : public Generator, public GeneratorFileOrCmd
   Bool_t Init() override;
 
   /** Terminate the background command (if any), see Generator::stop(). */
-  void stop() override;
+  void stop() override { stopCmd(); }
 
   /**
    * Configure the generator from parameters and the general

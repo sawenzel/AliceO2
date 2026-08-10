@@ -49,14 +49,6 @@ GeneratorTParticle::~GeneratorTParticle()
   removeTemp();
 }
 /*****************************************************************/
-void GeneratorTParticle::stop()
-{
-  if (mCmd.empty()) {
-    return;
-  }
-  terminateCmd(sStopGraceMillis);
-}
-/*****************************************************************/
 Bool_t GeneratorTParticle::Init()
 {
   mChain = new TChain(mTreeName.c_str());

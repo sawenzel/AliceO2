@@ -101,7 +101,7 @@ void GeneratorService::stopGenerators()
   }
   TIter next(generators);
   while (TObject* obj = next()) {
-    if (auto* gen = dynamic_cast<o2::eventgen::Generator*>(obj)) {
+    if (auto* gen = dynamic_cast<Generator*>(obj)) {
       gen->stop();
     }
   }

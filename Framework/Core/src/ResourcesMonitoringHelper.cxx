@@ -10,6 +10,8 @@
 // or submit itself to any jurisdiction.
 #include "ResourcesMonitoringHelper.h"
 #include "Framework/DeviceMetricsInfo.h"
+#include <Monitoring/Monitoring.h>
+#include <Monitoring/ProcessMonitor.h>
 #include <rapidjson/prettywriter.h>
 #include <rapidjson/ostreamwrapper.h>
 
@@ -166,4 +168,13 @@ bool ResourcesMonitoringHelper::dumpMetricsToJSON(const std::vector<DeviceMetric
   w.EndObject();
 
   return true;
+}
+
+void ResourcesMonitoringHelper::armProcessMonitoring(o2::monitoring::Monitoring& monitoring, unsigned short interval)
+{
+  if (!isResourcesMonitoringEnabled(interval)) {
+    return;
+  }
+  using o2::monitoring::PmMeasurement;
+  monitoring.enableProcessMonitoring(interval, {PmMeasurement::Cpu, PmMeasurement::Mem, PmMeasurement::Smaps});
 }

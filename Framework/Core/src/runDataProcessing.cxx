@@ -1120,9 +1120,7 @@ int doChild(int argc, char** argv, ServiceRegistry& serviceRegistry,
       LOG(debug) << "Declaring service " << service.name;
       serviceRegistry.declareService(service, *deviceState.get(), r.fConfig);
     }
-    if (ResourcesMonitoringHelper::isResourcesMonitoringEnabled(spec.resourceMonitoringInterval)) {
-      serviceRef.get<Monitoring>().enableProcessMonitoring(spec.resourceMonitoringInterval, {PmMeasurement::Cpu, PmMeasurement::Mem, PmMeasurement::Smaps});
-    }
+    ResourcesMonitoringHelper::armProcessMonitoring(serviceRef.get<Monitoring>(), spec.resourceMonitoringInterval);
   };
 
   runner.AddHook<fair::mq::hooks::InstantiateDevice>(afterConfigParsingCallback);

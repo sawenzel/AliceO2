@@ -66,6 +66,9 @@ GeneratorHepMC::~GeneratorHepMC()
   if (mEvent) {
     delete mEvent;
   }
+  // Must be executed before removing the temporary file, otherwise the child
+  // process might still be writing on it, causing unwanted stdout messages
+  // which could slow down the system
   stop();
   removeTemp();
 }
@@ -83,10 +86,7 @@ void GeneratorHepMC::stop()
   if (mReader) {
     mReader->close();
   }
-  // Must be executed before removing the temporary file
-  // otherwise the current child process might still be writing on it
-  // causing unwanted stdout messages which could slow down the system
-  terminateCmd(sStopGraceMillis);
+  stopCmd();
 }
 
 /*****************************************************************/

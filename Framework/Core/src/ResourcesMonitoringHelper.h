@@ -19,6 +19,11 @@
 #include <regex>
 #include <iosfwd>
 
+namespace o2::monitoring
+{
+class Monitoring;
+}
+
 namespace o2::framework
 {
 struct ResourcesMonitoringHelper {
@@ -30,6 +35,11 @@ struct ResourcesMonitoringHelper {
                                 std::vector<std::regex> const& metricsToDump,
                                 std::ostream& out) noexcept;
   static bool isResourcesMonitoringEnabled(unsigned short interval) noexcept { return interval > 0; }
+  /// Arm @a monitoring with the process measurements DPL reports, sampled every
+  /// @a interval seconds, if resource monitoring is enabled at all.  Doing so
+  /// while monitoring is already running is a no-op, so this can be called both
+  /// when the device is instantiated and on every start.
+  static void armProcessMonitoring(o2::monitoring::Monitoring& monitoring, unsigned short interval);
 };
 
 } // namespace o2::framework
