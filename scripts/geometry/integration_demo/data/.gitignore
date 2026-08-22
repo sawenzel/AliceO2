@@ -1,0 +1,3 @@
+# Raw run products: kept on disk for Track 3b (the event display) to consume, not committed.
+*.root
+*.dat

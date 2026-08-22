@@ -32,9 +32,9 @@ def main() -> int:
         print(__doc__)
         return 2
     conv_root, rep, outdir = sys.argv[1], sys.argv[2], sys.argv[3]
-    if rep not in ("exact", "tess"):
-        print("representation must be 'exact' or 'tess'")
-        return 2
+    # "exact" and "tess" are the two representations of record; any other value is allowed so
+    # that control variants (a coarser mesh, say) can be run through the same pipeline, as long
+    # as conv/iris_<rep> and conv/bagger_<rep> exist.
     os.makedirs(outdir, exist_ok=True)
 
     iris_macro = os.path.abspath(os.path.join(conv_root, "conv", f"iris_{rep}", "geom.C"))
