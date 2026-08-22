@@ -132,6 +132,22 @@ be useless); and the accuracy and X-ray counters. It reads Track 2's
 renders as `n/a`, never as `0`. A part with no measured record still gets its card, from the
 sidecar, and the page says which parts the measured set covers.
 
+**measure now (bridge).** The recorded bars are one machine's numbers, taken once, and a part with
+no record in `website_data/` (`BoomCylinderInner`, say) had no bars at all. The button at the top
+of the tab asks the bridge to measure the part in front of the reader: for each representation it
+can load -- `surfaces.bin` and `shape.root` -- one `POST /load` followed by one `POST /bench`, and
+the answer is drawn as a lighter, dash-outlined bar beside the recorded one, with the load average
+and the sample count in the caption under the chart. The mesh is **static data only**: the bridge
+has no kernel loader for `facets_*.bin`, so a tessellated row can only ever come from the recorded
+set, and the pane says so. `/bench` measures *timing* and nothing else, so the capacity, accuracy
+and X-ray columns stay exactly what Track 2 recorded; a live bar is never mixed into them. With no
+bridge the button is disabled and carries the reason (`no bridge on http://127.0.0.1:8077 -- start
+scripts/geometry/tgeoRayService.py --port 8077`), which is also how the liveness probe reports a
+service that has stopped. Measured this way on this machine, `BoomCylinderInner` `Contains` comes
+back at 475 ns/call for the exact surface solid against 29.7 ns/call for its CSG composite, and
+`Bucket`'s exact `Contains` at 300 ns/call against the 654 ns/call in the recorded set -- the same
+part, a differently loaded machine, which is the whole reason a live bar is labelled as one.
+
 `website_data` inside this directory is a symlink to `../website_data`, because `python3 -m
 http.server` refuses paths above its own root; the loader also tries `../website_data/` for the
 case where the server was started one level up instead.
@@ -163,7 +179,24 @@ The contract is one call: `async traceRays(Float32Array rays) -> Float32Array re
 POST /load   {"path": "<path to surfaces_*.bin or shape_*.root>"}
              -> {"ok": true, "kind": "surface"|"shape", "nSurfaces": N, "bbox": [...]}
 POST /trace  raw Float32Array n*6  ->  raw Float32Array n*5
+POST /bench  {"samples": 4000}
+             -> {"ok": true, "samples": N, "repeats": R, "insideSamples": M, "loadAverage": L,
+                 "functions": {"contains": {"nsPerCall": x}, "distFromOutside": {...}, ...}}
 ```
+
+`/bench` times the shape that is loaded **right now**, single-threaded, on deterministic sample
+points, and the benchmarks tab's "measure now" button drives it (see above). Because it measures
+whatever the service holds, it has to take the bridge over for the duration: it `/load`s each of
+the part's representations in turn and then hands the bridge back, re-`/load`ing the file the
+raytracer's current view needs (`Raytracer.reloadBridgeShape`). Without that handover the tracer
+would still believe its own file was resident and the next frame would quietly trace the other
+solid. The service caches loads, so the handover is a pointer swap.
+
+The button's liveness probe is a `POST` to an endpoint the service does not have, which answers
+404 with a JSON body and the CORS headers: proof of life that disturbs nothing a `/load` or a
+`/bench` would. That 404 in the browser console is the probe, and it is expected. A bare `OPTIONS`
+cannot serve instead -- its own preflight asks for an `Access-Control-Allow-Methods` the service
+does not send, so a live bridge would look dead.
 
 The bridge is tried without being asked when a part loads: the stored path prefix first, then two
 documented candidates (`` and `scripts/geometry/website/`), because the service resolves a
@@ -425,6 +458,7 @@ js/rtui.js          the raytracer tab's controls
 js/viewer3d.js      the shared three.js view
 js/orbit.js         a minimal orbit control (so no bare-specifier import map is needed)
 js/charts.js        the benchmark charts and the part card, SVG and DOM
+js/livebench.js     the benchmarks tab's live measurement: /load + /bench on the bridge
 js/events.js        the event-display tab
 js/gun.js           the synthetic gun, shared by the sample-data tool and the worker
 js/selfcheck.js     the assertions, runnable in node and in the browser
