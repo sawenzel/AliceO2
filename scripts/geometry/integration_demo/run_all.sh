@@ -26,4 +26,22 @@ for rep in exact tess; do
     CONFIGKEY="GeneratorExternal.fileName=$GEO/fibonacci_geantinos.macro;GeneratorExternal.funcName=fibonacci_geantinos($NRAYS,1.0,0.9)" \
     "$GEO/run_sim.sh" "$OUT" $rep matfan_$rep
 done
+# controls for section 8: determinism, and a deliberately degraded tessellation
+EVENTS=1 GEN=extgen STEPLOG=1 \
+  CONFIGKEY="GeneratorExternal.fileName=$GEO/fibonacci_geantinos.macro;GeneratorExternal.funcName=fibonacci_geantinos($NRAYS,1.0,0.9)" \
+  "$GEO/run_sim.sh" "$OUT" exact matfan_exact_repeat
+EVENTS=1 GEN=extgen STEPLOG=1 \
+  CONFIGKEY="GeneratorExternal.fileName=$GEO/fibonacci_geantinos.macro;GeneratorExternal.funcName=fibonacci_geantinos($NRAYS,1.0,0.9)" \
+  "$GEO/run_sim.sh" "$OUT" coarse matfan_coarse
+
+# the transport-cost measurement: a big fan, timed without MCStepLogger and counted with it
+BIGRAYS=${BIGRAYS:-8192}
+for rep in exact tess; do
+  EVENTS=1 GEN=extgen STEPLOG=0 \
+    CONFIGKEY="GeneratorExternal.fileName=$GEO/fibonacci_geantinos.macro;GeneratorExternal.funcName=fibonacci_geantinos($BIGRAYS,1.0,0.9)" \
+    "$GEO/run_sim.sh" "$OUT" $rep bigfan_$rep
+  EVENTS=1 GEN=extgen STEPLOG=1 \
+    CONFIGKEY="GeneratorExternal.fileName=$GEO/fibonacci_geantinos.macro;GeneratorExternal.funcName=fibonacci_geantinos($BIGRAYS,1.0,0.9)" \
+    "$GEO/run_sim.sh" "$OUT" $rep bigfanlog_$rep
+done
 echo "run_all done"

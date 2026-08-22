@@ -39,6 +39,15 @@ run iris_exact   "$GEO/ALICE_3_example/CAD_noETA.stp" --csg auto --exact-surface
 run iris_tess    "$GEO/ALICE_3_example/CAD_noETA.stp" --mesh --mesh-prec "$IRIS_PREC" \
     --materials-csv "$GEO/IRIS/IRIS_MATERIALS.csv"
 
+# The sensitivity control of Stream_Z_IntegrationDemo.md section 8: a deliberately degraded
+# tessellation, so that "the two representations agree" can be told apart from "the instrument
+# cannot see a difference".
+COARSE_PREC=${COARSE_PREC:-2.0}
+run iris_coarse   "$GEO/ALICE_3_example/CAD_noETA.stp" --mesh --mesh-prec "$COARSE_PREC" \
+    --materials-csv "$GEO/IRIS/IRIS_MATERIALS.csv"
+run bagger_coarse "$GEO/STEP_examples/Bagger.step" --mesh --mesh-prec "$COARSE_PREC" \
+    --materials-csv "$GEO/integration_demo/Bagger_MATERIALS.csv"
+
 
 # The exact-surface macros need one post-processing step before o2-sim can JIT them; see
 # patch_exact_macro.py for the precise reason (a converter/loader namespace interaction).
