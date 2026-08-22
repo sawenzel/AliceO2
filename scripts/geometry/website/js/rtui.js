@@ -47,6 +47,11 @@ export function initRaytracerTab() {
           </div>
           <div class="row"><span class="status" id="rt-resnote"></span></div>
           <div class="row">
+            <label><input type="checkbox" id="rt-scissor" checked> bounding-box scissor</label>
+          </div>
+          <p class="muted small">The scissor projects the part's world AABB to a screen rectangle and casts
+            rays only inside it. Everything outside is background &mdash; a gradient and a grid line, no ray.</p>
+          <div class="row">
             <button id="rt-frame">re-frame</button>
             <button id="rt-fromview">camera from 3D view</button>
           </div>
@@ -265,6 +270,11 @@ export function initRaytracerTab() {
       add('max |dt|', `${c.maxDeltaT.toExponential(2)} cm`);
     }
     if (tracer.view.startsWith('parity')) { add('parity breaks', `${c.parityBreaks}`); }
+    if (c.scissorPixels !== undefined) {
+      add('traced pixels', `${c.scissorPixels} (${(100 * (1 - c.scissorSaving)).toFixed(1)}% of the frame)`);
+      add('scissor saved', `${(100 * c.scissorSaving).toFixed(1)}% of the pixels`);
+      add('scissor rect', c.scissorRect.join(', '));
+    }
     if (c.ms !== undefined) { add('time', `${c.ms} ms`); }
     if (c.error) { add('error', c.error); }
   }
@@ -276,8 +286,10 @@ export function initRaytracerTab() {
     const a = tracer.perf.local, b = tracer.perf.remote;
     const both = a && b && a.width === b.width && a.height === b.height && a.camera === b.camera
       ? `\nlocal ${a.ms} ms  vs  bridge ${b.ms} ms  (${(b.ms / a.ms).toFixed(2)}x)` : '';
+    const scissor = c.scissorSaving > 0.001
+      ? `\nscissor ${c.scissorPixels} px traced, ${(100 * c.scissorSaving).toFixed(1)}% saved` : '';
     hud.textContent = `${state.part ? state.part.name : ''} - ${VIEWS.find(v => v.key === tracer.view).label}\n` +
-      `${tracer.width}x${tracer.height} in ${c.ms} ms` + both;
+      `${tracer.width}x${tracer.height} in ${c.ms} ms` + scissor + both;
   };
 
   let renderTimer = null;
@@ -296,6 +308,10 @@ export function initRaytracerTab() {
     scheduleRender();
   });
   resSelect.addEventListener('change', () => { applySize(); scheduleRender(); });
+  document.getElementById('rt-scissor').addEventListener('change', (e) => {
+    tracer.useScissor = e.target.checked;
+    scheduleRender();
+  });
   document.getElementById('rt-render').addEventListener('click', () => tracer.render());
   document.getElementById('rt-frame').addEventListener('click', () => {
     if (tracer.box) { tracer.camera.frameBox(tracer.box); scheduleRender(); }
