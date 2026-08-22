@@ -227,7 +227,13 @@ export function partCard(entry) {
   return card;
 }
 
-export function renderBenchmarks(container, loaded) {
+/// The benchmark record for one part, matched on the part name the selector holds.
+export function benchmarkFor(loaded, partName) {
+  if (!partName) { return null; }
+  return (loaded.benchmarks || []).find(e => e.doc && e.doc.meta && e.doc.meta.part === partName) || null;
+}
+
+export function renderBenchmarks(container, loaded, state) {
   container.innerHTML = '';
   const note = document.createElement('p');
   note.className = 'muted';
@@ -240,5 +246,18 @@ export function renderBenchmarks(container, loaded) {
     ? 'Measured data from <code>scripts/geometry/website_data/</code>.'
     : 'No measured data present yet: these are the <strong>synthetic sample records</strong> in <code>sample_data/</code>, shaped exactly like the Track-2 schema.';
   container.appendChild(note);
-  for (const entry of loaded.benchmarks) { container.appendChild(partCard(entry)); }
+
+  const partName = state && state.part ? state.part.name : null;
+  const entry = benchmarkFor(loaded, partName);
+  if (!entry) {
+    const missing = document.createElement('p');
+    missing.className = 'muted';
+    missing.textContent = partName
+      ? `No benchmark record for ${partName}. The measured set covers ` +
+        (loaded.benchmarks || []).map(e => e.doc.meta.part).join(', ') + '.'
+      : 'No part selected.';
+    container.appendChild(missing);
+    return;
+  }
+  container.appendChild(partCard(entry));
 }

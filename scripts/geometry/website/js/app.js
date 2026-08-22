@@ -5,8 +5,10 @@ import { parseSidecar, parseFacets } from './sidecar.js';
 import { SurfaceSolid } from './solid.js';
 import { Viewer3D } from './viewer3d.js';
 import { renderBenchmarks } from './charts.js';
+import { PartSelector } from './partselect.js';
 
 export const state = {
+  parts: [],           // every manifest entry
   part: null,          // the manifest entry
   parsed: null,        // parseSidecar result
   solid: null,         // SurfaceSolid
@@ -147,6 +149,7 @@ async function loadPart(entry) {
             (notes.length ? ` (${notes.join('; ')})` : ''), solid.failed.length > 0);
 
   renderMeshTab();
+  if (tabInitialised.bench) { renderBenchTab(); }
   for (const fn of state.listeners) {
     try { fn(state); } catch (e) { console.error(e); }
   }
@@ -200,32 +203,31 @@ registerTab('events', async () => {
   initEventsTab();
 });
 
-registerTab('bench', async () => {
+let benchmarksLoaded = null;
+async function renderBenchTab() {
   const container = document.getElementById('bench-body');
-  container.textContent = 'loading...';
-  try { renderBenchmarks(container, await loadBenchmarks()); } catch (e) { container.textContent = `benchmarks: ${e.message}`; }
-});
+  if (!benchmarksLoaded) {
+    container.textContent = 'loading...';
+    try { benchmarksLoaded = await loadBenchmarks(); } catch (e) { container.textContent = `benchmarks: ${e.message}`; return; }
+  }
+  renderBenchmarks(container, benchmarksLoaded, state);
+}
+registerTab('bench', renderBenchTab);
 
 async function boot() {
-  const select = document.getElementById('part-select');
   const { parts, reason } = await listParts();
   if (!parts.length) {
     setStatus(reason, true);
     document.getElementById('mesh-hud').textContent = 'no test data';
     return;
   }
-  for (const entry of parts) {
-    const option = document.createElement('option');
-    option.value = entry.name;
-    option.textContent = entry.name;
-    select.appendChild(option);
-  }
-  select.addEventListener('change', () => {
-    const entry = parts.find(p => p.name === select.value);
-    if (entry) { loadPart(entry).catch(e => setStatus(`${entry.name}: ${e.message}`, true)); }
+  state.parts = parts;
+  const selector = new PartSelector(document.getElementById('part-select'), {
+    onChange: (entry) => loadPart(entry).catch(e => setStatus(`${entry.name}: ${e.message}`, true)),
   });
+  selector.setParts(parts);
   const first = parts.find(p => p.name === 'Bucket') || parts[0];
-  select.value = first.name;
+  selector.select(first.name);
   await loadPart(first).catch(e => setStatus(`${first.name}: ${e.message}`, true));
 }
 

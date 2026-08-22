@@ -158,3 +158,47 @@ td.na { color: var(--text-muted); }
 .log { font: 12px/1.5 var(--mono); white-space: pre-wrap; max-height: 340px; overflow: auto; margin: 0; }
 .pass { color: var(--accent-3); }
 .fail { color: var(--bad); }
+
+/* --- the global part selector ------------------------------------------------------------- */
+
+.toolbar-label { font-size: 13px; color: var(--text-secondary); }
+
+.partsel { position: relative; }
+.partsel-button {
+  display: inline-flex; align-items: center; gap: 9px;
+  padding: 4px 9px 4px 4px; min-width: 250px; text-align: left;
+}
+.partsel-button[aria-expanded="true"] { border-color: var(--accent); }
+.partsel-thumb {
+  width: 30px; height: 30px; flex: 0 0 30px; border-radius: 5px; overflow: hidden;
+  background: var(--surface-0); border: 1px solid var(--line); display: block;
+}
+.partsel-thumb img { width: 100%; height: 100%; display: block; }
+.partsel-name { font-family: var(--mono); font-size: 12.5px; }
+.partsel-sub { color: var(--text-muted); font-size: 11px; margin-left: auto; }
+.partsel-caret { color: var(--text-muted); font-size: 11px; }
+
+.partsel-panel {
+  position: absolute; z-index: 40; top: calc(100% + 4px); left: 0;
+  min-width: 340px; max-height: min(60vh, 460px); overflow: auto;
+  background: var(--surface-1); border: 1px solid var(--line); border-radius: 8px;
+  padding: 5px; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55);
+}
+.partsel-group {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--text-muted); padding: 8px 8px 3px;
+}
+.partsel-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 4px 6px;
+}
+.partsel-item:hover { background: var(--surface-2); border-color: var(--line); }
+.partsel-item[aria-selected="true"] { border-color: var(--accent); background: var(--surface-2); }
+.partsel-item .partsel-thumb { width: 46px; height: 46px; flex: 0 0 46px; }
+.partsel-item .partsel-thumb.empty::after {
+  content: ''; display: block; width: 100%; height: 100%;
+  background: repeating-linear-gradient(45deg, #1d242e 0 5px, #151a21 5px 10px);
+}
+.partsel-text { display: flex; flex-direction: column; min-width: 0; }
+.partsel-itemname { font-family: var(--mono); font-size: 12.5px; }
+.partsel-itemsub { color: var(--text-muted); font-size: 11px; }
