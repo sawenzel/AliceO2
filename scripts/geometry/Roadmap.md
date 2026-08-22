@@ -248,3 +248,20 @@ every validation instrument this branch built applies directly; the parked
 `attic/O2_TGeoToCAD*.py` attempts are salvage. (ROOT's old `geocad`/`TGeoToStep` was considered
 and set aside per Sandro, 2026-08-22.) Acceptance is
 the round trip: TGeo → STEP → converter → gate, scored against the source TGeo itself.
+
+### (j) O2BVHAssembly: a high-performance wrapper for many-part assemblies
+
+> *"Assemblies in TGeo are not good CPU + mem wise for many parts (same as TGeoNavigator). I
+> would suggest to make a modern high performance O2BVHAssembly class that we can use to wrap
+> complicated assemblies such as the oTOF one. Should be straightforward to implement (just
+> follow O2Tessellated)."*  (Sandro, 2026-08-22)
+
+The shape of it: a BVH (bvh2, as in `O2Tessellated`/`O2BVHSurfaceSolid`) over the *child
+placements'* AABBs, so the where-am-I and next-boundary questions over N daughters cost log N
+box tests instead of TGeoNavigator's linear walk. The float-box outward-rounding discipline and
+the per-query dedup marker already exist in `O2BVHSurfaceSolid.cxx`; the Embree option (item d)
+applies to this layer too. Born test corpus: oTOF's 62 628 placements over 20 prototypes, whose
+`geom.C` is already the one-volume-many-nodes DAG. Open design questions to settle at
+implementation: whether it presents as a `TGeoShape` (a solid whose Contains/DistFrom* delegate
+to children through the BVH) or hooks the navigator level, and how hit/sensitive-volume identity
+is reported through it.
