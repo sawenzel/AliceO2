@@ -12,6 +12,7 @@ export const state = {
   solid: null,         // SurfaceSolid
   sidecarBuffer: null, // the raw bytes, so a worker can re-parse them itself
   facets: null,        // { nTriangles, positions }
+  facetsBuffer: null,  // the raw facets_*.bin bytes, for the worker
   listeners: [],
 };
 
@@ -124,14 +125,19 @@ async function loadPart(entry) {
   const parsed = parseSidecar(sidecarBuffer, entry.surfaces);
   const solid = new SurfaceSolid(parsed, entry.name);
   let facets = null;
+  let facetsBuffer = null;
   if (entry.facets) {
-    try { facets = parseFacets(await loadBinary(`testdata/${entry.facets}`), entry.facets); } catch (e) { facets = null; }
+    try {
+      facetsBuffer = await loadBinary(`testdata/${entry.facets}`);
+      facets = parseFacets(facetsBuffer, entry.facets);
+    } catch (e) { facets = null; facetsBuffer = null; }
   }
   state.part = entry;
   state.parsed = parsed;
   state.solid = solid;
   state.sidecarBuffer = sidecarBuffer;
   state.facets = facets;
+  state.facetsBuffer = facetsBuffer;
 
   const notes = [];
   if (parsed.warnings.length) { notes.push(parsed.warnings.length + ' warning(s)'); }
@@ -147,6 +153,11 @@ async function loadPart(entry) {
 }
 
 // --- boot -------------------------------------------------------------------------------------
+
+registerTab('raytracer', async () => {
+  const { initRaytracerTab } = await import('./rtui.js');
+  initRaytracerTab();
+});
 
 registerTab('bench', async () => {
   const container = document.getElementById('bench-body');

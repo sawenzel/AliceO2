@@ -1,0 +1,293 @@
+// The raytracer tab's controls, counters and camera interaction.
+
+import { Raytracer, VIEWS } from './raytrace.js';
+import { state, onPartChanged } from './app.js';
+
+const PRESETS = [
+  { label: '360p', width: 480 },
+  { label: '480p', width: 640 },
+  { label: '720p', width: 960 },
+];
+
+const STORAGE_KEY = 'o2surfaces.bridge';
+
+function loadBridgeSettings() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch (e) { return {}; }
+}
+function saveBridgeSettings(settings) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); } catch (e) { /* private mode: not worth a message */ }
+}
+
+export function initRaytracerTab() {
+  const section = document.getElementById('tab-raytracer');
+  section.innerHTML = `
+    <div class="split">
+      <div>
+        <div class="viewport" id="rt-viewport" style="display:flex;align-items:center;justify-content:center;">
+          <canvas id="rt-canvas" class="rtcanvas"></canvas>
+          <div class="hud" id="rt-hud"></div>
+        </div>
+        <div id="rt-scale"></div>
+        <p class="muted small" id="rt-footnote"></p>
+      </div>
+      <div>
+        <div class="pane">
+          <h3>View</h3>
+          <div class="row">
+            <select id="rt-view" class="grow"></select>
+          </div>
+          <div class="row">
+            <label>resolution <select id="rt-res"></select></label>
+            <button id="rt-render" class="primary">render</button>
+          </div>
+          <div class="row">
+            <button id="rt-frame">re-frame</button>
+            <button id="rt-fromview">camera from 3D view</button>
+          </div>
+          <p class="muted small" id="rt-viewnote"></p>
+        </div>
+        <div class="pane">
+          <h3>Engine</h3>
+          <p class="muted small">The picture is produced by an engine that answers rays. The local engine is
+            this page's JS port of the O2 kernel. The bridge sends the same rays to
+            <code>scripts/geometry/tgeoRayService.py</code>, which traces them through the real kernel, so the
+            two can be subtracted.</p>
+          <div class="row">
+            <label>port <input type="number" id="rt-port" value="8077" min="1" max="65535" style="width:6.5em"></label>
+            <button id="rt-connect">connect bridge</button>
+          </div>
+          <div class="row">
+            <label class="grow">path on the bridge host
+              <input type="text" id="rt-path" class="grow" style="width:100%">
+            </label>
+          </div>
+          <div class="row"><span class="status" id="rt-bridge-status">bridge not connected</span></div>
+        </div>
+        <div class="pane">
+          <h3>Counters</h3>
+          <dl class="facts" id="rt-counters"></dl>
+        </div>
+      </div>
+    </div>`;
+
+  const canvas = document.getElementById('rt-canvas');
+  const tracer = new Raytracer(canvas);
+  const viewSelect = document.getElementById('rt-view');
+  const resSelect = document.getElementById('rt-res');
+  const hud = document.getElementById('rt-hud');
+  const counters = document.getElementById('rt-counters');
+  const bridgeStatus = document.getElementById('rt-bridge-status');
+  const pathInput = document.getElementById('rt-path');
+  const portInput = document.getElementById('rt-port');
+  const viewNote = document.getElementById('rt-viewnote');
+  const footnote = document.getElementById('rt-footnote');
+
+  for (const view of VIEWS) {
+    const option = document.createElement('option');
+    option.value = view.key;
+    option.textContent = view.label;
+    viewSelect.appendChild(option);
+  }
+  PRESETS.forEach((preset, index) => {
+    const option = document.createElement('option');
+    option.value = String(index);
+    option.textContent = preset.label;
+    resSelect.appendChild(option);
+  });
+  resSelect.value = '0';
+
+  const settings = loadBridgeSettings();
+  if (settings.port) { portInput.value = settings.port; }
+
+  function defaultPath() {
+    const part = state.part;
+    const prefix = settings.prefix || '';
+    return part ? `${prefix}testdata/${part.surfaces}` : '';
+  }
+
+  function applySize() {
+    const preset = PRESETS[Number(resSelect.value)];
+    const viewport = document.getElementById('rt-viewport');
+    const aspect = Math.max(0.4, Math.min(2.5, viewport.clientWidth / Math.max(1, viewport.clientHeight)));
+    tracer.setSize(preset.width, Math.round(preset.width / aspect));
+    canvas.style.width = '100%';
+    canvas.style.height = 'auto';
+  }
+
+  const scaleBar = document.getElementById('rt-scale');
+  function renderScale() {
+    scaleBar.innerHTML = '';
+    if (tracer.view !== 'diff' && tracer.view !== 'engine') { return; }
+    const span = tracer.box
+      ? Math.hypot(tracer.box[3] - tracer.box[0], tracer.box[4] - tracer.box[1], tracer.box[5] - tracer.box[2]) : 1;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'legend';
+    const gradient = document.createElement('span');
+    gradient.style.cssText = 'display:inline-block;width:170px;height:11px;border-radius:3px;' +
+      'background:linear-gradient(90deg,#285ADC,#F0E6A0,#F0280A)';
+    const lo = document.createElement('span'); lo.textContent = '0';
+    const hi = document.createElement('span');
+    hi.textContent = `${(1e-3 * span).toExponential(1)} cm depth difference`;
+    const red = document.createElement('span');
+    red.className = 'legend-item';
+    const swatch = document.createElement('span');
+    swatch.className = 'swatch'; swatch.style.background = '#eb3c46';
+    red.appendChild(swatch);
+    red.appendChild(document.createTextNode('one hit, the other not'));
+    wrapper.append(lo, gradient, hi, red);
+    scaleBar.appendChild(wrapper);
+  }
+
+  function describeView() {
+    renderScale();
+    const key = tracer.view;
+    const notes = {
+      exact: 'Every pixel is a ray intersected with the real trimmed patches: quadratics for the plane, cylinder, cone and sphere, the quartic for the torus, and 2D winding against the trim wires. The shading normal is analytic, so a cylinder is smooth.',
+      mesh: 'The same camera, against the triangles of facets_*.bin, with flat facet normals. The silhouette is a polygon.',
+      diff: 'Red where one representation is hit and the other is not; otherwise a heatmap of the depth difference, saturating at one part in a thousand of the model size.',
+      engine: 'The same rays sent to the JS port and to the bridge. This is the port\'s validation instrument: any structure in this image is a disagreement with the real kernel.',
+      parityExact: 'Crossings are counted along the whole ray. Magenta means an odd count -- the ray entered the solid and never came out, which is a hole in the surface set.',
+      parityMesh: 'The same count against the tessellation. A mesh that loses rays lights up here; the exact solid should not.',
+    };
+    viewNote.textContent = notes[key] || '';
+    const bits = [];
+    if (state.solid && state.solid.bsplineTrimFaces) {
+      bits.push(`${state.solid.bsplineTrimFaces} face(s) carry B-spline trim curves: their boundaries are the adaptively flattened polyline at 1e-5, exactly as the kernel navigates them, not the rational curve itself.`);
+    }
+    if (state.solid && state.solid.unsupported.length) {
+      bits.push(`${state.solid.unsupported.length} record(s) of an unsupported kind are not drawn at all and are counted in the panel.`);
+    }
+    if (state.solid && state.solid.failed.length) {
+      bits.push(`${state.solid.failed.length} record(s) were rejected while building and are not drawn.`);
+    }
+    footnote.textContent = bits.join(' ');
+  }
+
+  function showCounters(c) {
+    counters.innerHTML = '';
+    const add = (key, value) => {
+      const dt = document.createElement('dt'); dt.textContent = key;
+      const dd = document.createElement('dd'); dd.textContent = value;
+      counters.appendChild(dt); counters.appendChild(dd);
+    };
+    add('engine', tracer.view === 'engine' && tracer.bridgeReady ? `local vs ${tracer.remote.name}` : tracer.local.name);
+    add('pixels', `${c.total}`);
+    add('hit', c.hit === undefined ? 'n/a' : `${c.hit} (${(100 * c.hit / Math.max(1, c.total)).toFixed(1)}%)`);
+    if (tracer.view === 'diff' || tracer.view === 'engine') {
+      add('hit / no-hit disagree', `${c.mismatch}`);
+      add('depth differs', `${c.differing}`);
+      add('max |dt|', `${c.maxDeltaT.toExponential(2)} cm`);
+    }
+    if (tracer.view.startsWith('parity')) { add('parity breaks', `${c.parityBreaks}`); }
+    if (c.ms !== undefined) { add('time', `${c.ms} ms`); }
+    if (c.error) { add('error', c.error); }
+  }
+
+  tracer.onProgress = showCounters;
+  tracer.onDone = (c) => {
+    showCounters(c);
+    hud.textContent = `${state.part ? state.part.name : ''} - ${VIEWS.find(v => v.key === tracer.view).label}\n` +
+      `${tracer.width}x${tracer.height} in ${c.ms} ms`;
+  };
+
+  let renderTimer = null;
+  function scheduleRender(delay = 30) {
+    clearTimeout(renderTimer);
+    renderTimer = setTimeout(() => { tracer.render(); }, delay);
+  }
+
+  viewSelect.addEventListener('change', () => {
+    tracer.view = viewSelect.value;
+    if (tracer.view === 'engine' && !tracer.bridgeReady) {
+      bridgeStatus.textContent = 'bridge offline: connect it, or the difference has nothing to compare against';
+      bridgeStatus.className = 'status error';
+    }
+    describeView();
+    scheduleRender();
+  });
+  resSelect.addEventListener('change', () => { applySize(); scheduleRender(); });
+  document.getElementById('rt-render').addEventListener('click', () => tracer.render());
+  document.getElementById('rt-frame').addEventListener('click', () => {
+    if (tracer.box) { tracer.camera.frameBox(tracer.box); scheduleRender(); }
+  });
+  document.getElementById('rt-fromview').addEventListener('click', async () => {
+    const { sharedViewer } = await import('./app.js');
+    const viewer = sharedViewer();
+    const spec = viewer.cameraSpec();
+    tracer.camera.origin = spec.origin.slice();
+    tracer.camera.target = [viewer.controls.target.x, viewer.controls.target.y, viewer.controls.target.z];
+    tracer.camera.fovY = spec.fovY;
+    scheduleRender();
+  });
+
+  // camera interaction directly on the raytraced canvas
+  let dragging = false, last = { x: 0, y: 0 };
+  canvas.addEventListener('pointerdown', (e) => {
+    dragging = true; last = { x: e.clientX, y: e.clientY };
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!dragging) { return; }
+    const scale = canvas.clientWidth / tracer.width;
+    tracer.camera.orbit((e.clientX - last.x) / scale, (e.clientY - last.y) / scale);
+    last = { x: e.clientX, y: e.clientY };
+    scheduleRender(90);
+  });
+  const endDrag = (e) => {
+    if (!dragging) { return; }
+    dragging = false;
+    try { canvas.releasePointerCapture(e.pointerId); } catch (_) { /* already released */ }
+    scheduleRender(0);
+  };
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    tracer.camera.dolly(Math.exp(e.deltaY * 0.0015));
+    scheduleRender(90);
+  }, { passive: false });
+
+  document.getElementById('rt-connect').addEventListener('click', async () => {
+    const port = Number(portInput.value) || 8077;
+    const path = pathInput.value.trim();
+    settings.port = port;
+    // remember whatever prefix the user put in front of testdata/, so the next part keeps it
+    const suffix = state.part ? `testdata/${state.part.surfaces}` : '';
+    settings.prefix = suffix && path.endsWith(suffix) ? path.slice(0, path.length - suffix.length) : '';
+    saveBridgeSettings(settings);
+    bridgeStatus.textContent = `connecting to 127.0.0.1:${port} ...`;
+    bridgeStatus.className = 'status';
+    const result = await tracer.connectBridge(port, path);
+    if (result.ok) {
+      const info = result.info;
+      bridgeStatus.textContent = `bridge ready: ${info.kind || '?'}, ${info.nSurfaces ?? '?'} surfaces`;
+      bridgeStatus.className = 'status';
+      if (tracer.view === 'engine') { scheduleRender(); }
+    } else {
+      bridgeStatus.textContent = `bridge offline (${result.error}); staying on the local engine`;
+      bridgeStatus.className = 'status error';
+    }
+  });
+
+  async function loadCurrentPart() {
+    if (!state.part) { return; }
+    hud.textContent = 'loading...';
+    applySize();
+    await tracer.load({
+      sidecar: state.sidecarBuffer,
+      facets: state.facetsBuffer ? state.facetsBuffer.slice(0) : null,
+      label: state.part.name,
+    });
+    pathInput.value = defaultPath();
+    describeView();
+    tracer.render();
+  }
+
+  onPartChanged(() => { if (initialised) { loadCurrentPart(); } });
+  window.addEventListener('tabshown', (e) => {
+    if (e.detail.tab === 'raytracer') { applySize(); if (!tracer.rendering) { scheduleRender(); } }
+  });
+
+  let initialised = false;
+  loadCurrentPart().then(() => { initialised = true; });
+}
