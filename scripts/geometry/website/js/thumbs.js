@@ -79,7 +79,30 @@ async function renderThumbnail(entry) {
   clearContent();
   let box = null;
 
-  if (entry.facets) {
+  // An assembly has no mesh of its own. Its placements alone already trace the barrel, so the
+  // thumbnail is one point per placement -- and it warms the cache the Assembly tab then reads.
+  if (entry.assembly) {
+    try {
+      const { loadAssemblyData } = await import('./assembly.js');
+      const model = await loadAssemblyData(entry.root);
+      const total = model.leaves.reduce((n, leaf) => n + leaf.count, 0);
+      const positions = new Float32Array(3 * total);
+      let o = 0;
+      for (const leaf of model.leaves) {
+        for (let i = 0; i < leaf.count; ++i) {
+          positions[o++] = leaf.sorted[16 * i + 12];
+          positions[o++] = leaf.sorted[16 * i + 13];
+          positions[o++] = leaf.sorted[16 * i + 14];
+        }
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      content.add(new THREE.Points(geometry, new THREE.PointsMaterial({ color: 0x8aa1b6, size: 1.6, sizeAttenuation: false })));
+      box = model.box;
+    } catch (e) { return null; }
+  }
+
+  if (!box && entry.facets) {
     try {
       const facets = parseFacets(await loadBinary(`testdata/${entry.facets}`), entry.facets);
       const geometry = new THREE.BufferGeometry();

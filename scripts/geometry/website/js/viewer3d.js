@@ -45,6 +45,7 @@ export class Viewer3D {
 
     this._dirty = true;
     this._running = false;
+    this.onFrame = null;
     this._observer = new ResizeObserver(() => this.resize());
     this._observer.observe(this.container);
     this.resize();
@@ -58,7 +59,13 @@ export class Viewer3D {
     this._running = true;
     const tick = () => {
       if (!this._running) { return; }
-      if (this._dirty) { this._dirty = false; this.renderer.render(this.scene, this.camera); }
+      if (this._dirty) {
+        this._dirty = false;
+        this.renderer.render(this.scene, this.camera);
+        // A hook for whoever wants to count frames that were actually drawn, rather than
+        // animation-frame callbacks that may have rendered nothing.
+        if (this.onFrame) { this.onFrame(performance.now()); }
+      }
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);

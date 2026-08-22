@@ -15,6 +15,7 @@ export const state = {
   sidecarBuffer: null, // the raw bytes, so a worker can re-parse them itself
   facets: null,        // { nTriangles, positions }
   facetsBuffer: null,  // the raw facets_*.bin bytes, for the worker
+  assembly: null,      // the selected assembly entry, when the selection is one rather than a part
   csg: null,           // testdata/<part>/csg.json: what the CSG recogniser found, and its verdict
   decline: null,       // the matching website_data/decline_reasons.json entry, when there is one
   aabb: null,          // the part's extent, from the exact solid or, failing that, the mesh
@@ -50,6 +51,19 @@ const tabInitialised = {};
 export function registerTab(name, initialiser) { tabInitialisers[name] = initialiser; }
 
 let activeTab = 'mesh';
+
+/// Which tabs the current selection can answer for. A part drives the four per-part tabs; the
+/// assembly is a placement table with no sidecar, no CSG and no benchmarks, so it drives one tab
+/// of its own and the per-part tabs step aside while it is selected.
+function setTabMode(mode) {
+  for (const button of document.querySelectorAll('nav.tabs button[data-needs]')) {
+    button.hidden = button.dataset.needs !== mode;
+  }
+  if (mode === 'assembly') { selectTab('assembly'); return; }
+  const current = document.querySelector(`nav.tabs button[data-tab="${activeTab}"]`);
+  if (current && current.hidden) { selectTab('mesh'); }
+}
+
 function selectTab(name) {
   activeTab = name;
   for (const button of document.querySelectorAll('nav.tabs button')) {
@@ -126,6 +140,17 @@ function renderMeshTab() {
 // --- loading a part ------------------------------------------------------------------------------
 
 async function loadPart(entry) {
+  // The assembly entry is not a part: it has no sidecar, no mesh of its own and no benchmark
+  // record, so it leaves the per-part state exactly as it was and hands over to its own tab.
+  if (entry.assembly) {
+    state.assembly = entry;
+    document.getElementById('tab-assembly').dataset.root = entry.root;
+    setStatus(`${entry.name}: ${entry.subtitle}`);
+    setTabMode('assembly');
+    return;
+  }
+  state.assembly = null;
+  setTabMode('part');
   setStatus(`loading ${entry.name}...`);
   // A part the converter declined for exact extraction has no sidecar at all. It is still shown --
   // that is the coverage story -- with every exact view turned off and said so.
@@ -218,6 +243,12 @@ registerTab('check', () => {
   });
 });
 
+registerTab('assembly', async () => {
+  const { initAssemblyTab, refreshAssemblyTab } = await import('./assemblyui.js');
+  window.addEventListener('tabshown', (e) => { if (e.detail.tab === 'assembly') { refreshAssemblyTab(); } });
+  initAssemblyTab();
+});
+
 registerTab('events', async () => {
   const { initEventsTab } = await import('./events.js');
   initEventsTab();
@@ -240,6 +271,21 @@ async function boot() {
     setStatus(reason, true);
     document.getElementById('mesh-hud').textContent = 'no test data';
     return;
+  }
+  // An assembly, where this checkout has one, is a selector entry like any other: the selection
+  // still drives the whole page, it just drives it to a different tab.
+  const { loadAssemblyIndex, grouped } = await import('./assembly.js');
+  const assemblyIndex = await loadAssemblyIndex().catch(() => null);
+  if (assemblyIndex) {
+    const totals = assemblyIndex.totals || {};
+    parts.push({
+      name: assemblyIndex.label || assemblyIndex.name,
+      assembly: assemblyIndex.name,
+      root: `testdata/${assemblyIndex.name}`,
+      group: assemblyIndex.group || '',
+      subtitle: `${grouped(totals.solids || 0)} placed solids`,
+      surfaces: null, facets: null, shape: null, csg: null,
+    });
   }
   state.parts = parts;
   const selector = new PartSelector(document.getElementById('part-select'), {
