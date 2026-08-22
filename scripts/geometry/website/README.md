@@ -23,6 +23,21 @@ representative set of parts, and writes `testdata/manifest.json`, which is what 
 The set is: `box`, `cyl_inter_cyl`, `torus_union_cyl`, `tube_window`, `BoomCylinderInner` and
 `Bucket`.
 
+It copies **four** artefacts per part, whichever of them the source layout holds:
+
+| in the source | in `testdata/<part>/` | in the manifest | what it is |
+| --- | --- | --- | --- |
+| `surfaces_<stem>.bin` | `surfaces.bin` | `"surfaces"` | the exact trimmed analytic faces |
+| `facets_<stem>.bin` | `facets.bin` | `"facets"` | the tessellation |
+| `shape_<stem>.root` | `shape.root` | `"shape"` | the recognised CSG composite, as a `TGeoShape` |
+| `csg_<stem>.json` | `csg.json` | `"csg"` | what the recogniser found, and its acceptance verdict |
+
+A missing artefact is `null` in the manifest, and the page turns off exactly the views that needed
+it. `ships` follows the same evidence: a part with a `shape_*.root` is one the cascade accepted as
+CSG, and the manifest says `"shape"` for it. Of the fetched set, `box` and `BoomCylinderInner` ship
+CSG; the ALICE3 parts come from a flat converter directory that holds no `csg_*.json` at all, so
+`null` there is the truth and not a gap.
+
 All data loading goes through one small module, `js/data.js`. A later single-file build only has to
 define `window.__INLINE_DATA__` (base64 for the binaries, objects for the JSON) before the modules
 load; nothing else changes. That matters because a published Claude Artifact runs under a CSP that
@@ -43,19 +58,27 @@ writes.
 **Mesh viewer.** The tessellation from `facets_*.bin`, flat-shaded so the faceting is visible, with
 a wireframe toggle — and over it, in gold, the **exact** trimmed face boundaries evaluated from the
 sidecar. Where the grey mesh cuts a corner off a gold loop, that is the tessellation error at this
-part's mesh precision.
+part's mesh precision. Its HUD carries the compact per-part line: faces, triangles, bounding box,
+and what the part ships as — naming the composite where that is CSG.
 
-**Exact raytracer.** A progressive CPU raytrace, in a pool of workers, with seven views:
+**Exact raytracer.** A progressive CPU raytrace, in a pool of workers, with nine views:
 
 | view | what it shows |
 | --- | --- |
 | exact surfaces (local JS port) | rays intersected with the real trimmed patches; the shading normal is analytic, so a cylinder shades smoothly |
 | exact surfaces (bridge: the real kernel) | the same picture, every pixel answered by the real O2 kernel through the bridge, shaded identically |
+| CSG (bridge: the real composite) | the part's own `shape.root` — the composite the recogniser produced — traced by the same kernel and shaded the same way, so the three shaded pictures differ only in the representation behind them |
 | tessellation | the same camera against the triangles, with flat facet normals |
 | difference: exact vs mesh | red where one representation is hit and the other is not; otherwise a heatmap of the depth difference, saturating at 1e-3 of the model size |
 | difference: local vs bridge | the same rays sent to the JS port and to the real O2 kernel (see below) |
+| difference: exact vs CSG (bridge) | the exact surface solid against the composite, on the same rays: the acceptance test's `dV_sym` made visible, one pixel at a time |
 | watertightness: exact | crossings counted along the whole ray; magenta where the count is odd, i.e. the ray entered and never came out |
 | watertightness: mesh | the same count against the tessellation |
+
+The two CSG views need a `shape.root` for the part **and** a connected bridge. A part without one
+has them disabled, with the recogniser's own reason (`whyNotCSG`, or the acceptance test's own
+rejection sentence) as the option's tooltip and as a line under the selector — the same
+honest-coverage pattern a tessellated-only part gets.
 
 Four things about how it behaves:
 
@@ -82,7 +105,15 @@ Four things about how it behaves:
   because the sky it reflects is dark. The mirror applies to the three shaded views, not to the
   difference or parity overlays.
 
-**Benchmarks.** One card for the selected part, and nothing else. It heads with a badge saying
+**Benchmarks.** One card for the selected part, and nothing else. Where the part has a `csg.json`
+the card carries a **CSG** block read straight out of it: the structure in TGeo's own classes
+(`TGeoTube ∪ TGeoTube` for `BoomCylinderInner`), the recogniser that produced it, each leaf's
+parameters, whether the leaves carry their own world frames and whether the composite carries a
+placement of its own, the acceptance verdict with `dV_sym` against its band, and the `shape.root`
+the raytracer's CSG view traces. A part the recogniser declined shows why in the same place — the
+acceptance test's own sentence where there is one, and otherwise the `whyNotCSG` line from
+`website_data/decline_reasons.json`, which is loaded optionally and simply says less when it is
+absent. It heads with a badge saying
 which representation **ships** -- CSG, SURFACE or TESSELLATED -- taken from
 `website_data/summary.json`'s own verdict where it has one, and otherwise from what the converter
 wrote into `testdata/`. Under it: the sidecar's own properties as this page loaded them (faces by
@@ -134,6 +165,16 @@ documented candidates (`` and `scripts/geometry/website/`), because the service 
 relative path against **its own** working directory and not this page's. Whichever answers is
 remembered. An offline bridge stays what it always was -- a message, never an error.
 
+**The service holds one shape at a time**, and a part can have two files worth tracing: its
+`surfaces.bin` and its `shape.root`. The page remembers both paths at connect time, tracks which
+one is resident, and re-`/load`s on a view switch that needs the other — once, not per band. That
+swap is timed and reported on its own line (`bridge /load`) rather than folded into the frame, so
+a ms/frame row is ray work and not file I/O. No `/trace` is ever allowed to overlap a `/load`: the
+load waits for the traces already in the air and the traces issued while it runs wait for it,
+because a trace that reaches the service mid-swap wedges it. Both requests carry a timeout (180 s
+for `/load`, 60 s for `/trace`); a service that stops answering now produces a sentence saying so
+instead of a page that waits for ever.
+
 Because the page and the service are different origins, the service must send
 `Access-Control-Allow-Origin` and answer the `OPTIONS` preflight (both content types used here are
 outside the CORS safelist). The service in this repository does. If it is not running, the page
@@ -141,12 +182,13 @@ says "bridge offline" and stays on the local engine — an absent bridge is neve
 
 ### ms per frame, per engine
 
-The pane compares **the same picture** -- the exact surfaces -- asked of each engine in turn. Each
-of those two views is served by exactly one engine, so the whole frame is that engine's work and
-the two are directly comparable; a frame in which both ran (the difference view) is not apportioned
-between them and does not appear, and neither does a mesh or parity frame, which is a different
-question. The pane says so when the two frames used a different camera or resolution.
-**"time both engines"** renders the matched pair at one camera. Measured here on `Bucket` at
+The pane compares **the same picture** -- the exact surfaces -- asked of each engine in turn, and
+then the same part's **CSG composite** asked of the same kernel. Each of those three views is
+served by exactly one engine, so the whole frame is that engine's work and they are directly
+comparable; a frame in which both ran (the difference views) is not apportioned between them and
+does not appear, and neither does a mesh or parity frame, which is a different question. The pane
+says so when the frames used a different camera or resolution. **"time every engine"** renders the
+matched set at one camera, and includes the CSG row for a part that has a `shape.root`. Measured here on `Bucket` at
 720p (960 x 493, 152 274 rays after the scissor), warm, four consecutive matched pairs, 8 local
 workers against the service on the same shared 10-core box:
 
@@ -157,12 +199,38 @@ workers against the service on the same shared 10-core box:
 
 The ratio the pane reports over those four pairs is **bridge / local 1.84-2.07x**.
 
+The three-row form, on `BoomCylinderInner` at 720p (960 x 493, 105 854 rays after the scissor),
+warm, one matched set, same box:
+
+| engine | representation | ms/frame | rate |
+| --- | --- | --- | --- |
+| local (8 workers) | exact surfaces | 131 | 808 kray/s |
+| bridge 127.0.0.1 | exact surfaces | 157 | 674 kray/s |
+| bridge 127.0.0.1 | CSG composite (`shape.root`) | 123 | 861 kray/s |
+
+**bridge exact / bridge CSG is 1.28x here**, and that is the honest number: it is *not* the 141x
+`Contains` ratio `website_data/summary.json` records for the sibling ram `BoomCylinderOuter`. The
+two measure different things. That 141x is per navigation call, in-process; this 1.28x is a whole
+frame of 105 854 rays over HTTP in fat bands, where the round trip, the JSON-free octet stream and
+the thread pool are most of the wall clock and the kernel maths is the small remainder. What the
+CSG row does show is the shape of the story at a glance: the same kernel, the same rays, the same
+camera, the composite coming back faster than the surface solid rather than slower.
+
 That is a statement about *these two implementations as deployed*, not about the kernels: the local
 engine is eight workers and the bridge is one single-threaded Python service reached over HTTP, so
 the ratio carries a process boundary, an octet-stream round trip and a thread count, not just the
 maths. The spread across four consecutive pairs on a box with other tenants on it is the reason
 four are quoted rather than one. What it is good for is showing that the real kernel answers a full
 frame of rays in a fraction of a second, on the same camera, next to the port.
+
+### What the exact-vs-CSG difference measured
+
+`BoomCylinderInner` is a `tier2-tube-union` whose acceptance test recorded `dV_sym = 0` against a
+8.57e-6 cm^3 band. The **difference: exact vs CSG (bridge)** view is that statement as a picture,
+and it comes back empty: at 960 x 493 with the scissor on, 99 530 rays traced and 10 363 pixels
+hit, **0 hit / no-hit disagreements and max |dt| 0.00e+0 cm** — a flat blue silhouette with no red
+in it. The exact surface solid in the JS port and the TGeo composite in the real kernel are the
+same solid, to float32, on every ray of that frame.
 
 ### What the engine difference measured
 
@@ -238,6 +306,21 @@ The kernels are ports of `Detectors/Base/src/BoundedSurface.h`:
   the sub-patch BVH in the kernel exists for and what this page deliberately does not reproduce.
 - **The mesh view is only as good as the mesh.** `facets_*.bin` carries no normals, so the shading
   normal is the facet's own geometric normal, oriented against the ray.
+- **The bridge does not survive unlimited shape swapping.** The CSG views make the page `/load`
+  far more often than it used to: once per part before, now once per switch between a surface view
+  and a CSG view. `scripts/geometry/tgeoRayService.py` does not take that indefinitely. Loading a
+  `shape_*.root` and a `surfaces_*.bin` alternately from a script is stable (12 alternations with
+  four concurrent trace bands each, measured while writing this), but a browser session that keeps
+  switching eventually leaves the service either aborted (`double free or corruption (!prev)`,
+  logged straight after `TGeoManager: default geometry created`) or wedged with every thread in a
+  futex wait, answering `/load` while `/trace` never returns. Reading a `TGeoShape` out of a file
+  creates a default `TGeoManager`, and a `TGeoShape` registers itself in the manager that is
+  current — so replacing the resident shape is not the local operation the endpoint's signature
+  suggests. This page does what it can from its side: it never overlaps a `/load` with a `/trace`,
+  it reloads only on a switch that actually needs the other file, and both requests time out with
+  a message instead of hanging. **The fix belongs in the service** — load each path once and keep
+  it, and create the `TGeoManager` once at startup — and that file is outside this directory.
+  Until then, a talk demo should expect to restart the bridge if the CSG views stop answering.
 
 ## Self-check results
 
@@ -336,7 +419,7 @@ js/raytrace.js      camera, bands, shading, the difference and parity views
 js/rtui.js          the raytracer tab's controls
 js/viewer3d.js      the shared three.js view
 js/orbit.js         a minimal orbit control (so no bare-specifier import map is needed)
-js/charts.js        the benchmark charts, as plain SVG
+js/charts.js        the benchmark charts and the part card, SVG and DOM
 js/events.js        the event-display tab
 js/gun.js           the synthetic gun, shared by the sample-data tool and the worker
 js/selfcheck.js     the assertions, runnable in node and in the browser

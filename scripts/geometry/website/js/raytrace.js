@@ -12,29 +12,42 @@ const BAND_ROWS = 8;
 export const VIEWS = [
   { key: 'exact', label: 'exact surfaces (local JS port)' },
   { key: 'exactBridge', label: 'exact surfaces (bridge: the real kernel)' },
+  { key: 'csgBridge', label: 'CSG (bridge: the real composite)' },
   { key: 'mesh', label: 'tessellation' },
   { key: 'diff', label: 'difference: exact vs mesh' },
   { key: 'engine', label: 'difference: local vs bridge' },
+  { key: 'csgDiff', label: 'difference: exact vs CSG (bridge)' },
   { key: 'parityExact', label: 'watertightness: exact' },
   { key: 'parityMesh', label: 'watertightness: mesh' },
 ];
 
-/// The two views the engine timing pane compares: the SAME picture -- the exact surfaces -- asked
-/// of each engine in turn. A mesh frame or a parity frame is a different question and is not put
-/// next to a bridge frame, however single-engine it is.
-export const PERF_VIEWS = { exact: 'local', exactBridge: 'remote' };
+/// The views whose whole frame is one engine's work, and which slot of the timing pane each one
+/// fills. The exact surfaces asked of the port and of the kernel are the SAME picture; the CSG
+/// composite is a different representation of the same part, asked of the same kernel, which is
+/// the ms/frame form of the measured Contains ratio. A mesh or parity frame is a different
+/// question and is not put next to any of them.
+export const PERF_VIEWS = { exact: 'local', exactBridge: 'remote', csgBridge: 'csg' };
 
 /// Which engine answers the rays of each view. A view served by exactly one engine is a view
-/// whose frame time IS that engine's frame time, which is what makes the two comparable.
+/// whose frame time IS that engine's frame time, which is what makes the three comparable.
 export const VIEW_ENGINES = {
   exact: ['local'],
   exactBridge: ['remote'],
+  csgBridge: ['remote'],
   mesh: ['local'],
   diff: ['local'],
   engine: ['local', 'remote'],
+  csgDiff: ['local', 'remote'],
   parityExact: ['local'],
   parityMesh: ['local'],
 };
+
+/// The views the bridge must hold the CSG composite for; every other bridge view wants the
+/// surface sidecar. The service keeps ONE shape loaded, so the pair decides what to /load.
+export const CSG_VIEWS = new Set(['csgBridge', 'csgDiff']);
+
+/// The views that put two representations side by side as a heatmap.
+export const DIFF_VIEWS = new Set(['diff', 'engine', 'csgDiff']);
 
 function normalize(v) {
   const n = Math.hypot(v[0], v[1], v[2]) || 1;
@@ -178,6 +191,13 @@ export class Raytracer {
     this.gridStep = 1;
     this.local = new LocalEngine();
     this.remote = null;
+    // The bridge holds ONE shape at a time. These are the two files it may be asked for, and the
+    // one it currently has; switching between a surface view and a CSG view re-/loads the right
+    // one, and switching back re-/loads the other. A /load is one round trip and a warm-up ray.
+    this.bridgePaths = { surface: null, shape: null };
+    this.bridgeLoaded = null;
+    this.bridgeConnected = false;
+    this.bridgeInfo = null;
     this.generation = 0;
     this.onProgress = null;
     this.onDone = null;
@@ -185,7 +205,7 @@ export class Raytracer {
     this.rendering = false;
     // The last frame each engine rendered ALONE: same camera, same resolution, one engine, so the
     // two numbers can be put side by side without apportioning a shared frame between them.
-    this.perf = { local: null, remote: null };
+    this.perf = { local: null, remote: null, csg: null };
     // Only the pixels the part's AABB can possibly cover are traced; the rest is background, which
     // costs a gradient and a grid line and no ray at all.
     this.useScissor = true;
@@ -198,7 +218,8 @@ export class Raytracer {
 
   /// Which views take a second, reflected ray batch, and which engine answers it.
   get reflectView() {
-    return this.reflect && (this.view === 'exact' || this.view === 'exactBridge' || this.view === 'mesh');
+    return this.reflect && (this.view === 'exact' || this.view === 'exactBridge' ||
+                            this.view === 'csgBridge' || this.view === 'mesh');
   }
 
   /// The part's world AABB projected to this frame's pixel rectangle, padded by a couple of pixels
@@ -280,17 +301,51 @@ export class Raytracer {
   }
 
   /// Connect (or reconnect) the bridge. Never throws: an offline bridge is reported, not fatal.
-  async connectBridge(port, path) {
+  /// `shapePath`, when the part has one, is the CSG composite the CSG views ask for; it is not
+  /// loaded now, only remembered, because only one of the two can be resident at a time.
+  async connectBridge(port, path, { shapePath = null } = {}) {
     this.remote = new RemoteEngine(port);
+    this.bridgePaths = { surface: path, shape: shapePath };
+    this.bridgeLoaded = null;
+    this.bridgeConnected = false;
     try {
       const info = await this.remote.load({ path });
+      this.bridgeLoaded = path;
+      this.bridgeInfo = info;
+      this.bridgeConnected = true;
       return { ok: true, info };
     } catch (e) {
       return { ok: false, error: e.message };
     }
   }
 
-  get bridgeReady() { return !!(this.remote && this.remote.ready); }
+  /// The file the bridge must hold for a given view.
+  bridgePathFor(view) {
+    return CSG_VIEWS.has(view) ? this.bridgePaths.shape : this.bridgePaths.surface;
+  }
+
+  /// Make the bridge hold the file this view needs. A no-op when it already does, which is every
+  /// frame but the first after a view switch.
+  async ensureBridgeShape() {
+    if (!this.remote) { throw new Error('bridge not connected'); }
+    const wanted = this.bridgePathFor(this.view);
+    if (!wanted) {
+      throw new Error(CSG_VIEWS.has(this.view)
+        ? 'this part has no shape.root: there is no CSG composite to trace'
+        : 'no sidecar path for the bridge');
+    }
+    if (this.bridgeLoaded === wanted) { return this.bridgeInfo; }
+    this.bridgeLoaded = null;
+    const info = await this.remote.load({ path: wanted });
+    this.bridgeLoaded = wanted;
+    this.bridgeInfo = info;
+    return info;
+  }
+
+  get bridgeReady() { return !!(this.remote && this.bridgeConnected); }
+
+  /// The CSG views need a bridge AND a shape_*.root for this part.
+  get csgReady() { return this.bridgeReady && !!this.bridgePaths.shape; }
 
   /// A signature of the current view, so two engine timings can say whether they are comparable.
   cameraKey() {
@@ -306,7 +361,7 @@ export class Raytracer {
     this.cancel();
     const generation = this.generation;
     this.rendering = true;
-    const started = performance.now();
+    let started = performance.now();
     const scissor = this.computeScissor();
     this.scissor = scissor;
     const scissorPixels = Math.max(0, (scissor.x1 - scissor.x0) * (scissor.y1 - scissor.y0));
@@ -323,6 +378,20 @@ export class Raytracer {
     this._fillBackground(scissor.x1, scissor.y0, this.width, scissor.y1);
     this.context.putImageData(this.image, 0, 0);
     try {
+      // One shape lives on the bridge at a time, so the view decides which file it must hold
+      // before any band is sent. Done once per frame; it costs nothing when it is already right.
+      // A swap is a /load and a warm-up ray on the service, so it is timed and reported on its
+      // own rather than folded into the frame -- a frame time here is ray work, not file I/O.
+      if (this._usesBridge()) {
+        const swap = this.bridgePathFor(this.view) !== this.bridgeLoaded;
+        const before = performance.now();
+        try { await this.ensureBridgeShape(); } catch (e) { this.counters.error = e.message; return; }
+        if (generation !== this.generation) { return; }
+        if (swap) {
+          this.counters.bridgeLoadMs = Math.round(performance.now() - before);
+          started = performance.now();
+        }
+      }
       await this._pass(generation, 4);
       if (generation !== this.generation) { return; }
       await this._pass(generation, 1);
@@ -346,7 +415,8 @@ export class Raytracer {
 
   /// True when the current view sends its primary rays to the bridge.
   _usesBridge() {
-    return this.bridgeReady && (this.view === 'exactBridge' || this.view === 'engine');
+    return this.bridgeReady &&
+           (this.view === 'exactBridge' || this.view === 'engine' || CSG_VIEWS.has(this.view));
   }
 
   async _pass(generation, step) {
@@ -419,9 +489,20 @@ export class Raytracer {
       } else if (this.view === 'diff') {
         primary = await this.local.traceRays(rays);
         secondary = await this.local.traceRaysMesh(raysCopy.slice(0));
+      } else if (this.view === 'csgBridge') {
+        if (!this.csgReady) { throw new Error('the CSG composite is not loaded on the bridge'); }
+        primary = await this.remote.traceRays(rays);
       } else if (this.view === 'engine') {
         primary = await this.local.traceRays(rays);
+        if (generation !== this.generation) { return; }   // do not send a doomed band to the bridge
         secondary = this.bridgeReady ? await this.remote.traceRays(raysCopy.slice(0)) : null;
+      } else if (this.view === 'csgDiff') {
+        // The exact surface solid, in the port, against the CSG composite in the real kernel:
+        // the acceptance test's dV_sym = 0 made visible, one pixel at a time.
+        if (!this.csgReady) { throw new Error('the CSG composite is not loaded on the bridge'); }
+        primary = await this.local.traceRays(rays);
+        if (generation !== this.generation) { return; }   // do not send a doomed band to the bridge
+        secondary = await this.remote.traceRays(raysCopy.slice(0));
       } else if (this.view === 'parityExact' || this.view === 'parityMesh') {
         counts = await this.local.parity(rays, this.view === 'parityMesh' ? 'mesh' : 'exact');
         primary = await this.local.traceRays(raysCopy.slice(0));
@@ -478,7 +559,7 @@ export class Raytracer {
     this.counters.raysTraced += m;
     let results;
     if (this.view === 'mesh') { results = await this.local.traceRaysMesh(out); }
-    else if (this.view === 'exactBridge') { results = await this.remote.traceRays(out); }
+    else if (this.view === 'exactBridge' || this.view === 'csgBridge') { results = await this.remote.traceRays(out); }
     else { results = await this.local.traceRays(out); }
     return { slot, rays: copy, results };
   }
@@ -501,7 +582,7 @@ export class Raytracer {
         const t = primary ? primary[q] : -1;
         const hit = t >= 0;
 
-        if (this.view === 'diff' || this.view === 'engine') {
+        if (DIFF_VIEWS.has(this.view)) {
           const t2 = secondary ? secondary[q] : -1;
           const hit2 = t2 >= 0;
           if (!hit && !hit2) {

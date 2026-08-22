@@ -126,6 +126,17 @@ export class LocalEngine extends Engine {
 ///   POST /load  {"path": "<abs path to surfaces_*.bin or shape_*.root>"}
 ///        -> {"ok": true, "kind": "surface"|"shape", "nSurfaces": N, "bbox": [...]}
 ///   POST /trace raw Float32Array, n*6  ->  raw Float32Array, n*5
+// A /load JIT-compiles the navigation path of a shape it has not seen, which is slow once and
+// fast thereafter; a /trace of a full frame is well under a second. Both get a ceiling, because a
+// fetch with no timeout turns a service that has stopped answering into a page that hangs for
+// ever with no message -- and this service can stop answering.
+const LOAD_TIMEOUT_MS = 180000;
+const TRACE_TIMEOUT_MS = 60000;
+
+function timeoutSignal(ms) {
+  return (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(ms) : undefined;
+}
+
 export class RemoteEngine extends Engine {
   constructor(port = 8077, host = '127.0.0.1') {
     super();
@@ -134,6 +145,12 @@ export class RemoteEngine extends Engine {
     this.ready = false;
     this.info = null;
     this.lastError = null;
+    // The service holds ONE shape, so a /load must not overlap a /trace in EITHER direction: a
+    // load waits for the traces already in the air, and a trace issued while a load runs waits
+    // for it. A cancelled frame's bands are still on the wire when the next view asks for the
+    // other file, and a trace that reaches the service while it is swapping shapes wedges it.
+    this.pending = new Set();
+    this._loading = null;
   }
 
   get base() { return `http://${this.host}:${this.port}`; }
@@ -141,6 +158,21 @@ export class RemoteEngine extends Engine {
   get available() { return this.ready; }
 
   async load({ path }) {
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const previous = this._loading;
+    this._loading = gate;              // set before the first await: a trace started now waits
+    try {
+      if (previous) { await previous; }
+      await this.waitIdle();
+      return await this._load(path);
+    } finally {
+      if (this._loading === gate) { this._loading = null; }
+      release();
+    }
+  }
+
+  async _load(path) {
     this.ready = false;
     this.lastError = null;
     try {
@@ -148,6 +180,7 @@ export class RemoteEngine extends Engine {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path }),
+        signal: timeoutSignal(LOAD_TIMEOUT_MS),
       });
       if (!response.ok) { throw new Error(`/load returned HTTP ${response.status}`); }
       const info = await response.json();
@@ -162,18 +195,45 @@ export class RemoteEngine extends Engine {
       this.lastError = e instanceof TypeError
         ? `no answer from ${this.base} (service not running, or it does not send ` +
           'Access-Control-Allow-Origin and answer the OPTIONS preflight)'
-        : e.message;
+        : (e && e.name === 'TimeoutError'
+          ? `${this.base} did not answer /load within ${LOAD_TIMEOUT_MS / 1000} s`
+          : e.message);
       this.ready = false;
       throw new Error(this.lastError);
     }
   }
 
+  /// Resolves once every trace this engine has sent has answered (or failed): a cancelled
+  /// frame's bands are awaited, not abandoned.
+  async waitIdle() {
+    while (this.pending.size) { await Promise.allSettled([...this.pending]); }
+  }
+
   async traceRays(rays) {
-    const response = await fetch(`${this.base}/trace`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/octet-stream' },
-      body: rays.buffer,
-    });
+    while (this._loading) { await this._loading; }
+    const job = this._traceRays(rays);
+    this.pending.add(job);
+    try { return await job; } finally { this.pending.delete(job); }
+  }
+
+  async _traceRays(rays) {
+    let response;
+    try {
+      response = await fetch(`${this.base}/trace`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: rays.buffer,
+        signal: timeoutSignal(TRACE_TIMEOUT_MS),
+      });
+    } catch (e) {
+      // A timeout here means the service accepted the rays and never answered. Say so, and let
+      // the page fall back to the local engine rather than waiting for ever.
+      this.ready = false;
+      throw new Error(e && e.name === 'TimeoutError'
+        ? `${this.base} accepted the rays and did not answer within ${TRACE_TIMEOUT_MS / 1000} s ` +
+          '(the service is wedged; restart it and press "connect bridge")'
+        : `/trace: ${e.message}`);
+    }
     if (!response.ok) { throw new Error(`/trace returned HTTP ${response.status}`); }
     const buffer = await response.arrayBuffer();
     const expected = (rays.length / 6) * 5 * 4;
