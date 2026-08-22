@@ -17,9 +17,20 @@
 #   flat converter   <dir>/surfaces_<stem>.bin, <dir>/facets_<stem>.bin       (O2_CADtoTGeo.py
 #                    --output-folder: every part of a whole model in one directory)
 #
+# Four artefacts per part are picked up where the source layout has them:
+#
+#   surfaces_<stem>.bin   the exact trimmed analytic faces  -> <part>/surfaces.bin
+#   facets_<stem>.bin     the tessellation                  -> <part>/facets.bin
+#   shape_<stem>.root     the recognised CSG composite, as a TGeoShape the bridge can trace
+#                                                           -> <part>/shape.root
+#   csg_<stem>.json       what the recogniser found and how the acceptance test judged it
+#                                                           -> <part>/csg.json
+#
 # A part the converter declined for exact extraction has a facets_*.bin and no surfaces_*.bin.
 # Such a part is copied and marked in the manifest as tessellated-only; the page then says so and
-# turns its exact views off, which is honest coverage rather than a gap.
+# turns its exact views off, which is honest coverage rather than a gap. In the same way a part
+# with no shape_*.root gets the CSG views turned off, and a csg_*.json with a null candidate is
+# still copied: it is the recogniser saying, in its own words, that it found nothing.
 #
 # The binaries are deliberately not committed (see .gitignore); this script is how a checkout gets
 # them back. Parts not present in the given source dirs are skipped with a note.
@@ -69,7 +80,7 @@ fi
 # The part name is the stem minus the four trailing placement ids the converter appends.
 partname() { echo "$1" | sed -E 's/(_[0-9]+){4}$//'; }
 
-declare -A SURF FACE
+declare -A SURF FACE SHAPE CSGJ
 keys=()
 
 for dir in "$@"; do
@@ -79,17 +90,26 @@ for dir in "$@"; do
     base="$(basename "$file")"
     parent="$(dirname "$file")"
     case "$base" in
-      surfaces_*) kind=s; stem="${base#surfaces_}" ;;
-      facets_*)   kind=f; stem="${base#facets_}" ;;
+      surfaces_*) kind=s; stem="${base%.bin}"; stem="${stem#surfaces_}" ;;
+      facets_*)   kind=f; stem="${base%.bin}"; stem="${stem#facets_}" ;;
+      shape_*)    kind=r; stem="${base%.root}"; stem="${stem#shape_}" ;;
+      # csg_report.json is the whole model's report, not a part's record.
+      csg_report.json) continue ;;
+      csg_*)      kind=c; stem="${base%.json}"; stem="${stem#csg_}" ;;
       *) continue ;;
     esac
-    stem="${stem%.bin}"
     key="$parent|$stem"
-    if [ -z "${SURF[$key]+x}" ] && [ -z "${FACE[$key]+x}" ]; then keys+=("$key"); fi
-    if [ "$kind" = s ]; then SURF["$key"]="$file"; else FACE["$key"]="$file"; fi
+    if [ -z "${SURF[$key]+x}" ] && [ -z "${FACE[$key]+x}" ] && [ -z "${SHAPE[$key]+x}" ] && [ -z "${CSGJ[$key]+x}" ]; then keys+=("$key"); fi
+    case "$kind" in
+      s) SURF["$key"]="$file" ;;
+      f) FACE["$key"]="$file" ;;
+      r) SHAPE["$key"]="$file" ;;
+      c) CSGJ["$key"]="$file" ;;
+    esac
     found=1
-  done < <(find "$dir" -maxdepth 3 -type f \( -name 'surfaces_*.bin' -o -name 'facets_*.bin' \) | sort)
-  [ "$found" = 1 ] || echo "skipping $dir: no surfaces_*.bin or facets_*.bin under it" >&2
+  done < <(find "$dir" -maxdepth 3 -type f \( -name 'surfaces_*.bin' -o -name 'facets_*.bin' \
+             -o -name 'shape_*.root' -o -name 'csg_*.json' \) | sort)
+  [ "$found" = 1 ] || echo "skipping $dir: no surfaces_*.bin, facets_*.bin, shape_*.root or csg_*.json under it" >&2
 done
 
 if [ ${#keys[@]} -eq 0 ]; then
@@ -104,6 +124,7 @@ if [ "$listonly" = yes ]; then
     what=""
     [ -n "${SURF[$key]+x}" ] && what="exact"
     [ -n "${FACE[$key]+x}" ] && what="${what:+$what+}mesh"
+    [ -n "${SHAPE[$key]+x}" ] && what="${what:+$what+}csg"
     printf '  %-34s %-11s %s\n' "$(partname "$stem")" "$what" "$stem"
   done | sort -u
   exit 0
@@ -129,7 +150,10 @@ for key in "${keys[@]}"; do
   mkdir -p "$dest/$part"
   surfaces=null
   facets=null
-  # What the converter's cascade chose for this part IS whether it wrote a sidecar for it.
+  shape=null
+  csg=null
+  # What the converter's cascade chose for this part IS which artefact it wrote for it: a
+  # shape_*.root means the CSG recogniser was accepted, a surfaces_*.bin means the exact solid.
   ships=mesh
   if [ -n "${SURF[$key]+x}" ]; then
     cp "${SURF[$key]}" "$dest/$part/surfaces.bin"
@@ -140,9 +164,18 @@ for key in "${keys[@]}"; do
     cp "${FACE[$key]}" "$dest/$part/facets.bin"
     facets="\"$part/facets.bin\""
   fi
+  if [ -n "${SHAPE[$key]+x}" ]; then
+    cp "${SHAPE[$key]}" "$dest/$part/shape.root"
+    shape="\"$part/shape.root\""
+    ships=shape
+  fi
+  if [ -n "${CSGJ[$key]+x}" ]; then
+    cp "${CSGJ[$key]}" "$dest/$part/csg.json"
+    csg="\"$part/csg.json\""
+  fi
   if [ "$surfaces" = null ] && [ "$facets" = null ]; then continue; fi
-  printf '{"name": "%s", "stem": "%s", "group": "%s", "surfaces": %s, "facets": %s, "ships": "%s"}\n' \
-    "$part" "$stem" "$group" "$surfaces" "$facets" "$ships" >> "$entries_file"
+  printf '{"name": "%s", "stem": "%s", "group": "%s", "surfaces": %s, "facets": %s, "shape": %s, "csg": %s, "ships": "%s"}\n' \
+    "$part" "$stem" "$group" "$surfaces" "$facets" "$shape" "$csg" "$ships" >> "$entries_file"
   copied+=("$part")
 done
 
@@ -200,6 +233,8 @@ for p in "${copied[@]}"; do
   what="exact+mesh"
   [ -e "$dest/$p/surfaces.bin" ] || what="tessellated only"
   [ -e "$dest/$p/facets.bin" ] || what="exact, no mesh"
+  [ -e "$dest/$p/shape.root" ] && what="$what, CSG shape"
+  [ -e "$dest/$p/csg.json" ] && [ ! -e "$dest/$p/shape.root" ] && what="$what, CSG declined"
   printf '  %-34s %s\n' "$p" "$what"
 done
 du -sh "$dest"
