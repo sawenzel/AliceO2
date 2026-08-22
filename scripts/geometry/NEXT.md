@@ -61,27 +61,38 @@ statement for the talk.
    Per-part decline reasons now ship in `csg_report.json` (`whyNotCSG`) and
    `surface_report.json` (`why_not_surface`), joined in `website_data/decline_reasons.json`
    (78 parts, 0 missing); the empty-reason and silent-no-ROOT defects of old item 2 are fixed.
-4. **Kernel: loose bounding boxes.** `Stick` claims 40.1 cm in z around an 11.0 cm solid (3.6×),
+4. **NEW, kernel-confirmed: `ST1829909_01` leaks parity through real inter-face slits.**
+   The website's JS raytracer flagged odd-parity rays; a kernel probe confirms **8 of 15 299
+   hitting rays** (BVH ≡ Loop, `onTrimBoundary` = 0 on all of them — not the sliver class), and
+   the mechanism is measured: `maxSharedEdgeDeviation` = 4.70e-4 cm against the model's own
+   declared tolerance 4.723e-4 cm, i.e. the faces genuinely sit up to ~5 µm apart along shared
+   edges. Identity closure calls this closed *by design* (topology, not geometry — the documented
+   caveat, now measured biting). The slit is wider than the trim boundary band, so no ambiguity
+   flag fires and the vote never triggers. Fix directions to evaluate: widen crossing acceptance
+   near identified shared edges by the sidecar's own measured deviation, or snap paired trims to
+   one canonical curve per edge identity (the per-edge deviation data already exists). Needs the
+   per-face localiser first. Probes: scratchpad `probe_parity.cxx` / `probe_dev.cxx`.
+5. **Kernel: loose bounding boxes.** `Stick` claims 40.1 cm in z around an 11.0 cm solid (3.6×),
    verified against OCCT `Bnd_Box` and the mesh (<0.1 mm apart). Costs broad-phase efficiency
    everywhere and confuses CheckOverlaps. Likely the conservative per-family boxes (full rim
    circles / full torus) propagating into `ComputeBBox`; the sub-patch cover boxes are already
    tighter — use their union.
-5. **Track 3b, the real data:** an exporter MCStepLogger trees → `events.json` (schema in
+6. **Track 3b, the real data:** an exporter MCStepLogger trees → `events.json` (schema in
    `website/README.md`; tree layout in `integration_demo/data/README`), then the website's event
    tab shows the real IRIS/Bagger transports. Data is preserved (uncommitted) in
    `integration_demo/data/` and the scratch.
-6. **Materials matching:** 26/55 IRIS volumes matched, 29 fell back to vacuum `Default`, and ten
+7. **Materials matching:** 26/55 IRIS volumes matched, 29 fell back to vacuum `Default`, and ten
    of the 26 match only by accidental string prefix (`ST0923290_01` ⊂ `ST0923290_010…_019`).
    Needs anchored/exact part-number matching.
-7. **Gate: credit the sliver.** Teach the relabel class to explain a distout mismatch whose
+8. **Gate: credit the sliver.** Teach the relabel class to explain a distout mismatch whose
    candidate crossing is `onTrimBoundary`-flagged within the trim band (Review Appendix A).
-8. **The face-normal gate column** (fourth hand-over in a row) and **the `auto`-mode
+9. **The face-normal gate column** (fourth hand-over in a row) and **the `auto`-mode
    unreliable-shipping policy** (~20 lines) — both still open, both pre-corpus items.
-9. **The talk (Track 4):** assemble from Review + Stream_Z + website; re-run the
+10. **The talk (Track 4):** assemble from Review + Stream_Z + website; re-run the
    `timingPreliminary` numbers on a quiet box; build the single-file website bundle for
    publishing (all data inlined — the Artifact CSP allows nothing external, and the bridge is
    local-only).
-10. **Standing, unchanged:** oTOF XCAF traversal; free-form surfaces; the models-are-not-legal
+11. **Standing, unchanged:** oTOF XCAF traversal; free-form surfaces; the models-are-not-legal
    overlap finding and the broken `CheckOverlaps` on our shape; `Curve2D::closestPoint` as the
    kernel hot spot; mesh healing.
 
