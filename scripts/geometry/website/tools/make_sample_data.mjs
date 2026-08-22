@@ -16,16 +16,25 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { parseSidecar } from '../js/sidecar.js';
-import { SurfaceSolid, CONTAINS_TEST_DIRECTION } from '../js/solid.js';
+import { SurfaceSolid } from '../js/solid.js';
+import { generateEvents } from '../js/gun.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
 const outDir = path.join(root, 'sample_data');
 fs.mkdirSync(outDir, { recursive: true });
 
-// A deterministic generator, so re-running produces the same file.
+// A deterministic generator, so re-running produces the same file. mulberry32 rather than a
+// textbook LCG: the LCG's multiply overflows 2^53 in double arithmetic, which silently throws
+// away the low bits it lives on, and the "random" aim then lands on a coarse lattice.
 let seedState = 20260822;
-function rnd() { seedState = (seedState * 1103515245 + 12345) & 0x7fffffff; return seedState / 0x7fffffff; }
+function rnd() {
+  seedState = (seedState + 0x6D2B79F5) | 0;
+  let t = seedState;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
 
 // ---------------------------------------------------------------------------------------------
 // benchmark records
@@ -133,104 +142,17 @@ const buffer = fs.readFileSync(sidecarPath);
 const solid = new SurfaceSolid(
   parseSidecar(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength), eventPart), eventPart);
 
-const box = solid.aabb;
-const center = [(box[0] + box[3]) / 2, (box[1] + box[4]) / 2, (box[2] + box[5]) / 2];
-const radius = 0.5 * Math.hypot(box[3] - box[0], box[4] - box[1], box[5] - box[2]);
-
-// The gun sits on -x and fires towards +x; the screen plane sits behind the part on +x.
-const gun = [center[0] - 3 * radius, center[1], center[2]];
-const screen = {
-  origin: [center[0] + 2.2 * radius, center[1], center[2]],
-  normal: [1, 0, 0],
-  up: [0, 0, 1],
-  halfWidth: 1.4 * radius,
-  halfHeight: 1.4 * radius,
-  pixels: [220, 220],
-};
-
-const SPECIES = [
-  { pdg: 22, charge: 0, energyGeV: 1.0, weight: 0.35 },     // photon: straight
-  { pdg: 11, charge: -1, energyGeV: 0.6, weight: 0.3 },     // electron: bends
-  { pdg: 211, charge: 1, energyGeV: 2.0, weight: 0.25 },    // pion: bends the other way
-  { pdg: 2212, charge: 1, energyGeV: 3.0, weight: 0.1 },    // proton: stiff
-];
-
-function pickSpecies() {
-  const r = rnd();
-  let acc = 0;
-  for (const s of SPECIES) { acc += s.weight; if (r <= acc) { return s; } }
-  return SPECIES[SPECIES.length - 1];
-}
-
-/// Step a track from the gun towards the part, bending it in a uniform field along +z, and record
-/// the polyline. Steps inside material are shortened, which is what makes the point cloud show
-/// where the material is.
-function trackPoints(species) {
-  // aim at a random point on the part's bounding sphere face
-  const aim = [center[0], center[1] + (2 * rnd() - 1) * radius * 0.9, center[2] + (2 * rnd() - 1) * radius * 0.9];
-  let dir = [aim[0] - gun[0], aim[1] - gun[1], aim[2] - gun[2]];
-  const len = Math.hypot(...dir);
-  dir = dir.map(c => c / len);
-
-  const points = [gun.slice()];
-  let position = gun.slice();
-  const vacuumStep = radius * 0.25;
-  const materialStep = radius * 0.03;
-  // curvature ~ charge / momentum, in the x-y plane (field along z)
-  const kappa = species.charge === 0 ? 0 : species.charge * 0.35 / species.energyGeV / Math.max(radius, 1e-6);
-  const maxRange = 8 * radius;
-  let travelled = 0;
-  let insideBefore = false;
-  while (travelled < maxRange) {
-    const inside = solid.containsAlong(position[0], position[1], position[2],
-      CONTAINS_TEST_DIRECTION[0], CONTAINS_TEST_DIRECTION[1], CONTAINS_TEST_DIRECTION[2]);
-    const step = inside ? materialStep : vacuumStep;
-    if (kappa !== 0) {
-      const angle = kappa * step;
-      const cos = Math.cos(angle), sin = Math.sin(angle);
-      const nx = dir[0] * cos - dir[1] * sin;
-      const ny = dir[0] * sin + dir[1] * cos;
-      dir = [nx, ny, dir[2]];
-      const n = Math.hypot(...dir);
-      dir = dir.map(c => c / n);
-    }
-    position = [position[0] + dir[0] * step, position[1] + dir[1] * step, position[2] + dir[2] * step];
-    points.push(position.slice());
-    travelled += step;
-    if (inside !== insideBefore) { insideBefore = inside; }
-    if (position[0] > screen.origin[0] + 0.1 * radius) { break; }
-  }
-  return points;
-}
-
-const events = [];
-for (let e = 0; e < 6; ++e) {
-  const tracks = [];
-  const nTracks = 6 + Math.floor(rnd() * 6);
-  for (let t = 0; t < nTracks; ++t) {
-    const species = pickSpecies();
-    tracks.push({
-      pdg: species.pdg,
-      charge: species.charge,
-      energyGeV: Number((species.energyGeV * (0.6 + 0.8 * rnd())).toFixed(3)),
-      points: trackPoints(species).map(p => p.map(c => Number(c.toFixed(4)))),
-    });
-  }
-  events.push({ tracks });
-}
-
-const eventsDoc = {
-  meta: {
-    part: eventPart,
-    generator: 'website/tools/make_sample_data.mjs (synthetic gun; transport is straight/helical, not Geant4)',
-    seed: 20260822,
-    representation: 'exact',
-    synthetic: true,
-  },
-  screen,
-  events,
-};
+// The committed sample is deliberately small -- it demonstrates the mechanism, and the page can
+// regenerate a high-statistics replay in a worker whenever a sharper radiograph is wanted.
+const eventsDoc = generateEvents(solid, {
+  events: Number(process.argv[3] || 5),
+  tracksPerEvent: Number(process.argv[4] || 300),
+  seed: 20260822,
+});
 fs.writeFileSync(path.join(outDir, 'events_sample.json'), JSON.stringify(eventsDoc) + '\n');
 
-console.log(`wrote ${files.length} benchmark records and events_sample.json (${eventPart}, ${events.length} events, ` +
-            `${events.reduce((n, ev) => n + ev.tracks.length, 0)} tracks) into ${outDir}`);
+const trackCount = eventsDoc.events.reduce((n, ev) => n + ev.tracks.length, 0);
+const pointCount = eventsDoc.events.reduce((n, ev) => n + ev.tracks.reduce((m, t) => m + t.points.length, 0), 0);
+console.log(`wrote ${files.length} benchmark records and events_sample.json (${eventPart}, ` +
+            `${eventsDoc.events.length} events, ${trackCount} tracks, ${pointCount} points, ` +
+            `${eventsDoc.meta.absorbed} absorbed) into ${outDir}`);

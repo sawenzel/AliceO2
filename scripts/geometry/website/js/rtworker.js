@@ -7,6 +7,7 @@
 import { parseSidecar, parseFacets } from './sidecar.js';
 import { SurfaceSolid, K_RAY_TOLERANCE, BIG } from './solid.js';
 import { MeshSolid } from './meshtrace.js';
+import { generateEvents } from './gun.js';
 
 let solid = null;
 let mesh = null;
@@ -87,6 +88,11 @@ self.onmessage = (event) => {
     if (message.type === 'trace' || message.type === 'traceMesh') {
       const out = message.type === 'trace' ? traceExact(message.rays) : traceMesh(message.rays);
       self.postMessage({ type: 'traced', id: message.id, band: message.band, results: out }, [out.buffer]);
+      return;
+    }
+    if (message.type === 'generate') {
+      if (!solid) { throw new Error('no exact solid loaded'); }
+      self.postMessage({ type: 'generated', id: message.id, doc: generateEvents(solid, message.options || {}) });
       return;
     }
     if (message.type === 'parity') {
