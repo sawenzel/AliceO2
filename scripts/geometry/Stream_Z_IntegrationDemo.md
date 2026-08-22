@@ -99,6 +99,16 @@ declared reason is the empty string (`declined CSG: None`), which is at least a 
 defect. The same file records `--self-test` at 48 checks; it now runs **12**. Neither is mine to
 chase — both are Track 0's to reconcile — but both are quoted numbers that no longer hold.
 
+*(Reconciled by the integrating session, same day: neither baseline moved. The 48-check
+self-test is four suites (18+8+10+12) and 12 is the last suite's own line — re-verified at 48
+this morning. The CSG 0 is an environment artifact: this run's converter shell had the pythonOCC
+env but not the O2/ROOT env, so the CSG hook's deferred shape completion (`emit.py --from-json`)
+could not run and every candidate declined; the gate pipeline, which composes both envs, measured
+Bagger at CSG 7 with all shape columns clean the same day. Two genuine items survive this
+reconciliation and are on `NEXT.md`'s list: the empty decline reason (`declined CSG: None`), and
+that a direct `--csg auto` invocation silently yields zero CSG instead of erroring when ROOT is
+unreachable.)*
+
 ## 3. Materials
 
 **IRIS** uses `IRIS/IRIS_MATERIALS.csv` with `g4_nist_database/G4_NIST_DB.json`. The CSV parses:
