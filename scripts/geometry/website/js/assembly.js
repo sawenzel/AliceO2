@@ -272,11 +272,19 @@ export class AssemblyView {
     this.spinning = on;
     if (!on) { this.viewer.onFrame = null; this.fps = 0; return; }
     let previous = performance.now();
+    const recent = [];
     this.viewer.onFrame = (now) => {
       if (!this.spinning) { return; }
       const dt = now - previous;
       previous = now;
-      if (dt > 0 && dt < 4000) { this.fps = this.fps ? this.fps * 0.85 + (1000 / dt) * 0.15 : 1000 / dt; }
+      // The median of the last nine frame times, not a running average: a rasteriser that draws
+      // one slow frame and then an empty fast one would otherwise be reported at the fast rate.
+      if (dt > 0) {
+        recent.push(dt);
+        if (recent.length > 9) { recent.shift(); }
+        const sorted = recent.slice().sort((a, b) => a - b);
+        this.fps = 1000 / sorted[sorted.length >> 1];
+      }
       this.viewer.controls.rotate(Math.min(6, dt * 0.09), 0);   // a steady turn, whatever the rate
       if (onFrame) { onFrame(this.fps); }
     };

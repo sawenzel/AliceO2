@@ -51,7 +51,10 @@ function renderHud() {
     barrelLine(model),
     `${grouped(view.visibleSolids)} solids drawn`,
   ];
-  if (view.spinning && view.fps) { lines.push(`${view.fps.toFixed(0)} fps`); }
+  if (view.spinning && view.fps) {
+    const rate = view.fps >= 10 ? view.fps.toFixed(0) : view.fps.toFixed(1);
+    lines.push(`${rate} fps (median frame)`);
+  }
   lines.push('WebGL only -- no raytracing, no bridge');
   el('assembly-hud').textContent = lines.join('\n');
 }
