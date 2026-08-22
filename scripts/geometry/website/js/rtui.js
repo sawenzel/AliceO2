@@ -54,9 +54,14 @@ export function initRaytracerTab() {
           <div class="row"><span class="status" id="rt-resnote"></span></div>
           <div class="row">
             <label><input type="checkbox" id="rt-scissor" checked> bounding-box scissor</label>
+            <label><input type="checkbox" id="rt-reflect"> mirror reflection</label>
           </div>
           <p class="muted small">The scissor projects the part's world AABB to a screen rectangle and casts
             rays only inside it. Everything outside is background &mdash; a gradient and a grid line, no ray.</p>
+          <p class="muted small">The mirror sends one more ray off every hit, to the <em>same</em> engine, so a
+            reflection in the exact view is exact and a reflection in the tessellation is faceted. It costs one
+            extra ray per hit pixel, and it applies to the three shaded views only, not to the difference or
+            parity overlays.</p>
           <div class="row">
             <button id="rt-frame">re-frame</button>
             <button id="rt-fromview">camera from the mesh tab</button>
@@ -203,7 +208,9 @@ export function initRaytracerTab() {
       parityExact: 'Crossings are counted along the whole ray. Magenta means an odd count -- the ray entered the solid and never came out, which is a hole in the surface set.',
       parityMesh: 'The same count against the tessellation. A mesh that loses rays lights up here; the exact solid should not.',
     };
-    viewNote.textContent = notes[key] || '';
+    viewNote.textContent = (notes[key] || '') +
+      (tracer.reflectView ? ' A second, mirrored ray batch is sent off every hit: the reflection is answered by ' +
+        'the same engine, so it carries the same normals the surface itself does.' : '');
     const bits = [];
     if (state.solid && state.solid.bsplineTrimFaces) {
       bits.push(`${state.solid.bsplineTrimFaces} face(s) carry B-spline trim curves: their boundaries are the adaptively flattened polyline at 1e-5, exactly as the kernel navigates them, not the rational curve itself.`);
@@ -379,6 +386,11 @@ export function initRaytracerTab() {
   resSelect.addEventListener('change', () => { applySize(); scheduleRender(); });
   document.getElementById('rt-scissor').addEventListener('change', (e) => {
     tracer.useScissor = e.target.checked;
+    scheduleRender();
+  });
+  document.getElementById('rt-reflect').addEventListener('change', (e) => {
+    tracer.reflect = e.target.checked;
+    describeView();
     scheduleRender();
   });
   document.getElementById('rt-render').addEventListener('click', () => { syncCameraFromProxy(); showTraced(); tracer.render(); });
