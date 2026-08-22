@@ -188,76 +188,187 @@ export function countersTable(doc) {
   return table(rows, ['representation', 'capacity dev.', 'disagreements', 'unexplained', 'rays', 'lost', 'extra', 'unterminated', 'parity']);
 }
 
-export function partCard(entry) {
-  const doc = entry.doc;
-  const card = document.createElement('section');
-  card.className = 'card';
-  const meta = doc.meta || {};
-  const h = document.createElement('h3');
-  h.textContent = meta.part || '(unnamed part)';
-  card.appendChild(h);
-
-  const sub = document.createElement('p');
-  sub.className = 'muted small';
-  const bits = [];
-  for (const [k, v] of Object.entries(meta)) {
-    // Nested meta blocks (the sample counts, say) are structure, not a caption; a naive join
-    // renders them as [object Object].
-    if (k === 'part' || v === null || typeof v === 'object') { continue; }
-    bits.push(`${k}: ${v}`);
-  }
-  bits.push(`source: ${entry.source}`);
-  sub.textContent = bits.join(' · ');
-  card.appendChild(sub);
-
-  // ... and the nested blocks as their own line, flattened one level, so nothing is hidden.
-  const nested = Object.entries(meta).filter(([, v]) => v && typeof v === 'object');
-  for (const [key, value] of nested) {
-    const line = document.createElement('p');
-    line.className = 'muted small';
-    line.textContent = `${key}: ` + Object.entries(value).map(([k, v]) => `${k} ${v}`).join(', ');
-    card.appendChild(line);
-  }
-
-  card.appendChild(barChart(doc));
-  const h2 = document.createElement('h4');
-  h2.textContent = 'accuracy and X-ray counters';
-  card.appendChild(h2);
-  card.appendChild(countersTable(doc));
-  return card;
-}
-
 /// The benchmark record for one part, matched on the part name the selector holds.
 export function benchmarkFor(loaded, partName) {
   if (!partName) { return null; }
   return (loaded.benchmarks || []).find(e => e.doc && e.doc.meta && e.doc.meta.part === partName) || null;
 }
 
+/// Which representation the converter's cascade actually emits for this part, and where that
+/// statement comes from. website_data's own verdict wins; failing that, what this checkout holds.
+export function shipsVerdict(partName, entry, summary) {
+  const row = summary && Array.isArray(summary.parts) ? summary.parts.find(p => p.part === partName) : null;
+  if (row && row.ships) { return { ships: row.ships, source: 'website_data/summary.json' }; }
+  if (entry && entry.ships) { return { ships: entry.ships, source: 'the converter that wrote testdata/' }; }
+  if (!entry) { return null; }
+  return { ships: entry.surfaces ? 'surface' : 'mesh', source: 'inferred from what testdata/ holds' };
+}
+
+const SHIPS_LABEL = { surface: 'SURFACE', mesh: 'TESSELLATED', shape: 'CSG' };
+const SHIPS_NOTE = {
+  surface: 'the exact trimmed analytic faces, navigated by O2BVHSurfaceSolid',
+  mesh: 'the triangle mesh, navigated by O2Tessellated -- the fallback',
+  shape: 'native CSG primitives, navigated by a TGeo composite shape',
+};
+
+function dl(pairs) {
+  const list = document.createElement('dl');
+  list.className = 'facts';
+  for (const [key, value] of pairs) {
+    if (value === undefined) { continue; }
+    const dt = document.createElement('dt'); dt.textContent = key;
+    const dd = document.createElement('dd');
+    if (value && value.nodeType) { dd.appendChild(value); } else { dd.textContent = value === null ? 'n/a' : String(value); }
+    if (value === null) { dd.className = 'na'; }
+    list.appendChild(dt); list.appendChild(dd);
+  }
+  return list;
+}
+
+function bytes(n) {
+  if (n === null || n === undefined) { return null; }
+  if (n < 1024) { return `${n} B`; }
+  if (n < 1024 * 1024) { return `${(n / 1024).toFixed(1)} kB`; }
+  return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+/// The key numbers per representation: what it is made of, what it costs in memory, how far its
+/// volume is from the CAD model's, and whether the kernel calls it navigable.
+function representationTable(doc) {
+  const reps = (doc && doc.representations) || [];
+  const rows = reps.map((rep) => {
+    const acc = rep.accuracy || {};
+    return [
+      (SERIES_BY_KEY[rep.name] || { label: rep.name }).label,
+      rep.primitives === undefined ? null : `${rep.primitives} ${rep.primitiveKind || ''}`.trim(),
+      bytes(rep.memoryBytes),
+      bytes(rep.sidecarBytes),
+      acc.capacityRelativeDeviation === undefined || acc.capacityRelativeDeviation === null
+        ? null : fmt(acc.capacityRelativeDeviation),
+      rep.reliability || (rep.meshClosedBody === true ? 'closed body' : rep.meshClosedBody === false ? 'NOT a closed body' : null),
+    ];
+  });
+  return table(rows, ['representation', 'made of', 'memory', 'sidecar', 'capacity dev.', 'reliability']);
+}
+
+/// Everything the page knows about the selected part: what ships, the key numbers, the sidecar's
+/// own properties, and then the per-function timing bars for this part alone.
+export function partCard(entry, state, summary) {
+  const doc = entry ? entry.doc : null;
+  const part = state && state.part ? state.part : null;
+  const partName = part ? part.name : (doc && doc.meta ? doc.meta.part : '(no part)');
+  const card = document.createElement('section');
+  card.className = 'card';
+
+  const heading = document.createElement('h3');
+  heading.textContent = partName;
+  const verdict = shipsVerdict(partName, part, summary);
+  if (verdict) {
+    const badge = document.createElement('span');
+    badge.className = `badge ships ships-${verdict.ships}`;
+    badge.textContent = `ships ${SHIPS_LABEL[verdict.ships] || verdict.ships.toUpperCase()}`;
+    badge.title = `${SHIPS_NOTE[verdict.ships] || ''} (${verdict.source})`;
+    heading.append(' ', badge);
+  }
+  card.appendChild(heading);
+
+  if (verdict) {
+    const line = document.createElement('p');
+    line.className = 'muted small';
+    line.textContent = `${SHIPS_NOTE[verdict.ships] || ''} - ${verdict.source}.`;
+    card.appendChild(line);
+  }
+
+  if (doc && doc.meta) {
+    const sub = document.createElement('p');
+    sub.className = 'muted small';
+    const bits = [];
+    for (const [k, v] of Object.entries(doc.meta)) {
+      if (k === 'part' || v === null || typeof v === 'object') { continue; }
+      bits.push(`${k}: ${v}`);
+    }
+    bits.push(`source: ${entry.source}`);
+    sub.textContent = bits.join(' \u00b7 ');
+    card.appendChild(sub);
+    for (const [key, value] of Object.entries(doc.meta).filter(([, v]) => v && typeof v === 'object')) {
+      const line = document.createElement('p');
+      line.className = 'muted small';
+      line.textContent = `${key}: ` + Object.entries(value).map(([k, v]) => `${k} ${v}`).join(', ');
+      card.appendChild(line);
+    }
+  }
+
+  // --- what this checkout actually loaded, straight off the sidecar ------------------------
+  if (part) {
+    const h = document.createElement('h4');
+    h.textContent = 'this part, as loaded here';
+    card.appendChild(h);
+    const solid = state.solid, parsed = state.parsed, facets = state.facets;
+    const records = document.createElement('span');
+    if (!solid) {
+      records.className = 'badge warn';
+      records.textContent = 'tessellated only -- no exact sidecar';
+    } else if (solid.failed.length || solid.unsupported.length) {
+      records.className = 'badge bad';
+      records.textContent = `${solid.failed.length} rejected, ${solid.unsupported.length} unsupported`;
+      records.title = [...solid.failed, ...solid.unsupported].map(f => `#${f.index}: ${f.reason}`).join('\n');
+    } else {
+      records.className = 'badge ok';
+      records.textContent = 'all records built';
+    }
+    card.appendChild(dl([
+      ['exact faces', solid ? String(solid.nSurfaces) : null],
+      ['by type', solid ? (Object.entries(solid.counts).map(([k, n]) => `${n} ${k}`).join(', ') || '-') : null],
+      ['triangles', facets ? String(facets.nTriangles) : null],
+      ['sidecar', parsed ? `version ${parsed.version}, ${(parsed.byteLength / 1024).toFixed(1)} kB` : null],
+      ['wire-trimmed', solid ? `${solid.wireTrimFaces} face(s)` : null],
+      ['B-spline trims', solid ? `${solid.bsplineTrimFaces} face(s)` : null],
+      ['model tolerance', parsed ? (parsed.modelToleranceStated ? `${parsed.modelTolerance.toExponential(2)} cm` : 'not stated (v1)') : null],
+      ['worst join gap', solid ? `${solid.worstJoinGap.toExponential(2)} cm (band ${solid.joinTolerance.toExponential(1)})` : null],
+      ['records', records],
+    ]));
+  }
+
+  if (!doc) {
+    const missing = document.createElement('p');
+    missing.className = 'muted small';
+    missing.textContent = 'No measured benchmark record for this part, so there are no timings, no memory model and ' +
+      'no X-ray counters below. The numbers above come from the sidecar this page loaded.';
+    card.appendChild(missing);
+    return card;
+  }
+
+  const h1 = document.createElement('h4');
+  h1.textContent = 'representations, as measured';
+  card.appendChild(h1);
+  card.appendChild(representationTable(doc));
+
+  const h2 = document.createElement('h4');
+  h2.textContent = 'ns per call, per navigation function';
+  card.appendChild(h2);
+  card.appendChild(barChart(doc));
+
+  const h3 = document.createElement('h4');
+  h3.textContent = 'accuracy and X-ray counters';
+  card.appendChild(h3);
+  card.appendChild(countersTable(doc));
+  return card;
+}
+
 export function renderBenchmarks(container, loaded, state) {
   container.innerHTML = '';
+  const partName = state && state.part ? state.part.name : null;
   const note = document.createElement('p');
   note.className = 'muted';
   if (loaded.origin === 'none') {
-    note.textContent = 'No benchmark JSON found. Track 2 writes scripts/geometry/website_data/*.json; sample_data/ holds a schema-shaped stand-in.';
-    container.appendChild(note);
-    return;
+    note.innerHTML = 'No benchmark JSON found. Track 2 writes <code>scripts/geometry/website_data/*.json</code>; ' +
+      '<code>sample_data/</code> holds a schema-shaped stand-in. The part card below is read from the sidecar.';
+  } else {
+    note.innerHTML = loaded.origin === 'website_data'
+      ? 'Measured data from <code>scripts/geometry/website_data/</code>, for the selected part only.'
+      : 'No measured data present yet: these are the <strong>synthetic sample records</strong> in ' +
+        '<code>sample_data/</code>, shaped exactly like the Track-2 schema.';
   }
-  note.innerHTML = loaded.origin === 'website_data'
-    ? 'Measured data from <code>scripts/geometry/website_data/</code>.'
-    : 'No measured data present yet: these are the <strong>synthetic sample records</strong> in <code>sample_data/</code>, shaped exactly like the Track-2 schema.';
   container.appendChild(note);
-
-  const partName = state && state.part ? state.part.name : null;
-  const entry = benchmarkFor(loaded, partName);
-  if (!entry) {
-    const missing = document.createElement('p');
-    missing.className = 'muted';
-    missing.textContent = partName
-      ? `No benchmark record for ${partName}. The measured set covers ` +
-        (loaded.benchmarks || []).map(e => e.doc.meta.part).join(', ') + '.'
-      : 'No part selected.';
-    container.appendChild(missing);
-    return;
-  }
-  container.appendChild(partCard(entry));
+  container.appendChild(partCard(benchmarkFor(loaded, partName), state, loaded.summary));
 }

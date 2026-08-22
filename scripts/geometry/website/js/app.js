@@ -65,16 +65,9 @@ function meshViewer() {
 }
 export function sharedViewer() { return meshViewer(); }
 
-function fact(dl, key, value) {
-  const dt = document.createElement('dt'); dt.textContent = key;
-  const dd = document.createElement('dd');
-  if (value && value.nodeType) { dd.appendChild(value); } else { dd.textContent = value; }
-  dl.appendChild(dt); dl.appendChild(dd);
-}
-
 function renderMeshTab() {
   const v = meshViewer();
-  const { solid, facets, parsed } = state;
+  const { solid, facets } = state;
   if (facets) {
     v.setMesh(facets.positions);
     v.setWireframe(document.getElementById('opt-wireframe').checked);
@@ -96,27 +89,6 @@ function renderMeshTab() {
     `${state.part.name}\n${solid.nSurfaces} exact faces` +
     (facets ? ` / ${facets.nTriangles} triangles` : ' / no mesh') +
     `\nbbox ${(box[3] - box[0]).toFixed(2)} x ${(box[4] - box[1]).toFixed(2)} x ${(box[5] - box[2]).toFixed(2)} cm`;
-
-  const dl = document.getElementById('mesh-facts');
-  dl.innerHTML = '';
-  fact(dl, 'sidecar', `version ${parsed.version}, ${(parsed.byteLength / 1024).toFixed(1)} kB`);
-  fact(dl, 'faces', String(solid.nSurfaces));
-  fact(dl, 'by type', Object.entries(solid.counts).map(([k, n]) => `${n} ${k}`).join(', ') || '-');
-  fact(dl, 'wire-trimmed', `${solid.wireTrimFaces} face(s)`);
-  fact(dl, 'B-spline trims', `${solid.bsplineTrimFaces} face(s)`);
-  fact(dl, 'model tolerance', parsed.modelToleranceStated ? `${parsed.modelTolerance.toExponential(2)} cm` : 'not stated (v1)');
-  fact(dl, 'worst join gap', `${solid.worstJoinGap.toExponential(2)} cm (band ${solid.joinTolerance.toExponential(1)})`);
-  fact(dl, 'triangles', facets ? String(facets.nTriangles) : 'no facets_*.bin');
-  const problems = document.createElement('span');
-  if (solid.failed.length || solid.unsupported.length) {
-    problems.className = 'badge bad';
-    problems.textContent = `${solid.failed.length} rejected, ${solid.unsupported.length} unsupported`;
-    problems.title = [...solid.failed, ...solid.unsupported].map(f => `#${f.index}: ${f.reason}`).join('\n');
-  } else {
-    problems.className = 'badge ok';
-    problems.textContent = 'all records built';
-  }
-  fact(dl, 'records', problems);
 }
 
 // --- loading a part ------------------------------------------------------------------------------
