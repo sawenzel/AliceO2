@@ -135,6 +135,7 @@ function cssEscape(s) { return s.replace(/["\\]/g, '\\$&'); }
 
 /// The one line under a part's name: what representations this checkout actually has for it.
 function subtitleOf(entry) {
+  if (entry.subtitle) { return entry.subtitle; }
   const bits = [];
   if (entry.surfaces) { bits.push('exact'); }
   if (entry.facets) { bits.push('mesh'); }

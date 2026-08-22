@@ -232,3 +232,11 @@ canvas.rt-overlay.stale { opacity: 0; }
   border: 1px solid var(--warn); border-radius: 6px; padding: 4px 8px; pointer-events: none;
 }
 #rt-coverage { color: var(--warn); font-size: 12px; margin: 0 0 8px; }
+
+/* --- the assembly view: twenty prototypes, one legend row each ------------------------------ */
+
+#asm-legend { display: grid; grid-template-columns: 1fr; gap: 3px 8px; font-size: 11.5px; }
+#asm-legend .legend-item { gap: 7px; min-width: 0; }
+#asm-legend .mono { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#tab-assembly .row label.grow { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-secondary); }
+#asm-slice-readout { flex: 1 1 100%; }

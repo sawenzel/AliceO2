@@ -19,10 +19,11 @@
     <span id="load-status" class="status"></span>
   </div>
   <nav class="tabs" id="tabs" role="tablist">
-    <button role="tab" data-tab="mesh" aria-selected="true">Mesh viewer</button>
-    <button role="tab" data-tab="raytracer" aria-selected="false">Exact raytracer</button>
-    <button role="tab" data-tab="bench" aria-selected="false">Benchmarks</button>
-    <button role="tab" data-tab="events" aria-selected="false">Event display</button>
+    <button role="tab" data-tab="mesh" data-needs="part" aria-selected="true">Mesh viewer</button>
+    <button role="tab" data-tab="raytracer" data-needs="part" aria-selected="false">Exact raytracer</button>
+    <button role="tab" data-tab="bench" data-needs="part" aria-selected="false">Benchmarks</button>
+    <button role="tab" data-tab="events" data-needs="part" aria-selected="false">Event display</button>
+    <button role="tab" data-tab="assembly" data-needs="assembly" aria-selected="false" hidden>Assembly</button>
     <button role="tab" data-tab="check" aria-selected="false">Self-check</button>
     <button role="tab" data-tab="about" aria-selected="false">About</button>
   </nav>
@@ -60,6 +61,49 @@
 
 <section class="tab" id="tab-bench">
   <div id="bench-body"></div>
+</section>
+
+<section class="tab" id="tab-assembly" data-root="testdata/otof_assembly">
+  <div class="split">
+    <div class="viewport" id="assembly-viewport"><div class="hud" id="assembly-hud"></div></div>
+    <div>
+      <div class="pane">
+        <h3>The tube is the assembly</h3>
+        <p class="muted small">oTOF has no tubular <em>solid</em>: all twenty of its body prototypes are
+          planar &mdash; nineteen exact boxes and one 1493-plane part. The barrel is what the
+          <em>placements</em> make of them. This view draws the placement table: one
+          <code>InstancedMesh</code> per prototype, and a body's vertices are already in its leaf's frame,
+          so an instance's world transform is exactly its leaf's matrix.</p>
+        <p class="muted small">WebGL only. There is no raytracing and no bridge on this tab &mdash;
+          62&nbsp;628 solids is a rasteriser's job.</p>
+        <div class="row"><span id="asm-status" class="status"></span></div>
+      </div>
+      <div class="pane">
+        <h3>View</h3>
+        <div class="row"><label><input type="checkbox" id="asm-wireframe"> wireframe</label>
+          <label><input type="checkbox" id="asm-spin"> spin</label>
+          <button id="asm-frame">re-frame</button></div>
+        <p class="muted small">Drag to orbit, wheel to zoom, shift-drag to pan &mdash; the mesh tab's
+          controls.</p>
+      </div>
+      <div class="pane">
+        <h3>Slice</h3>
+        <div class="row"><label class="grow">along the axis
+          <input type="range" id="asm-centre" min="0" max="1000" value="500" class="grow"></label></div>
+        <div class="row"><label class="grow">window width
+          <input type="range" id="asm-width" min="0" max="1000" value="1000" class="grow"></label></div>
+        <div class="row"><button id="asm-whole">whole barrel</button><button id="asm-ring">one ring</button>
+          <span id="asm-slice-readout" class="status"></span></div>
+        <p class="muted small">The slice keeps whole placements whose position along the barrel axis
+          falls in the window; it never cuts a body open. At its narrowest the window is one ring, which
+          is what makes a single module inspectable.</p>
+      </div>
+      <div class="pane">
+        <h3>Prototypes</h3>
+        <div class="legend" id="asm-legend"></div>
+      </div>
+    </div>
+  </div>
 </section>
 
 <section class="tab" id="tab-events">
