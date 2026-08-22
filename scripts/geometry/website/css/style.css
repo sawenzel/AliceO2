@@ -228,3 +228,4 @@ canvas.rt-overlay.stale { opacity: 0; }
   background: rgba(14, 17, 22, 0.78);
   border: 1px solid var(--warn); border-radius: 6px; padding: 4px 8px; pointer-events: none;
 }
+#rt-coverage { color: var(--warn); font-size: 12px; margin: 0 0 8px; }

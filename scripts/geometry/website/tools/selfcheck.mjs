@@ -25,7 +25,8 @@ if (!parts.length) {
     console.error(`no ${manifestPath}; run ./fetch_testdata.sh <gate-workdir> first`);
     process.exit(2);
   }
-  parts = JSON.parse(fs.readFileSync(manifestPath, 'utf8')).parts.map(p => p.name);
+  // A tessellated-only part has no sidecar, and every assertion here is about the exact solid.
+  parts = JSON.parse(fs.readFileSync(manifestPath, 'utf8')).parts.filter(p => p.surfaces).map(p => p.name);
 }
 
 const load = async (name) => {
