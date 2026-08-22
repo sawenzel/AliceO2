@@ -654,6 +654,21 @@ def face_supported(record: dict) -> Tuple[bool, Optional[str]]:
     return True, None
 
 
+def distill_reasons(reasons: List[str]) -> Optional[str]:
+    """Fold a per-face reason list into one brief line, most frequent first.
+
+    "40 face(s): unsupported surface type 'bspline'; 2 face(s): ..." -- the per-part
+    `why_not_surface` field of the surface report. Reporting only; nothing decides on it.
+    """
+    if not reasons:
+        return None
+    counts: Dict[str, int] = {}
+    for r in reasons:
+        counts[r] = counts.get(r, 0) + 1
+    return "; ".join(f"{n} face(s): {r}"
+                     for r, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
+
+
 def build_surface_report(step_path: str, scale_to_cm: float, recognize_surfaces: bool = True) -> dict:
     """Builds the JSON-serializable exact-conversion eligibility report over def_shapes.
 
@@ -720,6 +735,13 @@ def build_surface_report(step_path: str, scale_to_cm: float, recognize_surfaces:
             "eligible_without_recognition": eligible_without,
             "recognized_counts": vol_recognized,
             "recognized_max_gap_cm": vol_gap,
+            # The brief, machine-readable per-part reason this solid cannot be a SurfaceSolid,
+            # from the classification pass (None when every face classifies as supported).
+            # Classification is an optimistic upper bound: extraction can still decline, and
+            # then refines this field with the extractor's own reasons (see emit_root_macro).
+            "why_not_surface": None if eligible else distill_reasons(
+                [f.get("reason") or f"unsupported {f['type']} face"
+                 for f in faces if not f["supported"]]),
             "faces": faces,
         }
 
@@ -4468,8 +4490,17 @@ def emit_root_macro(
                 vol["emitted"] = emitted_here
                 if not emitted_here:
                     vol["extraction_reasons"] = sorted(set(failures.get(lid, [])))
-                elif vol["recognized_counts"]:
-                    n_emitted_rescued += 1
+                    # The extractor's verdict supersedes the classification pass's optimistic
+                    # one: this is the reason the sidecar was actually not written.
+                    vol["why_not_surface"] = (distill_reasons(failures.get(lid, []))
+                                              or vol.get("why_not_surface")
+                                              or "no sidecar was written")
+                else:
+                    # The part has a sidecar; whatever the classification pass guessed, there
+                    # is no "why not".
+                    vol["why_not_surface"] = None
+                    if vol["recognized_counts"]:
+                        n_emitted_rescued += 1
             summary = report["summary"]
             summary["n_emitted"] = len(extracted)
             summary["n_emitted_carrying_recognized_faces"] = n_emitted_rescued

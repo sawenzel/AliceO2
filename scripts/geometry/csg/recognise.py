@@ -65,10 +65,14 @@ def _face_records(solid):
     from OCC.Core.TopoDS import topods
 
     records = []
+    n_torus = 0
+    n_freeform = 0
+    n_faces = 0
     exp = TopExp_Explorer(solid, TopAbs_FACE)
     while exp.More():
         face = topods.Face(exp.Current())
         exp.Next()
+        n_faces += 1
         ad = BRepAdaptor_Surface(face, True)
         umin, umax, vmin, vmax = breptools.UVBounds(face)
         t = ad.GetType()
@@ -94,10 +98,23 @@ def _face_records(solid):
             sp = ad.Sphere()
             rec.update(kind="sphere", p=_xyz(sp.Location()), r=sp.Radius())
         elif t == GeomAbs_Torus:
-            return None, "toroidal face (out of the recogniser's scope)"
+            # Counted rather than reported at first sight, so the decline says how far out of
+            # scope the part is ("2 of 97 faces") instead of naming one face.
+            n_torus += 1
+            continue
         else:
-            return None, "non-quadric face"
+            n_freeform += 1
+            continue
         records.append(rec)
+    if n_torus or n_freeform:
+        found = []
+        if n_freeform:
+            found.append(f"free-form faces: {n_freeform} of {n_faces} "
+                         "(surface kind outside plane/cylinder/cone/sphere)")
+        if n_torus:
+            found.append(f"toroidal faces: {n_torus} of {n_faces} "
+                         "(out of the recogniser's scope)")
+        return None, "; ".join(found)
     if not records:
         return None, "no faces"
     return records, None
