@@ -10,13 +10,26 @@ import { LocalEngine, RemoteEngine } from './engine.js';
 const BAND_ROWS = 8;
 
 export const VIEWS = [
-  { key: 'exact', label: 'exact surfaces' },
+  { key: 'exact', label: 'exact surfaces (local JS port)' },
+  { key: 'exactBridge', label: 'exact surfaces (bridge: the real kernel)' },
   { key: 'mesh', label: 'tessellation' },
   { key: 'diff', label: 'difference: exact vs mesh' },
   { key: 'engine', label: 'difference: local vs bridge' },
   { key: 'parityExact', label: 'watertightness: exact' },
   { key: 'parityMesh', label: 'watertightness: mesh' },
 ];
+
+/// Which engine answers the rays of each view. A view served by exactly one engine is a view
+/// whose frame time IS that engine's frame time, which is what makes the two comparable.
+export const VIEW_ENGINES = {
+  exact: ['local'],
+  exactBridge: ['remote'],
+  mesh: ['local'],
+  diff: ['local'],
+  engine: ['local', 'remote'],
+  parityExact: ['local'],
+  parityMesh: ['local'],
+};
 
 function normalize(v) {
   const n = Math.hypot(v[0], v[1], v[2]) || 1;
@@ -153,6 +166,9 @@ export class Raytracer {
     this.onDone = null;
     this.counters = {};
     this.rendering = false;
+    // The last frame each engine rendered ALONE: same camera, same resolution, one engine, so the
+    // two numbers can be put side by side without apportioning a shared frame between them.
+    this.perf = { local: null, remote: null };
   }
 
   setSize(width, height) {
@@ -188,6 +204,12 @@ export class Raytracer {
 
   get bridgeReady() { return !!(this.remote && this.remote.ready); }
 
+  /// A signature of the current view, so two engine timings can say whether they are comparable.
+  cameraKey() {
+    return this.camera.origin.map(v => v.toFixed(4)).join(',') + '|' +
+           this.camera.target.map(v => v.toFixed(4)).join(',') + '|' + this.camera.fovY.toFixed(5);
+  }
+
   cancel() { this.generation += 1; }
 
   /// Render the current view progressively: a quarter-resolution pass first so the frame appears
@@ -197,7 +219,10 @@ export class Raytracer {
     const generation = this.generation;
     this.rendering = true;
     const started = performance.now();
-    this.counters = { hit: 0, total: this.width * this.height, mismatch: 0, differing: 0, maxDeltaT: 0, parityBreaks: 0 };
+    this.counters = {
+      hit: 0, total: this.width * this.height, mismatch: 0, differing: 0, maxDeltaT: 0,
+      parityBreaks: 0, raysTraced: 0,
+    };
     try {
       await this._pass(generation, 4);
       if (generation !== this.generation) { return; }
@@ -205,7 +230,16 @@ export class Raytracer {
     } finally {
       if (generation === this.generation) {
         this.rendering = false;
-        this.counters.ms = Math.round(performance.now() - started);
+        const ms = Math.round(performance.now() - started);
+        this.counters.ms = ms;
+        const engines = VIEW_ENGINES[this.view] || [];
+        if (engines.length === 1 && !this.counters.error && this.counters.raysTraced > 0) {
+          this.perf[engines[0]] = {
+            ms, rays: this.counters.raysTraced, width: this.width, height: this.height,
+            view: this.view, camera: this.cameraKey(),
+            engine: engines[0] === 'local' ? this.local.name : (this.remote ? this.remote.name : 'bridge'),
+          };
+        }
         if (this.onDone) { this.onDone(this.counters); }
       }
     }
@@ -261,11 +295,15 @@ export class Raytracer {
       }
     }
     const raysCopy = rays.slice(0);   // the engine transfers its input; keep our own for shading
+    this.counters.raysTraced += sampleRows * sampleCols;
 
     let primary = null, secondary = null, counts = null;
     try {
       if (this.view === 'exact') {
         primary = await this.local.traceRays(rays);
+      } else if (this.view === 'exactBridge') {
+        if (!this.bridgeReady) { throw new Error('bridge not connected'); }
+        primary = await this.remote.traceRays(rays);
       } else if (this.view === 'mesh') {
         primary = await this.local.traceRaysMesh(rays);
       } else if (this.view === 'diff') {
