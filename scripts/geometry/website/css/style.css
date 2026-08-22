@@ -209,6 +209,9 @@ td.na { color: var(--text-muted); }
 .badge.ships-surface { border-color: var(--accent); color: var(--accent); }
 .badge.ships-shape { border-color: var(--accent-3); color: var(--accent-3); }
 .badge.ships-mesh { border-color: var(--accent-2); color: var(--accent-2); }
+/* A part can carry more than one representation at full quality. The cascade's own choice is the
+   first badge and stays solid; the others are the same colour, set back. */
+.badge.ships.alt { font-weight: 500; opacity: 0.72; border-style: dashed; }
 .card dl.facts { margin: 4px 0 10px; }
 .card table { margin-bottom: 4px; }
 #bench-body .card, #bench-body > p { max-width: 1020px; }

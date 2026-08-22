@@ -113,10 +113,15 @@ placement of its own, the acceptance verdict with `dV_sym` against its band, and
 the raytracer's CSG view traces. A part the recogniser declined shows why in the same place — the
 acceptance test's own sentence where there is one, and otherwise the `whyNotCSG` line from
 `website_data/decline_reasons.json`, which is loaded optionally and simply says less when it is
-absent. It heads with a badge saying
-which representation **ships** -- CSG, SURFACE or TESSELLATED -- taken from
-`website_data/summary.json`'s own verdict where it has one, and otherwise from what the converter
-wrote into `testdata/`. Under it: the sidecar's own properties as this page loaded them (faces by
+absent. It heads with a badge **per representation the part
+carries at full quality** -- CSG, SURFACE or TESSELLATED. The cascade's own choice comes first and
+solid, taken from `website_data/summary.json`'s own verdict where it has one and otherwise from
+what the converter wrote into `testdata/`; anything else the part has stands next to it, dashed.
+`BoomCylinderInner` therefore reads **ships CSG  ships SURFACE**: the recogniser's composite passed
+the acceptance test *and* the exact sidecar is there, and both are navigable. A tessellated-only
+part keeps its single badge -- a mesh sitting next to an exact sidecar is not a representation the
+part has, it is the thing the sidecar replaced, so it is never a second badge. The mesh tab's HUD
+line says the same thing (`ships CSG + SURFACE: TGeoTube ∪ TGeoTube`). Under it: the sidecar's own properties as this page loaded them (faces by
 type, wire trims, model tolerance, worst join gap, record status -- this is the old Properties
 pane, which now lives here); a representations table with primitives, memory, sidecar size,
 capacity deviation and reliability; grouped bars of `nsPerCall` per navigation function per
