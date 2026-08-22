@@ -8,10 +8,8 @@
 
 import * as THREE from '../vendor/three.module.min.js';
 import { Viewer3D } from './viewer3d.js';
-import { loadEvents, loadBinary } from './data.js';
-import { parseSidecar, parseFacets } from './sidecar.js';
-import { SurfaceSolid } from './solid.js';
-import { state } from './app.js';
+import { loadEvents } from './data.js';
+import { state, onPartChanged } from './app.js';
 
 // Colour by species, falling back to charge. Identity is never colour alone here either: the
 // legend names every species that appears in the loaded file.
@@ -363,39 +361,54 @@ export function initEventsTab() {
     requestAnimationFrame(tick);
   }
 
-  async function showGeometryFor(partName) {
-    // The events file names the part it was made from; show that geometry when the manifest has it.
-    let entry = null;
-    try {
-      const { listParts } = await import('./data.js');
-      const listed = await listParts();
-      entry = listed.parts.find(p => p.name === partName) || null;
-    } catch (e) { entry = null; }
-    if (!entry && state.part) { entry = state.part; }
-    if (!entry) { return null; }
-    const sidecar = await loadBinary(`testdata/${entry.surfaces}`);
-    const solid = new SurfaceSolid(parseSidecar(sidecar, entry.name), entry.name);
-    if (entry.facets) {
-      try {
-        const facets = parseFacets(await loadBinary(`testdata/${entry.facets}`), entry.facets);
-        viewer.setMesh(facets.positions, { color: 0x6d7d92, opacity: 0.42 });
-      } catch (e) { viewer.clearMesh(); }
+  /// The scene is the part the selector holds -- always, whatever part a replay was recorded
+  /// against. The bytes are already in the shared state, so nothing is fetched twice.
+  function showSelectedGeometry() {
+    if (state.facets) {
+      viewer.setMesh(state.facets.positions, { color: 0x6d7d92, opacity: 0.42 });
+    } else {
+      viewer.clearMesh();
     }
     const polylines = [];
-    for (const surface of solid.surfaces) {
-      try { for (const loop of surface.patchOutline()) { polylines.push(loop); } } catch (e) { /* not drawable */ }
+    if (state.solid) {
+      for (const surface of state.solid.surfaces) {
+        try { for (const loop of surface.patchOutline()) { polylines.push(loop); } } catch (e) { /* not drawable */ }
+      }
     }
     viewer.setExactEdges(polylines);
-    viewer.setGrid(solid.aabb);
-    return { entry, solid };
+    const box = partBox();
+    viewer.setGrid(box);
+    return box;
+  }
+
+  /// The selected part's extent, from the exact solid where there is one and from the mesh
+  /// otherwise, so a tessellated-only part still frames and still gets a screen.
+  function partBox() {
+    if (state.solid) { return state.solid.aabb; }
+    if (state.facets) {
+      const p = state.facets.positions;
+      const box = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
+      for (let i = 0; i < p.length; i += 3) {
+        for (let k = 0; k < 3; ++k) {
+          if (p[i + k] < box[k]) { box[k] = p[i + k]; }
+          if (p[i + k] > box[k + 3]) { box[k + 3] = p[i + k]; }
+        }
+      }
+      if (Number.isFinite(box[0])) { return box; }
+    }
+    return [-1, -1, -1, 1, 1, 1];
   }
 
   /// Run the synthetic gun in a worker against the part currently selected, and replay the result.
-  async function generateHere() {
+  async function generateHere({ events: eventsIn, tracks: tracksIn } = {}) {
     const status = document.getElementById('ev-gen-status');
-    if (!state.part || !state.sidecarBuffer) { status.textContent = 'no part loaded'; return; }
-    const events = Number(document.getElementById('ev-gen-events').value) || 5;
-    const tracks = Number(document.getElementById('ev-gen-tracks').value) || 1000;
+    if (!state.part) { status.textContent = 'no part loaded'; return; }
+    if (!state.sidecarBuffer) {
+      status.textContent = 'tessellated only -- no exact sidecar, so the gun has no material to shoot at';
+      return;
+    }
+    const events = eventsIn || Number(document.getElementById('ev-gen-events').value) || 5;
+    const tracks = tracksIn || Number(document.getElementById('ev-gen-tracks').value) || 1000;
     status.textContent = `generating ${events} x ${tracks} tracks ...`;
     const started = performance.now();
 
@@ -430,8 +443,7 @@ export function initEventsTab() {
     doc = newDoc;
     origin = newOrigin;
     screen = new Screen(doc.screen);
-    const geometry = await showGeometryFor(doc.meta && doc.meta.part);
-    const box = geometry ? geometry.solid.aabb : [-1, -1, -1, 1, 1, 1];
+    const box = showSelectedGeometry();
     const wide = box.slice();
     for (const corner of screen.corners()) {
       for (let i = 0; i < 3; ++i) {
@@ -501,19 +513,49 @@ export function initEventsTab() {
     hud.textContent = `${meta.part || ''}\n${doc.events.length} events`;
   }
 
+  /// Show whatever replay belongs to the selected part: the committed one when it was recorded
+  /// against exactly this part, and otherwise a freshly generated one, because a replay of a
+  /// different part over this part's geometry would be a picture of nothing.
+  async function showSelectedPart() {
+    if (!state.part) { return; }
+    const box = showSelectedGeometry();
+    viewer.frame(box);
+    hud.textContent = `${state.part.name}\nloading replay...`;
+    document.getElementById('ev-gen-status').textContent = '';
+    if (committed && committed.doc && committed.doc.meta && committed.doc.meta.part === state.part.name) {
+      await adopt(committed.doc, committed.origin);
+      return;
+    }
+    if (!state.sidecarBuffer) {
+      doc = null;
+      hud.textContent = `${state.part.name}\ntessellated only`;
+      note.textContent = `${state.part.name} ships tessellated only -- it has no exact sidecar in this ` +
+        'checkout, so the synthetic gun has no exact solid to call material. The geometry above is its ' +
+        'mesh; there is nothing to replay over it.';
+      document.getElementById('ev-facts').innerHTML = '';
+      document.getElementById('ev-legend').innerHTML = '';
+      return;
+    }
+    // Keep the automatic run cheap on a part with many faces; the panel raises it on demand.
+    const faces = state.solid ? state.solid.nSurfaces : 0;
+    await generateHere({ events: 3, tracks: faces > 300 ? 400 : faces > 100 ? 1200 : 2500 });
+  }
+
+  let committed = null;
   async function boot() {
-    const loaded = await loadEvents();
-    if (!loaded.doc) {
+    committed = await loadEvents();
+    if (!committed.doc) {
+      committed = null;
       note.textContent = 'No events.json found. Track 3b writes scripts/geometry/website_data/events.json; ' +
         'tools/make_sample_data.mjs writes the synthetic sample_data/events_sample.json, and the ' +
         '"generate here" panel makes one in the browser.';
-      hud.textContent = 'no events';
-      return;
     }
-    await adopt(loaded.doc, loaded.origin);
+    await showSelectedPart();
   }
 
-  document.getElementById('ev-generate').addEventListener('click', () => generateHere());
+  onPartChanged(() => { showSelectedPart().catch(e => { note.textContent = `event display: ${e.message}`; }); });
+
+  document.getElementById('ev-generate').addEventListener('click', () => generateHere({}));
 
   document.getElementById('ev-play').addEventListener('click', (e) => {
     playing = !playing;
