@@ -169,6 +169,68 @@ export class Raytracer {
     // The last frame each engine rendered ALONE: same camera, same resolution, one engine, so the
     // two numbers can be put side by side without apportioning a shared frame between them.
     this.perf = { local: null, remote: null };
+    // Only the pixels the part's AABB can possibly cover are traced; the rest is background, which
+    // costs a gradient and a grid line and no ray at all.
+    this.useScissor = true;
+    this.scissor = null;
+  }
+
+  /// The part's world AABB projected to this frame's pixel rectangle, padded by a couple of pixels
+  /// so a silhouette is never clipped by the projection's own rounding. Returns the whole frame
+  /// when the box straddles the camera plane, where a perspective projection has no finite rect.
+  computeScissor() {
+    const full = { x0: 0, y0: 0, x1: this.width, y1: this.height, full: true };
+    if (!this.useScissor || !this.box) { return full; }
+    const { forward, right, up } = this.camera.basis();
+    const tanHalf = Math.tan(this.camera.fovY / 2);
+    const aspect = this.width / this.height;
+    const o = this.camera.origin;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (let corner = 0; corner < 8; ++corner) {
+      const px = this.box[(corner & 1) ? 3 : 0];
+      const py = this.box[(corner & 2) ? 4 : 1];
+      const pz = this.box[(corner & 4) ? 5 : 2];
+      const vx = px - o[0], vy = py - o[1], vz = pz - o[2];
+      const z = vx * forward[0] + vy * forward[1] + vz * forward[2];
+      if (z <= 1e-9) { return full; }        // a corner at or behind the eye: no finite rectangle
+      const a = (vx * right[0] + vy * right[1] + vz * right[2]) / z;
+      const b = (vx * up[0] + vy * up[1] + vz * up[2]) / z;
+      const sx = (a / (tanHalf * aspect) + 1) * this.width / 2 - 0.5;
+      const sy = (1 - b / tanHalf) * this.height / 2 - 0.5;
+      if (sx < minX) { minX = sx; } if (sx > maxX) { maxX = sx; }
+      if (sy < minY) { minY = sy; } if (sy > maxY) { maxY = sy; }
+    }
+    const pad = 2;
+    const x0 = Math.max(0, Math.floor(minX) - pad);
+    const y0 = Math.max(0, Math.floor(minY) - pad);
+    const x1 = Math.min(this.width, Math.ceil(maxX) + 1 + pad);
+    const y1 = Math.min(this.height, Math.ceil(maxY) + 1 + pad);
+    if (x1 <= x0 || y1 <= y0) { return { x0: 0, y0: 0, x1: 0, y1: 0, full: false }; }
+    return { x0, y0, x1, y1, full: x0 === 0 && y0 === 0 && x1 === this.width && y1 === this.height };
+  }
+
+  /// Paint a rectangle of pure background -- no ray is cast for any pixel in it.
+  _fillBackground(x0, y0, x1, y1) {
+    if (x1 <= x0 || y1 <= y0) { return; }
+    const data = this.image.data;
+    const rgb = [0, 0, 0];
+    const { forward, right, up } = this.camera.basis();
+    const aspect = this.width / this.height;
+    const tanHalf = Math.tan(this.camera.fovY / 2);
+    const o = this.camera.origin;
+    for (let y = y0; y < y1; ++y) {
+      const ndcY = (1 - 2 * (y + 0.5) / this.height) * tanHalf;
+      for (let x = x0; x < x1; ++x) {
+        const ndcX = (2 * (x + 0.5) / this.width - 1) * tanHalf * aspect;
+        const dx = forward[0] + right[0] * ndcX + up[0] * ndcY;
+        const dy = forward[1] + right[1] * ndcX + up[1] * ndcY;
+        const dz = forward[2] + right[2] * ndcX + up[2] * ndcY;
+        const n = Math.hypot(dx, dy, dz) || 1;
+        background(rgb, null, dx / n, dy / n, dz / n, o[0], o[1], o[2], this.groundY, this.gridStep);
+        const p = (y * this.width + x) * 4;
+        data[p] = rgb[0] | 0; data[p + 1] = rgb[1] | 0; data[p + 2] = rgb[2] | 0; data[p + 3] = 255;
+      }
+    }
   }
 
   setSize(width, height) {
@@ -219,10 +281,21 @@ export class Raytracer {
     const generation = this.generation;
     this.rendering = true;
     const started = performance.now();
+    const scissor = this.computeScissor();
+    this.scissor = scissor;
+    const scissorPixels = Math.max(0, (scissor.x1 - scissor.x0) * (scissor.y1 - scissor.y0));
     this.counters = {
       hit: 0, total: this.width * this.height, mismatch: 0, differing: 0, maxDeltaT: 0,
       parityBreaks: 0, raysTraced: 0,
+      scissorPixels, scissorRect: [scissor.x0, scissor.y0, scissor.x1, scissor.y1],
+      scissorSaving: 1 - scissorPixels / Math.max(1, this.width * this.height),
     };
+    // The frame outside the box is background, painted once, with no ray cast for any of it.
+    this._fillBackground(0, 0, this.width, scissor.y0);
+    this._fillBackground(0, scissor.y1, this.width, this.height);
+    this._fillBackground(0, scissor.y0, scissor.x0, scissor.y1);
+    this._fillBackground(scissor.x1, scissor.y0, this.width, scissor.y1);
+    this.context.putImageData(this.image, 0, 0);
     try {
       await this._pass(generation, 4);
       if (generation !== this.generation) { return; }
@@ -246,10 +319,10 @@ export class Raytracer {
   }
 
   async _pass(generation, step) {
-    const width = this.width, height = this.height;
+    const { y0: top, y1: bottom } = this.scissor;
     const bands = [];
-    for (let y = 0; y < height; y += BAND_ROWS * step) {
-      bands.push([y, Math.min(height, y + BAND_ROWS * step)]);
+    for (let y = top; y < bottom; y += BAND_ROWS * step) {
+      bands.push([y, Math.min(bottom, y + BAND_ROWS * step)]);
     }
     // Reset the counters on the full-resolution pass so they describe the finished frame.
     if (step === 1) {
@@ -267,7 +340,7 @@ export class Raytracer {
   }
 
   async _band(generation, y0, y1, step) {
-    const width = this.width;
+    const left = this.scissor.x0, rightEdge = this.scissor.x1;
     const rowsRendered = [];
     for (let y = y0; y < y1; y += step) { rowsRendered.push(y); }
     if (!rowsRendered.length) { return; }
@@ -275,17 +348,18 @@ export class Raytracer {
     // On a coarse pass only every `step`-th row and column is traced; the result is replicated
     // into the rows and columns between, so the frame appears whole immediately.
     const sampleRows = rowsRendered.length;
-    const sampleCols = Math.ceil(width / step);
+    const sampleCols = Math.ceil((rightEdge - left) / step);
+    if (sampleCols <= 0) { return; }
     const rays = new Float32Array(sampleRows * sampleCols * 6);
     const { forward, right, up } = this.camera.basis();
-    const aspect = width / this.height;
+    const aspect = this.width / this.height;
     const tanHalf = Math.tan(this.camera.fovY / 2);
     let k = 0;
     for (const y of rowsRendered) {
       const ndcY = (1 - 2 * (y + 0.5) / this.height) * tanHalf;
       for (let sx = 0; sx < sampleCols; ++sx) {
-        const x = Math.min(width - 1, sx * step);
-        const ndcX = (2 * (x + 0.5) / width - 1) * tanHalf * aspect;
+        const x = Math.min(rightEdge - 1, left + sx * step);
+        const ndcX = (2 * (x + 0.5) / this.width - 1) * tanHalf * aspect;
         const dx = forward[0] + right[0] * ndcX + up[0] * ndcY;
         const dy = forward[1] + right[1] * ndcX + up[1] * ndcY;
         const dz = forward[2] + right[2] * ndcX + up[2] * ndcY;
@@ -322,12 +396,12 @@ export class Raytracer {
     }
     if (generation !== this.generation) { return; }
 
-    this._paint(rowsRendered, sampleCols, step, raysCopy, primary, secondary, counts, right, up);
+    this._paint(rowsRendered, sampleCols, step, raysCopy, primary, secondary, counts, right, up, left, rightEdge);
     this.context.putImageData(this.image, 0, 0);
     if (this.onProgress) { this.onProgress(this.counters); }
   }
 
-  _paint(rowsRendered, sampleCols, step, rays, primary, secondary, counts, right, up) {
+  _paint(rowsRendered, sampleCols, step, rays, primary, secondary, counts, right, up, left, rightEdge) {
     const width = this.width, height = this.height;
     const data = this.image.data;
     const rgb = [0, 0, 0];
@@ -384,9 +458,9 @@ export class Raytracer {
         }
 
         const r8 = rgb[0] | 0, g8 = rgb[1] | 0, b8 = rgb[2] | 0;
-        const x0 = Math.min(width - 1, sx * step);
-        for (let yy = y; yy < Math.min(height, y + step); ++yy) {
-          for (let xx = x0; xx < Math.min(width, x0 + step); ++xx) {
+        const x0 = Math.min(rightEdge - 1, left + sx * step);
+        for (let yy = y; yy < Math.min(this.scissor.y1, y + step); ++yy) {
+          for (let xx = x0; xx < Math.min(rightEdge, x0 + step); ++xx) {
             const p = (yy * width + xx) * 4;
             data[p] = r8; data[p + 1] = g8; data[p + 2] = b8; data[p + 3] = 255;
           }
