@@ -344,11 +344,19 @@ export class Raytracer {
     }
   }
 
+  /// True when the current view sends its primary rays to the bridge.
+  _usesBridge() {
+    return this.bridgeReady && (this.view === 'exactBridge' || this.view === 'engine');
+  }
+
   async _pass(generation, step) {
     const { y0: top, y1: bottom } = this.scissor;
+    // The bridge pays an HTTP round trip per band and threads inside one request, so it wants
+    // few, fat batches; the local worker pool wants many thin ones so every worker stays busy.
+    const bandRows = this._usesBridge() ? BAND_ROWS * 8 : BAND_ROWS;
     const bands = [];
-    for (let y = top; y < bottom; y += BAND_ROWS * step) {
-      bands.push([y, Math.min(bottom, y + BAND_ROWS * step)]);
+    for (let y = top; y < bottom; y += bandRows * step) {
+      bands.push([y, Math.min(bottom, y + bandRows * step)]);
     }
     // Reset the counters on the full-resolution pass so they describe the finished frame.
     if (step === 1) {
@@ -359,8 +367,10 @@ export class Raytracer {
     for (const [y0, y1] of bands) {
       if (generation !== this.generation) { return; }
       inFlight.push(this._band(generation, y0, y1, step));
-      // keep a few bands in flight so every worker has work, but not the whole image at once
-      if (inFlight.length >= this.local.workers.length * 2) { await inFlight.shift(); }
+      // keep a few bands in flight so every worker has work, but not the whole image at once;
+      // the bridge threads inside each request, so more than a couple in flight just oversubscribes
+      const maxInFlight = this._usesBridge() ? 2 : this.local.workers.length * 2;
+      if (inFlight.length >= maxInFlight) { await inFlight.shift(); }
     }
     await Promise.all(inFlight);
   }

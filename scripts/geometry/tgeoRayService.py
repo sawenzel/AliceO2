@@ -87,7 +87,7 @@ void traceChunk(const TGeoShape* shape, const float* rays, int begin, int end, f
 
 void trace(const TGeoShape* shape, const float* rays, int n, float* out, int nThreads)
 {
-  if (nThreads <= 1 || n < 4096) {
+  if (nThreads <= 1 || n < 512) {
     traceChunk(shape, rays, 0, n, out);
     return;
   }
@@ -114,6 +114,15 @@ def jit_setup(o2_src: str):
     ROOT.gInterpreter.AddIncludePath(os.path.join(o2_src, "Detectors/Base/include"))
     if not ROOT.gInterpreter.Declare(CPP):
         raise RuntimeError("JIT compilation of the tracer failed")
+    # Release the GIL around the long C++ calls: a handler thread that holds it through a
+    # multi-second trace starves every other request, and a worker thread that needs the
+    # interpreter for lazy symbol resolution while the caller holds the GIL deadlocks the
+    # whole server (observed on the first threaded trace of a surface solid).
+    for fn in (ROOT.raysvc.trace, ROOT.raysvc.loadSurface, ROOT.raysvc.loadShapeFile):
+        try:
+            fn.__release_gil__ = True
+        except AttributeError:
+            pass
 
 
 class State:
@@ -159,6 +168,11 @@ def make_handler(state: State, threads: int):
                 if not shape:
                     return self._reply_json({"ok": False, "error": f"cannot load {path}"}, 422)
                 state.shape, state.kind = shape, kind
+                # Warm-up: one single-threaded ray, so every lazy-JIT symbol of this shape's
+                # navigation path is resolved on this thread before any std::thread runs it.
+                warm_rays = np.zeros(6, dtype=np.float32); warm_rays[3] = 1.0
+                warm_out = np.empty(5, dtype=np.float32)
+                ROOT.raysvc.trace(state.shape, warm_rays, 1, warm_out, 1)
                 origin = [shape.GetOrigin()[i] for i in range(3)]
                 half = [shape.GetDX(), shape.GetDY(), shape.GetDZ()]
                 info = {"ok": True, "kind": kind,
