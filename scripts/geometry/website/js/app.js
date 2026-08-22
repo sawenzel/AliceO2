@@ -82,6 +82,12 @@ function meshViewer() {
 }
 export function sharedViewer() { return meshViewer(); }
 
+// The raytracer tab owns the bridge connection. The benchmarks tab borrows the bridge for a live
+// measurement and has to hand it back, so this is where the two find each other.
+let raytracer = null;
+export function registerRaytracer(tracer) { raytracer = tracer; }
+export function activeRaytracer() { return raytracer; }
+
 function renderMeshTab() {
   const v = meshViewer();
   const { solid, facets } = state;

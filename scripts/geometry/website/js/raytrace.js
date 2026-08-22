@@ -342,6 +342,20 @@ export class Raytracer {
     return info;
   }
 
+  /// Put back the file this view needs after something else on the page -- the benchmarks tab's
+  /// live measurement -- has had the bridge load a shape of its own. Without this the tracer would
+  /// still believe its own path is loaded and the next frame would trace the other solid.
+  async reloadBridgeShape() {
+    if (!this.bridgeReady) { return null; }
+    const wanted = this.bridgePathFor(this.view);
+    this.bridgeLoaded = null;                 // whatever it holds now, it is not this view's file
+    if (!wanted) { return null; }
+    const info = await this.remote.load({ path: wanted });
+    this.bridgeLoaded = wanted;
+    this.bridgeInfo = info;
+    return wanted;
+  }
+
   get bridgeReady() { return !!(this.remote && this.bridgeConnected); }
 
   /// The CSG views need a bridge AND a shape_*.root for this part.

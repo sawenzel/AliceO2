@@ -1,7 +1,7 @@
 // The raytracer tab's controls, counters and camera interaction.
 
 import { Raytracer, VIEWS, CSG_VIEWS, DIFF_VIEWS } from './raytrace.js';
-import { state, onPartChanged } from './app.js';
+import { state, onPartChanged, registerRaytracer } from './app.js';
 import { Viewer3D } from './viewer3d.js';
 
 // How long the camera must stand still after a drag before the frame is traced.
@@ -113,6 +113,9 @@ export function initRaytracerTab() {
 
   const canvas = document.getElementById('rt-canvas');
   const tracer = new Raytracer(canvas);
+  // The benchmarks tab's live measurement loads its own shapes on the same bridge; it asks this
+  // tracer to take the bridge back when it is done.
+  registerRaytracer(tracer);
   // Orbiting a CPU raytrace is unusable, so the drag happens on a WebGL proxy of the same part --
   // the mesh with the gold exact boundaries over it, the mesh tab's own look -- and the traced
   // frame is produced once the camera stands still.
