@@ -5,6 +5,7 @@
 #
 # Environment knobs:
 #   EVENTS=3  SEED=42  GEN=boxgen  PDG=0 (geantino)  NGUN=20  STEPLOG=0|1  NOGEANT=0|1
+#   CONFIGKEY="a=1;b=2"   extra --configKeyValues, appended to the box-gun ones
 #
 # Everything is deterministic: the seed is fixed and the run is single-threaded
 # (o2-sim-serial), so two runs differing only in the geometry representation are comparable.
@@ -24,6 +25,7 @@ NGUN=${NGUN:-20}
 PMIN=${PMIN:-1.0}
 PMAX=${PMAX:-1.0}
 STEPLOG=${STEPLOG:-0}
+CONFIGKEY=${CONFIGKEY:-}
 NOGEANT=${NOGEANT:-0}
 
 RUNDIR=$CONV/runs/$TAG
@@ -36,13 +38,16 @@ cd "$RUNDIR" || exit 1
 ARGS=(-n "$EVENTS" -g "$GEN" --seed "$SEED"
       --detectorList "EXTCAD:$RUNDIR/detectorlist.json"
       --extGeomFile "$RUNDIR/externalGeometry.json"
-      --configKeyValues "BoxGun.number=$NGUN;BoxGun.pdg=$PDG;BoxGun.prange[0]=$PMIN;BoxGun.prange[1]=$PMAX"
+      --configKeyValues "BoxGun.number=$NGUN;BoxGun.pdg=$PDG;BoxGun.prange[0]=$PMIN;BoxGun.prange[1]=$PMAX${CONFIGKEY:+;$CONFIGKEY}"
       -o o2sim)
 [ "$NOGEANT" = "1" ] && ARGS+=(--noGeant)
 
 if [ "$STEPLOG" = "1" ]; then
   export LD_PRELOAD=$SW/MCStepLogger/latest/lib/libMCStepLoggerInterceptSteps.so
   export MCSTEPLOG_OUTFILE=$RUNDIR/MCStepLoggerOutput.root
+  # the per-step ROOT tree (StepLoggerTree) is only written when MCSTEPLOG_TTREE is set;
+  # without it MCStepLogger only prints its per-volume summary to the log.
+  export MCSTEPLOG_TTREE=1
 fi
 
 /usr/bin/time -v "$B/stage/bin/o2-sim-serial" "${ARGS[@]}" "$@" > "$RUNDIR/sim.log" 2>&1
