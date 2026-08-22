@@ -204,7 +204,23 @@ export function shipsVerdict(partName, entry, summary) {
   return { ships: entry.surfaces ? 'surface' : 'mesh', source: 'inferred from what testdata/ holds' };
 }
 
-const SHIPS_LABEL = { surface: 'SURFACE', mesh: 'TESSELLATED', shape: 'CSG' };
+export const SHIPS_LABEL = { surface: 'SURFACE', mesh: 'TESSELLATED', shape: 'CSG' };
+
+/// Every representation this part carries at full quality, the cascade's own choice first.
+///
+/// A part can have more than one: `BoomCylinderInner` has both an exact sidecar and a shape.root
+/// the acceptance test passed, and it ships CSG *and* SURFACE. The mesh is named only when it is
+/// what the part ships as -- a tessellation sitting next to an exact sidecar is not a
+/// representation the part has, it is the thing the sidecar replaced.
+export function shipsKeys(primary, entry, csg) {
+  const keys = [];
+  if (primary) { keys.push(primary); }
+  if (entry && entry.surfaces && !keys.includes('surface')) { keys.push('surface'); }
+  const rejected = !!(csg && csg.acceptance && csg.acceptance.accepted === false);
+  if (entry && entry.shape && !rejected && !keys.includes('shape')) { keys.push('shape'); }
+  return keys;
+}
+
 const SHIPS_NOTE = {
   surface: 'the exact trimmed analytic faces, navigated by O2BVHSurfaceSolid',
   mesh: 'the triangle mesh, navigated by O2Tessellated -- the fallback',
@@ -356,19 +372,26 @@ export function partCard(entry, state, summary) {
   const heading = document.createElement('h3');
   heading.textContent = partName;
   const verdict = shipsVerdict(partName, part, summary);
-  if (verdict) {
+  // One badge per representation the part actually has, not one per part: the cascade's choice is
+  // first and bold, and anything else at full quality stands next to it.
+  const keys = verdict ? shipsKeys(verdict.ships, part, state && state.csg) : [];
+  keys.forEach((key, index) => {
     const badge = document.createElement('span');
-    badge.className = `badge ships ships-${verdict.ships}`;
-    badge.textContent = `ships ${SHIPS_LABEL[verdict.ships] || verdict.ships.toUpperCase()}`;
-    badge.title = `${SHIPS_NOTE[verdict.ships] || ''} (${verdict.source})`;
+    badge.className = `badge ships ships-${key}` + (index ? ' alt' : '');
+    badge.textContent = `ships ${SHIPS_LABEL[key] || key.toUpperCase()}`;
+    badge.title = `${SHIPS_NOTE[key] || ''} (${index === 0 ? `${verdict.source}; what the cascade picked` : 'also carried by this part, at full quality'})`;
     heading.append(' ', badge);
-  }
+  });
   card.appendChild(heading);
 
   if (verdict) {
     const line = document.createElement('p');
     line.className = 'muted small';
-    line.textContent = `${SHIPS_NOTE[verdict.ships] || ''} - ${verdict.source}.`;
+    line.textContent = keys.length > 1
+      ? `${SHIPS_NOTE[verdict.ships] || ''} - ${verdict.source}. This part also carries ` +
+        keys.slice(1).map(k => `${SHIPS_LABEL[k]} (${SHIPS_NOTE[k] || ''})`).join(', ') +
+        `, so every one of the ${keys.length} representations named above is available at full quality.`
+      : `${SHIPS_NOTE[verdict.ships] || ''} - ${verdict.source}.`;
     card.appendChild(line);
   }
 

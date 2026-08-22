@@ -4,7 +4,7 @@ import { listParts, loadBinary, loadJSON, loadBenchmarks, loadDeclineReasons } f
 import { parseSidecar, parseFacets } from './sidecar.js';
 import { SurfaceSolid } from './solid.js';
 import { Viewer3D } from './viewer3d.js';
-import { renderBenchmarks, csgStructure } from './charts.js';
+import { renderBenchmarks, csgStructure, shipsKeys, SHIPS_LABEL } from './charts.js';
 import { PartSelector } from './partselect.js';
 
 export const state = {
@@ -107,7 +107,9 @@ function renderMeshTab() {
   // The compact per-part line: what it is made of, how big it is, and -- for a part the CSG
   // recogniser accepted -- the composite it ships as, named in TGeo's own shape classes.
   const structure = csgStructure(state.csg);
-  const ships = state.part.ships === 'shape' ? 'CSG' : state.part.ships === 'surface' ? 'SURFACE' : 'TESSELLATED';
+  // Every representation this part has at full quality, the cascade's own pick first.
+  const ships = shipsKeys(state.part.ships, state.part, state.csg)
+    .map(key => SHIPS_LABEL[key] || key.toUpperCase()).join(' + ');
   document.getElementById('mesh-hud').textContent =
     `${state.part.name}\n` + (solid ? `${solid.nSurfaces} exact faces` : 'tessellated only -- no exact sidecar') +
     (facets ? ` / ${facets.nTriangles} triangles` : ' / no mesh') +
