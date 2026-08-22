@@ -48,27 +48,40 @@ statement for the talk.
    decline with the empty reason `declined CSG: None`. Error loudly when ROOT is unreachable and
    fix the empty reason. (This produced the false "baseline moved" in `Stream_Z` §2, reconciled
    there.)
-3. **Kernel: loose bounding boxes.** `Stick` claims 40.1 cm in z around an 11.0 cm solid (3.6×),
+3. **The CSG path forward is now measured** (`Stream_AA_FlatCSG.md`, 2026-08-22): the cell-count
+   table Tier 3 was gated on exists at last, and the feared blow-up did not happen — Bagger's
+   decliners decompose to 7–28 cells and 15/16 tessellated-but-analytic ALICE3 solids to 6–14,
+   by OCCT's own splitter at converter time, with every failure traced to a NURBS carrier
+   (making Tier-0 canonicalisation the measured prerequisite). Order of work: Tier-0
+   canonicalisation → the risk-free single-cell emitter (retires `cyl_inter_cyl` and
+   `tube_window` exactly — and with them the two known sliver rays) → balanced
+   `TGeoCompositeShape` trees for the 16 ALICE3 solids under the existing two-test acceptance.
+   A flat `TGeoBVHCSG` is legitimate but deferred behind falsifiable criteria (Stream_AA §5):
+   build it only if the trees measure too slow on the X-ray bench or at AOT-codegen time.
+   Per-part decline reasons now ship in `csg_report.json` (`whyNotCSG`) and
+   `surface_report.json` (`why_not_surface`), joined in `website_data/decline_reasons.json`
+   (78 parts, 0 missing); the empty-reason and silent-no-ROOT defects of old item 2 are fixed.
+4. **Kernel: loose bounding boxes.** `Stick` claims 40.1 cm in z around an 11.0 cm solid (3.6×),
    verified against OCCT `Bnd_Box` and the mesh (<0.1 mm apart). Costs broad-phase efficiency
    everywhere and confuses CheckOverlaps. Likely the conservative per-family boxes (full rim
    circles / full torus) propagating into `ComputeBBox`; the sub-patch cover boxes are already
    tighter — use their union.
-4. **Track 3b, the real data:** an exporter MCStepLogger trees → `events.json` (schema in
+5. **Track 3b, the real data:** an exporter MCStepLogger trees → `events.json` (schema in
    `website/README.md`; tree layout in `integration_demo/data/README`), then the website's event
    tab shows the real IRIS/Bagger transports. Data is preserved (uncommitted) in
    `integration_demo/data/` and the scratch.
-5. **Materials matching:** 26/55 IRIS volumes matched, 29 fell back to vacuum `Default`, and ten
+6. **Materials matching:** 26/55 IRIS volumes matched, 29 fell back to vacuum `Default`, and ten
    of the 26 match only by accidental string prefix (`ST0923290_01` ⊂ `ST0923290_010…_019`).
    Needs anchored/exact part-number matching.
-6. **Gate: credit the sliver.** Teach the relabel class to explain a distout mismatch whose
+7. **Gate: credit the sliver.** Teach the relabel class to explain a distout mismatch whose
    candidate crossing is `onTrimBoundary`-flagged within the trim band (Review Appendix A).
-7. **The face-normal gate column** (fourth hand-over in a row) and **the `auto`-mode
+8. **The face-normal gate column** (fourth hand-over in a row) and **the `auto`-mode
    unreliable-shipping policy** (~20 lines) — both still open, both pre-corpus items.
-8. **The talk (Track 4):** assemble from Review + Stream_Z + website; re-run the
+9. **The talk (Track 4):** assemble from Review + Stream_Z + website; re-run the
    `timingPreliminary` numbers on a quiet box; build the single-file website bundle for
    publishing (all data inlined — the Artifact CSP allows nothing external, and the bridge is
    local-only).
-9. **Standing, unchanged:** oTOF XCAF traversal; free-form surfaces; the models-are-not-legal
+10. **Standing, unchanged:** oTOF XCAF traversal; free-form surfaces; the models-are-not-legal
    overlap finding and the broken `CheckOverlaps` on our shape; `Curve2D::closestPoint` as the
    kernel hot spot; mesh healing.
 

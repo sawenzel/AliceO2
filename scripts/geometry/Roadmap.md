@@ -208,8 +208,8 @@ Layer 1 (batch replay from MCStepLogger, embedded in the website) is in
 > recursion ... flat) possible? I'd like to understand if this could have it's own place next to
 > BVHSurfaceSolid or if it is strictly not worth it."*
 
-In flight 2026-08-22: a review is building the cell-count table Tier 3 was always gated on,
+Delivered 2026-08-22 in `Stream_AA_FlatCSG.md` — verdict: legitimate but deferred behind falsifiable criteria; the cells ARE Stream_R's arrangement cells and OCCT's splitter enumerates them at converter time. (Original note: a review is building the cell-count table Tier 3 was always gated on,
 implementing the decline-reason reporting (which also fixes NEXT items 1–2's empty/silent
 declines), and will deliver a falsifiable go/no-go in `Stream_AA_FlatCSG.md`. Noted connection to
 examine: a union of arrangement cells (Stream_R §9.3) *is* a flat recursion-free CSG, so the
-"exact trims" research route and this shape may be one decision, not two.
+"exact trims" research route and this shape may be one decision, not two.)
