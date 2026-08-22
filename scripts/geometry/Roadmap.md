@@ -230,3 +230,20 @@ test-bench route was already scoped once as Stream E step 4 (the beampipe round 
 answer) — the `O2_TGeoToCAD*` scripts for it are parked in `attic/`, one needs reviving. Sampling
 the shape census of the actual Run 3 geometry (`o2-sim` geometry dump) would pick the specimens
 that matter: Pcon (beampipe, TPC field cage), Pgon, Xtru, and the composite-heavy passives.
+
+### (i) TGeo → STEP: make the C++ geometry CAD-editable, and close the loop
+
+> *"We have existing ALICE geometry made out of single CSG shapes. What about writing a converter
+> of this geometry into STEP? It would make the C++ generated geometry CAD editable and CAD tool
+> accessible. We can thereafter use the generated STEPs as test examples for the reverse
+> conversion process?"*  (Sandro, 2026-08-22)
+
+Why this closes the loop: a STEP generated from a known TGeo makes the **original TGeo an exact
+oracle** for the reverse conversion — no tolerance band, the right answer is known by
+construction — which is precisely what (h)'s Pcon/Pgon bench and Stream E §4's beampipe round
+trip wanted. And it is a deliverable by itself: detector geometry becomes editable in CAD tools.
+What exists to build on: ROOT's own `geocad` module (`TGeoToStep`, OCC-backed) — check whether
+our ROOT build enables it before writing anything; the parked `attic/O2_TGeoToCAD*.py` attempts;
+and OCCT's `STEPControl_Writer` reachable from pythonOCC, where TGeo primitives map naturally
+(tube→cylinder+planes, pcon→revolution stack, composite→`BRepAlgoAPI` boolean). Acceptance is
+the round trip: TGeo → STEP → converter → gate, scored against the source TGeo itself.
