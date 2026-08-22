@@ -141,23 +141,28 @@ says "bridge offline" and stays on the local engine — an absent bridge is neve
 
 ### ms per frame, per engine
 
-A view served by exactly one engine has its whole frame time attributed to that engine, so the two
-are directly comparable; a frame in which both ran (the difference view) is not apportioned between
-them and is not reported. The timing pane shows the last such frame per engine with its ms, its ray
-count and its rate, and says when the two frames used a different camera or resolution.
+The pane compares **the same picture** -- the exact surfaces -- asked of each engine in turn. Each
+of those two views is served by exactly one engine, so the whole frame is that engine's work and
+the two are directly comparable; a frame in which both ran (the difference view) is not apportioned
+between them and does not appear, and neither does a mesh or parity frame, which is a different
+question. The pane says so when the two frames used a different camera or resolution.
 **"time both engines"** renders the matched pair at one camera. Measured here on `Bucket` at
-480 x 247 with the scissor on, 8 local workers against the service on the same 10-core box:
+720p (960 x 493, 152 274 rays after the scissor), warm, four consecutive matched pairs, 8 local
+workers against the service on the same shared 10-core box:
 
-| engine | ms/frame | rays | rate |
-| --- | --- | --- | --- |
-| local (8 workers) | 104 | 126 000 | 1.21 Mray/s |
-| bridge 127.0.0.1:8077 | 175 | 126 000 | 720 kray/s |
+| engine | ms/frame, four pairs | rate |
+| --- | --- | --- |
+| local (8 workers) | 134, 143, 147, 158 | 0.96-1.14 Mray/s |
+| bridge 127.0.0.1:8077 | 271, 278, 281, 297 | 513-562 kray/s |
+
+The ratio the pane reports over those four pairs is **bridge / local 1.84-2.07x**.
 
 That is a statement about *these two implementations as deployed*, not about the kernels: the local
 engine is eight workers and the bridge is one single-threaded Python service reached over HTTP, so
-the ratio carries a process boundary, a JSON/octet-stream round trip and a thread count, not just
-the maths. What it is good for is showing that the real kernel answers a full frame of rays in a
-fraction of a second, on the same camera, next to the port.
+the ratio carries a process boundary, an octet-stream round trip and a thread count, not just the
+maths. The spread across four consecutive pairs on a box with other tenants on it is the reason
+four are quoted rather than one. What it is good for is showing that the real kernel answers a full
+frame of rays in a fraction of a second, on the same camera, next to the port.
 
 ### What the engine difference measured
 

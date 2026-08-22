@@ -92,8 +92,10 @@ export function initRaytracerTab() {
         </div>
         <div class="pane">
           <h3>ms per frame, per engine</h3>
-          <p class="muted small">Each row is the last frame that engine rendered <em>on its own</em>: the whole
-            frame was its work, so the two are directly comparable when the camera and the resolution agree.</p>
+          <p class="muted small">The same picture &mdash; the exact surfaces &mdash; asked of each engine in
+            turn. Each row is the last such frame, and the whole of it was that engine's work, so the two are
+            directly comparable when the camera and the resolution agree. A mesh or parity frame is a
+            different question and does not appear here.</p>
           <table id="rt-perf"></table>
           <div class="row" style="margin-top:8px">
             <button id="rt-timeboth">time both engines</button>
@@ -143,7 +145,8 @@ export function initRaytracerTab() {
       viewSelect.value = 'mesh';
       tracer.view = 'mesh';
     }
-    for (const id of ['rt-connect', 'rt-timeboth', 'rt-reflect']) {
+    // The mirror still works on a mesh-only part: its bounce goes to the triangles.
+    for (const id of ['rt-connect', 'rt-timeboth']) {
       const el = document.getElementById(id);
       if (el) { el.disabled = !exact; }
     }

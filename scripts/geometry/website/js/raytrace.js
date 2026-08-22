@@ -19,6 +19,11 @@ export const VIEWS = [
   { key: 'parityMesh', label: 'watertightness: mesh' },
 ];
 
+/// The two views the engine timing pane compares: the SAME picture -- the exact surfaces -- asked
+/// of each engine in turn. A mesh frame or a parity frame is a different question and is not put
+/// next to a bridge frame, however single-engine it is.
+export const PERF_VIEWS = { exact: 'local', exactBridge: 'remote' };
+
 /// Which engine answers the rays of each view. A view served by exactly one engine is a view
 /// whose frame time IS that engine's frame time, which is what makes the two comparable.
 export const VIEW_ENGINES = {
@@ -326,12 +331,12 @@ export class Raytracer {
         this.rendering = false;
         const ms = Math.round(performance.now() - started);
         this.counters.ms = ms;
-        const engines = VIEW_ENGINES[this.view] || [];
-        if (engines.length === 1 && !this.counters.error && this.counters.raysTraced > 0) {
-          this.perf[engines[0]] = {
+        const slot = PERF_VIEWS[this.view];
+        if (slot && !this.counters.error && this.counters.raysTraced > 0) {
+          this.perf[slot] = {
             ms, rays: this.counters.raysTraced, width: this.width, height: this.height,
             view: this.view, camera: this.cameraKey(),
-            engine: engines[0] === 'local' ? this.local.name : (this.remote ? this.remote.name : 'bridge'),
+            engine: slot === 'local' ? this.local.name : (this.remote ? this.remote.name : 'bridge'),
           };
         }
         if (this.onDone) { this.onDone(this.counters); }
