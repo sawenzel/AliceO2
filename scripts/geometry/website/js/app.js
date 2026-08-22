@@ -1,7 +1,7 @@
 // Page wiring: the part selector, the tabs, and the state every tab shares.
 
 import { listParts, loadBinary, loadBenchmarks } from './data.js';
-import { parseSidecar, parseFacets, surfaceTypeName } from './sidecar.js';
+import { parseSidecar, parseFacets } from './sidecar.js';
 import { SurfaceSolid } from './solid.js';
 import { Viewer3D } from './viewer3d.js';
 import { renderBenchmarks } from './charts.js';

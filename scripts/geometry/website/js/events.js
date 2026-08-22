@@ -11,7 +11,7 @@ import { Viewer3D } from './viewer3d.js';
 import { loadEvents, loadBinary } from './data.js';
 import { parseSidecar, parseFacets } from './sidecar.js';
 import { SurfaceSolid } from './solid.js';
-import { state, onPartChanged } from './app.js';
+import { state } from './app.js';
 
 // Colour by species, falling back to charge. Identity is never colour alone here either: the
 // legend names every species that appears in the loaded file.
