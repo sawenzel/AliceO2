@@ -1,0 +1,180 @@
+// Page wiring: the part selector, the tabs, and the state every tab shares.
+
+import { listParts, loadBinary, loadBenchmarks } from './data.js';
+import { parseSidecar, parseFacets, surfaceTypeName } from './sidecar.js';
+import { SurfaceSolid } from './solid.js';
+import { Viewer3D } from './viewer3d.js';
+import { renderBenchmarks } from './charts.js';
+
+export const state = {
+  part: null,          // the manifest entry
+  parsed: null,        // parseSidecar result
+  solid: null,         // SurfaceSolid
+  sidecarBuffer: null, // the raw bytes, so a worker can re-parse them itself
+  facets: null,        // { nTriangles, positions }
+  listeners: [],
+};
+
+export function onPartChanged(fn) { state.listeners.push(fn); }
+
+const statusEl = document.getElementById('load-status');
+function setStatus(text, isError = false) {
+  statusEl.textContent = text;
+  statusEl.className = isError ? 'status error' : 'status';
+}
+
+// --- tabs --------------------------------------------------------------------------------------
+
+const tabInitialisers = {};
+const tabInitialised = {};
+export function registerTab(name, initialiser) { tabInitialisers[name] = initialiser; }
+
+let activeTab = 'mesh';
+function selectTab(name) {
+  activeTab = name;
+  for (const button of document.querySelectorAll('nav.tabs button')) {
+    button.setAttribute('aria-selected', String(button.dataset.tab === name));
+  }
+  for (const section of document.querySelectorAll('section.tab')) {
+    section.classList.toggle('active', section.id === `tab-${name}`);
+  }
+  const init = tabInitialisers[name];
+  if (init && !tabInitialised[name]) { tabInitialised[name] = true; init(); }
+  window.dispatchEvent(new CustomEvent('tabshown', { detail: { tab: name } }));
+}
+document.getElementById('tabs').addEventListener('click', (e) => {
+  const button = e.target.closest('button[data-tab]');
+  if (button) { selectTab(button.dataset.tab); }
+});
+
+// --- the mesh viewer -----------------------------------------------------------------------------
+
+let viewer = null;
+function meshViewer() {
+  if (!viewer) {
+    viewer = new Viewer3D(document.getElementById('mesh-viewport'));
+    document.getElementById('opt-wireframe').addEventListener('change', (e) => viewer.setWireframe(e.target.checked));
+    document.getElementById('opt-mesh').addEventListener('change', (e) => viewer.setMeshVisible(e.target.checked));
+    document.getElementById('opt-edges').addEventListener('change', (e) => viewer.setEdgesVisible(e.target.checked));
+    document.getElementById('btn-frame').addEventListener('click', () => viewer.frame(state.solid ? state.solid.aabb : [-1, -1, -1, 1, 1, 1]));
+  }
+  return viewer;
+}
+export function sharedViewer() { return meshViewer(); }
+
+function fact(dl, key, value) {
+  const dt = document.createElement('dt'); dt.textContent = key;
+  const dd = document.createElement('dd');
+  if (value && value.nodeType) { dd.appendChild(value); } else { dd.textContent = value; }
+  dl.appendChild(dt); dl.appendChild(dd);
+}
+
+function renderMeshTab() {
+  const v = meshViewer();
+  const { solid, facets, parsed } = state;
+  if (facets) {
+    v.setMesh(facets.positions);
+    v.setWireframe(document.getElementById('opt-wireframe').checked);
+  } else {
+    v.clearMesh();
+  }
+  const polylines = [];
+  for (const surface of solid.surfaces) {
+    try { for (const loop of surface.patchOutline()) { polylines.push(loop); } } catch (e) { /* a face whose outline cannot be sampled is simply not drawn */ }
+  }
+  v.setExactEdges(polylines);
+  v.setGrid(solid.aabb);
+  v.setMeshVisible(document.getElementById('opt-mesh').checked);
+  v.setEdgesVisible(document.getElementById('opt-edges').checked);
+  v.frame(solid.aabb);
+
+  const box = solid.aabb;
+  document.getElementById('mesh-hud').textContent =
+    `${state.part.name}\n${solid.nSurfaces} exact faces` +
+    (facets ? ` / ${facets.nTriangles} triangles` : ' / no mesh') +
+    `\nbbox ${(box[3] - box[0]).toFixed(2)} x ${(box[4] - box[1]).toFixed(2)} x ${(box[5] - box[2]).toFixed(2)} cm`;
+
+  const dl = document.getElementById('mesh-facts');
+  dl.innerHTML = '';
+  fact(dl, 'sidecar', `version ${parsed.version}, ${(parsed.byteLength / 1024).toFixed(1)} kB`);
+  fact(dl, 'faces', String(solid.nSurfaces));
+  fact(dl, 'by type', Object.entries(solid.counts).map(([k, n]) => `${n} ${k}`).join(', ') || '-');
+  fact(dl, 'wire-trimmed', `${solid.wireTrimFaces} face(s)`);
+  fact(dl, 'B-spline trims', `${solid.bsplineTrimFaces} face(s)`);
+  fact(dl, 'model tolerance', parsed.modelToleranceStated ? `${parsed.modelTolerance.toExponential(2)} cm` : 'not stated (v1)');
+  fact(dl, 'worst join gap', `${solid.worstJoinGap.toExponential(2)} cm (band ${solid.joinTolerance.toExponential(1)})`);
+  fact(dl, 'triangles', facets ? String(facets.nTriangles) : 'no facets_*.bin');
+  const problems = document.createElement('span');
+  if (solid.failed.length || solid.unsupported.length) {
+    problems.className = 'badge bad';
+    problems.textContent = `${solid.failed.length} rejected, ${solid.unsupported.length} unsupported`;
+    problems.title = [...solid.failed, ...solid.unsupported].map(f => `#${f.index}: ${f.reason}`).join('\n');
+  } else {
+    problems.className = 'badge ok';
+    problems.textContent = 'all records built';
+  }
+  fact(dl, 'records', problems);
+}
+
+// --- loading a part ------------------------------------------------------------------------------
+
+async function loadPart(entry) {
+  setStatus(`loading ${entry.name}...`);
+  const sidecarBuffer = await loadBinary(`testdata/${entry.surfaces}`);
+  const parsed = parseSidecar(sidecarBuffer, entry.surfaces);
+  const solid = new SurfaceSolid(parsed, entry.name);
+  let facets = null;
+  if (entry.facets) {
+    try { facets = parseFacets(await loadBinary(`testdata/${entry.facets}`), entry.facets); } catch (e) { facets = null; }
+  }
+  state.part = entry;
+  state.parsed = parsed;
+  state.solid = solid;
+  state.sidecarBuffer = sidecarBuffer;
+  state.facets = facets;
+
+  const notes = [];
+  if (parsed.warnings.length) { notes.push(parsed.warnings.length + ' warning(s)'); }
+  if (solid.failed.length) { notes.push(`${solid.failed.length} record(s) rejected`); }
+  if (solid.unsupported.length) { notes.push(`${solid.unsupported.length} unsupported record(s)`); }
+  setStatus(`${entry.name}: ${solid.nSurfaces} faces` + (facets ? `, ${facets.nTriangles} triangles` : '') +
+            (notes.length ? ` (${notes.join('; ')})` : ''), solid.failed.length > 0);
+
+  renderMeshTab();
+  for (const fn of state.listeners) {
+    try { fn(state); } catch (e) { console.error(e); }
+  }
+}
+
+// --- boot -------------------------------------------------------------------------------------
+
+registerTab('bench', async () => {
+  const container = document.getElementById('bench-body');
+  container.textContent = 'loading...';
+  try { renderBenchmarks(container, await loadBenchmarks()); } catch (e) { container.textContent = `benchmarks: ${e.message}`; }
+});
+
+async function boot() {
+  const select = document.getElementById('part-select');
+  const { parts, reason } = await listParts();
+  if (!parts.length) {
+    setStatus(reason, true);
+    document.getElementById('mesh-hud').textContent = 'no test data';
+    return;
+  }
+  for (const entry of parts) {
+    const option = document.createElement('option');
+    option.value = entry.name;
+    option.textContent = entry.name;
+    select.appendChild(option);
+  }
+  select.addEventListener('change', () => {
+    const entry = parts.find(p => p.name === select.value);
+    if (entry) { loadPart(entry).catch(e => setStatus(`${entry.name}: ${e.message}`, true)); }
+  });
+  const first = parts.find(p => p.name === 'Bucket') || parts[0];
+  select.value = first.name;
+  await loadPart(first).catch(e => setStatus(`${first.name}: ${e.message}`, true));
+}
+
+boot();

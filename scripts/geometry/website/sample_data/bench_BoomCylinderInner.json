@@ -1,0 +1,69 @@
+{
+  "meta": {
+    "part": "BoomCylinderInner",
+    "synthetic": true,
+    "note": "SYNTHETIC placeholder in the Track-2 schema; replace with scripts/geometry/website_data/*.json",
+    "faces": 6,
+    "triangles": 1612
+  },
+  "representations": [
+    {
+      "name": "surface",
+      "functions": {
+        "contains": {
+          "nsPerCall": 79
+        },
+        "distFromOutside": {
+          "nsPerCall": 189.6
+        },
+        "distFromInside": {
+          "nsPerCall": 165.9
+        },
+        "safety": {
+          "nsPerCall": 126.4
+        }
+      },
+      "accuracy": {
+        "capacityRelativeDeviation": 2.8e-7,
+        "disagreements": {},
+        "unexplained": {}
+      },
+      "xray": {
+        "lost": 0,
+        "extra": 0,
+        "unterminated": 0,
+        "parity": 0,
+        "raysTotal": 4096
+      }
+    },
+    {
+      "name": "mesh",
+      "functions": {
+        "contains": {
+          "nsPerCall": 3476
+        },
+        "distFromOutside": {
+          "nsPerCall": 8342.4
+        },
+        "distFromInside": {
+          "nsPerCall": 7299.6
+        },
+        "safety": {
+          "nsPerCall": 5561.6
+        }
+      },
+      "accuracy": {
+        "capacityRelativeDeviation": null,
+        "disagreements": {},
+        "unexplained": {}
+      },
+      "xray": {
+        "lost": 0,
+        "extra": 0,
+        "unterminated": 0,
+        "parity": 0,
+        "raysTotal": 4096
+      }
+    }
+  ]
+}

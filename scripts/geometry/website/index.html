@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Exact CAD surfaces, in the browser</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230e1116'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%23ffc857' stroke-width='2.5'/%3E%3Cpath d='M4 22 L28 10' stroke='%233987e5' stroke-width='2.5'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="site">
+  <h1>Exact CAD surfaces, in the browser</h1>
+  <p class="tagline">The trimmed analytic B-rep faces of a converted CAD part, rendered from the same
+    <code>surfaces_*.bin</code> sidecar the O2 kernel navigates &mdash; next to the triangle mesh they replace.</p>
+  <div class="toolbar">
+    <label>part
+      <select id="part-select"></select>
+    </label>
+    <span id="load-status" class="status"></span>
+  </div>
+  <nav class="tabs" id="tabs" role="tablist">
+    <button role="tab" data-tab="mesh" aria-selected="true">Mesh viewer</button>
+    <button role="tab" data-tab="raytracer" aria-selected="false">Exact raytracer</button>
+    <button role="tab" data-tab="bench" aria-selected="false">Benchmarks</button>
+    <button role="tab" data-tab="events" aria-selected="false">Event display</button>
+    <button role="tab" data-tab="check" aria-selected="false">Self-check</button>
+    <button role="tab" data-tab="about" aria-selected="false">About</button>
+  </nav>
+</header>
+
+<main>
+
+<section class="tab active" id="tab-mesh">
+  <div class="split">
+    <div class="viewport" id="mesh-viewport"><div class="hud" id="mesh-hud"></div></div>
+    <div>
+      <div class="pane">
+        <h3>View</h3>
+        <div class="row"><label><input type="checkbox" id="opt-wireframe"> wireframe (show the facets)</label></div>
+        <div class="row"><label><input type="checkbox" id="opt-mesh" checked> tessellation</label></div>
+        <div class="row"><label><input type="checkbox" id="opt-edges" checked> exact trim edges</label></div>
+        <div class="row"><button id="btn-frame">re-frame</button></div>
+        <p class="muted small">Drag to orbit, wheel to zoom, shift-drag to pan. The gold loops are the
+          <em>exact</em> face boundaries evaluated from the sidecar; where the grey mesh cuts a corner off
+          them, that is the tessellation error, at this part's mesh precision.</p>
+      </div>
+      <div class="pane">
+        <h3>Part</h3>
+        <dl class="facts" id="mesh-facts"></dl>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="tab" id="tab-raytracer">
+  <p class="muted">Loading&hellip;</p>
+</section>
+
+<section class="tab" id="tab-bench">
+  <div id="bench-body"></div>
+</section>
+
+<section class="tab" id="tab-events">
+  <p class="muted">Loading&hellip;</p>
+</section>
+
+<section class="tab" id="tab-check">
+  <div class="pane">
+    <h3>Self-check</h3>
+    <p class="muted small">A deterministic ray grid against the parts in <code>testdata/</code>: every enter must
+      have an exit (parity closure), and the analytic distances through a box and a tube must come back exact.
+      The counts printed here are the ones quoted in <code>README.md</code>.</p>
+    <div class="row">
+      <button id="btn-selfcheck" class="primary">run self-check</button>
+      <span id="selfcheck-status" class="status"></span>
+    </div>
+    <pre class="log" id="selfcheck-log"></pre>
+  </div>
+</section>
+
+<section class="tab" id="tab-about">
+  <div class="prose">
+    <h2>What this is</h2>
+    <p>A CAD part converted for simulation can be carried into the geometry in three ways: as native CSG
+      primitives, as its real trimmed analytic surfaces, or as a triangle mesh. This page reads the second
+      one &mdash; the <code>surfaces_*.bin</code> sidecar &mdash; and renders it by intersecting rays with the
+      actual planes, cylinders, cones, spheres and tori, trimmed by their real boundary wires. Nothing here is
+      tessellated: a cylinder shades smoothly because it <em>is</em> a cylinder.</p>
+    <p>Everything is served from this directory. There is no CDN, no external request and no server-side
+      component; the raytracer is JavaScript in a worker.</p>
+    <h2>Provenance of the maths</h2>
+    <p>The kernels are a port of <code>Detectors/Base/src/BoundedSurface.h</code>, and the sidecar parser
+      mirrors <code>Detectors/Base/src/O2SurfaceSolidIO.cxx</code> record for record. See
+      <code>scripts/geometry/website/README.md</code> for what is supported, what is approximated and how the
+      self-check numbers were obtained.</p>
+  </div>
+</section>
+
+</main>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
