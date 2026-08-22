@@ -1,0 +1,706 @@
+{
+ "parts": [
+  {
+   "name": "BasePin",
+   "model": "Bagger",
+   "lid": "0:1:1:2",
+   "shipsAs": "csg",
+   "whyNotCSG": null,
+   "whyNotSurface": null,
+   "nFaces": 3
+  },
+  {
+   "name": "Base",
+   "model": "Bagger",
+   "lid": "0:1:1:3",
+   "shipsAs": "surface",
+   "whyNotCSG": "7 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built) [44 faces: 16 cylinder, 28 plane; 7 axis cluster(s)]",
+   "whyNotSurface": null,
+   "nFaces": 44
+  },
+  {
+   "name": "Boom",
+   "model": "Bagger",
+   "lid": "0:1:1:4",
+   "shipsAs": "surface",
+   "whyNotCSG": "6 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built) [31 faces: 14 cylinder, 17 plane; 6 axis cluster(s)]",
+   "whyNotSurface": null,
+   "nFaces": 31
+  },
+  {
+   "name": "Stick",
+   "model": "Bagger",
+   "lid": "0:1:1:5",
+   "shipsAs": "surface",
+   "whyNotCSG": "6 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built) [24 faces: 12 cylinder, 12 plane; 6 axis cluster(s)]",
+   "whyNotSurface": null,
+   "nFaces": 24
+  },
+  {
+   "name": "Bucket",
+   "model": "Bagger",
+   "lid": "0:1:1:6",
+   "shipsAs": "surface",
+   "whyNotCSG": "toroidal faces: 2 of 97 (out of the recogniser's scope)",
+   "whyNotSurface": null,
+   "nFaces": 97
+  },
+  {
+   "name": "BucketLink2",
+   "model": "Bagger",
+   "lid": "0:1:1:7",
+   "shipsAs": "surface",
+   "whyNotCSG": "3 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built) [23 faces: 11 cylinder, 12 plane; 3 axis cluster(s)]",
+   "whyNotSurface": null,
+   "nFaces": 23
+  },
+  {
+   "name": "BucketLink1",
+   "model": "Bagger",
+   "lid": "0:1:1:8",
+   "shipsAs": "surface",
+   "whyNotCSG": "a planar face is neither a cap nor a wedge of any axis cluster [22 faces: 10 cylinder, 12 plane; 2 axis cluster(s)]",
+   "whyNotSurface": null,
+   "nFaces": 22
+  },
+  {
+   "name": "BoomCylinderOuter",
+   "model": "Bagger",
+   "lid": "0:1:1:9",
+   "shipsAs": "csg",
+   "whyNotCSG": null,
+   "whyNotSurface": null,
+   "nFaces": 8
+  },
+  {
+   "name": "BoomCylinderInner",
+   "model": "Bagger",
+   "lid": "0:1:1:10",
+   "shipsAs": "csg",
+   "whyNotCSG": null,
+   "whyNotSurface": null,
+   "nFaces": 6
+  },
+  {
+   "name": "StickCylinderInner",
+   "model": "Bagger",
+   "lid": "0:1:1:11",
+   "shipsAs": "csg",
+   "whyNotCSG": null,
+   "whyNotSurface": null,
+   "nFaces": 6
+  },
+  {
+   "name": "StickCylinderOuter",
+   "model": "Bagger",
+   "lid": "0:1:1:12",
+   "shipsAs": "csg",
+   "whyNotCSG": null,
+   "whyNotSurface": null,
+   "nFaces": 8
+  },
+  {
+   "name": "BucketCylinderInner",
+   "model": "Bagger",
+   "lid": "0:1:1:13",
+   "shipsAs": "csg",
+   "whyNotCSG": null,
+   "whyNotSurface": null,
+   "nFaces": 6
+  },
+  {
+   "name": "BucketCylinderOuter",
+   "model": "Bagger",
+   "lid": "0:1:1:14",
+   "shipsAs": "csg",
+   "whyNotCSG": null,
+   "whyNotSurface": null,
+   "nFaces": 10
+  },
+  {
+   "name": "SOLID",
+   "model": "ALICE3",
+   "lid": "0:1:1:5",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 4 of 50 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": "2 face(s): bspline face extraction not implemented yet",
+   "nFaces": 50
+  },
+  {
+   "name": "ST2487455_01",
+   "model": "ALICE3",
+   "lid": "0:1:1:8",
+   "shipsAs": "surface",
+   "whyNotCSG": "8 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built) [66 faces: 2 cone, 31 cylinder, 33 plane; 8 axis cluster(s)]",
+   "whyNotSurface": null,
+   "nFaces": 66
+  },
+  {
+   "name": "ST2487455_002",
+   "model": "ALICE3",
+   "lid": "0:1:1:9",
+   "shipsAs": "surface",
+   "whyNotCSG": "toroidal faces: 1 of 6 (out of the recogniser's scope)",
+   "whyNotSurface": null,
+   "nFaces": 6
+  },
+  {
+   "name": "ST2487455_003",
+   "model": "ALICE3",
+   "lid": "0:1:1:10",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 40 of 245 (surface kind outside plane/cylinder/cone/sphere); toroidal faces: 120 of 245 (out of the recogniser's scope)",
+   "whyNotSurface": "40 face(s): bspline face extraction not implemented yet",
+   "nFaces": 245
+  },
+  {
+   "name": "ST1A38495_01",
+   "model": "ALICE3",
+   "lid": "0:1:1:11",
+   "shipsAs": "surface",
+   "whyNotCSG": "19 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built) [65 faces: 9 cone, 36 cylinder, 20 plane; 19 axis cluster(s)]",
+   "whyNotSurface": null,
+   "nFaces": 65
+  },
+  {
+   "name": "ST1A38526_01",
+   "model": "ALICE3",
+   "lid": "0:1:1:12",
+   "shipsAs": "surface",
+   "whyNotCSG": "13 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built) [53 faces: 9 cone, 24 cylinder, 20 plane; 13 axis cluster(s)]",
+   "whyNotSurface": null,
+   "nFaces": 53
+  },
+  {
+   "name": "ST1A38476_01",
+   "model": "ALICE3",
+   "lid": "0:1:1:14",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 40 of 148 (surface kind outside plane/cylinder/cone/sphere); toroidal faces: 11 of 148 (out of the recogniser's scope)",
+   "whyNotSurface": "19 face(s): bspline face extraction not implemented yet; 18 face(s): extrusion face extraction not implemented yet; 3 face(s): revolution face extraction not implemented yet",
+   "nFaces": 148
+  },
+  {
+   "name": "ST1A38494_01",
+   "model": "ALICE3",
+   "lid": "0:1:1:16",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 14 of 22 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": "14 face(s): extrusion face extraction not implemented yet",
+   "nFaces": 22
+  },
+  {
+   "name": "ST1A38494_002",
+   "model": "ALICE3",
+   "lid": "0:1:1:17",
+   "shipsAs": "csg",
+   "whyNotCSG": null,
+   "whyNotSurface": null,
+   "nFaces": 6
+  },
+  {
+   "name": "ST1A38494_003",
+   "model": "ALICE3",
+   "lid": "0:1:1:18",
+   "shipsAs": "csg",
+   "whyNotCSG": null,
+   "whyNotSurface": null,
+   "nFaces": 6
+  },
+  {
+   "name": "ST1A38494_004",
+   "model": "ALICE3",
+   "lid": "0:1:1:19",
+   "shipsAs": "surface",
+   "whyNotCSG": "a planar face is neither a cap nor a wedge of any axis cluster [10 faces: 2 cylinder, 8 plane; 1 axis cluster(s)]",
+   "whyNotSurface": null,
+   "nFaces": 10
+  },
+  {
+   "name": "ST1A38486_01",
+   "model": "ALICE3",
+   "lid": "0:1:1:20",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 40 of 148 (surface kind outside plane/cylinder/cone/sphere); toroidal faces: 11 of 148 (out of the recogniser's scope)",
+   "whyNotSurface": "19 face(s): bspline face extraction not implemented yet; 18 face(s): extrusion face extraction not implemented yet; 3 face(s): revolution face extraction not implemented yet",
+   "nFaces": 148
+  },
+  {
+   "name": "ST2487457_01",
+   "model": "ALICE3",
+   "lid": "0:1:1:21",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 69 of 996 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": "69 face(s): bspline face extraction not implemented yet",
+   "nFaces": 996
+  },
+  {
+   "name": "ST2487459_01",
+   "model": "ALICE3",
+   "lid": "0:1:1:27",
+   "shipsAs": "surface",
+   "whyNotCSG": "toroidal faces: 82 of 202 (out of the recogniser's scope)",
+   "whyNotSurface": null,
+   "nFaces": 202
+  },
+  {
+   "name": "ST2487459_002",
+   "model": "ALICE3",
+   "lid": "0:1:1:28",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 2 of 10 (surface kind outside plane/cylinder/cone/sphere); toroidal faces: 2 of 10 (out of the recogniser's scope)",
+   "whyNotSurface": "2 face(s): revolution face extraction not implemented yet",
+   "nFaces": 10
+  },
+  {
+   "name": "ST2487459_003",
+   "model": "ALICE3",
+   "lid": "0:1:1:29",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 2 of 10 (surface kind outside plane/cylinder/cone/sphere); toroidal faces: 2 of 10 (out of the recogniser's scope)",
+   "whyNotSurface": "2 face(s): revolution face extraction not implemented yet",
+   "nFaces": 10
+  },
+  {
+   "name": "ST2487459_004",
+   "model": "ALICE3",
+   "lid": "0:1:1:30",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 2 of 10 (surface kind outside plane/cylinder/cone/sphere); toroidal faces: 2 of 10 (out of the recogniser's scope)",
+   "whyNotSurface": "2 face(s): revolution face extraction not implemented yet",
+   "nFaces": 10
+  },
+  {
+   "name": "ST2487461_01",
+   "model": "ALICE3",
+   "lid": "0:1:1:31",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 69 of 128 (surface kind outside plane/cylinder/cone/sphere); toroidal faces: 4 of 128 (out of the recogniser's scope)",
+   "whyNotSurface": "46 face(s): bspline face extraction not implemented yet; 23 face(s): extrusion face extraction not implemented yet",
+   "nFaces": 128
+  },
+  {
+   "name": "ST2487721_01",
+   "model": "ALICE3",
+   "lid": "0:1:1:32",
+   "shipsAs": "surface",
+   "whyNotCSG": "7 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built) [32 faces: 8 cone, 20 cylinder, 4 plane; 7 axis cluster(s)]",
+   "whyNotSurface": null,
+   "nFaces": 32
+  },
+  {
+   "name": "ST2487462_01",
+   "model": "ALICE3",
+   "lid": "0:1:1:33",
+   "shipsAs": "surface",
+   "whyNotCSG": "toroidal faces: 14 of 80 (out of the recogniser's scope)",
+   "whyNotSurface": null,
+   "nFaces": 80
+  },
+  {
+   "name": "ST1829909_01",
+   "model": "ALICE3",
+   "lid": "0:1:1:35",
+   "shipsAs": "surface",
+   "whyNotCSG": "toroidal faces: 16 of 1052 (out of the recogniser's scope)",
+   "whyNotSurface": null,
+   "nFaces": 1052
+  },
+  {
+   "name": "ST1829909_002",
+   "model": "ALICE3",
+   "lid": "0:1:1:36",
+   "shipsAs": "surface",
+   "whyNotCSG": "toroidal faces: 20 of 965 (out of the recogniser's scope)",
+   "whyNotSurface": null,
+   "nFaces": 965
+  },
+  {
+   "name": "ST1829909_003",
+   "model": "ALICE3",
+   "lid": "0:1:1:37",
+   "shipsAs": "surface",
+   "whyNotCSG": "toroidal faces: 20 of 236 (out of the recogniser's scope)",
+   "whyNotSurface": null,
+   "nFaces": 236
+  },
+  {
+   "name": "ST1829909_004",
+   "model": "ALICE3",
+   "lid": "0:1:1:38",
+   "shipsAs": "surface",
+   "whyNotCSG": "toroidal faces: 33 of 720 (out of the recogniser's scope)",
+   "whyNotSurface": null,
+   "nFaces": 720
+  },
+  {
+   "name": "ST1782525_01",
+   "model": "ALICE3",
+   "lid": "0:1:1:39",
+   "shipsAs": "surface",
+   "whyNotCSG": "toroidal faces: 12 of 50 (out of the recogniser's scope)",
+   "whyNotSurface": null,
+   "nFaces": 50
+  },
+  {
+   "name": "ST0923290_01",
+   "model": "ALICE3",
+   "lid": "0:1:1:41",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 274 of 352 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": "68 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cone but recognized quadric boundary edge is not axis-aligned in (phi, h/theta); 28 face(s): bspline face extraction not implemented yet; 8 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cylinder but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
+   "nFaces": 352
+  },
+  {
+   "name": "ST0923290_002",
+   "model": "ALICE3",
+   "lid": "0:1:1:42",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
+   "nFaces": 24
+  },
+  {
+   "name": "ST0923290_003",
+   "model": "ALICE3",
+   "lid": "0:1:1:43",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
+   "nFaces": 24
+  },
+  {
+   "name": "ST0923290_004",
+   "model": "ALICE3",
+   "lid": "0:1:1:44",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
+   "nFaces": 24
+  },
+  {
+   "name": "ST0923290_005",
+   "model": "ALICE3",
+   "lid": "0:1:1:45",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
+   "nFaces": 24
+  },
+  {
+   "name": "ST0923290_006",
+   "model": "ALICE3",
+   "lid": "0:1:1:46",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 29 of 45 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": "6 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cone but recognized quadric boundary edge is not axis-aligned in (phi, h/theta); 5 face(s): bspline face extraction not implemented yet; 3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cylinder but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
+   "nFaces": 45
+  },
+  {
+   "name": "ST0923290_007",
+   "model": "ALICE3",
+   "lid": "0:1:1:47",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 29 of 45 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": "6 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cone but recognized quadric boundary edge is not axis-aligned in (phi, h/theta); 5 face(s): bspline face extraction not implemented yet; 3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cylinder but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
+   "nFaces": 45
+  },
+  {
+   "name": "ST0923290_008",
+   "model": "ALICE3",
+   "lid": "0:1:1:48",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 29 of 45 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": "6 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cone but recognized quadric boundary edge is not axis-aligned in (phi, h/theta); 5 face(s): bspline face extraction not implemented yet; 3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cylinder but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
+   "nFaces": 45
+  },
+  {
+   "name": "ST0923290_009",
+   "model": "ALICE3",
+   "lid": "0:1:1:49",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 29 of 45 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": "6 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cone but recognized quadric boundary edge is not axis-aligned in (phi, h/theta); 5 face(s): bspline face extraction not implemented yet; 3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cylinder but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
+   "nFaces": 45
+  },
+  {
+   "name": "ST0923290_010",
+   "model": "ALICE3",
+   "lid": "0:1:1:50",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 29 of 86 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": "6 face(s): bspline face extraction not implemented yet",
+   "nFaces": 86
+  },
+  {
+   "name": "ST0923290_011",
+   "model": "ALICE3",
+   "lid": "0:1:1:51",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 161 of 193 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": "28 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cone but recognized quadric boundary edge is not axis-aligned in (phi, h/theta); 26 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cylinder but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
+   "nFaces": 193
+  },
+  {
+   "name": "ST0923290_012",
+   "model": "ALICE3",
+   "lid": "0:1:1:52",
+   "shipsAs": "surface",
+   "whyNotCSG": "free-form faces: 4 of 10 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": null,
+   "nFaces": 10
+  },
+  {
+   "name": "ST0923290_013",
+   "model": "ALICE3",
+   "lid": "0:1:1:53",
+   "shipsAs": "surface",
+   "whyNotCSG": "free-form faces: 9 of 20 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": null,
+   "nFaces": 20
+  },
+  {
+   "name": "ST0923290_014",
+   "model": "ALICE3",
+   "lid": "0:1:1:54",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 101 of 138 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": "6 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cone but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
+   "nFaces": 138
+  },
+  {
+   "name": "ST0923290_015",
+   "model": "ALICE3",
+   "lid": "0:1:1:55",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 185 of 246 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": "68 face(s): bspline face extraction not implemented yet; 12 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cylinder but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
+   "nFaces": 246
+  },
+  {
+   "name": "ST0923290_016",
+   "model": "ALICE3",
+   "lid": "0:1:1:56",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 41 of 59 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": "5 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cone but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
+   "nFaces": 59
+  },
+  {
+   "name": "ST0923290_017",
+   "model": "ALICE3",
+   "lid": "0:1:1:57",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
+   "nFaces": 24
+  },
+  {
+   "name": "ST0923290_018",
+   "model": "ALICE3",
+   "lid": "0:1:1:58",
+   "shipsAs": "surface",
+   "whyNotCSG": "free-form faces: 27 of 48 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": null,
+   "nFaces": 48
+  },
+  {
+   "name": "ST0923290_019",
+   "model": "ALICE3",
+   "lid": "0:1:1:59",
+   "shipsAs": "surface",
+   "whyNotCSG": "free-form faces: 30 of 44 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": null,
+   "nFaces": 44
+  },
+  {
+   "name": "ST0923290_020",
+   "model": "ALICE3",
+   "lid": "0:1:1:60",
+   "shipsAs": "surface",
+   "whyNotCSG": "free-form faces: 17 of 37 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": null,
+   "nFaces": 37
+  },
+  {
+   "name": "ST0923290_021",
+   "model": "ALICE3",
+   "lid": "0:1:1:61",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 16 of 33 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": "1 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cone but recognized quadric trim wire has fewer than 3 edges",
+   "nFaces": 33
+  },
+  {
+   "name": "ST0923290_022",
+   "model": "ALICE3",
+   "lid": "0:1:1:62",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
+   "nFaces": 24
+  },
+  {
+   "name": "ST0923290_023",
+   "model": "ALICE3",
+   "lid": "0:1:1:63",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
+   "nFaces": 24
+  },
+  {
+   "name": "ST0923290_024",
+   "model": "ALICE3",
+   "lid": "0:1:1:64",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
+   "nFaces": 24
+  },
+  {
+   "name": "ST0923290_025",
+   "model": "ALICE3",
+   "lid": "0:1:1:65",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
+   "nFaces": 24
+  },
+  {
+   "name": "ST0923290_026",
+   "model": "ALICE3",
+   "lid": "0:1:1:66",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
+   "nFaces": 24
+  },
+  {
+   "name": "ST0923290_027",
+   "model": "ALICE3",
+   "lid": "0:1:1:67",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
+   "nFaces": 24
+  },
+  {
+   "name": "ST0923290_028",
+   "model": "ALICE3",
+   "lid": "0:1:1:68",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
+   "nFaces": 24
+  },
+  {
+   "name": "ST2487195_01",
+   "model": "ALICE3",
+   "lid": "0:1:1:69",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 138 of 182 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": "138 face(s): bspline face extraction not implemented yet",
+   "nFaces": 182
+  },
+  {
+   "name": "ST2487458_01",
+   "model": "ALICE3",
+   "lid": "0:1:1:70",
+   "shipsAs": "mesh",
+   "whyNotCSG": "free-form faces: 924 of 2034 (surface kind outside plane/cylinder/cone/sphere)",
+   "whyNotSurface": "924 face(s): bspline face extraction not implemented yet",
+   "nFaces": 2034
+  },
+  {
+   "name": "box",
+   "model": "box",
+   "lid": "0:1:1:1",
+   "shipsAs": "csg",
+   "whyNotCSG": null,
+   "whyNotSurface": null,
+   "nFaces": 6
+  },
+  {
+   "name": "box_minus_cyl",
+   "model": "box_minus_cyl",
+   "lid": "0:1:1:1",
+   "shipsAs": "surface",
+   "whyNotCSG": "a planar face is neither a cap nor a wedge of any axis cluster [7 faces: 1 cylinder, 6 plane; 1 axis cluster(s)]",
+   "whyNotSurface": null,
+   "nFaces": 7
+  },
+  {
+   "name": "box_union_box",
+   "model": "box_union_box",
+   "lid": "0:1:1:1",
+   "shipsAs": "surface",
+   "whyNotCSG": "10 planar faces: not a six-plane box [10 faces: 10 plane; 0 axis cluster(s)]",
+   "whyNotSurface": null,
+   "nFaces": 10
+  },
+  {
+   "name": "cyl_cross_cyl",
+   "model": "cyl_cross_cyl",
+   "lid": "0:1:1:1",
+   "shipsAs": "csg",
+   "whyNotCSG": null,
+   "whyNotSurface": null,
+   "nFaces": 8
+  },
+  {
+   "name": "cyl_inter_cyl",
+   "model": "cyl_inter_cyl",
+   "lid": "0:1:1:1",
+   "shipsAs": "surface",
+   "whyNotCSG": "symmetric difference 1.8997 cm^3 exceeds the band 1.6e-06 cm^3 (= 1e-07 cm x area 16 cm^2); extra 1.8997, missing 0",
+   "whyNotSurface": null,
+   "nFaces": 6
+  },
+  {
+   "name": "cyl_plus_cone",
+   "model": "cyl_plus_cone",
+   "lid": "0:1:1:1",
+   "shipsAs": "surface",
+   "whyNotCSG": "mixed lateral surface kinds ['cone', 'cylinder'] on one axis [4 faces: 1 cone, 1 cylinder, 2 plane; 1 axis cluster(s)]",
+   "whyNotSurface": null,
+   "nFaces": 4
+  },
+  {
+   "name": "oblique_cut_cyl",
+   "model": "oblique_cut_cyl",
+   "lid": "0:1:1:1",
+   "shipsAs": "surface",
+   "whyNotCSG": "a planar face is neither a cap nor a wedge of any axis cluster [3 faces: 1 cylinder, 2 plane; 1 axis cluster(s)]",
+   "whyNotSurface": null,
+   "nFaces": 3
+  },
+  {
+   "name": "sphere_minus_cyl",
+   "model": "sphere_minus_cyl",
+   "lid": "0:1:1:1",
+   "shipsAs": "surface",
+   "whyNotCSG": "a sphere with additional faces is out of scope (no theta/phi cuts) [2 faces: 1 cylinder, 1 sphere; 1 axis cluster(s)]",
+   "whyNotSurface": null,
+   "nFaces": 2
+  },
+  {
+   "name": "torus_union_cyl",
+   "model": "torus_union_cyl",
+   "lid": "0:1:1:1",
+   "shipsAs": "surface",
+   "whyNotCSG": "toroidal faces: 2 of 6 (out of the recogniser's scope)",
+   "whyNotSurface": null,
+   "nFaces": 6
+  },
+  {
+   "name": "tube_window",
+   "model": "tube_window",
+   "lid": "0:1:1:1",
+   "shipsAs": "surface",
+   "whyNotCSG": "symmetric difference 6.03536 cm^3 exceeds the band 8.04457e-06 cm^3 (= 1e-07 cm x area 80.4457 cm^2); extra 6.03536, missing 0",
+   "whyNotSurface": null,
+   "nFaces": 4
+  }
+ ]
+}

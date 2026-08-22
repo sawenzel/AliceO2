@@ -97,18 +97,30 @@ def recognise_and_emit(def_shapes, def_names, scale_to_cm, out_folder, sanitize_
             else:
                 record["shape"] = None
                 record["shapeDeferred"] = True
+                # NEXT.md item 2: this used to leave `reason` empty, so `csg_report.json` said
+                # "declined CSG: None" for a part whose candidate was *accepted*. The reason must
+                # name the real cause -- the environment, not the geometry.
+                record["reason"] = ("csg deferred: ROOT unavailable in this interpreter; the "
+                                    f"accepted candidate is in csg_{suffix}.json -- run "
+                                    "csg/emit.py --from-json on the output folder to complete it")
         records.append(record)
         if verbose:
             emit._print_record(record)
+            if record.get("shapeDeferred"):
+                print(f"  [WARN] {display or lid}: accepted as CSG but NOT emitted -- "
+                      "ROOT unavailable; geom.C will dispatch this part one tier down")
 
     n_csg = sum(1 for r in records if r["accepted"])
     if verbose:
         print(f"CSG recognition ({mode}): {n_csg}/{len(records)} leaf solid(s) accepted as native "
               f"ROOT shapes ({len(csg_files)} written)")
         if n_csg and not root_available:
-            print("  [warn] PyROOT is not importable in this interpreter, so no shape_*.root was "
-                  "written; run `csg/emit.py --from-json <output folder>` under the O2 "
-                  "environment to complete them. Those parts fall back one tier in geom.C.")
+            n_deferred = sum(1 for r in records if r.get("shapeDeferred"))
+            print(f"  [WARN] PyROOT is not importable in this interpreter: {n_deferred} accepted "
+                  "CSG part(s) were NOT emitted and geom.C dispatches them one tier down. "
+                  "csg_report.json records each as 'csg deferred: ROOT unavailable'. Run "
+                  "`csg/emit.py --from-json <output folder>` under the O2 environment, then "
+                  "reconvert (or re-run the gate), to ship them as CSG.")
     if mode == "required":
         failed = [r for r in records if not r["accepted"]]
         if failed:
@@ -133,6 +145,7 @@ def write_report(records, path, surface_lids, facet_lids):
         lid = record["lid"]
         if record["accepted"] and record.get("shape"):
             tier = "csg"
+            why_not_csg = None
             evidence = {
                 "recogniser": record["recogniser"],
                 "description": record["description"],
@@ -143,9 +156,11 @@ def write_report(records, path, surface_lids, facet_lids):
             }
         elif lid in surface_lids:
             tier = "surface"
+            why_not_csg = record["reason"]
             evidence = {"declinedCsgBecause": record["reason"]}
         else:
             tier = "mesh"
+            why_not_csg = record["reason"]
             evidence = {"declinedCsgBecause": record["reason"]}
         tiers[tier] += 1
         # `part` is the artifact stem -- `<VOLNAME>_<LID>`, the same suffix that names
@@ -156,6 +171,11 @@ def write_report(records, path, surface_lids, facet_lids):
         # (scripts/geometry/Stream_I_Verdict.md).
         rows.append({"lid": lid, "part": record.get("part"), "volume": record["volume"],
                      "representation": tier, "shapeFile": record.get("shape"),
+                     # The brief, machine-readable decline reason (None for a part that ships as
+                     # CSG). Same string as evidence.declinedCsgBecause, promoted to a top-level
+                     # field so consumers (decline_catalogue.py, the website) need not know the
+                     # evidence layout. A deferred part carries "csg deferred: ROOT unavailable".
+                     "whyNotCSG": why_not_csg,
                      "shapeDeferred": bool(record.get("shapeDeferred", False)),
                      # 3x4 row-major [R | t] taking the shape's own frame into the part frame,
                      # or null for identity (Stream_N_PlacedPrimitives.md). Mirrors the
