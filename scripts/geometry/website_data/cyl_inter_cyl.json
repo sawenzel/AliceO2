@@ -1,0 +1,162 @@
+{
+ "meta": {
+  "part": "cyl_inter_cyl",
+  "partId": "cyl_inter_cyl/cyl_inter_cyl_0_1_1_1",
+  "model": "synthetic fixture (make_boolean_fixtures.py)",
+  "story": "Steinmetz solid, two orthogonal r=10mm cylinders intersected; the minimized reproducer of the Bagger BoomCylinderOuter failure and the watertightness case -- the mesh's crossing list against the same OCCT oracle is the leak story",
+  "generated": "2026-08-22",
+  "machine": "aarch64 10-core shared (other tenants running o2-sim concurrently)",
+  "loadAverageDuringTiming": 2.03,
+  "timingPreliminary": true,
+  "samples": {
+   "gatePoints": 2000,
+   "gateRays": 2000,
+   "gateSeed": 1,
+   "xrayRaster": 48,
+   "xrayBeams": 96,
+   "perfPoints": 4096,
+   "perfRays": 4096,
+   "perfPasses": 9
+  }
+ },
+ "representations": [
+  {
+   "name": "surface",
+   "class": "o2::base::O2BVHSurfaceSolid",
+   "primitives": 6,
+   "primitiveKind": "patches",
+   "memoryBytes": 6942,
+   "memoryFormula": "patches=6; bytes = sidecar on disk (in-memory trim arrays are not introspectable; see measured heap delta)",
+   "sidecarBytes": 6942,
+   "closeSeconds": 0.02315212,
+   "meshClosedBody": null,
+   "reliability": "reliable",
+   "navigable": true,
+   "functions": {
+    "contains": {
+     "nsPerCall": 2505.036865234375,
+     "nsPerCallMin": 2456.99169921875,
+     "nsPerCallMax": 2528.0576171875
+    },
+    "distFromOutside": {
+     "nsPerCall": 6312.72802734375,
+     "nsPerCallMin": 6288.43603515625,
+     "nsPerCallMax": 6417.2822265625
+    },
+    "distFromInside": {
+     "nsPerCall": 2945.63330078125,
+     "nsPerCallMin": 2942.23583984375,
+     "nsPerCallMax": 2961.25830078125
+    },
+    "safety": {
+     "nsPerCall": 399.24462890625,
+     "nsPerCallMin": 384.799560546875,
+     "nsPerCallMax": 410.66845703125
+    }
+   },
+   "transport": {
+    "nsPerRay": 14019.50925925926,
+    "nsPerCrossing": 8195.437077131259
+   },
+   "accuracy": {
+    "capacityRelativeDeviation": -1.0271949957187348e-11,
+    "capacityComparableNote": null,
+    "disagreements": {
+     "contains": 0,
+     "distout": 1,
+     "distin": 0,
+     "safety": 0
+    },
+    "unexplained": {
+     "contains": 0,
+     "distout": 1,
+     "distin": 0,
+     "safety": 0
+    },
+    "oracleTolerance": 1e-07,
+    "oracleValid": true
+   },
+   "xray": {
+    "lost": 0,
+    "extra": 2,
+    "displaced": 3,
+    "unterminated": 2,
+    "parity": 2,
+    "parityNearBoundary": 0,
+    "oddCrossingLists": 2,
+    "raysTotal": 221184,
+    "raysIdentical": 221179,
+    "worstDeltaTCm": 8.815219346924863e-06
+   }
+  },
+  {
+   "name": "mesh",
+   "class": "o2::base::O2Tessellated",
+   "primitives": 604,
+   "primitiveKind": "triangles",
+   "memoryBytes": 33872,
+   "memoryFormula": "304 vertices x 24 B + 604 facets x 20 B + 604 normals x 24 B",
+   "sidecarBytes": 21748,
+   "closeSeconds": 0.001036551,
+   "meshClosedBody": true,
+   "reliability": null,
+   "navigable": null,
+   "functions": {
+    "contains": {
+     "nsPerCall": 131.25732421875,
+     "nsPerCallMin": 129.375244140625,
+     "nsPerCallMax": 141.623046875
+    },
+    "distFromOutside": {
+     "nsPerCall": 370.0390625,
+     "nsPerCallMin": 367.078857421875,
+     "nsPerCallMax": 402.17431640625
+    },
+    "distFromInside": {
+     "nsPerCall": 233.756591796875,
+     "nsPerCallMin": 220.908447265625,
+     "nsPerCallMax": 238.588623046875
+    },
+    "safety": {
+     "nsPerCall": 1007.3837890625,
+     "nsPerCallMin": 994.56640625,
+     "nsPerCallMax": 1067.127685546875
+    }
+   },
+   "transport": {
+    "nsPerRay": 456.6915509259259,
+    "nsPerCrossing": 267.4675478732418
+   },
+   "accuracy": {
+    "capacityRelativeDeviation": -0.00037127348054172277,
+    "capacityComparableNote": null,
+    "disagreements": {
+     "contains": 36,
+     "distout": 1162,
+     "distin": 998,
+     "safety": 675
+    },
+    "unexplained": {
+     "contains": 36,
+     "distout": 1162,
+     "distin": 998,
+     "safety": 675
+    },
+    "oracleTolerance": 1e-07,
+    "oracleValid": true
+   },
+   "xray": {
+    "lost": 132,
+    "extra": 0,
+    "displaced": 269428,
+    "unterminated": 0,
+    "parity": 0,
+    "parityNearBoundary": 0,
+    "oddCrossingLists": 0,
+    "raysTotal": 221184,
+    "raysIdentical": 86288,
+    "worstDeltaTCm": 0.046636354054399476
+   }
+  }
+ ]
+}

@@ -1,0 +1,162 @@
+{
+ "meta": {
+  "part": "ST1829909_002",
+  "partId": "adhoc",
+  "model": "ALICE_3_example/CAD_noETA.stp (leaf solid ST1829909_002)",
+  "story": "ALICE3 scale: 965 analytic patches (535 plane, 308 cylinder, 102 cone, 20 torus), the sub-patch BVH part (Stream_X_SubPatchBVH.md); exact surface only, see README for why no CSG shape exists and how the mesh was kept safe to build",
+  "generated": "2026-08-22",
+  "machine": "aarch64 10-core shared (other tenants running o2-sim concurrently)",
+  "loadAverageDuringTiming": 1.97,
+  "timingPreliminary": false,
+  "samples": {
+   "gatePoints": 3000,
+   "gateRays": 3000,
+   "gateSeed": 1,
+   "xrayRaster": 16,
+   "xrayBeams": 96,
+   "perfPoints": 4096,
+   "perfRays": 4096,
+   "perfPasses": 9
+  }
+ },
+ "representations": [
+  {
+   "name": "surface",
+   "class": "o2::base::O2BVHSurfaceSolid",
+   "primitives": 965,
+   "primitiveKind": "patches",
+   "memoryBytes": 931964,
+   "memoryFormula": "patches=965; bytes = sidecar on disk (in-memory trim arrays are not introspectable; see measured heap delta)",
+   "sidecarBytes": 931964,
+   "closeSeconds": 9.512274999,
+   "meshClosedBody": null,
+   "reliability": "reliable",
+   "navigable": true,
+   "functions": {
+    "contains": {
+     "nsPerCall": 11834.401123046875,
+     "nsPerCallMin": 11725.55419921875,
+     "nsPerCallMax": 12008.790283203125
+    },
+    "distFromOutside": {
+     "nsPerCall": 8092.734130859375,
+     "nsPerCallMin": 7986.0439453125,
+     "nsPerCallMax": 8190.14697265625
+    },
+    "distFromInside": {
+     "nsPerCall": 8371.2294921875,
+     "nsPerCallMin": 8299.451416015625,
+     "nsPerCallMax": 8608.566650390625
+    },
+    "safety": {
+     "nsPerCall": 20971.75,
+     "nsPerCallMin": 20790.05712890625,
+     "nsPerCallMax": 21084.238525390625
+    }
+   },
+   "transport": {
+    "nsPerRay": 18964.525752314814,
+    "nsPerCrossing": 13337.688441188442
+   },
+   "accuracy": {
+    "capacityRelativeDeviation": -1.247104790084923e-06,
+    "capacityComparableNote": null,
+    "disagreements": {
+     "contains": 2,
+     "distout": 0,
+     "distin": 0,
+     "safety": 65
+    },
+    "unexplained": {
+     "contains": 2,
+     "distout": 0,
+     "distin": 0,
+     "safety": 65
+    },
+    "oracleTolerance": 0.000429905360032057,
+    "oracleValid": true
+   },
+   "xray": {
+    "lost": 0,
+    "extra": 6,
+    "displaced": 0,
+    "unterminated": 0,
+    "parity": 1,
+    "parityNearBoundary": 0,
+    "oddCrossingLists": 0,
+    "raysTotal": 24576,
+    "raysIdentical": 24573,
+    "worstDeltaTCm": 5.2752290521596024e-05
+   }
+  },
+  {
+   "name": "mesh",
+   "class": "o2::base::O2Tessellated",
+   "primitives": 211542,
+   "primitiveKind": "triangles",
+   "memoryBytes": 11846352,
+   "memoryFormula": "105771 vertices x 24 B + 211542 facets x 20 B + 211542 normals x 24 B",
+   "sidecarBytes": 7615948,
+   "closeSeconds": 20.074799856,
+   "meshClosedBody": true,
+   "reliability": null,
+   "navigable": null,
+   "functions": {
+    "contains": {
+     "nsPerCall": 190.01416015625,
+     "nsPerCallMin": 184.0732421875,
+     "nsPerCallMax": 213.024658203125
+    },
+    "distFromOutside": {
+     "nsPerCall": 429.47705078125,
+     "nsPerCallMin": 422.529052734375,
+     "nsPerCallMax": 444.969970703125
+    },
+    "distFromInside": {
+     "nsPerCall": 671.066162109375,
+     "nsPerCallMin": 654.627197265625,
+     "nsPerCallMax": 709.04052734375
+    },
+    "safety": {
+     "nsPerCall": 1899.377197265625,
+     "nsPerCallMin": 1857.985107421875,
+     "nsPerCallMax": 1955.1435546875
+    }
+   },
+   "transport": {
+    "nsPerRay": 776.6320891203703,
+    "nsPerCrossing": 546.6477596741344
+   },
+   "accuracy": {
+    "capacityRelativeDeviation": -0.00013539279559964635,
+    "capacityComparableNote": null,
+    "disagreements": {
+     "contains": 10,
+     "distout": 253,
+     "distin": 288,
+     "safety": 717
+    },
+    "unexplained": {
+     "contains": 10,
+     "distout": 253,
+     "distin": 288,
+     "safety": 717
+    },
+    "oracleTolerance": 0.000429905360032057,
+    "oracleValid": true
+   },
+   "xray": {
+    "lost": 13,
+    "extra": 17,
+    "displaced": 6499,
+    "unterminated": 0,
+    "parity": 0,
+    "parityNearBoundary": 0,
+    "oddCrossingLists": 0,
+    "raysTotal": 24576,
+    "raysIdentical": 20831,
+    "worstDeltaTCm": 0.07209923222398551
+   }
+  }
+ ]
+}

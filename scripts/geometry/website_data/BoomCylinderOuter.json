@@ -1,0 +1,231 @@
+{
+ "meta": {
+  "part": "BoomCylinderOuter",
+  "partId": "Bagger/BoomCylinderOuter_0_1_1_9",
+  "model": "STEP_examples/Bagger.step",
+  "story": "the Bagger ram: CSG tube-union, expect the shipped shape representation far faster than the exact surface solid",
+  "generated": "2026-08-22",
+  "machine": "aarch64 10-core shared (other tenants running o2-sim concurrently)",
+  "loadAverageDuringTiming": 2.31,
+  "timingPreliminary": true,
+  "samples": {
+   "gatePoints": 2000,
+   "gateRays": 2000,
+   "gateSeed": 1,
+   "xrayRaster": 48,
+   "xrayBeams": 96,
+   "perfPoints": 4096,
+   "perfRays": 4096,
+   "perfPasses": 9
+  }
+ },
+ "representations": [
+  {
+   "name": "surface",
+   "class": "o2::base::O2BVHSurfaceSolid",
+   "primitives": 8,
+   "primitiveKind": "patches",
+   "memoryBytes": 23756,
+   "memoryFormula": "patches=8; bytes = sidecar on disk (in-memory trim arrays are not introspectable; see measured heap delta)",
+   "sidecarBytes": 23756,
+   "closeSeconds": 0.186801771,
+   "meshClosedBody": null,
+   "reliability": "reliable",
+   "navigable": true,
+   "functions": {
+    "contains": {
+     "nsPerCall": 2681.36865234375,
+     "nsPerCallMin": 2661.237060546875,
+     "nsPerCallMax": 2741.224365234375
+    },
+    "distFromOutside": {
+     "nsPerCall": 7073.10986328125,
+     "nsPerCallMin": 6991.179443359375,
+     "nsPerCallMax": 7176.788818359375
+    },
+    "distFromInside": {
+     "nsPerCall": 7799.6376953125,
+     "nsPerCallMin": 7678.868408203125,
+     "nsPerCallMax": 7913.59130859375
+    },
+    "safety": {
+     "nsPerCall": 578.689453125,
+     "nsPerCallMin": 575.1796875,
+     "nsPerCallMax": 620.7939453125
+    }
+   },
+   "transport": {
+    "nsPerRay": 19658.93243634259,
+    "nsPerCrossing": 12084.893365350408
+   },
+   "accuracy": {
+    "capacityRelativeDeviation": 1.3913494521239647e-06,
+    "capacityComparableNote": null,
+    "disagreements": {
+     "contains": 0,
+     "distout": 0,
+     "distin": 0,
+     "safety": 0
+    },
+    "unexplained": {
+     "contains": 0,
+     "distout": 0,
+     "distin": 0,
+     "safety": 0
+    },
+    "oracleTolerance": 1e-07,
+    "oracleValid": true
+   },
+   "xray": {
+    "lost": 0,
+    "extra": 0,
+    "displaced": 0,
+    "unterminated": 0,
+    "parity": 0,
+    "parityNearBoundary": 0,
+    "oddCrossingLists": 0,
+    "raysTotal": 221184,
+    "raysIdentical": 221184,
+    "worstDeltaTCm": 4.827693800280031e-12
+   }
+  },
+  {
+   "name": "mesh",
+   "class": "o2::base::O2Tessellated",
+   "primitives": 2244,
+   "primitiveKind": "triangles",
+   "memoryBytes": 125664,
+   "memoryFormula": "1122 vertices x 24 B + 2244 facets x 20 B + 2244 normals x 24 B",
+   "sidecarBytes": 80788,
+   "closeSeconds": 0.008257113,
+   "meshClosedBody": true,
+   "reliability": null,
+   "navigable": null,
+   "functions": {
+    "contains": {
+     "nsPerCall": 696.193359375,
+     "nsPerCallMin": 692.09375,
+     "nsPerCallMax": 728.074462890625
+    },
+    "distFromOutside": {
+     "nsPerCall": 1759.984130859375,
+     "nsPerCallMin": 1711.86767578125,
+     "nsPerCallMax": 1765.548583984375
+    },
+    "distFromInside": {
+     "nsPerCall": 1220.031982421875,
+     "nsPerCallMin": 1205.6376953125,
+     "nsPerCallMax": 1260.427490234375
+    },
+    "safety": {
+     "nsPerCall": 6013.32666015625,
+     "nsPerCallMin": 5899.373046875,
+     "nsPerCallMax": 6113.91357421875
+    }
+   },
+   "transport": {
+    "nsPerRay": 1249.0581597222222,
+    "nsPerCrossing": 767.8308431163288
+   },
+   "accuracy": {
+    "capacityRelativeDeviation": -0.00026470685390495073,
+    "capacityComparableNote": null,
+    "disagreements": {
+     "contains": 5,
+     "distout": 712,
+     "distin": 927,
+     "safety": 1491
+    },
+    "unexplained": {
+     "contains": 5,
+     "distout": 712,
+     "distin": 926,
+     "safety": 1491
+    },
+    "oracleTolerance": 1e-07,
+    "oracleValid": true
+   },
+   "xray": {
+    "lost": 26,
+    "extra": 4,
+    "displaced": 139688,
+    "unterminated": 0,
+    "parity": 0,
+    "parityNearBoundary": 0,
+    "oddCrossingLists": 0,
+    "raysTotal": 221184,
+    "raysIdentical": 173018,
+    "worstDeltaTCm": 0.029114340695873153
+   }
+  },
+  {
+   "name": "shape",
+   "class": "TGeoCompositeShape",
+   "primitives": 2,
+   "primitiveKind": null,
+   "memoryBytes": 600,
+   "memoryFormula": "leaves=2 nodes=1 depth=2; bytes ~ (leaves+nodes) x 200 B (ROOT object overhead dominates)",
+   "sidecarBytes": 2955,
+   "closeSeconds": 0.0,
+   "meshClosedBody": null,
+   "reliability": null,
+   "navigable": null,
+   "functions": {
+    "contains": {
+     "nsPerCall": 19.043212890625,
+     "nsPerCallMin": 18.921142578125,
+     "nsPerCallMax": 21.34228515625
+    },
+    "distFromOutside": {
+     "nsPerCall": 84.513916015625,
+     "nsPerCallMin": 83.557861328125,
+     "nsPerCallMax": 86.986083984375
+    },
+    "distFromInside": {
+     "nsPerCall": 63.84326171875,
+     "nsPerCallMin": 63.711181640625,
+     "nsPerCallMax": 66.651123046875
+    },
+    "safety": {
+     "nsPerCall": 23.295166015625,
+     "nsPerCallMin": 23.22412109375,
+     "nsPerCallMax": 25.1875
+    }
+   },
+   "transport": {
+    "nsPerRay": 179.8760127314815,
+    "nsPerCrossing": 110.57479544646033
+   },
+   "accuracy": {
+    "capacityRelativeDeviation": null,
+    "capacityComparableNote": "TGeoShape::Capacity() is root-montecarlo for this representation; no capacity deviation is reported (project convention, see README)",
+    "disagreements": {
+     "contains": 0,
+     "distout": 0,
+     "distin": 0,
+     "safety": 0
+    },
+    "unexplained": {
+     "contains": 0,
+     "distout": 0,
+     "distin": 0,
+     "safety": 0
+    },
+    "oracleTolerance": 1e-07,
+    "oracleValid": true
+   },
+   "xray": {
+    "lost": 0,
+    "extra": 0,
+    "displaced": 0,
+    "unterminated": 0,
+    "parity": 0,
+    "parityNearBoundary": 0,
+    "oddCrossingLists": 0,
+    "raysTotal": 221184,
+    "raysIdentical": 221184,
+    "worstDeltaTCm": 4.9253934264470445e-12
+   }
+  }
+ ]
+}

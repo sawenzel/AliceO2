@@ -1,0 +1,191 @@
+{
+ "generated": "2026-08-22",
+ "machine": "aarch64 10-core shared (other tenants running o2-sim concurrently)",
+ "parts": [
+  {
+   "part": "BoomCylinderOuter",
+   "story": "the Bagger ram: CSG tube-union, expect the shipped shape representation far faster than the exact surface solid",
+   "ships": "shape",
+   "speedRatioSurfaceVsFastest": {
+    "contains": {
+     "vs": "shape",
+     "ratio": 140.80442558428737
+    },
+    "distFromOutside": {
+     "vs": "shape",
+     "ratio": 83.69165927624947
+    },
+    "distFromInside": {
+     "vs": "shape",
+     "ratio": 122.16853408386935
+    },
+    "safety": {
+     "vs": "shape",
+     "ratio": 24.841611033673246
+    }
+   },
+   "meshLeak": {
+    "lost": 26,
+    "extra": 4,
+    "unterminated": 0,
+    "parity": 0,
+    "raysTotal": 221184
+   },
+   "surfaceLeak": {
+    "lost": 0,
+    "extra": 0,
+    "unterminated": 0,
+    "parity": 0,
+    "raysTotal": 221184
+   }
+  },
+  {
+   "part": "Bucket",
+   "story": "97 faces (69 plane, 22 cylinder, 4 sphere, 2 torus); the last part on this corpus to ship tessellated, made exact by the ellipse-trim fix (Stream_Q_EllipseTrim.md)",
+   "ships": "surface",
+   "speedRatioSurfaceVsFastest": {
+    "contains": {
+     "vs": "mesh",
+     "ratio": 4.256757895406237
+    },
+    "distFromOutside": {
+     "vs": "mesh",
+     "ratio": 3.4436912056941225
+    },
+    "distFromInside": {
+     "vs": "mesh",
+     "ratio": 2.055468596147941
+    },
+    "safety": {
+     "vs": "mesh",
+     "ratio": 3.0660575318577465
+    }
+   },
+   "meshLeak": {
+    "lost": 8,
+    "extra": 4,
+    "unterminated": 0,
+    "parity": 0,
+    "raysTotal": 221184
+   },
+   "surfaceLeak": {
+    "lost": 0,
+    "extra": 1,
+    "unterminated": 1,
+    "parity": 1,
+    "raysTotal": 221184
+   }
+  },
+  {
+   "part": "cyl_inter_cyl",
+   "story": "Steinmetz solid, two orthogonal r=10mm cylinders intersected; the minimized reproducer of the Bagger BoomCylinderOuter failure and the watertightness case -- the mesh's crossing list against the same OCCT oracle is the leak story",
+   "ships": "surface",
+   "speedRatioSurfaceVsFastest": {
+    "contains": {
+     "vs": "mesh",
+     "ratio": 19.084930156427284
+    },
+    "distFromOutside": {
+     "vs": "mesh",
+     "ratio": 17.0596260424364
+    },
+    "distFromInside": {
+     "vs": "mesh",
+     "ratio": 12.601284430690562
+    },
+    "safety": {
+     "vs": "mesh",
+     "ratio": 0.39631829819080017
+    }
+   },
+   "meshLeak": {
+    "lost": 132,
+    "extra": 0,
+    "unterminated": 0,
+    "parity": 0,
+    "raysTotal": 221184
+   },
+   "surfaceLeak": {
+    "lost": 0,
+    "extra": 2,
+    "unterminated": 2,
+    "parity": 2,
+    "raysTotal": 221184
+   }
+  },
+  {
+   "part": "torus_union_cyl",
+   "story": "torus R=25mm r=8mm fused with a coaxial r=20mm cylinder; isolates the toroidal (quartic) surface and its trimming from any transcendental trim curve",
+   "ships": "surface",
+   "speedRatioSurfaceVsFastest": {
+    "contains": {
+     "vs": "mesh",
+     "ratio": 2.3449242714165837
+    },
+    "distFromOutside": {
+     "vs": "mesh",
+     "ratio": 1.1278527956348763
+    },
+    "distFromInside": {
+     "vs": "mesh",
+     "ratio": 2.0697594406077613
+    },
+    "safety": {
+     "vs": "mesh",
+     "ratio": 0.19269476851788336
+    }
+   },
+   "meshLeak": {
+    "lost": 116,
+    "extra": 36,
+    "unterminated": 0,
+    "parity": 0,
+    "raysTotal": 221184
+   },
+   "surfaceLeak": {
+    "lost": 0,
+    "extra": 0,
+    "unterminated": 0,
+    "parity": 0,
+    "raysTotal": 221184
+   }
+  },
+  {
+   "part": "ST1829909_002",
+   "story": "ALICE3 scale: 965 analytic patches (535 plane, 308 cylinder, 102 cone, 20 torus), the sub-patch BVH part (Stream_X_SubPatchBVH.md); exact surface only, see README for why no CSG shape exists and how the mesh was kept safe to build",
+   "ships": "surface",
+   "speedRatioSurfaceVsFastest": {
+    "contains": {
+     "vs": "mesh",
+     "ratio": 62.28168002487479
+    },
+    "distFromOutside": {
+     "vs": "mesh",
+     "ratio": 18.843228331148552
+    },
+    "distFromInside": {
+     "vs": "mesh",
+     "ratio": 12.474521835334471
+    },
+    "safety": {
+     "vs": "mesh",
+     "ratio": 11.041382422717973
+    }
+   },
+   "meshLeak": {
+    "lost": 13,
+    "extra": 17,
+    "unterminated": 0,
+    "parity": 0,
+    "raysTotal": 24576
+   },
+   "surfaceLeak": {
+    "lost": 0,
+    "extra": 6,
+    "unterminated": 0,
+    "parity": 1,
+    "raysTotal": 24576
+   }
+  }
+ ]
+}
