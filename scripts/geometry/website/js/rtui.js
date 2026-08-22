@@ -3,10 +3,15 @@
 import { Raytracer, VIEWS } from './raytrace.js';
 import { state, onPartChanged } from './app.js';
 
+// Raster width; the height follows the viewport's aspect. "native" instead traces one ray per
+// physical device pixel of the viewport, which is the only setting whose picture is not upscaled.
 const PRESETS = [
   { label: '360p', width: 480 },
   { label: '480p', width: 640 },
   { label: '720p', width: 960 },
+  { label: '1080p', width: 1440 },
+  { label: '1440p', width: 1920 },
+  { label: 'native (device pixels)', native: true },
 ];
 
 const STORAGE_KEY = 'o2surfaces.bridge';
@@ -40,6 +45,7 @@ export function initRaytracerTab() {
             <label>resolution <select id="rt-res"></select></label>
             <button id="rt-render" class="primary">render</button>
           </div>
+          <div class="row"><span class="status" id="rt-resnote"></span></div>
           <div class="row">
             <button id="rt-frame">re-frame</button>
             <button id="rt-fromview">camera from 3D view</button>
@@ -114,13 +120,31 @@ export function initRaytracerTab() {
     return part ? `${prefix}testdata/${part.surfaces}` : '';
   }
 
+  const resNote = document.getElementById('rt-resnote');
+
   function applySize() {
     const preset = PRESETS[Number(resSelect.value)];
     const viewport = document.getElementById('rt-viewport');
-    const aspect = Math.max(0.4, Math.min(2.5, viewport.clientWidth / Math.max(1, viewport.clientHeight)));
-    tracer.setSize(preset.width, Math.round(preset.width / aspect));
+    const viewWidth = Math.max(1, viewport.clientWidth), viewHeight = Math.max(1, viewport.clientHeight);
+    if (preset.native) {
+      const ratio = window.devicePixelRatio || 1;
+      tracer.setSize(Math.round(viewWidth * ratio), Math.round(viewHeight * ratio));
+    } else {
+      const aspect = Math.max(0.4, Math.min(2.5, viewWidth / viewHeight));
+      tracer.setSize(preset.width, Math.round(preset.width / aspect));
+    }
     canvas.style.width = '100%';
     canvas.style.height = 'auto';
+    describeSize();
+  }
+
+  function describeSize() {
+    const rays = tracer.width * tracer.height;
+    const preset = PRESETS[Number(resSelect.value)];
+    const ratio = window.devicePixelRatio || 1;
+    resNote.textContent = `${tracer.width} x ${tracer.height} = ` +
+      (rays >= 1e6 ? `${(rays / 1e6).toFixed(2)} Mrays` : `${Math.round(rays / 1e3)} krays`) + ' per full pass' +
+      (preset.native ? ` (devicePixelRatio ${ratio})` : '');
   }
 
   const scaleBar = document.getElementById('rt-scale');
