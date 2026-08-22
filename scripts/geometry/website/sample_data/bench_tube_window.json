@@ -1,0 +1,69 @@
+{
+  "meta": {
+    "part": "tube_window",
+    "synthetic": true,
+    "note": "SYNTHETIC placeholder in the Track-2 schema; replace with scripts/geometry/website_data/*.json",
+    "faces": 4,
+    "triangles": 1248
+  },
+  "representations": [
+    {
+      "name": "surface",
+      "functions": {
+        "contains": {
+          "nsPerCall": 88
+        },
+        "distFromOutside": {
+          "nsPerCall": 211.2
+        },
+        "distFromInside": {
+          "nsPerCall": 184.8
+        },
+        "safety": {
+          "nsPerCall": 140.8
+        }
+      },
+      "accuracy": {
+        "capacityRelativeDeviation": 1.6e-7,
+        "disagreements": {},
+        "unexplained": {}
+      },
+      "xray": {
+        "lost": 0,
+        "extra": 0,
+        "unterminated": 0,
+        "parity": 0,
+        "raysTotal": 4096
+      }
+    },
+    {
+      "name": "mesh",
+      "functions": {
+        "contains": {
+          "nsPerCall": 4576
+        },
+        "distFromOutside": {
+          "nsPerCall": 10982.4
+        },
+        "distFromInside": {
+          "nsPerCall": 9609.6
+        },
+        "safety": {
+          "nsPerCall": 7321.6
+        }
+      },
+      "accuracy": {
+        "capacityRelativeDeviation": null,
+        "disagreements": {},
+        "unexplained": {}
+      },
+      "xray": {
+        "lost": 0,
+        "extra": 0,
+        "unterminated": 0,
+        "parity": 0,
+        "raysTotal": 4096
+      }
+    }
+  ]
+}

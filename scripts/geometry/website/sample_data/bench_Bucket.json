@@ -1,0 +1,69 @@
+{
+  "meta": {
+    "part": "Bucket",
+    "synthetic": true,
+    "note": "SYNTHETIC placeholder in the Track-2 schema; replace with scripts/geometry/website_data/*.json",
+    "faces": 97,
+    "triangles": 9556
+  },
+  "representations": [
+    {
+      "name": "surface",
+      "functions": {
+        "contains": {
+          "nsPerCall": 210
+        },
+        "distFromOutside": {
+          "nsPerCall": 504
+        },
+        "distFromInside": {
+          "nsPerCall": 441
+        },
+        "safety": {
+          "nsPerCall": 336
+        }
+      },
+      "accuracy": {
+        "capacityRelativeDeviation": 3.3e-7,
+        "disagreements": {},
+        "unexplained": {}
+      },
+      "xray": {
+        "lost": 0,
+        "extra": 0,
+        "unterminated": 0,
+        "parity": 0,
+        "raysTotal": 4096
+      }
+    },
+    {
+      "name": "mesh",
+      "functions": {
+        "contains": {
+          "nsPerCall": 14280
+        },
+        "distFromOutside": {
+          "nsPerCall": 34272
+        },
+        "distFromInside": {
+          "nsPerCall": 29988
+        },
+        "safety": {
+          "nsPerCall": 22848
+        }
+      },
+      "accuracy": {
+        "capacityRelativeDeviation": null,
+        "disagreements": {},
+        "unexplained": {}
+      },
+      "xray": {
+        "lost": 0,
+        "extra": 0,
+        "unterminated": 0,
+        "parity": 0,
+        "raysTotal": 4096
+      }
+    }
+  ]
+}

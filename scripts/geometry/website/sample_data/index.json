@@ -1,0 +1,11 @@
+{
+  "synthetic": true,
+  "files": [
+    "bench_box.json",
+    "bench_cyl_inter_cyl.json",
+    "bench_torus_union_cyl.json",
+    "bench_tube_window.json",
+    "bench_Bucket.json",
+    "bench_BoomCylinderInner.json"
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "meta": {
+    "part": "cyl_inter_cyl",
+    "synthetic": true,
+    "note": "SYNTHETIC placeholder in the Track-2 schema; replace with scripts/geometry/website_data/*.json",
+    "faces": 6,
+    "triangles": 604
+  },
+  "representations": [
+    {
+      "name": "surface",
+      "functions": {
+        "contains": {
+          "nsPerCall": 96
+        },
+        "distFromOutside": {
+          "nsPerCall": 230.4
+        },
+        "distFromInside": {
+          "nsPerCall": 201.6
+        },
+        "safety": {
+          "nsPerCall": 153.6
+        }
+      },
+      "accuracy": {
+        "capacityRelativeDeviation": 2.8e-7,
+        "disagreements": {},
+        "unexplained": {}
+      },
+      "xray": {
+        "lost": 0,
+        "extra": 0,
+        "unterminated": 0,
+        "parity": 0,
+        "raysTotal": 4096
+      }
+    },
+    {
+      "name": "mesh",
+      "functions": {
+        "contains": {
+          "nsPerCall": 3936
+        },
+        "distFromOutside": {
+          "nsPerCall": 9446.4
+        },
+        "distFromInside": {
+          "nsPerCall": 8265.6
+        }
+      },
+      "accuracy": {
+        "capacityRelativeDeviation": null,
+        "disagreements": {},
+        "unexplained": {}
+      },
+      "xray": {
+        "lost": 6,
+        "extra": 0,
+        "unterminated": 6,
+        "parity": 6,
+        "raysTotal": 4096
+      }
+    }
+  ]
+}

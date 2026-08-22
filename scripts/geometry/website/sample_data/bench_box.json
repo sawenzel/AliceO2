@@ -1,0 +1,98 @@
+{
+  "meta": {
+    "part": "box",
+    "synthetic": true,
+    "note": "SYNTHETIC placeholder in the Track-2 schema; replace with scripts/geometry/website_data/*.json",
+    "faces": 6,
+    "triangles": 12
+  },
+  "representations": [
+    {
+      "name": "surface",
+      "functions": {
+        "contains": {
+          "nsPerCall": 41
+        },
+        "distFromOutside": {
+          "nsPerCall": 98.4
+        },
+        "distFromInside": {
+          "nsPerCall": 86.1
+        },
+        "safety": {
+          "nsPerCall": 65.6
+        }
+      },
+      "accuracy": {
+        "capacityRelativeDeviation": 0,
+        "disagreements": {},
+        "unexplained": {}
+      },
+      "xray": {
+        "lost": 0,
+        "extra": 0,
+        "unterminated": 0,
+        "parity": 0,
+        "raysTotal": 4096
+      }
+    },
+    {
+      "name": "mesh",
+      "functions": {
+        "contains": {
+          "nsPerCall": 131.2
+        },
+        "distFromOutside": {
+          "nsPerCall": 314.9
+        },
+        "distFromInside": {
+          "nsPerCall": 275.5
+        },
+        "safety": {
+          "nsPerCall": 209.9
+        }
+      },
+      "accuracy": {
+        "capacityRelativeDeviation": null,
+        "disagreements": {},
+        "unexplained": {}
+      },
+      "xray": {
+        "lost": 0,
+        "extra": 0,
+        "unterminated": 0,
+        "parity": 0,
+        "raysTotal": 4096
+      }
+    },
+    {
+      "name": "shape",
+      "functions": {
+        "contains": {
+          "nsPerCall": 12
+        },
+        "distFromOutside": {
+          "nsPerCall": 28.8
+        },
+        "distFromInside": {
+          "nsPerCall": 25.2
+        },
+        "safety": {
+          "nsPerCall": 19.2
+        }
+      },
+      "accuracy": {
+        "capacityRelativeDeviation": 0,
+        "disagreements": {},
+        "unexplained": {}
+      },
+      "xray": {
+        "lost": 0,
+        "extra": 0,
+        "unterminated": 0,
+        "parity": 0,
+        "raysTotal": 4096
+      }
+    }
+  ]
+}

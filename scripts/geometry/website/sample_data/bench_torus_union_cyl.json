@@ -1,0 +1,98 @@
+{
+  "meta": {
+    "part": "torus_union_cyl",
+    "synthetic": true,
+    "note": "SYNTHETIC placeholder in the Track-2 schema; replace with scripts/geometry/website_data/*.json",
+    "faces": 6,
+    "triangles": 23432
+  },
+  "representations": [
+    {
+      "name": "surface",
+      "functions": {
+        "contains": {
+          "nsPerCall": 128
+        },
+        "distFromOutside": {
+          "nsPerCall": 307.2
+        },
+        "distFromInside": {
+          "nsPerCall": 268.8
+        },
+        "safety": {
+          "nsPerCall": 204.8
+        }
+      },
+      "accuracy": {
+        "capacityRelativeDeviation": 4.1e-8,
+        "disagreements": {},
+        "unexplained": {}
+      },
+      "xray": {
+        "lost": 0,
+        "extra": 0,
+        "unterminated": 0,
+        "parity": 0,
+        "raysTotal": 4096
+      }
+    },
+    {
+      "name": "mesh",
+      "functions": {
+        "contains": {
+          "nsPerCall": 18560
+        },
+        "distFromOutside": {
+          "nsPerCall": 44544
+        },
+        "distFromInside": {
+          "nsPerCall": 38976
+        },
+        "safety": {
+          "nsPerCall": 29696
+        }
+      },
+      "accuracy": {
+        "capacityRelativeDeviation": null,
+        "disagreements": {},
+        "unexplained": {}
+      },
+      "xray": {
+        "lost": 0,
+        "extra": 2,
+        "unterminated": 0,
+        "parity": 0,
+        "raysTotal": 4096
+      }
+    },
+    {
+      "name": "shape",
+      "functions": {
+        "contains": {
+          "nsPerCall": 31
+        },
+        "distFromOutside": {
+          "nsPerCall": 74.4
+        },
+        "distFromInside": {
+          "nsPerCall": 65.1
+        },
+        "safety": {
+          "nsPerCall": 49.6
+        }
+      },
+      "accuracy": {
+        "capacityRelativeDeviation": 0,
+        "disagreements": {},
+        "unexplained": {}
+      },
+      "xray": {
+        "lost": 0,
+        "extra": 0,
+        "unterminated": 0,
+        "parity": 0,
+        "raysTotal": 4096
+      }
+    }
+  ]
+}
