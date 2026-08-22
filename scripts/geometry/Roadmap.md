@@ -199,3 +199,17 @@ Layer 1 (batch replay from MCStepLogger, embedded in the website) is in
   MCTracks** (Sandro's correction, 2026-08-22), so it can feed track-level display (vertices and
   kinematics; line/helix rendering) without the step logger — less granular than steps, but
   already streaming in parallel mode.
+
+### (g) Per-part decline reasons, and a flat TGeoBVHCSG — under assessment
+
+> *"We should, for each part write specific brief reasons this cannot be a CSG or reasons this
+> cannot be a SurfaceSolid. In this regard a subagent should review if we've already done
+> everything we could to make a CSG conversion (via a possible new TGeoBVHCSG ... without
+> recursion ... flat) possible? I'd like to understand if this could have it's own place next to
+> BVHSurfaceSolid or if it is strictly not worth it."*
+
+In flight 2026-08-22: a review is building the cell-count table Tier 3 was always gated on,
+implementing the decline-reason reporting (which also fixes NEXT items 1–2's empty/silent
+declines), and will deliver a falsifiable go/no-go in `Stream_AA_FlatCSG.md`. Noted connection to
+examine: a union of arrangement cells (Stream_R §9.3) *is* a flat recursion-free CSG, so the
+"exact trims" research route and this shape may be one decision, not two.
