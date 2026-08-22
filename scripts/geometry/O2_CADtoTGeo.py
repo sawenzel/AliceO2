@@ -87,7 +87,7 @@ from OCC.Core.GeomAbs import (
 )
 from OCC.Core.TopExp import TopExp_Explorer, topexp
 from OCC.Core.TopLoc import TopLoc_Location
-from OCC.Core.TopAbs import TopAbs_REVERSED, TopAbs_WIRE, TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
+from OCC.Core.TopAbs import TopAbs_REVERSED, TopAbs_WIRE, TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX, TopAbs_SOLID
 from OCC.Core.TopTools import TopTools_IndexedMapOfShape
 from OCC.Core.TopoDS import topods
 from OCC.Extend.TopologyUtils import TopologyExplorer
@@ -2585,6 +2585,99 @@ def run_duplicate_placement_self_test() -> int:
     return failures
 
 
+def run_multibody_leaf_self_test() -> int:
+    """Assert that one XCAF leaf label carrying several solid bodies becomes several volumes.
+
+    `Stream_AC_OTOFTraversal.md`. An XCAF "simple shape" is a label, not a body: exporters hang a
+    compound of many solids off a single leaf label. `oTOF System V3-R92cm.step` does exactly that
+    -- three leaf labels holding 3, 17 and 0 solid bodies -- and the traversal used to see three
+    logical volumes where the CAD has twenty, plus one with no geometry that killed the no-mesh
+    path in `Bnd_Box`.
+
+    The single-body control below is the one that matters for every other corpus: Bagger, as1 and
+    ALICE3 leaves are all one solid each, and their definition keys must stay the bare label entry
+    so that their emitted output does not move.
+
+    Returns the number of failures; prints one line per check.
+    """
+    from OCC.Core.BRep import BRep_Builder
+    from OCC.Core.TopoDS import TopoDS_Compound
+
+    failures = 0
+    checks = 0
+
+    def report(ok: bool, label: str, detail: str = ""):
+        nonlocal failures, checks
+        checks += 1
+        if not ok:
+            failures += 1
+        print(f"  [{'ok ' if ok else 'FAIL'}] {label}{(' -- ' + detail) if detail else ''}")
+
+    def compound_of(*shapes):
+        comp = TopoDS_Compound()
+        builder = BRep_Builder()
+        builder.MakeCompound(comp)
+        for s in shapes:
+            builder.Add(comp, s)
+        return comp
+
+    print("\nMulti-body leaf labels: one label, one body each (Stream_AC_OTOFTraversal.md)")
+
+    # --- 1. a leaf label holding two boxes, instanced twice -----------------------------------
+    _doc, st = _self_test_shape_tool()
+    two_bodies = compound_of(BRepPrimAPI_MakeBox(gp_Pnt(0., 0., 0.), 1., 1., 1.).Shape(),
+                             BRepPrimAPI_MakeBox(gp_Pnt(5., 0., 0.), 1., 1., 1.).Shape())
+    part = st.AddShape(two_bodies, False)
+    module = _self_test_assembly(st, [(part, gp_Trsf())])
+    _self_test_assembly(st, [(module, _self_test_shift(dx=0.0)),
+                             (module, _self_test_shift(dx=100.0))])
+    st.UpdateAssemblies()
+    rep, occ = _self_test_convert(st)
+    report(len(logical_volumes) == 2,
+           "a leaf label carrying two solid bodies becomes two logical volumes, not one",
+           f"{len(logical_volumes)} logical volume(s)")
+    report(len(occ) == 4 and len(set(occ)) == 4,
+           "and instancing that label twice places four bodies, all at distinct transforms",
+           f"{rep['declared_leaf_placements']} declared -> {len(occ)} placed, "
+           f"{len(set(occ))} distinct")
+    report(sum(rep["n_suppressed_by_rule"].values()) == 0,
+           "the two bodies of one label never look like a coincident duplicate",
+           f"{rep['n_suppressed_by_rule']}")
+
+    # --- 2. the control: a single-body leaf keeps its bare label entry as the definition key ---
+    _doc, st = _self_test_shape_tool()
+    one_body = st.AddShape(BRepPrimAPI_MakeBox(2., 2., 2.).Shape(), False)
+    _self_test_assembly(st, [(one_body, gp_Trsf())])
+    st.UpdateAssemblies()
+    _rep, occ = _self_test_convert(st)
+    keys = list(logical_volumes)
+    report(len(keys) == 1 and "#b" not in keys[0] and keys[0] == label_id(one_body),
+           "a single-body leaf is untouched: one volume, keyed on the bare label entry",
+           f"{keys}")
+    report(len(occ) == 1, "and it is placed exactly once", f"{len(occ)} placed")
+
+    # --- 3. a leaf label with no geometry at all is skipped, not crashed on ---------------------
+    _doc, st = _self_test_shape_tool()
+    empty = st.AddShape(compound_of(), False)
+    good = st.AddShape(BRepPrimAPI_MakeBox(3., 3., 3.).Shape(), False)
+    _self_test_assembly(st, [(empty, gp_Trsf()), (good, _self_test_shift(dx=10.0))])
+    st.UpdateAssemblies()
+    ok_empty = True
+    detail = ""
+    try:
+        _rep, occ = _self_test_convert(st)
+    except Exception as exc:          # the old failure mode: Bnd_Box is void
+        ok_empty = False
+        occ = []
+        detail = f"{type(exc).__name__}: {exc}"
+    report(ok_empty and len(logical_volumes) == 1 and len(occ) == 1,
+           "an empty leaf label is dropped with a warning and its siblings still convert",
+           detail or f"{len(logical_volumes)} volume(s), {len(occ)} placed")
+
+    print(f"\n{checks} checks, {failures} failure(s)")
+    return failures
+
+
 def _recognized_inner_wall(face, rec) -> Optional[bool]:
     """Decide, by measurement, which side of a RECOGNIZED quadric is outside the solid.
 
@@ -3779,6 +3872,49 @@ def cpp_var_for_def(lid: str) -> str:
     return f"asm_{safe}" if lid in assemblies else f"vol_{safe}"
 
 
+def solid_bodies_of(shape) -> list:
+    """The TopoDS_Solid bodies a shape carries, each with its own location already baked in."""
+    if shape is None:
+        return []
+    try:
+        if shape.IsNull():
+            return []
+    except Exception:
+        return []
+    out = []
+    exp = TopExp_Explorer(shape, TopAbs_SOLID)
+    while exp.More():
+        out.append(topods.Solid(exp.Current()))
+        exp.Next()
+    return out
+
+
+def _register_leaf_shape(def_key: str, shape, meshparam, scale_to_cm: float,
+                         clip_enabled: bool, clip_box, clip_box_shape,
+                         world_trsf, def_lid: str) -> bool:
+    """Record one leaf logical volume: its CAD volume, its shape and its triangles.
+
+    Returns False when clipping removed the shape entirely, in which case nothing is recorded.
+    """
+    try:
+        volume_cm3 = volume_cm3_of_shape(shape, scale_to_cm=scale_to_cm)
+    except Exception:
+        volume_cm3 = 0.0
+
+    if clip_enabled:
+        shape = clip_shape_to_box(shape, clip_box, clip_box_shape, world_trsf, def_lid)
+        if shape is None:
+            return False
+
+    def_volumes_cm3[def_key] = volume_cm3
+    def_shapes[def_key] = shape
+
+    do_meshing = (meshparam is not None) and meshparam.get("do_meshing", None) is True
+    logical_volumes[def_key] = (triangulate_CAD_solid(shape, meshparam=meshparam, scale_to_cm=scale_to_cm)
+                                if do_meshing else triangulate_asbbox(shape, scale_to_cm=scale_to_cm))
+    return True
+
+
 def expand_definition(
     def_label: TDF_Label,
     shape_tool,
@@ -3929,25 +4065,44 @@ def expand_definition(
         if name_filter is not None and name_filter.has_include and not subtree_included:
             return None
 
-        if def_key not in logical_volumes:
-            shape = shape_tool.GetShape(def_label)
+        if def_key in logical_volumes or def_key in assemblies:
+            return def_key
 
-            # store volume (for density estimation)
-            try:
-                volume_cm3 = volume_cm3_of_shape(shape, scale_to_cm=scale_to_cm)
-            except Exception:
-                volume_cm3 = 0.0
+        shape = shape_tool.GetShape(def_label)
+        bodies = solid_bodies_of(shape)
 
-            if clip_enabled:
-                shape = clip_shape_to_box(shape, clip_box, clip_box_shape, world_trsf, def_lid)
-                if shape is None:
-                    return None
+        # An XCAF "simple shape" is one label, not necessarily one body. CAD exporters routinely
+        # hang a TopoDS_Compound of several solid bodies off a single leaf label (oTOF's
+        # 'Module v1' carries 17). Meshing that compound as one logical volume loses every body
+        # but the union's bounding box, and an empty compound has no bounding box at all. So each
+        # body becomes its own logical volume and the label becomes the assembly that places them,
+        # once each, in the label's own frame -- the body's location is already baked into it.
+        if len(bodies) > 1:
+            assemblies.add(def_key)
+            kept_bodies = 0
+            for i, body in enumerate(bodies):
+                body_key = f"{def_key}#b{i + 1}"
+                if body_key not in def_names:
+                    def_names[body_key] = nm
+                if _register_leaf_shape(body_key, body, meshparam, scale_to_cm,
+                                        clip_enabled, clip_box, clip_box_shape,
+                                        world_trsf, def_lid):
+                    placements.append((def_key, body_key, gp_Trsf()))
+                    kept_bodies += 1
+            if kept_bodies == 0:
+                assemblies.discard(def_key)
+                return None
+            return def_key
 
-            def_volumes_cm3[def_key] = volume_cm3
-            def_shapes[def_key] = shape
+        if not bodies and _shape_is_empty(shape):
+            print(f"WARNING: CAD leaf {def_lid} ('{nm}') carries no geometry at all "
+                  f"(empty compound); skipping it.")
+            return None
 
-            do_meshing = (meshparam is not None) and meshparam.get("do_meshing", None) is True
-            logical_volumes[def_key] = triangulate_CAD_solid(shape, meshparam=meshparam, scale_to_cm=scale_to_cm) if do_meshing else triangulate_asbbox(shape, scale_to_cm=scale_to_cm)
+        if not _register_leaf_shape(def_key, shape, meshparam, scale_to_cm,
+                                    clip_enabled, clip_box, clip_box_shape,
+                                    world_trsf, def_lid):
+            return None
         return def_key
 
     assemblies.add(def_key)
@@ -4781,7 +4936,8 @@ def main():
     if args.self_test:
         sys.exit(1 if (run_recognition_self_test() + run_placement_self_test()
                        + run_planar_trim_self_test()
-                       + run_duplicate_placement_self_test()) else 0)
+                       + run_duplicate_placement_self_test()
+                       + run_multibody_leaf_self_test()) else 0)
     if args.step is None:
         ap.error("the following arguments are required: step (or pass --self-test)")
 
