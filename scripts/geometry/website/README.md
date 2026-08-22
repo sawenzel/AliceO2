@@ -53,6 +53,11 @@ first open of the panel, not at boot, because with ALICE3 in the list that is se
 facets nobody has asked to look at. Entries are grouped by the `group` field the fetch script
 writes.
 
+One entry is not a part: where `testdata/otof_assembly/` exists, the list ends with the **oTOF
+assembly**, whose thumbnail is one point per placement. Selecting it swaps the per-part tabs for
+the single **Assembly** tab, because a placement table has no sidecar, no CSG record and no
+benchmark row; selecting a part again brings them back untouched.
+
 ## The tabs
 
 **Mesh viewer.** The tessellation from `facets_*.bin`, flat-shaded so the faceting is visible, with
@@ -158,6 +163,35 @@ accumulating a radiograph. The screen is post-processing, not geometry: it can b
 normal and re-binned without re-running anything. The committed replay is synthetic and labelled
 so; the same gun can be re-run in the browser at higher statistics (5 × 3000 tracks takes about
 0.5 s), which is what makes the part's shadow legible on the screen.
+
+**Assembly.** The placed tree rather than one part, and it appears only when the selector's
+assembly entry is chosen — the per-part tabs have nothing to say about a placement table, so they
+step aside while it is selected and come back with the next part.
+
+The honest note first: **oTOF has no tubular *solid*.** All twenty of its body prototypes are
+planar — nineteen exact boxes and one 1493-plane part. The tube is the **assembly**: 20 prototypes,
+3 741 leaf placements, 62 628 placed solids, 1 136 824 triangles, and out of those a barrel about
+`x` of R 85.0–96.7 cm and 3.48 m long. Those numbers are measured from the placement table on load,
+not written into a caption.
+
+It draws one `THREE.InstancedMesh` per body prototype, so the whole barrel is 20 draw calls. What
+makes that possible is a geometry fact from the converter: a body's vertices are already in its
+**leaf's** frame — the body's own pose is baked in — so an instance's world transform is exactly
+its leaf's matrix, and every prototype of a leaf shares one instance-matrix buffer. The slice keeps
+whole placements whose position along the barrel axis falls in the window (it never cuts a body
+open); at its narrowest the window is one ring, 2 312 solids, and `re-frame` then frames the slice
+rather than the barrel. There is a wireframe toggle and a spin toggle whose frame-rate read-out is
+the median of the last nine **drawn** frames.
+
+This tab is **WebGL only** and says so on the page: no raytracing and no bridge. 62 628 solids is a
+rasteriser's job.
+
+Its data does not come from `fetch_testdata.sh`, which is per-part. `./fetch_assembly.sh
+<placements.json> <facets-dir> ...` copies the placement table verbatim to
+`testdata/otof_assembly/placements.json`, copies one `facets_<body>.bin` per prototype next to it
+(taking the properly meshed copy where two source dirs offer the same body), and writes
+`testdata/otof_assembly/index.json` with the leaf → bodies mapping and the totals. A checkout
+without that directory simply has no assembly entry in the selector and no Assembly tab.
 
 **Self-check.** Runs the assertions below in the page and prints PASS/FAIL. The same code runs from
 the command line as `node tools/selfcheck.mjs`.
@@ -460,12 +494,14 @@ js/orbit.js         a minimal orbit control (so no bare-specifier import map is 
 js/charts.js        the benchmark charts and the part card, SVG and DOM
 js/livebench.js     the benchmarks tab's live measurement: /load + /bench on the bridge
 js/events.js        the event-display tab
+js/assembly.js      the placement table: loading it, and the InstancedMesh view of it
+js/assemblyui.js    the assembly tab's controls
 js/gun.js           the synthetic gun, shared by the sample-data tool and the worker
 js/selfcheck.js     the assertions, runnable in node and in the browser
 js/app.js           part selection, tabs, shared state
 tools/              make_sample_data.mjs, selfcheck.mjs
 sample_data/        committed synthetic stand-ins, all labelled synthetic in their own meta
 vendor/             three.js r185 (MIT, licence included)
-testdata/           gate output, NOT committed; see fetch_testdata.sh
+testdata/           gate output, NOT committed; see fetch_testdata.sh and fetch_assembly.sh
 website_data        symlink to ../website_data, Track 2's measured JSON
 ```
