@@ -88,6 +88,10 @@
       one &mdash; the <code>surfaces_*.bin</code> sidecar &mdash; and renders it by intersecting rays with the
       actual planes, cylinders, cones, spheres and tori, trimmed by their real boundary wires. Nothing here is
       tessellated: a cylinder shades smoothly because it <em>is</em> a cylinder.</p>
+    <p>The other two are here to be compared against it. The mesh is loaded and traced in the same page; the
+      CSG composite, where the recogniser produced one, is described on the part card from its own
+      <code>csg.json</code> and traced through the bridge from the very <code>shape.root</code> the converter
+      ships &mdash; so the three representations of one part can be put on the same camera, and subtracted.</p>
     <p>Everything is served from this directory. There is no CDN, no external request and no server-side
       component; the raytracer is JavaScript in a worker.</p>
     <h2>Provenance of the maths</h2>
