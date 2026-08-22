@@ -96,6 +96,31 @@ An artifact page in three layers, in order of certainty:
 If layer 2 slips, layer 1 plus offline raytraces from the C++ kernel is the talk's material.
 The website never becomes the critical path: the timebox is hard.
 
+
+### Track 3b — the event display: real Geant4 transport in the browser (layer 1)
+
+Raised by Sandro 2026-08-22, agreed in session: show **actual o2-sim Geant4 transport** through a
+converted part inside the visualization — an event display, and a new level of *part testing*.
+
+Scope for the two weeks is **layer 1, batch replay**, which shares Track 1's converted parts and
+run scripts:
+
+- A run script fires a fixed-seed gun (geantinos first, then electrons/pions) at the part loaded
+  as an external module; **MCStepLogger** captures every step.
+- A converter reduces the step log to `events.json`: per event the track polylines
+  (pdg/charge/energy), the step point cloud, and the crossings with a **virtual screen plane**
+  behind the part — the screen is post-processing, no geometry change, so it can be moved freely.
+- The three.js page plays events back: animated tracks, point-cloud density (the material budget
+  made visible), and the accumulating radiograph on the screen.
+- The closing visual: same seed, same gun, geometry toggled exact <-> tessellated, difference
+  image on the radiograph — a leaking mesh does not show up in a table, it glows on the screen.
+- Publication caveat: the Artifact CSP blocks WebSockets, so the published page carries embedded
+  replay events; only a locally served copy can ever be live.
+
+Deferred to the Roadmap (recorded there): layer 2, the live loop — a local bridge with a
+"fire N events" button, o2-sim service mode keeping warm workers, and the O2HitMerger FairMQ tap,
+which despite its name sees **all MCTracks** and is therefore a genuine track-level live source.
+
 ### Track 4 — the talk (days 12–14)
 
 ~30 min: the problem (CAD → simulation, what tessellation costs); the three-representation
@@ -110,7 +135,7 @@ website demo; the o2-sim demo with hits; the one honest overlaps slide; gaps and
 | 1–2 | Track 0 reading half, Track 0b | `Review_2026-09.md` drafted; INDEX committed |
 | build-done | Track 0 verification half | recorded numbers re-confirmed or divergences named |
 | 3–8 | Track 1 (owns the build), Track 2 (Python-only, parallel) | o2-sim transports both modules without stuck tracks; benchmark JSON exists |
-| 5–12 | Track 3, timeboxed | layer 1 done by day 9 or layer 2 is cut |
+| 5–12 | Tracks 3 + 3b, timeboxed | website layer 1 done by day 9 or the JS raytracer is cut; event-display replay demo runs on at least one part |
 | 12–14 | Track 4 | dry run against the clock |
 
 ## Risks, named
