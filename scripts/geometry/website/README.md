@@ -48,10 +48,14 @@ part's mesh precision.
 
 **Benchmarks.** Per-part grouped bars of `nsPerCall` per navigation function per representation on
 a log axis (the ratios are one to two orders of magnitude, so a linear axis would be useless), plus
-the accuracy and X-ray counters as a table. It reads `scripts/geometry/website_data/*.json` first
-(Track 2's output, via an `index.json` listing the files) and falls back to the **synthetic**
-records in `sample_data/`, saying so on the page. A field that was not measured renders as `n/a`,
-never as `0`.
+the accuracy and X-ray counters as a table. It reads Track 2's `scripts/geometry/website_data/*.json`
+first, via the `index.json` that lists them, and falls back to the **synthetic** records in
+`sample_data/`, saying which on the page. A field that was not measured renders as `n/a`, never as
+`0`.
+
+`website_data` inside this directory is a symlink to `../website_data`, because `python3 -m
+http.server` refuses paths above its own root; the loader also tries `../website_data/` for the
+case where the server was started one level up instead.
 
 **Event display.** Track 3b layer 1: batch replay of an `events.json` over the geometry — track
 polylines coloured by pdg, the step points as a cloud, and a virtual screen behind the part
@@ -243,4 +247,5 @@ tools/              make_sample_data.mjs, selfcheck.mjs
 sample_data/        committed synthetic stand-ins, all labelled synthetic in their own meta
 vendor/             three.js r185 (MIT, licence included)
 testdata/           gate output, NOT committed; see fetch_testdata.sh
+website_data        symlink to ../website_data, Track 2's measured JSON
 ```
