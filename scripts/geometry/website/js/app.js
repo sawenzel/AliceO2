@@ -159,6 +159,42 @@ registerTab('raytracer', async () => {
   initRaytracerTab();
 });
 
+registerTab('check', () => {
+  const button = document.getElementById('btn-selfcheck');
+  const status = document.getElementById('selfcheck-status');
+  const log = document.getElementById('selfcheck-log');
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    log.textContent = '';
+    status.textContent = 'running...';
+    try {
+      const [{ runSelfCheck }, { listParts }] = await Promise.all([import('./selfcheck.js'), import('./data.js')]);
+      const listed = await listParts();
+      if (!listed.parts.length) { status.textContent = listed.reason; button.disabled = false; return; }
+      const load = async (name) => {
+        const entry = listed.parts.find(p => p.name === name);
+        return {
+          sidecar: await loadBinary(`testdata/${entry.surfaces}`),
+          facets: entry.facets ? await loadBinary(`testdata/${entry.facets}`) : null,
+        };
+      };
+      const started = performance.now();
+      const report = await runSelfCheck(listed.parts.map(p => p.name), load, (line, ok) => {
+        const span = document.createElement('span');
+        if (ok === true) { span.className = 'pass'; } else if (ok === false) { span.className = 'fail'; }
+        span.textContent = line + '\n';
+        log.appendChild(span);
+      });
+      status.textContent = `${report.pass} passed, ${report.fail} failed in ${Math.round(performance.now() - started)} ms`;
+      status.className = report.fail ? 'status error' : 'status';
+    } catch (e) {
+      status.textContent = `self-check failed to run: ${e.message}`;
+      status.className = 'status error';
+    }
+    button.disabled = false;
+  });
+});
+
 registerTab('events', async () => {
   const { initEventsTab } = await import('./events.js');
   initEventsTab();
