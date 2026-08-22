@@ -119,6 +119,7 @@ def jit_setup(o2_src: str):
 class State:
     shape = None
     kind = None
+    root = "."
 
 
 def make_handler(state: State, threads: int):
@@ -146,6 +147,11 @@ def make_handler(state: State, threads: int):
                     path = json.loads(body)["path"]
                 except Exception:
                     return self._reply_json({"ok": False, "error": "bad request"}, 400)
+                # the website sends its own relative testdata paths; resolve them against --root
+                if not os.path.isabs(path):
+                    path = os.path.join(state.root, path)
+                if not os.path.exists(path):
+                    return self._reply_json({"ok": False, "error": f"no such file: {path}"}, 422)
                 if path.endswith(".root"):
                     shape, kind = ROOT.raysvc.loadShapeFile(path), "shape"
                 else:
@@ -190,10 +196,13 @@ def main():
     parser.add_argument("--threads", type=int, default=max(1, (os.cpu_count() or 2) - 2))
     parser.add_argument("--o2-src", default=os.path.expanduser("~/alisw/O2"))
     parser.add_argument("--load", help="optionally load a shape at startup")
+    parser.add_argument("--root", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "website"),
+                        help="directory that relative /load paths resolve against (default: the website dir)")
     args = parser.parse_args()
 
     jit_setup(args.o2_src)
     state = State()
+    state.root = args.root
     if args.load:
         loader = ROOT.raysvc.loadShapeFile if args.load.endswith(".root") else ROOT.raysvc.loadSurface
         state.shape = loader(args.load)
