@@ -211,6 +211,99 @@ const SHIPS_NOTE = {
   shape: 'native CSG primitives, navigated by a TGeo composite shape',
 };
 
+// ------------------------------------------------------------------------------------------
+// the CSG record
+// ------------------------------------------------------------------------------------------
+
+/// How the recogniser's boolean reads. Only the operators the cascade can emit are named; anything
+/// else is printed as the JSON's own word, so a new operator shows up rather than disappearing.
+const CSG_OPERATOR = { union: ' \u222a ', intersection: ' \u2229 ', subtraction: ' \u2212 ', difference: ' \u2212 ' };
+
+/// One line naming the composite: "TGeoTube \u222a TGeoTube", or the primitive's own class.
+/// Returns null when there is no accepted candidate -- a part that is not CSG says so elsewhere.
+export function csgStructure(csg) {
+  const candidate = csg && csg.candidate;
+  if (!candidate || !Array.isArray(candidate.leaves) || !candidate.leaves.length) { return null; }
+  const types = candidate.leaves.map(leaf => leaf.type || '?');
+  if (candidate.op === 'primitive' || types.length === 1) { return types[0]; }
+  return types.join(CSG_OPERATOR[candidate.op] || ` ${candidate.op} `);
+}
+
+/// A leaf's parameters in the order TGeo takes them, with the numbers rounded to something a
+/// reader can hold in their head. Angles keep their degrees.
+function csgLeafParams(leaf) {
+  const params = (leaf && leaf.params) || {};
+  const entries = Object.entries(params).filter(([, v]) => typeof v === 'number');
+  if (!entries.length) { return ''; }
+  return entries.map(([k, v]) => `${k} ${fmt(v, 5)}`).join(', ');
+}
+
+/// The recogniser's record for this part, as the part card shows it: what it found, what the
+/// acceptance test said about it, and whether a shape_*.root sits next to it for the raytracer.
+function csgSection(card, part, csg, decline) {
+  const heading = document.createElement('h4');
+  heading.textContent = 'CSG, as the recogniser found it';
+  card.appendChild(heading);
+
+  const candidate = csg && csg.candidate;
+  const acceptance = csg && csg.acceptance;
+  const whyNot = decline && decline.whyNotCSG;
+
+  if (candidate) {
+    const pairs = [
+      ['structure', csgStructure(csg)],
+      ['recogniser', candidate.recogniser || (csg && csg.recogniser) || null],
+    ];
+    (candidate.leaves || []).forEach((leaf, index) => {
+      pairs.push([
+        (candidate.leaves.length > 1 ? `leaf ${index + 1}` : 'primitive'),
+        `${leaf.type || '?'}  ${csgLeafParams(leaf)}`.trim(),
+      ]);
+    });
+    pairs.push([(candidate.leaves || []).length > 1 ? 'leaf placement' : 'primitive placement',
+      (candidate.leaves || []).every(leaf => leaf && leaf.frame)
+      ? 'every leaf carries its own world frame (origin and axes)'
+      : 'not every leaf carries a frame']);
+    pairs.push(['solid placement', csg.placement
+      ? 'one 3 x 4 world matrix on the composite itself'
+      : 'none -- the leaves are already in world coordinates']);
+    if (acceptance) {
+      const dv = acceptance.symmetricDifference;
+      pairs.push(['acceptance', acceptance.accepted
+        ? `accepted: dV_sym ${fmt(dv)} cm^3 against a band of ${fmt(acceptance.band)} cm^3`
+        : `REJECTED: ${acceptance.reason || 'no reason recorded'}`]);
+      pairs.push(['volume', acceptance.volumeOriginal === undefined ? null
+        : `CAD ${fmt(acceptance.volumeOriginal, 6)} cm^3, candidate ${fmt(acceptance.volumeCandidate, 6)} cm^3`]);
+    }
+    pairs.push(['traceable here', part && part.shape
+      ? `testdata/${part.shape} -- the "CSG (bridge)" raytracer view traces this very file`
+      : 'no shape_*.root in testdata/ for this part']);
+    card.appendChild(dl(pairs));
+    return;
+  }
+
+  const line = document.createElement('p');
+  line.className = 'muted small';
+  if (acceptance && acceptance.reason) {
+    line.textContent = 'The recogniser produced a candidate and the acceptance test threw it out: ' +
+      acceptance.reason + '. The part therefore ships as something else.';
+  } else if (whyNot) {
+    line.textContent = `Not CSG: ${whyNot}`;
+  } else if (csg) {
+    line.textContent = 'The recogniser found no candidate for this part, and recorded no reason beyond that.';
+  } else {
+    line.textContent = 'No csg_*.json was copied for this part, and website_data/decline_reasons.json ' +
+      'has no entry for it, so this page cannot say why it is not CSG.';
+  }
+  card.appendChild(line);
+  if (whyNot && acceptance && acceptance.reason && whyNot !== acceptance.reason) {
+    const second = document.createElement('p');
+    second.className = 'muted small';
+    second.textContent = `The cascade's own summary of the same decision: ${whyNot}`;
+    card.appendChild(second);
+  }
+}
+
 function dl(pairs) {
   const list = document.createElement('dl');
   list.className = 'facts';
@@ -328,6 +421,8 @@ export function partCard(entry, state, summary) {
       ['records', records],
     ]));
   }
+
+  if (part) { csgSection(card, part, state.csg, state.decline); }
 
   if (!doc) {
     const missing = document.createElement('p');

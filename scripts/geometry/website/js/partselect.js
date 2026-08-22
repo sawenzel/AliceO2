@@ -135,7 +135,12 @@ function cssEscape(s) { return s.replace(/["\\]/g, '\\$&'); }
 
 /// The one line under a part's name: what representations this checkout actually has for it.
 function subtitleOf(entry) {
-  if (!entry.surfaces) { return 'tessellated only'; }
-  if (!entry.facets) { return 'exact sidecar, no mesh'; }
-  return 'exact + mesh';
+  const bits = [];
+  if (entry.surfaces) { bits.push('exact'); }
+  if (entry.facets) { bits.push('mesh'); }
+  if (entry.shape) { bits.push('CSG'); }
+  if (!bits.length) { return 'nothing to load'; }
+  if (!entry.surfaces) { return entry.shape ? bits.join(' + ') : 'tessellated only'; }
+  if (!entry.facets) { return `${bits.join(' + ')}, no mesh`; }
+  return bits.join(' + ');
 }
