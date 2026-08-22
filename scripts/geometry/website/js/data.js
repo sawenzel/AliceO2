@@ -64,7 +64,10 @@ export async function loadBenchmarks() {
       const doc = await loadJSON(`${root}/${file}`, { optional: true });
       if (doc) { out.push({ source: `${root}/${file}`, doc }); }
     }
-    if (out.length) { return { origin: 'website_data', benchmarks: out }; }
+    if (out.length) {
+      const summary = await loadJSON(`${root}/summary.json`, { optional: true });
+      return { origin: 'website_data', benchmarks: out, summary };
+    }
   }
   // No index: try the sample set, which follows the same schema and is committed.
   const sampleIndex = await loadJSON('sample_data/index.json', { optional: true });
@@ -74,9 +77,9 @@ export async function loadBenchmarks() {
       const doc = await loadJSON(`sample_data/${file}`, { optional: true });
       if (doc) { out.push({ source: `sample_data/${file}`, doc }); }
     }
-    return { origin: 'sample_data', benchmarks: out };
+    return { origin: 'sample_data', benchmarks: out, summary: await loadJSON('sample_data/summary.json', { optional: true }) };
   }
-  return { origin: 'none', benchmarks: [] };
+  return { origin: 'none', benchmarks: [], summary: null };
 }
 
 /// The event-display replay. Real o2-sim output when it exists, the synthetic sample otherwise.

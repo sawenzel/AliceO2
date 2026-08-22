@@ -202,3 +202,13 @@ td.na { color: var(--text-muted); }
 .partsel-text { display: flex; flex-direction: column; min-width: 0; }
 .partsel-itemname { font-family: var(--mono); font-size: 12.5px; }
 .partsel-itemsub { color: var(--text-muted); font-size: 11px; }
+
+/* --- the benchmarks part card --------------------------------------------------------------- */
+
+.badge.ships { font-weight: 600; letter-spacing: 0.3px; vertical-align: 2px; }
+.badge.ships-surface { border-color: var(--accent); color: var(--accent); }
+.badge.ships-shape { border-color: var(--accent-3); color: var(--accent-3); }
+.badge.ships-mesh { border-color: var(--accent-2); color: var(--accent-2); }
+.card dl.facts { margin: 4px 0 10px; }
+.card table { margin-bottom: 4px; }
+#bench-body .card, #bench-body > p { max-width: 1020px; }
