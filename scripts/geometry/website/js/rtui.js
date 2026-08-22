@@ -64,6 +64,15 @@ export function initRaytracerTab() {
           <div class="row"><span class="status" id="rt-bridge-status">bridge not connected</span></div>
         </div>
         <div class="pane">
+          <h3>ms per frame, per engine</h3>
+          <p class="muted small">Each row is the last frame that engine rendered <em>on its own</em>: the whole
+            frame was its work, so the two are directly comparable when the camera and the resolution agree.</p>
+          <table id="rt-perf"></table>
+          <div class="row" style="margin-top:8px">
+            <button id="rt-timeboth">time both engines</button>
+          </div>
+        </div>
+        <div class="pane">
           <h3>Counters</h3>
           <dl class="facts" id="rt-counters"></dl>
         </div>
@@ -142,6 +151,7 @@ export function initRaytracerTab() {
     renderScale();
     const key = tracer.view;
     const notes = {
+      exactBridge: 'The same picture, every pixel answered by scripts/geometry/tgeoRayService.py driving the REAL O2 kernel through TGeo. Identical shading, so what you see is the kernel\'s own hit points and its own analytic normals -- not a difference image of them.',
       exact: 'Every pixel is a ray intersected with the real trimmed patches: quadratics for the plane, cylinder, cone and sphere, the quartic for the torus, and 2D winding against the trim wires. The shading normal is analytic, so a cylinder is smooth.',
       mesh: 'The same camera, against the triangles of facets_*.bin, with flat facet normals. The silhouette is a polygon.',
       diff: 'Red where one representation is hit and the other is not; otherwise a heatmap of the depth difference, saturating at one part in a thousand of the model size.',
@@ -163,6 +173,56 @@ export function initRaytracerTab() {
     footnote.textContent = bits.join(' ');
   }
 
+  const perfTable = document.getElementById('rt-perf');
+
+  function rate(entry) {
+    if (!entry || !entry.ms) { return 'n/a'; }
+    const raysPerSecond = entry.rays / (entry.ms / 1000);
+    return raysPerSecond >= 1e6 ? `${(raysPerSecond / 1e6).toFixed(2)} Mray/s` : `${Math.round(raysPerSecond / 1e3)} kray/s`;
+  }
+
+  /// The two engines side by side. A row appears only once that engine has rendered a frame of
+  /// its own; a frame in which both ran is not apportioned between them and is not shown here.
+  function showPerf() {
+    const rows = [['local', tracer.perf.local], ['bridge', tracer.perf.remote]];
+    perfTable.innerHTML = '';
+    const head = document.createElement('tr');
+    for (const label of ['engine', 'ms/frame', 'rays', 'rate']) {
+      const th = document.createElement('th'); th.textContent = label; head.appendChild(th);
+    }
+    perfTable.appendChild(head);
+    for (const [key, entry] of rows) {
+      const tr = document.createElement('tr');
+      const cells = entry
+        ? [entry.engine, `${entry.ms}`, `${entry.rays}`, rate(entry)]
+        : [key === 'local' ? 'local' : 'bridge', 'not rendered yet', '-', '-'];
+      cells.forEach((text, i) => {
+        const td = document.createElement('td');
+        td.textContent = text;
+        if (!entry) { td.className = 'na'; }
+        if (i === 0) { td.style.textAlign = 'left'; }
+        tr.appendChild(td);
+      });
+      perfTable.appendChild(tr);
+    }
+    const note = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 4;
+    td.style.textAlign = 'left';
+    td.className = 'na';
+    const a = tracer.perf.local, b = tracer.perf.remote;
+    if (a && b) {
+      const comparable = a.width === b.width && a.height === b.height && a.camera === b.camera;
+      td.textContent = comparable
+        ? `same camera at ${a.width}x${a.height}: bridge / local ${(b.ms / a.ms).toFixed(2)}x`
+        : 'the two frames used a different camera or resolution -- press "time both engines" for a matched pair';
+    } else {
+      td.textContent = 'render the "exact surfaces" view and the "exact surfaces (bridge)" view to fill both rows';
+    }
+    note.appendChild(td);
+    perfTable.appendChild(note);
+  }
+
   function showCounters(c) {
     counters.innerHTML = '';
     const add = (key, value) => {
@@ -170,7 +230,9 @@ export function initRaytracerTab() {
       const dd = document.createElement('dd'); dd.textContent = value;
       counters.appendChild(dt); counters.appendChild(dd);
     };
-    add('engine', tracer.view === 'engine' && tracer.bridgeReady ? `local vs ${tracer.remote.name}` : tracer.local.name);
+    if (tracer.view === 'engine' && tracer.bridgeReady) { add('engine', `local vs ${tracer.remote.name}`); }
+    else if (tracer.view === 'exactBridge') { add('engine', tracer.remote ? tracer.remote.name : 'bridge (not connected)'); }
+    else { add('engine', tracer.local.name); }
     add('pixels', `${c.total}`);
     add('hit', c.hit === undefined ? 'n/a' : `${c.hit} (${(100 * c.hit / Math.max(1, c.total)).toFixed(1)}%)`);
     if (tracer.view === 'diff' || tracer.view === 'engine') {
@@ -186,8 +248,12 @@ export function initRaytracerTab() {
   tracer.onProgress = showCounters;
   tracer.onDone = (c) => {
     showCounters(c);
+    showPerf();
+    const a = tracer.perf.local, b = tracer.perf.remote;
+    const both = a && b && a.width === b.width && a.height === b.height && a.camera === b.camera
+      ? `\nlocal ${a.ms} ms  vs  bridge ${b.ms} ms  (${(b.ms / a.ms).toFixed(2)}x)` : '';
     hud.textContent = `${state.part ? state.part.name : ''} - ${VIEWS.find(v => v.key === tracer.view).label}\n` +
-      `${tracer.width}x${tracer.height} in ${c.ms} ms`;
+      `${tracer.width}x${tracer.height} in ${c.ms} ms` + both;
   };
 
   let renderTimer = null;
@@ -198,8 +264,8 @@ export function initRaytracerTab() {
 
   viewSelect.addEventListener('change', () => {
     tracer.view = viewSelect.value;
-    if (tracer.view === 'engine' && !tracer.bridgeReady) {
-      bridgeStatus.textContent = 'bridge offline: connect it, or the difference has nothing to compare against';
+    if ((tracer.view === 'engine' || tracer.view === 'exactBridge') && !tracer.bridgeReady) {
+      bridgeStatus.textContent = 'bridge offline: connect it, or this view has nothing to render';
       bridgeStatus.className = 'status error';
     }
     describeView();
@@ -247,6 +313,58 @@ export function initRaytracerTab() {
     scheduleRender(90);
   }, { passive: false });
 
+  /// Try the bridge without being asked. The service resolves a relative path against its own
+  /// working directory, which is not this page's, so a couple of documented candidates are tried
+  /// and whichever answers is remembered.
+  async function autoConnect() {
+    if (!state.part) { return false; }
+    const suffix = `testdata/${state.part.surfaces}`;
+    const candidates = [];
+    if (settings.prefix) { candidates.push(settings.prefix); }
+    candidates.push('', 'scripts/geometry/website/');
+    const port = Number(portInput.value) || 8077;
+    for (const prefix of candidates) {
+      const path = prefix + suffix;
+      const result = await tracer.connectBridge(port, path);
+      if (result.ok) {
+        settings.prefix = prefix;
+        settings.port = port;
+        saveBridgeSettings(settings);
+        pathInput.value = path;
+        bridgeStatus.textContent = `bridge ready: ${result.info.kind || '?'}, ${result.info.nSurfaces ?? '?'} surfaces`;
+        bridgeStatus.className = 'status';
+        return true;
+      }
+      // A dead service fails the same way for every candidate; do not hammer it.
+      if (/no answer from/.test(result.error || '')) { break; }
+    }
+    bridgeStatus.textContent = 'bridge offline; the local engine answers every view that does not need it';
+    bridgeStatus.className = 'status';
+    return false;
+  }
+
+  document.getElementById('rt-timeboth').addEventListener('click', async () => {
+    const button = document.getElementById('rt-timeboth');
+    if (!tracer.bridgeReady) {
+      bridgeStatus.textContent = 'connect the bridge first: with only one engine there is nothing to compare';
+      bridgeStatus.className = 'status error';
+      return;
+    }
+    button.disabled = true;
+    const restore = viewSelect.value;
+    for (const view of ['exact', 'exactBridge']) {
+      tracer.view = view;
+      viewSelect.value = view;
+      describeView();
+      await tracer.render();
+    }
+    viewSelect.value = restore;
+    tracer.view = restore;
+    describeView();
+    button.disabled = false;
+    await tracer.render();
+  });
+
   document.getElementById('rt-connect').addEventListener('click', async () => {
     const port = Number(portInput.value) || 8077;
     const path = pathInput.value.trim();
@@ -280,7 +398,9 @@ export function initRaytracerTab() {
     });
     pathInput.value = defaultPath();
     describeView();
+    showPerf();
     tracer.render();
+    await autoConnect();
   }
 
   onPartChanged(() => { if (initialised) { loadCurrentPart(); } });
