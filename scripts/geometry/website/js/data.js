@@ -77,7 +77,8 @@ export async function loadBenchmarks() {
       const doc = await loadJSON(`sample_data/${file}`, { optional: true });
       if (doc) { out.push({ source: `sample_data/${file}`, doc }); }
     }
-    return { origin: 'sample_data', benchmarks: out, summary: await loadJSON('sample_data/summary.json', { optional: true }) };
+    // The sample set has no cross-part summary, so there is no verdict to read there.
+    return { origin: 'sample_data', benchmarks: out, summary: null };
   }
   return { origin: 'none', benchmarks: [], summary: null };
 }
