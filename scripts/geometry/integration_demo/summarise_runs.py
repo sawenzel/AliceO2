@@ -72,10 +72,26 @@ def main() -> int:
     root = os.path.join(sys.argv[1], "runs")
     per_volume = "--per-volume" in sys.argv
     runs = {}
+    analysis = os.path.join(sys.argv[1], "analysis")
     for tag in sorted(os.listdir(root)):
         log = os.path.join(root, tag, "sim.log")
-        if os.path.exists(log):
-            runs[tag] = parse(log)
+        if not os.path.exists(log):
+            continue
+        r = parse(log)
+        # With MCSTEP LOG_TTREE set (which run_sim.sh does) MCStepLogger writes its tree and
+        # stops printing the per-volume log summary, so the step counts come from the
+        # analyse_all.sh reduction instead.
+        af = os.path.join(analysis, f"steps_{tag}.txt")
+        if os.path.exists(af):
+            for line in open(af):
+                f = line.split()
+                if len(f) >= 2 and f[0] == "STEPS_TOTAL":
+                    r["steps"] = int(f[1])
+                elif len(f) >= 2 and f[0] == "SECONDARIES":
+                    r["secondaries"] = int(f[1])
+                elif len(f) >= 4 and f[0] == "VOL":
+                    r["vol"][f[1]] = int(f[2])
+        runs[tag] = r
 
     hdr = f"{'run':22s} {'init_s':>8s} {'transp_s':>9s} {'RSS_MB':>8s} {'steps':>9s} {'2nd':>8s} {'tracks':>7s} {'IRIS hits':>9s} {'BAGR hits':>9s} {'bad':>4s}"
     print(hdr)
