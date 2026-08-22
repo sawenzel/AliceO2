@@ -49,15 +49,20 @@ export async function listParts() {
   return { parts: manifest.parts, reason: null, generated: manifest.generated, sources: manifest.sources };
 }
 
-/// The Track-2 benchmark JSON. Read from website_data/ first (produced by the benchmark run,
-/// one directory up), then from the committed sample_data/ fallback.
+/// Where the measured Track-2 data may sit. `website_data/` is the symlink inside this directory
+/// (so `python3 -m http.server` here can reach it -- the server refuses paths above its root);
+/// `../website_data/` is the same directory when the server was started one level up instead.
+const BENCHMARK_ROOTS = ['website_data', '../website_data'];
+
+/// The Track-2 benchmark JSON, with the committed sample_data/ records as the fallback.
 export async function loadBenchmarks() {
-  const index = await loadJSON('../website_data/index.json', { optional: true });
-  if (index && Array.isArray(index.files) && index.files.length) {
+  for (const root of BENCHMARK_ROOTS) {
+    const index = await loadJSON(`${root}/index.json`, { optional: true });
+    if (!index || !Array.isArray(index.files) || !index.files.length) { continue; }
     const out = [];
     for (const file of index.files) {
-      const doc = await loadJSON(`../website_data/${file}`, { optional: true });
-      if (doc) { out.push({ source: `website_data/${file}`, doc }); }
+      const doc = await loadJSON(`${root}/${file}`, { optional: true });
+      if (doc) { out.push({ source: `${root}/${file}`, doc }); }
     }
     if (out.length) { return { origin: 'website_data', benchmarks: out }; }
   }
@@ -76,8 +81,10 @@ export async function loadBenchmarks() {
 
 /// The event-display replay. Real o2-sim output when it exists, the synthetic sample otherwise.
 export async function loadEvents() {
-  const real = await loadJSON('../website_data/events.json', { optional: true });
-  if (real) { return { origin: 'website_data/events.json', doc: real }; }
+  for (const root of BENCHMARK_ROOTS) {
+    const real = await loadJSON(`${root}/events.json`, { optional: true });
+    if (real) { return { origin: `${root}/events.json`, doc: real }; }
+  }
   const sample = await loadJSON('sample_data/events_sample.json', { optional: true });
   if (sample) { return { origin: 'sample_data/events_sample.json', doc: sample }; }
   return { origin: 'none', doc: null };

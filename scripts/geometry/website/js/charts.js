@@ -200,10 +200,24 @@ export function partCard(entry) {
   const sub = document.createElement('p');
   sub.className = 'muted small';
   const bits = [];
-  for (const [k, v] of Object.entries(meta)) { if (k !== 'part') { bits.push(`${k}: ${v}`); } }
+  for (const [k, v] of Object.entries(meta)) {
+    // Nested meta blocks (the sample counts, say) are structure, not a caption; a naive join
+    // renders them as [object Object].
+    if (k === 'part' || v === null || typeof v === 'object') { continue; }
+    bits.push(`${k}: ${v}`);
+  }
   bits.push(`source: ${entry.source}`);
   sub.textContent = bits.join(' · ');
   card.appendChild(sub);
+
+  // ... and the nested blocks as their own line, flattened one level, so nothing is hidden.
+  const nested = Object.entries(meta).filter(([, v]) => v && typeof v === 'object');
+  for (const [key, value] of nested) {
+    const line = document.createElement('p');
+    line.className = 'muted small';
+    line.textContent = `${key}: ` + Object.entries(value).map(([k, v]) => `${k} ${v}`).join(', ');
+    card.appendChild(line);
+  }
 
   card.appendChild(barChart(doc));
   const h2 = document.createElement('h4');
