@@ -129,6 +129,9 @@ class State:
     shape = None
     kind = None
     root = "."
+    cache = {}        # path -> (shape, kind): shapes register themselves in the TGeoManager and
+                      # are NEVER replaced or deleted; a reload is a cache hit and a pointer swap
+    lock = None       # serialises /load; traces read state.shape once and keep their pointer
 
 
 def make_handler(state: State, threads: int):
@@ -159,15 +162,21 @@ def make_handler(state: State, threads: int):
                 # the website sends its own relative testdata paths; resolve them against --root
                 if not os.path.isabs(path):
                     path = os.path.join(state.root, path)
+                path = os.path.realpath(path)
                 if not os.path.exists(path):
                     return self._reply_json({"ok": False, "error": f"no such file: {path}"}, 422)
-                if path.endswith(".root"):
-                    shape, kind = ROOT.raysvc.loadShapeFile(path), "shape"
-                else:
-                    shape, kind = ROOT.raysvc.loadSurface(path), "surface"
-                if not shape:
-                    return self._reply_json({"ok": False, "error": f"cannot load {path}"}, 422)
-                state.shape, state.kind = shape, kind
+                with state.lock:
+                    if path in state.cache:
+                        shape, kind = state.cache[path]
+                    else:
+                        if path.endswith(".root"):
+                            shape, kind = ROOT.raysvc.loadShapeFile(path), "shape"
+                        else:
+                            shape, kind = ROOT.raysvc.loadSurface(path), "surface"
+                        if not shape:
+                            return self._reply_json({"ok": False, "error": f"cannot load {path}"}, 422)
+                        state.cache[path] = (shape, kind)
+                    state.shape, state.kind = shape, kind
                 # Warm-up: one single-threaded ray, so every lazy-JIT symbol of this shape's
                 # navigation path is resolved on this thread before any std::thread runs it.
                 warm_rays = np.zeros(6, dtype=np.float32); warm_rays[3] = 1.0
@@ -215,7 +224,10 @@ def main():
     args = parser.parse_args()
 
     jit_setup(args.o2_src)
+    import threading
+    ROOT.TGeoManager("raysvc", "ray service geometry")  # one manager, created once, up front
     state = State()
+    state.lock = threading.Lock()
     state.root = args.root
     if args.load:
         loader = ROOT.raysvc.loadShapeFile if args.load.endswith(".root") else ROOT.raysvc.loadSurface
