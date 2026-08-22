@@ -83,6 +83,22 @@ export async function loadBenchmarks() {
   return { origin: 'none', benchmarks: [], summary: null };
 }
 
+/// The recogniser's own words on why a part is not CSG. `website_data/decline_reasons.json` is
+/// written by the converter cascade and is optional: without it the page simply says less.
+let declineCache;
+export async function loadDeclineReasons() {
+  if (declineCache !== undefined) { return declineCache; }
+  for (const root of BENCHMARK_ROOTS) {
+    const doc = await loadJSON(`${root}/decline_reasons.json`, { optional: true });
+    if (doc && Array.isArray(doc.parts)) {
+      declineCache = new Map(doc.parts.map(entry => [entry.name, entry]));
+      return declineCache;
+    }
+  }
+  declineCache = null;
+  return declineCache;
+}
+
 /// The event-display replay. Real o2-sim output when it exists, the synthetic sample otherwise.
 export async function loadEvents() {
   for (const root of BENCHMARK_ROOTS) {

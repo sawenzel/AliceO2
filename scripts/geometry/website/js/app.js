@@ -1,10 +1,10 @@
 // Page wiring: the part selector, the tabs, and the state every tab shares.
 
-import { listParts, loadBinary, loadBenchmarks } from './data.js';
+import { listParts, loadBinary, loadJSON, loadBenchmarks, loadDeclineReasons } from './data.js';
 import { parseSidecar, parseFacets } from './sidecar.js';
 import { SurfaceSolid } from './solid.js';
 import { Viewer3D } from './viewer3d.js';
-import { renderBenchmarks } from './charts.js';
+import { renderBenchmarks, csgStructure } from './charts.js';
 import { PartSelector } from './partselect.js';
 
 export const state = {
@@ -15,6 +15,8 @@ export const state = {
   sidecarBuffer: null, // the raw bytes, so a worker can re-parse them itself
   facets: null,        // { nTriangles, positions }
   facetsBuffer: null,  // the raw facets_*.bin bytes, for the worker
+  csg: null,           // testdata/<part>/csg.json: what the CSG recogniser found, and its verdict
+  decline: null,       // the matching website_data/decline_reasons.json entry, when there is one
   aabb: null,          // the part's extent, from the exact solid or, failing that, the mesh
   listeners: [],
 };
@@ -102,10 +104,15 @@ function renderMeshTab() {
   v.setEdgesVisible(document.getElementById('opt-edges').checked);
   v.frame(box);
 
+  // The compact per-part line: what it is made of, how big it is, and -- for a part the CSG
+  // recogniser accepted -- the composite it ships as, named in TGeo's own shape classes.
+  const structure = csgStructure(state.csg);
+  const ships = state.part.ships === 'shape' ? 'CSG' : state.part.ships === 'surface' ? 'SURFACE' : 'TESSELLATED';
   document.getElementById('mesh-hud').textContent =
     `${state.part.name}\n` + (solid ? `${solid.nSurfaces} exact faces` : 'tessellated only -- no exact sidecar') +
     (facets ? ` / ${facets.nTriangles} triangles` : ' / no mesh') +
-    `\nbbox ${(box[3] - box[0]).toFixed(2)} x ${(box[4] - box[1]).toFixed(2)} x ${(box[5] - box[2]).toFixed(2)} cm`;
+    `\nbbox ${(box[3] - box[0]).toFixed(2)} x ${(box[4] - box[1]).toFixed(2)} x ${(box[5] - box[2]).toFixed(2)} cm` +
+    `\nships ${ships}` + (structure ? `: ${structure}` : '');
 }
 
 // --- loading a part ------------------------------------------------------------------------------
@@ -120,6 +127,10 @@ async function loadPart(entry) {
     parsed = parseSidecar(sidecarBuffer, entry.surfaces);
     solid = new SurfaceSolid(parsed, entry.name);
   }
+  // Optional, and small: the recogniser's record for this part, and its reason for declining.
+  const csg = entry.csg ? await loadJSON(`testdata/${entry.csg}`, { optional: true }) : null;
+  const reasons = await loadDeclineReasons();
+  const decline = reasons ? (reasons.get(entry.name) || null) : null;
   let facets = null;
   let facetsBuffer = null;
   if (entry.facets) {
@@ -134,6 +145,8 @@ async function loadPart(entry) {
   state.sidecarBuffer = sidecarBuffer;
   state.facets = facets;
   state.facetsBuffer = facetsBuffer;
+  state.csg = csg;
+  state.decline = decline;
 
   state.aabb = solid ? solid.aabb : facetsBox(facets);
 
