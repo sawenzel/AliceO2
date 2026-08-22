@@ -381,23 +381,7 @@ export function initEventsTab() {
     return box;
   }
 
-  /// The selected part's extent, from the exact solid where there is one and from the mesh
-  /// otherwise, so a tessellated-only part still frames and still gets a screen.
-  function partBox() {
-    if (state.solid) { return state.solid.aabb; }
-    if (state.facets) {
-      const p = state.facets.positions;
-      const box = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
-      for (let i = 0; i < p.length; i += 3) {
-        for (let k = 0; k < 3; ++k) {
-          if (p[i + k] < box[k]) { box[k] = p[i + k]; }
-          if (p[i + k] > box[k + 3]) { box[k + 3] = p[i + k]; }
-        }
-      }
-      if (Number.isFinite(box[0])) { return box; }
-    }
-    return [-1, -1, -1, 1, 1, 1];
-  }
+  function partBox() { return state.aabb || [-1, -1, -1, 1, 1, 1]; }
 
   /// Run the synthetic gun in a worker against the part currently selected, and replay the result.
   async function generateHere({ events: eventsIn, tracks: tracksIn } = {}) {

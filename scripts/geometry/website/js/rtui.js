@@ -47,6 +47,7 @@ export function initRaytracerTab() {
           <div class="row">
             <select id="rt-view" class="grow"></select>
           </div>
+          <p class="small" id="rt-coverage" hidden></p>
           <div class="row">
             <label>resolution <select id="rt-res"></select></label>
             <button id="rt-render" class="primary">render</button>
@@ -120,13 +121,38 @@ export function initRaytracerTab() {
   const pathInput = document.getElementById('rt-path');
   const portInput = document.getElementById('rt-port');
   const viewNote = document.getElementById('rt-viewnote');
+  const coverage = document.getElementById('rt-coverage');
   const footnote = document.getElementById('rt-footnote');
 
+  // Every view but these two asks the exact solid a question; a tessellated-only part cannot answer.
+  const MESH_ONLY_VIEWS = new Set(['mesh', 'parityMesh']);
   for (const view of VIEWS) {
     const option = document.createElement('option');
     option.value = view.key;
     option.textContent = view.label;
     viewSelect.appendChild(option);
+  }
+
+  /// Turn the exact views off for a part that has no sidecar, and say why rather than failing.
+  function applyCoverage() {
+    const exact = !!state.sidecarBuffer;
+    for (const option of viewSelect.options) {
+      option.disabled = !exact && !MESH_ONLY_VIEWS.has(option.value);
+    }
+    if (!exact && !MESH_ONLY_VIEWS.has(viewSelect.value)) {
+      viewSelect.value = 'mesh';
+      tracer.view = 'mesh';
+    }
+    for (const id of ['rt-connect', 'rt-timeboth', 'rt-reflect']) {
+      const el = document.getElementById(id);
+      if (el) { el.disabled = !exact; }
+    }
+    coverage.hidden = exact;
+    if (!exact) {
+      coverage.textContent = `${state.part ? state.part.name : 'This part'} is tessellated only -- no exact ` +
+        'sidecar. The converter declined it for exact extraction, so there is nothing here to intersect a ray ' +
+        'with but triangles: the exact, bridge, difference and exact-parity views are turned off.';
+    }
   }
   PRESETS.forEach((preset, index) => {
     const option = document.createElement('option');
@@ -142,7 +168,7 @@ export function initRaytracerTab() {
   function defaultPath() {
     const part = state.part;
     const prefix = settings.prefix || '';
-    return part ? `${prefix}testdata/${part.surfaces}` : '';
+    return part && part.surfaces ? `${prefix}testdata/${part.surfaces}` : '';
   }
 
   const resNote = document.getElementById('rt-resnote');
@@ -410,7 +436,7 @@ export function initRaytracerTab() {
   /// working directory, which is not this page's, so a couple of documented candidates are tried
   /// and whichever answers is remembered.
   async function autoConnect() {
-    if (!state.part) { return false; }
+    if (!state.part || !state.part.surfaces) { return false; }
     const suffix = `testdata/${state.part.surfaces}`;
     const candidates = [];
     if (settings.prefix) { candidates.push(settings.prefix); }
@@ -490,12 +516,13 @@ export function initRaytracerTab() {
       label: state.part.name,
     });
     loadProxy();
+    applyCoverage();
     pathInput.value = defaultPath();
     describeView();
     showPerf();
     showTraced();
     tracer.render();
-    await autoConnect();
+    if (state.sidecarBuffer) { await autoConnect(); }
   }
 
   onPartChanged(() => { if (initialised) { loadCurrentPart(); } });

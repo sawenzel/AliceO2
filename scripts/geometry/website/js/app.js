@@ -15,8 +15,23 @@ export const state = {
   sidecarBuffer: null, // the raw bytes, so a worker can re-parse them itself
   facets: null,        // { nTriangles, positions }
   facetsBuffer: null,  // the raw facets_*.bin bytes, for the worker
+  aabb: null,          // the part's extent, from the exact solid or, failing that, the mesh
   listeners: [],
 };
+
+/// The extent of a triangle soup, for a part that has no exact solid to ask.
+export function facetsBox(facets) {
+  if (!facets) { return [-1, -1, -1, 1, 1, 1]; }
+  const p = facets.positions;
+  const box = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < p.length; i += 3) {
+    for (let k = 0; k < 3; ++k) {
+      if (p[i + k] < box[k]) { box[k] = p[i + k]; }
+      if (p[i + k] > box[k + 3]) { box[k + 3] = p[i + k]; }
+    }
+  }
+  return Number.isFinite(box[0]) ? box : [-1, -1, -1, 1, 1, 1];
+}
 
 export function onPartChanged(fn) { state.listeners.push(fn); }
 
@@ -59,7 +74,7 @@ function meshViewer() {
     document.getElementById('opt-wireframe').addEventListener('change', (e) => viewer.setWireframe(e.target.checked));
     document.getElementById('opt-mesh').addEventListener('change', (e) => viewer.setMeshVisible(e.target.checked));
     document.getElementById('opt-edges').addEventListener('change', (e) => viewer.setEdgesVisible(e.target.checked));
-    document.getElementById('btn-frame').addEventListener('click', () => viewer.frame(state.solid ? state.solid.aabb : [-1, -1, -1, 1, 1, 1]));
+    document.getElementById('btn-frame').addEventListener('click', () => viewer.frame(state.aabb || [-1, -1, -1, 1, 1, 1]));
   }
   return viewer;
 }
@@ -75,18 +90,20 @@ function renderMeshTab() {
     v.clearMesh();
   }
   const polylines = [];
-  for (const surface of solid.surfaces) {
-    try { for (const loop of surface.patchOutline()) { polylines.push(loop); } } catch (e) { /* a face whose outline cannot be sampled is simply not drawn */ }
+  if (solid) {
+    for (const surface of solid.surfaces) {
+      try { for (const loop of surface.patchOutline()) { polylines.push(loop); } } catch (e) { /* a face whose outline cannot be sampled is simply not drawn */ }
+    }
   }
   v.setExactEdges(polylines);
-  v.setGrid(solid.aabb);
+  const box = state.aabb;
+  v.setGrid(box);
   v.setMeshVisible(document.getElementById('opt-mesh').checked);
   v.setEdgesVisible(document.getElementById('opt-edges').checked);
-  v.frame(solid.aabb);
+  v.frame(box);
 
-  const box = solid.aabb;
   document.getElementById('mesh-hud').textContent =
-    `${state.part.name}\n${solid.nSurfaces} exact faces` +
+    `${state.part.name}\n` + (solid ? `${solid.nSurfaces} exact faces` : 'tessellated only -- no exact sidecar') +
     (facets ? ` / ${facets.nTriangles} triangles` : ' / no mesh') +
     `\nbbox ${(box[3] - box[0]).toFixed(2)} x ${(box[4] - box[1]).toFixed(2)} x ${(box[5] - box[2]).toFixed(2)} cm`;
 }
@@ -95,9 +112,14 @@ function renderMeshTab() {
 
 async function loadPart(entry) {
   setStatus(`loading ${entry.name}...`);
-  const sidecarBuffer = await loadBinary(`testdata/${entry.surfaces}`);
-  const parsed = parseSidecar(sidecarBuffer, entry.surfaces);
-  const solid = new SurfaceSolid(parsed, entry.name);
+  // A part the converter declined for exact extraction has no sidecar at all. It is still shown --
+  // that is the coverage story -- with every exact view turned off and said so.
+  let sidecarBuffer = null, parsed = null, solid = null;
+  if (entry.surfaces) {
+    sidecarBuffer = await loadBinary(`testdata/${entry.surfaces}`);
+    parsed = parseSidecar(sidecarBuffer, entry.surfaces);
+    solid = new SurfaceSolid(parsed, entry.name);
+  }
   let facets = null;
   let facetsBuffer = null;
   if (entry.facets) {
@@ -113,12 +135,15 @@ async function loadPart(entry) {
   state.facets = facets;
   state.facetsBuffer = facetsBuffer;
 
+  state.aabb = solid ? solid.aabb : facetsBox(facets);
+
   const notes = [];
-  if (parsed.warnings.length) { notes.push(parsed.warnings.length + ' warning(s)'); }
-  if (solid.failed.length) { notes.push(`${solid.failed.length} record(s) rejected`); }
-  if (solid.unsupported.length) { notes.push(`${solid.unsupported.length} unsupported record(s)`); }
-  setStatus(`${entry.name}: ${solid.nSurfaces} faces` + (facets ? `, ${facets.nTriangles} triangles` : '') +
-            (notes.length ? ` (${notes.join('; ')})` : ''), solid.failed.length > 0);
+  if (parsed && parsed.warnings.length) { notes.push(parsed.warnings.length + ' warning(s)'); }
+  if (solid && solid.failed.length) { notes.push(`${solid.failed.length} record(s) rejected`); }
+  if (solid && solid.unsupported.length) { notes.push(`${solid.unsupported.length} unsupported record(s)`); }
+  setStatus(`${entry.name}: ` + (solid ? `${solid.nSurfaces} faces` : 'tessellated only -- no exact sidecar') +
+            (facets ? `, ${facets.nTriangles} triangles` : '') +
+            (notes.length ? ` (${notes.join('; ')})` : ''), !!(solid && solid.failed.length));
 
   renderMeshTab();
   if (tabInitialised.bench) { renderBenchTab(); }
@@ -146,6 +171,8 @@ registerTab('check', () => {
       const [{ runSelfCheck }, { listParts }] = await Promise.all([import('./selfcheck.js'), import('./data.js')]);
       const listed = await listParts();
       if (!listed.parts.length) { status.textContent = listed.reason; button.disabled = false; return; }
+      // A tessellated-only part has nothing for these assertions to assert against.
+      const exactParts = listed.parts.filter(p => p.surfaces);
       const load = async (name) => {
         const entry = listed.parts.find(p => p.name === name);
         return {
@@ -154,7 +181,7 @@ registerTab('check', () => {
         };
       };
       const started = performance.now();
-      const report = await runSelfCheck(listed.parts.map(p => p.name), load, (line, ok) => {
+      const report = await runSelfCheck(exactParts.map(p => p.name), load, (line, ok) => {
         const span = document.createElement('span');
         if (ok === true) { span.className = 'pass'; } else if (ok === false) { span.className = 'fail'; }
         span.textContent = line + '\n';

@@ -28,6 +28,16 @@ define `window.__INLINE_DATA__` (base64 for the binaries, objects for the JSON) 
 load; nothing else changes. That matters because a published Claude Artifact runs under a CSP that
 blocks every external request.
 
+## The part selector drives everything
+
+There is one global control, the **part** listbox in the header, and every tab renders whatever it
+holds -- the mesh viewer, the raytracer, the benchmarks card and the event display alike. Each
+entry carries a 112 px thumbnail rendered offscreen once, from the part's tessellation (or, for a
+part with no mesh, from its exact trim loops) and then cached; the thumbnails are drawn on the
+first open of the panel, not at boot, because with ALICE3 in the list that is several megabytes of
+facets nobody has asked to look at. Entries are grouped by the `group` field the fetch script
+writes.
+
 ## The tabs
 
 **Mesh viewer.** The tessellation from `facets_*.bin`, flat-shaded so the faceting is visible, with
@@ -35,23 +45,56 @@ a wireframe toggle — and over it, in gold, the **exact** trimmed face boundari
 sidecar. Where the grey mesh cuts a corner off a gold loop, that is the tessellation error at this
 part's mesh precision.
 
-**Exact raytracer.** A progressive CPU raytrace, in a pool of workers, with six views:
+**Exact raytracer.** A progressive CPU raytrace, in a pool of workers, with seven views:
 
 | view | what it shows |
 | --- | --- |
-| exact surfaces | rays intersected with the real trimmed patches; the shading normal is analytic, so a cylinder shades smoothly |
+| exact surfaces (local JS port) | rays intersected with the real trimmed patches; the shading normal is analytic, so a cylinder shades smoothly |
+| exact surfaces (bridge: the real kernel) | the same picture, every pixel answered by the real O2 kernel through the bridge, shaded identically |
 | tessellation | the same camera against the triangles, with flat facet normals |
 | difference: exact vs mesh | red where one representation is hit and the other is not; otherwise a heatmap of the depth difference, saturating at 1e-3 of the model size |
 | difference: local vs bridge | the same rays sent to the JS port and to the real O2 kernel (see below) |
 | watertightness: exact | crossings counted along the whole ray; magenta where the count is odd, i.e. the ray entered and never came out |
 | watertightness: mesh | the same count against the tessellation |
 
-**Benchmarks.** Per-part grouped bars of `nsPerCall` per navigation function per representation on
-a log axis (the ratios are one to two orders of magnitude, so a linear axis would be useless), plus
-the accuracy and X-ray counters as a table. It reads Track 2's `scripts/geometry/website_data/*.json`
-first, via the `index.json` that lists them, and falls back to the **synthetic** records in
-`sample_data/`, saying which on the page. A field that was not measured renders as `n/a`, never as
-`0`.
+Four things about how it behaves:
+
+- **Nothing is raytraced while you orbit.** The drag moves a WebGL proxy of the part -- the
+  tessellation with the exact trim boundaries in gold over it, the mesh tab's own look -- and the
+  traced frame appears 300 ms after the camera stands still, and never while the pointer is down.
+  A camera move cancels the frame in flight.
+- **Resolution presets** run 360p, 480p, 720p, 1080p, 1440p and *native*, which traces one ray per
+  physical device pixel of the viewport and is the only setting whose picture is not upscaled. The
+  line under the selector gives the raster and the rays per full pass.
+- **The bounding-box scissor** projects the part's world AABB to a screen rectangle and casts rays
+  only inside it, padded by two pixels; everything outside is background, with no ray cast for any
+  of it. The HUD reports the traced pixel count and the saving. A box that straddles the eye falls
+  back to the whole frame, where a perspective projection has no finite rectangle. On `Bucket` at
+  1440 x 740 the rectangle is 27.7% of the frame and the frame takes 351 ms instead of 470 ms --
+  the time saving is smaller than the pixel saving because a ray that misses the AABB only fails a
+  slab test.
+- **Shading** is two lights with a Blinn-Phong specular at exponent 48 on each, and an optional
+  single-bounce mirror. The mirror sends a second ray batch off every hit pixel to the *same*
+  engine that answered the first -- the bridge included, whose `/trace` returns the kernel's own
+  normals -- so the reflection in the exact view is exact and the reflection in the tessellation is
+  faceted. Only the hit pixels are in the second batch. The mix is Schlick-weighted, so a face seen
+  edge-on reflects and a face seen straight on barely does; without that the part just gets darker,
+  because the sky it reflects is dark. The mirror applies to the three shaded views, not to the
+  difference or parity overlays.
+
+**Benchmarks.** One card for the selected part, and nothing else. It heads with a badge saying
+which representation **ships** -- CSG, SURFACE or TESSELLATED -- taken from
+`website_data/summary.json`'s own verdict where it has one, and otherwise from what the converter
+wrote into `testdata/`. Under it: the sidecar's own properties as this page loaded them (faces by
+type, wire trims, model tolerance, worst join gap, record status -- this is the old Properties
+pane, which now lives here); a representations table with primitives, memory, sidecar size,
+capacity deviation and reliability; grouped bars of `nsPerCall` per navigation function per
+representation on a log axis (the ratios are one to two orders of magnitude, so a linear axis would
+be useless); and the accuracy and X-ray counters. It reads Track 2's
+`scripts/geometry/website_data/*.json` via the `index.json` that lists them, and falls back to the
+**synthetic** records in `sample_data/`, saying which on the page. A field that was not measured
+renders as `n/a`, never as `0`. A part with no measured record still gets its card, from the
+sidecar, and the page says which parts the measured set covers.
 
 `website_data` inside this directory is a symlink to `../website_data`, because `python3 -m
 http.server` refuses paths above its own root; the loader also tries `../website_data/` for the
@@ -86,10 +129,35 @@ POST /load   {"path": "<path to surfaces_*.bin or shape_*.root>"}
 POST /trace  raw Float32Array n*6  ->  raw Float32Array n*5
 ```
 
+The bridge is tried without being asked when a part loads: the stored path prefix first, then two
+documented candidates (`` and `scripts/geometry/website/`), because the service resolves a
+relative path against **its own** working directory and not this page's. Whichever answers is
+remembered. An offline bridge stays what it always was -- a message, never an error.
+
 Because the page and the service are different origins, the service must send
 `Access-Control-Allow-Origin` and answer the `OPTIONS` preflight (both content types used here are
 outside the CORS safelist). The service in this repository does. If it is not running, the page
 says "bridge offline" and stays on the local engine — an absent bridge is never an error.
+
+### ms per frame, per engine
+
+A view served by exactly one engine has its whole frame time attributed to that engine, so the two
+are directly comparable; a frame in which both ran (the difference view) is not apportioned between
+them and is not reported. The timing pane shows the last such frame per engine with its ms, its ray
+count and its rate, and says when the two frames used a different camera or resolution.
+**"time both engines"** renders the matched pair at one camera. Measured here on `Bucket` at
+480 x 247 with the scissor on, 8 local workers against the service on the same 10-core box:
+
+| engine | ms/frame | rays | rate |
+| --- | --- | --- | --- |
+| local (8 workers) | 104 | 126 000 | 1.21 Mray/s |
+| bridge 127.0.0.1:8077 | 175 | 126 000 | 720 kray/s |
+
+That is a statement about *these two implementations as deployed*, not about the kernels: the local
+engine is eight workers and the bridge is one single-threaded Python service reached over HTTP, so
+the ratio carries a process boundary, a JSON/octet-stream round trip and a thread count, not just
+the maths. What it is good for is showing that the real kernel answers a full frame of rays in a
+fraction of a second, on the same camera, next to the port.
 
 ### What the engine difference measured
 
@@ -123,8 +191,9 @@ so a bore's normal points the right way. Supported trim curves: **line**, **circ
 **clamped rational B-spline**.
 
 Any record kind outside that set is **kept, counted and reported** — in the part panel, in the
-raytracer's footnote, and as a failure in the self-check — rather than silently dropped. On the six
-test parts nothing is unsupported and nothing is rejected.
+raytracer's footnote, and as a failure in the self-check — rather than silently dropped. On all 14
+parts in `testdata/` that have a sidecar — the six original ones and eight from ALICE3, up to 965
+faces — nothing is unsupported and nothing is rejected.
 
 The kernels are ports of `Detectors/Base/src/BoundedSurface.h`:
 
@@ -158,16 +227,19 @@ The kernels are ports of `Detectors/Base/src/BoundedSurface.h`:
 - **The loader does not reject a wire whose join gap exceeds the band.** The kernel does, and must.
   A viewer that refuses to draw a face teaches nothing, so the gap is measured and reported instead
   (the part panel shows the worst gap next to the band it would be judged against).
-- **Per-surface AABBs, no BVH over the faces.** The parts here have at most 97 faces and a slab
-  test each is enough. A part with thousands of faces would want the real thing.
+- **Per-surface AABBs, no BVH over the faces.** The largest part here, `ST1829909_002`, has 965 of
+  them, and a slab test each is still enough for a frame in a third of a second at 480 x 247 with
+  the scissor on. A part with tens of thousands of faces would want the real thing; this is what
+  the sub-patch BVH in the kernel exists for and what this page deliberately does not reproduce.
 - **The mesh view is only as good as the mesh.** `facets_*.bin` carries no normals, so the shading
   normal is the facet's own geometric normal, oriented against the ray.
 
 ## Self-check results
 
-`node tools/selfcheck.mjs` (and the Self-check tab, which runs the same code) — **30 passed,
-0 failed**, in 0.33 s on the command line and 296 ms in the browser. The assertions are analytic,
-not recorded:
+`node tools/selfcheck.mjs` (and the Self-check tab, which runs the same code) -- **54 passed,
+0 failed**, in 1.4 s on the command line and 1143 ms in the browser, over the 14 parts in
+`testdata/` that have an exact sidecar. A tessellated-only part is skipped: every assertion here is
+about the exact solid, and it has none. The assertions are analytic, not recorded:
 
 ```
 == solveQuarticReal ==
@@ -189,18 +261,37 @@ PASS  axial ray beside the bore crosses 6.0000 cm of material   (2 crossings)
 PASS  a ray down the bore hits nothing                          (0 crossings)
 PASS  a ray across the bore crosses 4 walls and 1.4000 cm       (4 crossings)
 
-== parity closure, every part ==
-PASS  box                2880 grid rays (800 hit)  + 1500 random rays (1500 hit):  0 odd
-PASS  cyl_inter_cyl      2880 grid rays (686 hit)  + 1500 random rays (1300 hit):  0 odd
-PASS  torus_union_cyl    2880 grid rays (476 hit)  + 1500 random rays (1164 hit):  0 odd
-PASS  tube_window        2880 grid rays (632 hit)  + 1500 random rays (1384 hit):  0 odd
-PASS  BoomCylinderInner  2880 grid rays (84 hit)   + 1500 random rays (353 hit):   0 odd
-PASS  Bucket             2880 grid rays (572 hit)  + 1500 random rays (1192 hit):  0 odd
+== parity closure, every part with a sidecar ==
+                     faces   grid rays (hit)   random rays (hit)   odd   worst join gap / band
+box                      6     2880 ( 800)        1500 (1500)        0   0        / 1.0e-6
+cyl_inter_cyl            6     2880 ( 686)        1500 (1300)        0   2.4e-16  / 1.0e-6
+torus_union_cyl          6     2880 ( 476)        1500 (1164)        0   9.8e-16  / 1.0e-6
+tube_window              4     2880 ( 632)        1500 (1384)        0   6.2e-13  / 1.0e-6
+BoomCylinderInner        6     2880 (  84)        1500 ( 353)        0   4.2e-12  / 1.0e-6
+Bucket                  97     2880 ( 572)        1500 (1192)        0   3.7e-11  / 1.0e-6
+ST0923290_013           20     2880 ( 626)        1500 (1373)        0   1.0e-11  / 3.3e-6
+ST1829909_002          965     2880 ( 304)        1500 ( 715)        0   6.8e-9   / 4.3e-4
+ST1829909_004          720     2880 ( 205)        1500 ( 623)        0   4.0e-6   / 4.4e-4
+ST1A38494_002            6     2880 (  85)        1500 (1361)        0   2.9e-12  / 1.0e-6
+ST1A38495_01            65     2880 ( 440)        1500 (1199)        0   9.9e-10  / 8.6e-5
+ST2487455_01            66     2880 (  16)        1500 (1122)        0   2.7e-8   / 4.9e-5
+ST2487459_01           202     2880 ( 120)        1500 ( 501)        0   2.3e-10  / 7.4e-5
+ST2487462_01            80     2880 (  21)        1500 (1066)        0   1.3e-8   / 5.3e-5
 ```
 
-The worst wire join gap found while building, against the 1e-6 cm band each model would be judged
-at: `box` 0, `cyl_inter_cyl` 2.4e-16, `torus_union_cyl` 9.8e-16, `tube_window` 6.2e-13,
-`BoomCylinderInner` 4.2e-12, `Bucket` 3.7e-11 cm.
+Every one of those 14 parts also had **every** sidecar record built: 0 rejected, 0 unsupported.
+Their meshes are closed too -- 0 odd of 2880 grid rays and 0 odd of 1500 random rays, each.
+
+### The ALICE3 part that is NOT in testdata/, and why
+
+`ST1829909_01` (1052 faces, the largest leaf of `CAD_noETA.stp`) is deliberately **left out** of the
+fetched set. It parses cleanly here -- 0 rejected, 0 unsupported, worst join gap 1.0e-5 cm against a
+4.7e-4 cm band -- but its exact solid does **not** close: 1 odd-parity ray of the self-check's 1500,
+and 6 odd of 9340 hitting rays on an independent 20 000-ray scan taken while writing this. Including
+it would make this page's own self-check red, so it is excluded and the measurement recorded here
+instead. It is the same part that is already on record as failing to load in O2 (see the
+`ST1829909_01` handoff item); this is an independent second symptom on the same part, found by a
+different instrument, and it is a statement about that ray sample, not a located defect.
 
 ### Where this page does *not* reproduce a recorded number
 
@@ -225,6 +316,8 @@ demonstrates it is the X-ray counter table, not this overlay.
 index.html          the page; tabs, and nothing else
 css/style.css
 js/data.js          the ONE place data is loaded from (the single-file build's seam)
+js/partselect.js    the global part listbox
+js/thumbs.js        the offscreen thumbnail renderer behind it
 js/sidecar.js       surfaces_*.bin / facets_*.bin parsers, mirroring O2SurfaceSolidIO.cxx
 js/quartic.js       solveDepressedCubic + solveQuarticReal
 js/curve2d.js       lines, arcs, clamped rational B-splines; flattening, winding, distance
