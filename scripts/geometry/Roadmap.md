@@ -213,3 +213,20 @@ implementing the decline-reason reporting (which also fixes NEXT items 1–2's e
 declines), and will deliver a falsifiable go/no-go in `Stream_AA_FlatCSG.md`. Noted connection to
 examine: a union of arrangement cells (Stream_R §9.3) *is* a flat recursion-free CSG, so the
 "exact trims" research route and this shape may be one decision, not two.)
+
+### (h) Pcon/Polyhedra recognition: a round-trip test bench from the Run 3 geometry
+
+> *"Are we able to recognise Pcons, Polyhedra? We should create a test bench of these things
+> (possibly motivated from existing shapes in ALICE Run3 geometry) and see if their representation
+> in STEP is recognised by the CSG engine in the converter."*  (Sandro, 2026-08-22)
+
+What is already known that bears on it: a `TGeoPcon` exported to STEP becomes a coaxial stack of
+cones/cylinders/planes — every face individually recognisable by the quadric recogniser, but the
+*whole-part* verdict needs either the revolved-profile detector (`Workstreams.md` Stream D,
+`O2RevolvedSolid`: all carriers coaxial ⇒ revolution) or Tier-3 decomposition (now measured
+feasible, `Stream_AA_FlatCSG.md`); a `TGeoPgon` is all planes, i.e. Tier-3 prism territory. The
+test-bench route was already scoped once as Stream E step 4 (the beampipe round trip: TGeo → STEP
+→ converter, scored against the **original TGeo**, which is an *exact* oracle and a known-right
+answer) — the `O2_TGeoToCAD*` scripts for it are parked in `attic/`, one needs reviving. Sampling
+the shape census of the actual Run 3 geometry (`o2-sim` geometry dump) would pick the specimens
+that matter: Pcon (beampipe, TPC field cage), Pgon, Xtru, and the composite-heavy passives.
