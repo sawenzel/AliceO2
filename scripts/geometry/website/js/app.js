@@ -159,6 +159,11 @@ registerTab('raytracer', async () => {
   initRaytracerTab();
 });
 
+registerTab('events', async () => {
+  const { initEventsTab } = await import('./events.js');
+  initEventsTab();
+});
+
 registerTab('bench', async () => {
   const container = document.getElementById('bench-body');
   container.textContent = 'loading...';
