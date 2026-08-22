@@ -2,6 +2,10 @@
 
 import { Raytracer, VIEWS } from './raytrace.js';
 import { state, onPartChanged } from './app.js';
+import { Viewer3D } from './viewer3d.js';
+
+// How long the camera must stand still after a drag before the frame is traced.
+const SETTLE_MS = 300;
 
 // Raster width; the height follows the viewport's aspect. "native" instead traces one ray per
 // physical device pixel of the viewport, which is the only setting whose picture is not upscaled.
@@ -28,9 +32,11 @@ export function initRaytracerTab() {
   section.innerHTML = `
     <div class="split">
       <div>
-        <div class="viewport" id="rt-viewport" style="display:flex;align-items:center;justify-content:center;">
-          <canvas id="rt-canvas" class="rtcanvas"></canvas>
+        <div class="viewport" id="rt-viewport">
+          <div class="rt-proxy" id="rt-proxy"></div>
+          <canvas id="rt-canvas" class="rtcanvas rt-overlay"></canvas>
           <div class="hud" id="rt-hud"></div>
+          <div class="rt-badge" id="rt-badge" hidden>orbiting the WebGL proxy &mdash; release to trace this view</div>
         </div>
         <div id="rt-scale"></div>
         <p class="muted small" id="rt-footnote"></p>
@@ -53,8 +59,12 @@ export function initRaytracerTab() {
             rays only inside it. Everything outside is background &mdash; a gradient and a grid line, no ray.</p>
           <div class="row">
             <button id="rt-frame">re-frame</button>
-            <button id="rt-fromview">camera from 3D view</button>
+            <button id="rt-fromview">camera from the mesh tab</button>
           </div>
+          <p class="muted small">Drag to orbit, wheel to zoom, shift-drag to pan. Orbiting moves a WebGL
+            proxy of the part &mdash; the mesh with the gold exact boundaries over it &mdash; and the ray
+            trace of that fixed view starts 300&nbsp;ms after the camera stands still. Nothing is raytraced
+            while you are dragging.</p>
           <p class="muted small" id="rt-viewnote"></p>
         </div>
         <div class="pane">
@@ -92,6 +102,11 @@ export function initRaytracerTab() {
 
   const canvas = document.getElementById('rt-canvas');
   const tracer = new Raytracer(canvas);
+  // Orbiting a CPU raytrace is unusable, so the drag happens on a WebGL proxy of the same part --
+  // the mesh with the gold exact boundaries over it, the mesh tab's own look -- and the traced
+  // frame is produced once the camera stands still.
+  const proxy = new Viewer3D(document.getElementById('rt-proxy'));
+  const badge = document.getElementById('rt-badge');
   const viewSelect = document.getElementById('rt-view');
   const resSelect = document.getElementById('rt-res');
   const hud = document.getElementById('rt-hud');
@@ -295,7 +310,61 @@ export function initRaytracerTab() {
   let renderTimer = null;
   function scheduleRender(delay = 30) {
     clearTimeout(renderTimer);
-    renderTimer = setTimeout(() => { tracer.render(); }, delay);
+    renderTimer = setTimeout(() => { showTraced(); tracer.render(); }, delay);
+  }
+
+  /// Show the raytraced frame; the proxy stays underneath it and is what an orbit reveals.
+  function showTraced() { canvas.classList.remove('stale'); badge.hidden = true; }
+  function showProxy() { canvas.classList.add('stale'); badge.hidden = false; }
+
+  function syncCameraFromProxy() {
+    const spec = proxy.cameraSpec();
+    tracer.camera.origin = spec.origin.slice();
+    tracer.camera.target = [proxy.controls.target.x, proxy.controls.target.y, proxy.controls.target.z];
+    tracer.camera.fovY = spec.fovY;
+  }
+
+  let dragging = false;
+  let settleTimer = null;
+  function settleSoon() {
+    clearTimeout(settleTimer);
+    settleTimer = setTimeout(() => {
+      if (dragging) { settleSoon(); return; }   // still on the mouse: wait for the release
+      syncCameraFromProxy();
+      showTraced();
+      tracer.render();
+    }, SETTLE_MS);
+  }
+
+  /// Any camera move abandons the frame in flight and hands the view back to the proxy.
+  proxy.controls.onChange = () => {
+    proxy.requestRender();
+    tracer.cancel();
+    clearTimeout(renderTimer);
+    showProxy();
+    settleSoon();
+  };
+  const proxyDom = proxy.renderer.domElement;
+  proxyDom.addEventListener('pointerdown', () => { dragging = true; });
+  for (const type of ['pointerup', 'pointercancel']) {
+    proxyDom.addEventListener(type, () => { dragging = false; settleSoon(); });
+  }
+
+  /// Give the proxy the same picture the mesh tab shows: the tessellation, and the exact trimmed
+  /// boundaries in gold over it.
+  function loadProxy() {
+    if (state.facets) { proxy.setMesh(state.facets.positions); } else { proxy.clearMesh(); }
+    const polylines = [];
+    if (state.solid) {
+      for (const surface of state.solid.surfaces) {
+        try { for (const loop of surface.patchOutline()) { polylines.push(loop); } } catch (e) { /* not drawable */ }
+      }
+    }
+    proxy.setExactEdges(polylines);
+    const box = tracer.box || [-1, -1, -1, 1, 1, 1];
+    proxy.setGrid(box);
+    proxy.frame(box);
+    syncCameraFromProxy();
   }
 
   viewSelect.addEventListener('change', () => {
@@ -312,46 +381,18 @@ export function initRaytracerTab() {
     tracer.useScissor = e.target.checked;
     scheduleRender();
   });
-  document.getElementById('rt-render').addEventListener('click', () => tracer.render());
+  document.getElementById('rt-render').addEventListener('click', () => { syncCameraFromProxy(); showTraced(); tracer.render(); });
   document.getElementById('rt-frame').addEventListener('click', () => {
-    if (tracer.box) { tracer.camera.frameBox(tracer.box); scheduleRender(); }
+    if (tracer.box) { proxy.frame(tracer.box); syncCameraFromProxy(); scheduleRender(); }
   });
   document.getElementById('rt-fromview').addEventListener('click', async () => {
     const { sharedViewer } = await import('./app.js');
     const viewer = sharedViewer();
     const spec = viewer.cameraSpec();
-    tracer.camera.origin = spec.origin.slice();
-    tracer.camera.target = [viewer.controls.target.x, viewer.controls.target.y, viewer.controls.target.z];
-    tracer.camera.fovY = spec.fovY;
+    proxy.applyCameraSpec(spec, [viewer.controls.target.x, viewer.controls.target.y, viewer.controls.target.z]);
+    syncCameraFromProxy();
     scheduleRender();
   });
-
-  // camera interaction directly on the raytraced canvas
-  let dragging = false, last = { x: 0, y: 0 };
-  canvas.addEventListener('pointerdown', (e) => {
-    dragging = true; last = { x: e.clientX, y: e.clientY };
-    canvas.setPointerCapture(e.pointerId);
-  });
-  canvas.addEventListener('pointermove', (e) => {
-    if (!dragging) { return; }
-    const scale = canvas.clientWidth / tracer.width;
-    tracer.camera.orbit((e.clientX - last.x) / scale, (e.clientY - last.y) / scale);
-    last = { x: e.clientX, y: e.clientY };
-    scheduleRender(90);
-  });
-  const endDrag = (e) => {
-    if (!dragging) { return; }
-    dragging = false;
-    try { canvas.releasePointerCapture(e.pointerId); } catch (_) { /* already released */ }
-    scheduleRender(0);
-  };
-  canvas.addEventListener('pointerup', endDrag);
-  canvas.addEventListener('pointercancel', endDrag);
-  canvas.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    tracer.camera.dolly(Math.exp(e.deltaY * 0.0015));
-    scheduleRender(90);
-  }, { passive: false });
 
   /// Try the bridge without being asked. The service resolves a relative path against its own
   /// working directory, which is not this page's, so a couple of documented candidates are tried
@@ -436,16 +477,18 @@ export function initRaytracerTab() {
       facets: state.facetsBuffer ? state.facetsBuffer.slice(0) : null,
       label: state.part.name,
     });
+    loadProxy();
     pathInput.value = defaultPath();
     describeView();
     showPerf();
+    showTraced();
     tracer.render();
     await autoConnect();
   }
 
   onPartChanged(() => { if (initialised) { loadCurrentPart(); } });
   window.addEventListener('tabshown', (e) => {
-    if (e.detail.tab === 'raytracer') { applySize(); if (!tracer.rendering) { scheduleRender(); } }
+    if (e.detail.tab === 'raytracer') { proxy.resize(); applySize(); if (!tracer.rendering) { scheduleRender(); } }
   });
 
   let initialised = false;
