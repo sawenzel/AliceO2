@@ -33,6 +33,7 @@ CPP = r"""
 #include "TGeoShape.h"
 #include "TFile.h"
 #include <thread>
+#include <chrono>
 #include <vector>
 
 namespace raysvc {
@@ -105,6 +106,30 @@ void trace(const TGeoShape* shape, const float* rays, int n, float* out, int nTh
   }
 }
 
+double benchFunction(const TGeoShape* shape, int which, const float* origins, const float* dirs,
+                     int n, int repeats)
+{
+  // which: 0 Contains, 1 DistFromOutside, 2 DistFromInside, 3 Safety. Single-threaded on
+  // purpose: the number is ns per call, not throughput.
+  auto* sh = const_cast<TGeoShape*>(shape);
+  volatile double sink = 0.;
+  const auto start = std::chrono::steady_clock::now();
+  for (int r = 0; r < repeats; ++r) {
+    for (int i = 0; i < n; ++i) {
+      const double p[3] = {origins[3 * i], origins[3 * i + 1], origins[3 * i + 2]};
+      const double d[3] = {dirs[3 * i], dirs[3 * i + 1], dirs[3 * i + 2]};
+      switch (which) {
+        case 0: sink = sink + (sh->Contains(p) ? 1. : 0.); break;
+        case 1: sink = sink + sh->DistFromOutside(p, d, 3, 1e30, nullptr); break;
+        case 2: sink = sink + sh->DistFromInside(p, d, 3, 1e30, nullptr); break;
+        default: sink = sink + sh->Safety(p, false); break;
+      }
+    }
+  }
+  const std::chrono::duration<double, std::nano> elapsed = std::chrono::steady_clock::now() - start;
+  return elapsed.count() / (double(n) * repeats);
+}
+
 } // namespace raysvc
 """
 
@@ -118,7 +143,8 @@ def jit_setup(o2_src: str):
     # multi-second trace starves every other request, and a worker thread that needs the
     # interpreter for lazy symbol resolution while the caller holds the GIL deadlocks the
     # whole server (observed on the first threaded trace of a surface solid).
-    for fn in (ROOT.raysvc.trace, ROOT.raysvc.loadSurface, ROOT.raysvc.loadShapeFile):
+    for fn in (ROOT.raysvc.trace, ROOT.raysvc.loadSurface, ROOT.raysvc.loadShapeFile,
+               ROOT.raysvc.benchFunction):
         try:
             fn.__release_gil__ = True
         except AttributeError:
@@ -205,6 +231,51 @@ def make_handler(state: State, threads: int):
                 self._headers(200, "application/octet-stream", len(payload))
                 self.wfile.write(payload)
                 return
+            if self.path == "/bench":
+                if state.shape is None:
+                    return self._reply_json({"ok": False, "error": "no shape loaded"}, 409)
+                try:
+                    cfg = json.loads(body) if body else {}
+                except Exception:
+                    cfg = {}
+                n = int(cfg.get("samples", 4000))
+                n = max(100, min(n, 50000))
+                sh = state.shape
+                o = [sh.GetOrigin()[i] for i in range(3)]
+                h = [sh.GetDX(), sh.GetDY(), sh.GetDZ()]
+                rng = np.random.default_rng(20260822)
+                # points spread over 1.5x the bbox: a mix of inside and outside
+                pts = np.stack([rng.uniform(o[i] - 1.5 * h[i], o[i] + 1.5 * h[i], n)
+                                for i in range(3)], axis=1).astype(np.float32)
+                dirs = rng.normal(size=(n, 3))
+                dirs /= np.linalg.norm(dirs, axis=1)[:, None]
+                dirs = dirs.astype(np.float32)
+                # classify once through /trace machinery to split inside/outside honestly
+                probe = np.empty(n * 5, dtype=np.float32)
+                rays = np.concatenate([pts, dirs], axis=1).astype(np.float32).ravel()
+                with state.lock:
+                    ROOT.raysvc.trace(sh, rays, n, probe, 1)
+                    started_inside = probe.reshape(-1, 5)[:, 4] > 0.5
+                    inside = np.ascontiguousarray(pts[started_inside])
+                    outside = np.ascontiguousarray(pts[~started_inside])
+                    din = np.ascontiguousarray(dirs[started_inside])
+                    dout = np.ascontiguousarray(dirs[~started_inside])
+                    repeats = max(1, 20000 // n)
+                    result = {"ok": True, "samples": n, "repeats": repeats,
+                              "insideSamples": int(started_inside.sum()),
+                              "loadAverage": os.getloadavg()[0],
+                              "functions": {}}
+                    result["functions"]["contains"] = {
+                        "nsPerCall": ROOT.raysvc.benchFunction(sh, 0, pts.ravel(), dirs.ravel(), n, repeats)}
+                    if len(outside):
+                        result["functions"]["distFromOutside"] = {
+                            "nsPerCall": ROOT.raysvc.benchFunction(sh, 1, outside.ravel(), dout.ravel(), len(outside), repeats)}
+                    if len(inside):
+                        result["functions"]["distFromInside"] = {
+                            "nsPerCall": ROOT.raysvc.benchFunction(sh, 2, inside.ravel(), din.ravel(), len(inside), repeats)}
+                    result["functions"]["safety"] = {
+                        "nsPerCall": ROOT.raysvc.benchFunction(sh, 3, pts.ravel(), dirs.ravel(), n, repeats)}
+                return self._reply_json(result)
             self._reply_json({"ok": False, "error": "unknown endpoint"}, 404)
 
         def log_message(self, fmt, *args):  # quiet
