@@ -66,30 +66,6 @@ export class Camera {
     const d = normalize(offset);
     this.origin = [this.target[0] + d[0] * radius, this.target[1] + d[1] * radius, this.target[2] + d[2] * radius];
   }
-  distance() { const o = sub(this.origin, this.target); return Math.hypot(o[0], o[1], o[2]); }
-}
-
-/// Rays for one horizontal band, as the flat n*6 buffer the engine contract asks for.
-export function bandRays(camera, width, height, y0, y1) {
-  const { forward, right, up } = camera.basis();
-  const aspect = width / height;
-  const tanHalf = Math.tan(camera.fovY / 2);
-  const rows = y1 - y0;
-  const rays = new Float32Array(rows * width * 6);
-  let k = 0;
-  for (let y = y0; y < y1; ++y) {
-    const ndcY = (1 - 2 * (y + 0.5) / height) * tanHalf;
-    for (let x = 0; x < width; ++x) {
-      const ndcX = (2 * (x + 0.5) / width - 1) * tanHalf * aspect;
-      const dx = forward[0] + right[0] * ndcX + up[0] * ndcY;
-      const dy = forward[1] + right[1] * ndcX + up[1] * ndcY;
-      const dz = forward[2] + right[2] * ndcX + up[2] * ndcY;
-      const n = Math.hypot(dx, dy, dz) || 1;
-      rays[k++] = camera.origin[0]; rays[k++] = camera.origin[1]; rays[k++] = camera.origin[2];
-      rays[k++] = dx / n; rays[k++] = dy / n; rays[k++] = dz / n;
-    }
-  }
-  return rays;
 }
 
 // ------------------------------------------------------------------------------------------

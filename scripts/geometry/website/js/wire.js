@@ -9,7 +9,7 @@
 // CW). Orientation changes no crossing parity and nothing here integrates a signed area, so the
 // loop is used in the order the file gives it, and the outer/inner role is taken from the file.
 
-import { Curve2D, distanceSq2, pointSegmentDistanceSq, v2, K_TOLERANCE, K_TOLERANCE_SQ, TWO_PI } from './curve2d.js';
+import { pointSegmentDistanceSq, v2, K_TOLERANCE, TWO_PI } from './curve2d.js';
 
 export const WireClass = { Inside: 'Inside', Outside: 'Outside', Boundary: 'Boundary' };
 

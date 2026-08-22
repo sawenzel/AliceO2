@@ -5,7 +5,7 @@
 // and keeps one code path for building the geometry.
 
 import { parseSidecar, parseFacets } from './sidecar.js';
-import { SurfaceSolid, K_RAY_TOLERANCE, BIG } from './solid.js';
+import { SurfaceSolid } from './solid.js';
 import { MeshSolid } from './meshtrace.js';
 import { generateEvents } from './gun.js';
 
