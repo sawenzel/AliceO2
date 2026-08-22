@@ -28,6 +28,7 @@ the plan of record for the WG talk (~1.5 weeks out from this rewrite).
 | the talk visual | exact IRIS hits at exactly r = 5.460 cm; tessellated smeared 5.427–5.460 (330 µm sagitta) |
 | website (`website/`) | mesh viewer, charts, **JS exact raytracer validated bit-true against the kernel** (0 disagreements, max Δt = 0 in float32, 6 parts × 141k rays), event-display player, self-check 30/30 |
 | ray bridge (`tgeoRayService.py`) | the real kernel serving pixels: 10k rays in 4 ms |
+| **oTOF converts** (fixed 2026-08-22, `Stream_AC_OTOFTraversal.md`) | 20 prototypes / **62 628 placements**, 20/20 exact surfaces, **19/20 CSG `TGeoBBox` at dV_sym = 0**, 44 s / 753 MB, 3 964 `AddNode`; converter self-test now 48+6 |
 | benchmark JSON (`website_data/`) | five hero parts complete; ram shape 141× surface on `Contains`; ALICE3 part mesh 12–62× faster than surface; timing under load flagged `timingPreliminary` |
 
 **Sharpened during Track 3, quote it correctly:** `cyl_inter_cyl`'s mesh is *closed as a
@@ -86,13 +87,13 @@ statement for the talk.
    Needs anchored/exact part-number matching.
 8. **Gate: credit the sliver.** Teach the relabel class to explain a distout mismatch whose
    candidate crossing is `onTrimBoundary`-flagged within the trim band (Review Appendix A).
-9. **The face-normal gate column** (fourth hand-over in a row) and **the `auto`-mode
+10. **The face-normal gate column** (fourth hand-over in a row) and **the `auto`-mode
    unreliable-shipping policy** (~20 lines) — both still open, both pre-corpus items.
-10. **The talk (Track 4):** assemble from Review + Stream_Z + website; re-run the
+11. **The talk (Track 4):** assemble from Review + Stream_Z + website; re-run the
    `timingPreliminary` numbers on a quiet box; build the single-file website bundle for
    publishing (all data inlined — the Artifact CSP allows nothing external, and the bridge is
    local-only).
-11. **Standing, unchanged:** oTOF XCAF traversal; free-form surfaces; the models-are-not-legal
+12. **Standing, unchanged:** free-form surfaces; the models-are-not-legal
    overlap finding and the broken `CheckOverlaps` on our shape; `Curve2D::closestPoint` as the
    kernel hot spot; mesh healing.
 
