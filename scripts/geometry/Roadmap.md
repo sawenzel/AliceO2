@@ -177,3 +177,25 @@ setup.** This is the next harness, and the point of it is that it *instruments t
 can* — the step-length cost of a loose safety (item b), the real per-event cost of the surface solid
 against a mesh, and assembly-level navigation, all under a workload that is the actual use case
 rather than a benchmark of it.
+
+## Raised by Sandro, 2026-08-22
+
+### (f) The in-browser event display, layer 2: a live o2-sim loop
+
+> *"What about **actually** simulating a part in the visualization in the browser with the o2-sim
+> Geant4 backend and display some transported traces (either pixels on a screen behind the object)
+> ... pointclouds within the object or things like this --> A sort of event-display. This will push
+> **part testing** to a whole new level **and** we can sell it nicely. To have the impression of
+> real-time, we might need to use MCStepLogger ... or hook into the O2HitMerger FairMQ channel."*
+
+Layer 1 (batch replay from MCStepLogger, embedded in the website) is in
+`Plan_Presentation.md` Track 3b. What is deferred here is the **live loop**:
+
+- a local bridge (WebSocket/SSE) with a "fire N events" button spawning runs on demand;
+- o2-sim **service mode** to keep geometry-initialized workers warm, so a shot costs the batch
+  and not the Geant4 init — whether MCStepLogger flushes usably per batch in that mode is the
+  gate to measure first;
+- the **O2HitMerger FairMQ channel** as an alternative live tap: despite its name it sees **all
+  MCTracks** (Sandro's correction, 2026-08-22), so it can feed track-level display (vertices and
+  kinematics; line/helix rendering) without the step logger — less granular than steps, but
+  already streaming in parallel mode.
