@@ -242,8 +242,9 @@ Why this closes the loop: a STEP generated from a known TGeo makes the **origina
 oracle** for the reverse conversion — no tolerance band, the right answer is known by
 construction — which is precisely what (h)'s Pcon/Pgon bench and Stream E §4's beampipe round
 trip wanted. And it is a deliverable by itself: detector geometry becomes editable in CAD tools.
-What exists to build on: ROOT's own `geocad` module (`TGeoToStep`, OCC-backed) — check whether
-our ROOT build enables it before writing anything; the parked `attic/O2_TGeoToCAD*.py` attempts;
-and OCCT's `STEPControl_Writer` reachable from pythonOCC, where TGeo primitives map naturally
-(tube→cylinder+planes, pcon→revolution stack, composite→`BRepAlgoAPI` boolean). Acceptance is
+The route is a pythonOCC writer of our own (`STEPControl_Writer`), where TGeo primitives map
+naturally (tube→cylinder+planes, pcon→revolution stack, composite→`BRepAlgoAPI` boolean) and
+every validation instrument this branch built applies directly; the parked
+`attic/O2_TGeoToCAD*.py` attempts are salvage. (ROOT's old `geocad`/`TGeoToStep` was considered
+and set aside per Sandro, 2026-08-22.) Acceptance is
 the round trip: TGeo → STEP → converter → gate, scored against the source TGeo itself.
