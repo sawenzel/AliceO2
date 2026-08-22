@@ -119,8 +119,11 @@ function background(out, o, dirX, dirY, dirZ, ox, oy, oz, groundY, gridStep) {
 
 const MATERIAL = { exact: [150, 178, 214], mesh: [214, 150, 110] };
 
-/// Headlight plus one cool fill, from the analytic normal. This is where the exact surfaces pay
-/// off visually: a cylinder shades smoothly because its normal is the cylinder's, not a facet's.
+const SPECULAR_EXPONENT = 48;
+
+/// Headlight plus one cool fill, from the analytic normal, with a Blinn-Phong specular on each.
+/// This is where the exact surfaces pay off visually: a cylinder shades smoothly, and its highlight
+/// runs as one unbroken band, because its normal is the cylinder's and not a facet's.
 function shade(out, nx, ny, nz, dirX, dirY, dirZ, right, up, base) {
   // headlight along the view direction, fill from up-left in camera space
   const headlight = Math.max(0, -(nx * dirX + ny * dirY + nz * dirZ));
@@ -129,12 +132,21 @@ function shade(out, nx, ny, nz, dirX, dirY, dirZ, right, up, base) {
                              -right[2] * 0.6 + up[2] * 0.7 - dirZ * 0.4]);
   const fill = Math.max(0, nx * fillDir[0] + ny * fillDir[1] + nz * fillDir[2]);
   const ambient = 0.16;
-  const intensity = ambient + 0.78 * headlight + 0.3 * fill;
+  const intensity = ambient + 0.74 * headlight + 0.28 * fill;
+
+  // Blinn-Phong: the half vector between the light and the eye. The eye direction is -ray, so for
+  // the headlight the half vector is the eye direction itself and its highlight is the headlight
+  // term sharpened; the fill's highlight is the one that travels across a curved face.
+  const halfFill = normalize([fillDir[0] - dirX, fillDir[1] - dirY, fillDir[2] - dirZ]);
+  const specFill = Math.pow(Math.max(0, nx * halfFill[0] + ny * halfFill[1] + nz * halfFill[2]), SPECULAR_EXPONENT);
+  const specHead = Math.pow(headlight, SPECULAR_EXPONENT);
+  const specular = 150 * specFill + 55 * specHead;
+
   // a touch of rim light so a silhouette against the background stays readable
   const rim = Math.pow(1 - headlight, 3) * 0.25;
-  out[0] = Math.min(255, base[0] * intensity + 90 * rim);
-  out[1] = Math.min(255, base[1] * intensity + 100 * rim);
-  out[2] = Math.min(255, base[2] * intensity + 120 * rim);
+  out[0] = Math.min(255, base[0] * intensity + 90 * rim + specular);
+  out[1] = Math.min(255, base[1] * intensity + 100 * rim + specular * 1.02);
+  out[2] = Math.min(255, base[2] * intensity + 120 * rim + specular * 1.06);
 }
 
 /// Blue -> yellow -> red, for the depth-difference heatmap.
@@ -173,6 +185,15 @@ export class Raytracer {
     // costs a gradient and a grid line and no ray at all.
     this.useScissor = true;
     this.scissor = null;
+    // One extra bounce: the mirror direction off every hit, answered by the SAME engine, so the
+    // reflection is as exact (or as faceted) as the representation being shown.
+    this.reflect = false;
+    this.reflectivity = 0.85;   // the grazing-angle limit; Schlick weights it per pixel
+  }
+
+  /// Which views take a second, reflected ray batch, and which engine answers it.
+  get reflectView() {
+    return this.reflect && (this.view === 'exact' || this.view === 'exactBridge' || this.view === 'mesh');
   }
 
   /// The part's world AABB projected to this frame's pixel rectangle, padded by a couple of pixels
@@ -396,15 +417,62 @@ export class Raytracer {
     }
     if (generation !== this.generation) { return; }
 
-    this._paint(rowsRendered, sampleCols, step, raysCopy, primary, secondary, counts, right, up, left, rightEdge);
+    let bounce = null;
+    if (this.reflectView && primary) {
+      try { bounce = await this._bounce(raysCopy, primary); } catch (e) {
+        if (generation === this.generation) { this.counters.error = e.message; }
+      }
+      if (generation !== this.generation) { return; }
+    }
+
+    this._paint(rowsRendered, sampleCols, step, raysCopy, primary, secondary, counts, right, up, left, rightEdge, bounce);
     this.context.putImageData(this.image, 0, 0);
     if (this.onProgress) { this.onProgress(this.counters); }
   }
 
-  _paint(rowsRendered, sampleCols, step, rays, primary, secondary, counts, right, up, left, rightEdge) {
+  /// The second ray batch: the mirror direction off every pixel that hit something, sent to the
+  /// same engine that answered the first. Only the hits are sent, so the batch is as small as the
+  /// silhouette. Returns { slot, rays, results } with slot[sample] the index into the batch, or -1.
+  async _bounce(rays, primary) {
+    const n = rays.length / 6;
+    const slot = new Int32Array(n).fill(-1);
+    let m = 0;
+    for (let i = 0; i < n; ++i) { if (primary[i * 5] >= 0) { slot[i] = m++; } }
+    if (!m) { return { slot, rays: new Float32Array(0), results: new Float32Array(0) }; }
+
+    const span = Math.max(1e-9, Math.hypot(this.box[3] - this.box[0], this.box[4] - this.box[1], this.box[5] - this.box[2]));
+    const offset = 1e-5 * span;    // step off the surface, or the bounce re-hits the face it left
+    const out = new Float32Array(m * 6);
+    for (let i = 0; i < n; ++i) {
+      const j = slot[i];
+      if (j < 0) { continue; }
+      const o = i * 6, q = i * 5;
+      const t = primary[q];
+      const nx = primary[q + 1], ny = primary[q + 2], nz = primary[q + 3];
+      const dx = rays[o + 3], dy = rays[o + 4], dz = rays[o + 5];
+      const dot = dx * nx + dy * ny + dz * nz;
+      const rx = dx - 2 * dot * nx, ry = dy - 2 * dot * ny, rz = dz - 2 * dot * nz;
+      const len = Math.hypot(rx, ry, rz) || 1;
+      const k = j * 6;
+      out[k] = rays[o] + dx * t + nx * offset;
+      out[k + 1] = rays[o + 1] + dy * t + ny * offset;
+      out[k + 2] = rays[o + 2] + dz * t + nz * offset;
+      out[k + 3] = rx / len; out[k + 4] = ry / len; out[k + 5] = rz / len;
+    }
+    const copy = out.slice(0);
+    this.counters.raysTraced += m;
+    let results;
+    if (this.view === 'mesh') { results = await this.local.traceRaysMesh(out); }
+    else if (this.view === 'exactBridge') { results = await this.remote.traceRays(out); }
+    else { results = await this.local.traceRays(out); }
+    return { slot, rays: copy, results };
+  }
+
+  _paint(rowsRendered, sampleCols, step, rays, primary, secondary, counts, right, up, left, rightEdge, bounce) {
     const width = this.width, height = this.height;
     const data = this.image.data;
     const rgb = [0, 0, 0];
+    const mirror = [0, 0, 0];
     const scale = Math.max(1e-9, Math.hypot(this.box[3] - this.box[0], this.box[4] - this.box[1], this.box[5] - this.box[2]));
     const full = step === 1;
 
@@ -450,8 +518,29 @@ export class Raytracer {
             background(rgb, null, dirX, dirY, dirZ, rays[o], rays[o + 1], rays[o + 2], this.groundY, this.gridStep);
           }
         } else if (hit) {
-          shade(rgb, primary[q + 1], primary[q + 2], primary[q + 3], dirX, dirY, dirZ, right, up,
-                this.view === 'mesh' ? MATERIAL.mesh : MATERIAL.exact);
+          const base = this.view === 'mesh' ? MATERIAL.mesh : MATERIAL.exact;
+          shade(rgb, primary[q + 1], primary[q + 2], primary[q + 3], dirX, dirY, dirZ, right, up, base);
+          if (bounce) {
+            const j = bounce.slot[s];
+            if (j >= 0) {
+              const bo = j * 6, bq = j * 5;
+              const bx = bounce.rays[bo + 3], by = bounce.rays[bo + 4], bz = bounce.rays[bo + 5];
+              if (bounce.results[bq] >= 0) {
+                shade(mirror, bounce.results[bq + 1], bounce.results[bq + 2], bounce.results[bq + 3],
+                      bx, by, bz, right, up, base);
+              } else {
+                background(mirror, null, bx, by, bz, bounce.rays[bo], bounce.rays[bo + 1], bounce.rays[bo + 2],
+                           this.groundY, this.gridStep);
+              }
+              // Schlick: a face seen edge-on is a mirror, a face seen straight on is barely one.
+              // Without this the whole part just gets darker, because the sky it reflects is dark.
+              const cosine = Math.max(0, -(primary[q + 1] * dirX + primary[q + 2] * dirY + primary[q + 3] * dirZ));
+              const k = this.reflectivity * (0.05 + 0.95 * Math.pow(1 - cosine, 5));
+              rgb[0] += (mirror[0] - rgb[0]) * k;
+              rgb[1] += (mirror[1] - rgb[1]) * k;
+              rgb[2] += (mirror[2] - rgb[2]) * k;
+            }
+          }
           if (full) { this.counters.hit += 1; }
         } else {
           background(rgb, null, dirX, dirY, dirZ, rays[o], rays[o + 1], rays[o + 2], this.groundY, this.gridStep);
