@@ -29,6 +29,7 @@ the plan of record for the WG talk (~1.5 weeks out from this rewrite).
 | website (`website/`) | mesh viewer, charts, **JS exact raytracer validated bit-true against the kernel** (0 disagreements, max Δt = 0 in float32, 6 parts × 141k rays), event-display player, self-check 30/30 |
 | ray bridge (`tgeoRayService.py`) | the real kernel serving pixels: 10k rays in 4 ms |
 | **oTOF converts** (fixed 2026-08-22, `Stream_AC_OTOFTraversal.md`) | 20 prototypes / **62 628 placements**, 20/20 exact surfaces, **19/20 CSG `TGeoBBox` at dV_sym = 0**, 44 s / 753 MB, 3 964 `AddNode`; converter self-test now 48+6 |
+| **TGeo → STEP round trip closes** (`Stream_AD_TGeoToStep.md`, 2026-08-23) | `O2_TGeoToCAD.py`: 16/17 Run 3 shape classes, self-test 71/71; PIPE: 1.69M Contains samples, **168/169 parts zero disagreements** (1 point open), CSG-vs-source 620k/0, capacity median 1.5e-13; full geometry 21 150 solids (99.7 %) in 3 min — the STEP *writer* segfaults on the full model |
 | benchmark JSON (`website_data/`) | five hero parts complete; ram shape 141× surface on `Contains`; ALICE3 part mesh 12–62× faster than surface; timing under load flagged `timingPreliminary` |
 
 **Sharpened during Track 3, quote it correctly:** `cyl_inter_cyl`'s mesh is *closed as a
