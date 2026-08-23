@@ -31,6 +31,7 @@ done), **historical** (kept for the reasoning, no longer steering anything).
 | `SolidNavigationHarness.md` | reference | the harness: options, output, perf entry point |
 | `CSG_Pipeline.md` | reference | the B-rep → CSG design and tiers |
 | `Handoff_IntegrationTest.md` | open | the Geant integration test brief; basis of Track 1 |
+| `Handoff_ClosureTest.md` | open | the closure test: real physics through the round trip, for a fresh session |
 | `MeshHealing.md` | open | mesh validity ≠ accuracy; repair options unbuilt |
 | `Workstreams.md` | historical | the parallel-streams contract (waves 0–3, executed) |
 | `CodeReview_Fable.md`, `_v2.md` | historical | the two defect registers that drove waves 0–1 |
