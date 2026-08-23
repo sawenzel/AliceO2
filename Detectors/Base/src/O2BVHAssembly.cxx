@@ -508,8 +508,9 @@ O2BVHAssembly* O2BVHAssembly::MakeBVHAssembly(TGeoVolumeAssembly* volume, bool d
   auto* shape = new O2BVHAssembly(volume);
   volume->SetShape(shape);
   if (dropVoxels && volume->GetVoxels() != nullptr) {
-    // nothing reads the voxel finder once this shape answers the queries; the same clone guard
-    // TGeoVolume::Voxelize uses keeps a cloned volume's shared finder alive
+    // measured to be a bad idea outside a benchmark: TGeoNavigator::SearchNode reads the finder
+    // itself once it is inside the assembly. The same clone guard TGeoVolume::Voxelize uses keeps
+    // a cloned volume's shared finder alive.
     if (!volume->TestBit(TGeoVolume::kVolumeClone)) {
       delete volume->GetVoxels();
     }
