@@ -49,5 +49,6 @@
 #pragma link C++ class std::vector < o2::base::BVHSurfaceCurveRecord> + ;
 #pragma link C++ class std::vector < o2::base::BVHSurfaceRecord> + ;
 #pragma link C++ class o2::base::O2BVHSurfaceSolid - ;
+#pragma link C++ class o2::base::O2BVHAssembly + ;
 
 #endif
