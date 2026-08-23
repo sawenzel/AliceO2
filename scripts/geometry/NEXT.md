@@ -6,6 +6,13 @@ stack re-verification, and the three parallel presentation tracks).
 
 Branch `swenzel/bvhsurfacesolid`. Everything below is committed unless marked otherwise.
 
+## The next major step (decided 2026-08-23, for a FRESH session)
+
+**The closure test**: real `o2-sim -m PIPE ITS TPC MAG` physics through the round-tripped
+geometry in three representations, scored against the original C++ TGeo as its own oracle —
+same hits (layered acceptance), step counts under control, realistic CPU. The full analysis,
+pain points (media/materials/cuts) and staging: [`Handoff_ClosureTest.md`](Handoff_ClosureTest.md).
+
 ## Read this first
 
 [`Tutorial.md`](Tutorial.md) is still the map; [`Review_2026-09.md`](Review_2026-09.md) is the
