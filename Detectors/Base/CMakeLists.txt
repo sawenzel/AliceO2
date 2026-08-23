@@ -37,6 +37,7 @@ o2_add_library(DetectorsBase
                        src/GlobalParams.cxx
                        src/O2Tessellated.cxx
                        src/O2BVHSurfaceSolid.cxx
+                       src/O2BVHAssembly.cxx
                        src/O2SurfaceSolidIO.cxx
                        src/O2OverlapCheck.cxx
                        src/O2SolidHarness.cxx
@@ -86,6 +87,7 @@ o2_target_root_dictionary(DetectorsBase
                                   include/DetectorsBase/GlobalParams.h
                                   include/DetectorsBase/O2Tessellated.h
                                   include/DetectorsBase/O2BVHSurfaceSolid.h
+                                  include/DetectorsBase/O2BVHAssembly.h
                                   )
 
 o2_add_test(
