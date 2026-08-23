@@ -346,6 +346,20 @@ def _quad_face(b0, b1, t1, t0, what, tol=1e-7):
     pts = _dedupe_ring3([b0, b1, t1, t0])
     if len(pts) < 3:
         return None
+    # Distinct points can still be collinear: a TGeoPgon z-step (two sections at
+    # one z) makes the radial closure edges collapse to three points on one line,
+    # and a face built from them has zero area and invalidates the whole shell
+    # (found on TPC_WSEG's tpc_hole). Newell's formula over the ring is the
+    # orientation-free area test; below the band the patch bounds nothing.
+    nrm = [0.0, 0.0, 0.0]
+    for i in range(len(pts)):
+        a, b = pts[i], pts[(i + 1) % len(pts)]
+        nrm[0] += (a[1] - b[1]) * (a[2] + b[2])
+        nrm[1] += (a[2] - b[2]) * (a[0] + b[0])
+        nrm[2] += (a[0] - b[0]) * (a[1] + b[1])
+    span = max(math.sqrt(sum((pp[i] - pts[0][i]) ** 2 for i in range(3))) for pp in pts[1:])
+    if math.sqrt(sum(c * c for c in nrm)) <= tol * span * span:
+        return None
     if len(pts) == 3:
         return BRepBuilderAPI_MakeFace(_polygon_wire(pts, what)).Face()
     n = cross(sub(b1, b0), sub(t0, b0))
@@ -2533,6 +2547,36 @@ def self_test():
                None, None, None))
     total += len(r9)
     failures += _print_suite("reflected subtrees: mirrored prototypes, placed", r9)
+
+    # ---- suite 10: the TGeoPgon z-step, and the collinear-face guard ----------
+    # TPC_WSEG subtracts a Pgon whose sections 1 and 2 share z = -1.5 (a radius
+    # step).  The radial closure edges between those two sections dedupe to three
+    # DISTINCT but COLLINEAR points, and a face built from them has zero area and
+    # invalidates the shell: OCCT's classifier then answers ~64 % garbage on the
+    # operand while its volume still integrates exactly.  The guard rejects any
+    # patch whose Newell area vanishes; the step itself is legal TGeo and stays.
+    r10 = []
+    shift10 = 1.5 / math.sin(math.radians(10.0))
+    pg10 = ROOT.TGeoPgon("st_zstep", 0.0, 20.0, 1, 4)
+    pg10.DefineSection(0, -3.5, 86.3 - shift10, 240.4 - shift10)
+    pg10.DefineSection(1, -1.5, 86.3 - shift10, 240.4 - shift10)
+    pg10.DefineSection(2, -1.5, 86.3 - shift10, 243.4 - shift10)
+    pg10.DefineSection(3, 3.5, 86.3 - shift10, 243.4 - shift10)
+    occ10 = shape_to_occ(pg10)
+    from OCC.Core.BRepCheck import BRepCheck_Analyzer as _BCA10
+    r10.append(("a z-step TGeoPgon builds a VALID shell (TPC_WSEG's tpc_hole)",
+                _BCA10(occ10).IsValid(), None, None, None))
+    v10 = solid_volume_mm3(occ10) / 1000.0
+    d10 = abs(v10 - pg10.Capacity()) / pg10.Capacity()
+    r10.append((f"its volume matches Capacity() ({d10:.2e})", d10 < 1e-9, None, None, None))
+    r10.append(("three collinear points yield no face (the guard, negative control)",
+                _quad_face((0, 0, 0), (1, 0, 0), (2, 0, 0), (1, 0, 0), "st") is None,
+                None, None, None))
+    r10.append(("a genuine triangle still yields a face",
+                _quad_face((0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 0), "st") is not None,
+                None, None, None))
+    total += len(r10)
+    failures += _print_suite("TGeoPgon z-step and the collinear-face guard", r10)
 
     print(f"\n{total} checks, {failures} failures")
     sys.stdout.flush()
