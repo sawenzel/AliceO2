@@ -80,6 +80,16 @@ the assembly tree per occurrence (leaf definitions stay shared, so there is stil
 one prototype per TGeoVolume) and drops every repeated (volume, world transform),
 counting them in the report.
 
+Baking a reflection
+-------------------
+A STEP component location is a proper rigid motion, so a reflecting `TGeoMatrix`
+cannot be a placement and is baked into a private copy of the child solid instead.
+The bake goes through `gp_Trsf`, not `gp_GTrsf`: the general transform rewrote
+every mirrored plane and cylinder as a B-spline and moved the volume by up to
+1.1 %, measured against a `TGeoPcon`'s analytic `Capacity()`.  `gp_Trsf` carries an
+improper orthogonal matrix exactly, and every bake is now priced against the volume
+an isometry must preserve.
+
 Report
 ------
 `tgeo2step_report.json`-style: one record per logical volume with
@@ -503,14 +513,37 @@ def _det3(m):
             + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]))
 
 
-def tgeo_matrix_to_trsf(m):
-    """A rigid gp_Trsf, or None if the matrix is a reflection / non-uniform scale.
+# Hand-written ALICE rotation matrices are only orthogonal to about 1e-7 -- TRD's
+# `BM49/B051_1` is a TGeoCombiTrans whose cosines were written out to nine digits,
+# and its M^T M departs from the identity by 6.7e-08.  That is 0.3 um over the whole
+# cave, so it is a rigid placement; the band only has to separate it from a genuine
+# non-uniform scale, which is O(0.1).
+_ORTHO_TOL = 1e-6
 
-    STEP component placements are rigid by construction, so a non-rigid TGeoMatrix
-    cannot be a placement -- it has to be baked into a copy of the solid instead.
+# The volume a baked isometry must preserve, as a relative band.  Three orders of
+# magnitude tighter than the 0.5-1.1 % the general transform used to lose, and loose
+# enough for the input matrices above; what is actually achieved is 0.
+_ISOMETRY_TOL = 1e-6
+
+
+def _is_orthogonal(mat, tol=_ORTHO_TOL):
+    for i in range(3):
+        for j in range(i, 3):
+            d = sum(mat[k][i] * mat[k][j] for k in range(3))
+            if abs(d - (1.0 if i == j else 0.0)) > tol:
+                return False
+    return True
+
+
+def tgeo_matrix_to_isometry(m):
+    """An exact gp_Trsf for any isometry, reflections included, or None.
+
+    A `gp_Trsf` carries an improper orthogonal matrix perfectly well -- OCCT models
+    it as a uniform scale of -1 -- and `BRepBuilderAPI_Transform` then moves the
+    exact analytic carriers.  Only a genuinely non-uniform scale needs a `gp_GTrsf`.
     """
     mat, tr = tgeo_matrix_components(m)
-    if abs(_det3(mat) - 1.0) > 1e-9:
+    if not _is_orthogonal(mat) or abs(abs(_det3(mat)) - 1.0) > _ORTHO_TOL:
         return None
     t = gp_Trsf()
     try:
@@ -520,6 +553,20 @@ def tgeo_matrix_to_trsf(m):
     except Exception:
         return None
     return t
+
+
+def tgeo_matrix_to_trsf(m):
+    """A *proper* rigid gp_Trsf, or None if the matrix reflects or scales.
+
+    STEP component placements are rigid and right-handed by construction, so a
+    reflecting TGeoMatrix cannot be a placement -- it has to be pushed into the
+    definition instead.  Baking is a different question and takes the isometry
+    above, which accepts the reflection.
+    """
+    mat, _tr = tgeo_matrix_components(m)
+    if abs(_det3(mat) - 1.0) > 1e-9:
+        return None
+    return tgeo_matrix_to_isometry(m)
 
 
 def tgeo_matrix_to_gtrsf(m):
@@ -532,10 +579,53 @@ def tgeo_matrix_to_gtrsf(m):
     return g
 
 
+def apply_isometry(shape, t, what):
+    """Apply an exact isometry, and price it against the volume it must preserve.
+
+    An isometry cannot change a volume, so this is a real invariant rather than a
+    tolerance -- and this path used to carry none: `BRepBuilderAPI_GTransform`
+    re-approximates every analytic carrier as a B-spline and returned 0.887 % too
+    much volume on a mirrored `TGeoPcon` with an analytic `Capacity()`, 0.86 % on
+    every mirrored cylinder in TRD, with nothing reporting an error.
+    """
+    v0 = solid_volume_mm3(shape)
+    algo = BRepBuilderAPI_Transform(shape, t, True)
+    if not algo.IsDone():
+        raise ShapeDeclined(f"{what}: BRepBuilderAPI_Transform failed")
+    out = _check(algo.Shape(), what)
+    v1 = solid_volume_mm3(out)
+    if v0 > 0 and abs(v1 - v0) > _ISOMETRY_TOL * v0:
+        raise ShapeDeclined(f"{what}: the isometry changed the volume by "
+                            f"{abs(v1 - v0) / v0:.3e} relative")
+    if _signed_volume(out) < 0:
+        raise ShapeDeclined(f"{what}: the isometry left the solid inside out")
+    return out
+
+
+def zmirror_trsf():
+    """The canonical reflection z -> -z, exactly."""
+    t = gp_Trsf()
+    t.SetMirror(gp_Ax2(gp_Pnt(0., 0., 0.), gp_Dir(0., 0., 1.)))
+    return t
+
+
+def mirror_solid_z(shape, what="mirrored copy"):
+    """Reflect a solid through the z = 0 plane, exactly and carrier-preserving."""
+    return apply_isometry(shape, zmirror_trsf(), what)
+
+
 def apply_tgeo_matrix(shape, m, what):
-    """Move `shape` by a TGeoMatrix, using a general transform when it reflects."""
-    t = tgeo_matrix_to_trsf(m)
+    """Move `shape` by a TGeoMatrix.
+
+    A reflection goes through `gp_Trsf`, not `gp_GTrsf`: the general transform is
+    what turned every mirrored plane and cylinder into a B-spline and moved the
+    volume by up to 1.1 %.  The general transform is kept for the one case that
+    genuinely needs it, a non-uniform scale.
+    """
+    t = tgeo_matrix_to_isometry(m)
     if t is not None:
+        if t.IsNegative():
+            return apply_isometry(shape, t, what)
         return _moved(shape, t)
     g = tgeo_matrix_to_gtrsf(m)
     algo = BRepBuilderAPI_GTransform(shape, g, True)
@@ -1797,7 +1887,7 @@ def self_test():
                tgeo_matrix_to_trsf(refl) is None, None, None, None))
     box = shape_to_occ(ROOT.TGeoBBox("rb", 1, 2, 3), SCALE_TO_MM)
     mirrored = apply_tgeo_matrix(box, refl, "reflection test")
-    r3.append(("reflected box keeps its volume (baked GTrsf)",
+    r3.append(("reflected box keeps its volume (baked as an exact isometry)",
                abs(solid_volume_mm3(mirrored) - solid_volume_mm3(box)) < 1e-6,
                None, None, None))
     total += len(r3)
@@ -2038,6 +2128,69 @@ def self_test():
                ratio > 1e-2, None, None, None))
     total += len(r7)
     failures += _print_suite("definition cache keyed on volume identity", r7)
+
+    # ---- suite 8: baking a reflection is an isometry, and keeps the carriers ----
+    # `BRepBuilderAPI_GTransform` re-approximates every analytic carrier as a
+    # B-spline and moves the volume by 0.5-1.1 % on curved ones.  `gp_Trsf` carries
+    # the reflection exactly.  Volume alone would not have caught this -- the
+    # mirrored copies sat inside the composites' ordinary noise -- so the carriers
+    # are asserted too, and the old route is run as the negative control.
+    r8 = []
+    mtube = ROOT.TGeoTube("mt", 4, 5, 10)
+    occ_t = shape_to_occ(mtube, SCALE_TO_MM)
+    v_t = solid_volume_mm3(occ_t)
+    f_t = face_types(occ_t)
+    mir_t = mirror_solid_z(occ_t, "self-test tube")
+    v_m = solid_volume_mm3(mir_t)
+    f_m = face_types(mir_t)
+    rel_t = abs(v_m - v_t) / v_t
+    g = gp_GTrsf()
+    g.SetVectorialPart(gp_Mat(1, 0, 0, 0, 1, 0, 0, 0, -1))
+    old = BRepBuilderAPI_GTransform(occ_t, g, True).Shape()
+    v_o = solid_volume_mm3(old)
+    f_o = face_types(old)
+    rel_o = abs(v_o - v_t) / v_t
+    print(f"    tube {f_t} -> gp_Trsf mirror {f_m}, rel {rel_t:.3e}")
+    print(f"    the retired gp_GTrsf route: {f_o}, rel {rel_o:.3e}")
+    r8.append((f"a mirrored tube keeps its volume (rel {rel_t:.3e})",
+               rel_t <= 1e-12, None, None, None))
+    r8.append((f"a mirrored tube keeps its analytic faces {f_m}",
+               f_m == f_t and sum(f_m.get(k, 0) for k in
+                                  ("bspline", "bezier", "revolution")) == 0,
+               None, None, None))
+    r8.append((f"the retired gp_GTrsf route is wrong by {rel_o:.3e} and all "
+               f"B-spline (negative control)",
+               rel_o > 1e-3 and f_o.get("bspline", 0) == 4, None, None, None))
+    mpc = ROOT.TGeoPcon("mpc", 0, 360, 3)
+    mpc.DefineSection(0, -1, 0.5, 1)
+    mpc.DefineSection(1, 0, 0.5, 2)
+    mpc.DefineSection(2, 1, 0.8, 2)
+    occ_p = shape_to_occ(mpc, SCALE_TO_MM)
+    mir_p = mirror_solid_z(occ_p, "self-test pcon")
+    cap_p = float(mpc.Capacity())
+    rel_p = abs(solid_volume_mm3(mir_p) / 1000.0 - cap_p) / cap_p
+    r8.append((f"a mirrored Pcon matches its analytic Capacity() ({rel_p:.3e})",
+               rel_p <= 1e-9, None, None, None))
+    r8.append(("a mirrored Pcon keeps its analytic faces",
+               face_types(mir_p) == face_types(occ_p), None, None, None))
+    rotxz = ROOT.TGeoRotation("rotxz_st", 90., 0., 90., 90., 180., 0.)
+    baked = apply_tgeo_matrix(occ_t, rotxz, "self-test rotxz")
+    r8.append(("apply_tgeo_matrix takes a real reflecting TGeoRotation exactly",
+               abs(solid_volume_mm3(baked) - v_t) <= 1e-12 * v_t
+               and face_types(baked) == f_t, None, None, None))
+    r8.append(("the mirrored solid is not inside out",
+               _signed_volume(mir_t) > 0, None, None, None))
+    bad = gp_Trsf()
+    bad.SetScale(gp_Pnt(0, 0, 0), 1.01)
+    try:
+        apply_isometry(occ_t, bad, "not an isometry")
+        caught = False
+    except ShapeDeclined:
+        caught = True
+    r8.append(("the volume invariant rejects a transform that is not an isometry "
+               "(negative control)", caught, None, None, None))
+    total += len(r8)
+    failures += _print_suite("mirror baking: exact isometry, analytic carriers", r8)
 
     print(f"\n{total} checks, {failures} failures")
     sys.stdout.flush()
