@@ -83,9 +83,21 @@ statement for the talk.
 11. **The talk (Track 4):** assemble from Review + Stream_Z + the website; re-run the
     `timingPreliminary` numbers on a quiet box; build the single-file website bundle for
     publishing (the Artifact CSP allows nothing external; the bridge stays local-only).
-12. **In flight:** `O2BVHAssembly` (Roadmap (j)) — an Opus agent is implementing it
-    (baseline-first, TGeoShapeAssembly contract, oTOF acceptance); fold its
-    `Stream_AE_BVHAssembly.md` on landing.
+12. **`O2BVHAssembly` landed** (`Stream_AE_BVHAssembly.md`): derives from `TGeoShapeAssembly`,
+    BVH over daughter AABBs, `MakeBVHAssembly(vol)` after `CloseGeometry()`. Flat oTOF
+    (62 628 daughters): Contains 4.3×, Safety(out) 28.7×, transport 6.5×; **honest limit**: at
+    ≤68 daughters ROOT's voxel finder wins, and `FindNode` is untouched because
+    `TGeoNavigator::SearchNode` reads the voxel finder directly (§8 offers three hook options —
+    the pluggable daughter-search interface is also the Embree seam; Sandro to pick).
+    ctest: 113 + 22 new, green. **Two ROOT defects found by measurement, upstream-report
+    decision is Sandro's:** (i) `TGeoShapeAssembly::DistFromOutside` returns `Big()` for points
+    outside the bbox of a *voxelized* assembly — an assignment where a subtraction belongs;
+    minimal repro in scratch (3 boxes correct, 10 boxes → `Big()`), 300/300 rays lost at shape
+    level on oTOF (navigator-level impact unmeasured — measure before claiming transport loss);
+    (ii) `TGeoShapeAssembly::Safety` can exceed the true minimum over its daughters (69/2000
+    grid points) because it prunes on the Euclidean box gap while `TGeoBBox::Safety` returns the
+    axis maximum — a too-LARGE safety is the walk-through-walls failure mode. Not done: Geant4
+    transport test, thread-safety measurement.
 13. **Standing, unchanged:** free-form surfaces; the models-are-not-legal overlap finding and the
     broken `CheckOverlaps` on our shape; `Curve2D::closestPoint` as the kernel hot spot; mesh
     healing.
@@ -102,6 +114,11 @@ statement for the talk.
   (item 2 above): the gate composes both; a bare OCC shell silently loses CSG.
 - **External-detector hits live in `o2sim.root`** (`IRISHit`, `BAGRHit` branches), not in
   per-detector `o2sim_Hits*.root` files, under `o2-sim-serial`.
+- **Reconfiguring CMake on this branch needs Clang on the prefix path**:
+  `export CMAKE_PREFIX_PATH=$HOME/alisw/sw/ubuntu2404_aarch64/Clang/v20.1.7-local1:$CMAKE_PREFIX_PATH`
+  (alienv omits it; Gandiva's config then corrupts `CMAKE_MODULE_PATH` for every later
+  `find_package`). New `.C` macros under scripts/ must be listed in
+  `O2RootMacroExclusionList.cmake` or configure aborts.
 - `rm` is blocked by a repo hook (`.claude/hooks/deny-deletions.py`); move files aside instead.
 - Everything else in the 2026-08-09 list still applies: eval+command in one shell; stage lib
   first; prepend-never-replace; one ninja at a time; detach long runs to unique `--out` paths;
