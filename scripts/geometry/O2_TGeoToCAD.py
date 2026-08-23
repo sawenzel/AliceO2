@@ -55,6 +55,7 @@ Usage
                          volume that coincides exactly with another placement of the
                          same volume (see "coincident placements" below)
     --no-verify          skip the per-definition BRepGProp capacity check
+    --no-step            build and report, but do not write the STEP
     --quiet
 
 Coincident placements
@@ -114,6 +115,7 @@ from OCC.Core.BRepFill import brepfill
 from OCC.Core.TopoDS import topods
 from OCC.Core.BRepOffsetAPI import BRepOffsetAPI_ThruSections
 from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Cut, BRepAlgoAPI_Fuse, BRepAlgoAPI_Common
+from OCC.Core.ShapeUpgrade import ShapeUpgrade_UnifySameDomain
 from OCC.Core.BRepGProp import brepgprop
 from OCC.Core.GProp import GProp_GProps
 from OCC.Core.TDocStd import TDocStd_Document
@@ -125,6 +127,7 @@ from OCC.Core.Interface import Interface_Static
 from OCC.Core.IFSelect import IFSelect_RetDone
 
 SCALE_TO_MM = 10.0          # TGeo cm -> STEP mm
+BOOLEAN_VOLUME_TOL = 1e-4   # relative slack on the boolean volume invariant
 EPS = 1e-12
 
 
@@ -385,12 +388,85 @@ def _prism_from_rings(outer, inner=None, what="prism"):
     return _check(solid, what)
 
 
-def _boolean(op, a, b, what):
+def _unify(shape):
+    """Merge co-planar / co-cylindrical neighbouring faces.
+
+    A solid built by a chain of fuses carries a seam face at every merge, and
+    OCCT's BOP can choke on those without saying so -- see `_boolean` below.
+    """
+    u = ShapeUpgrade_UnifySameDomain(shape)
+    u.Build()
+    return u.Shape()
+
+
+def _run_boolean(op, a, b):
     algo = op(a, b)
     algo.Build()
     if not algo.IsDone():
+        return None
+    return algo.Shape()
+
+
+def _boolean(op, a, b, what, lower=True):
+    """A boolean with a volume invariant, because OCCT can fail silently.
+
+    On one MFT part (`MF21`) `BRepAlgoAPI_Fuse` returned `IsDone() == True` and a
+    valid solid that was **just the second operand** -- the 4.38 cm^3 first operand
+    had vanished, and the enclosing volume came out 25 % wrong with nothing
+    reporting an error. Every boolean is therefore priced against what its result
+    must satisfy:
+
+        fuse    max(vA, vB) <= v <= vA + vB
+        cut     vA - vB     <= v <= vA
+        common  0           <= v <= min(vA, vB)
+
+    `lower=False` drops the lower bound, for the one case where the tool has no
+    meaningful volume: a `BRepPrimAPI_MakeHalfSpace` solid is unbounded, so vB is
+    not a number the bound can be built from.
+
+    A violation is first treated as the seam-face problem it turned out to be
+    (retry with the operands unified), and only then declined -- never shipped.
+
+    The band is deliberately loose (`BOOLEAN_VOLUME_TOL`, 1e-4 relative): this is a
+    net for a boolean that silently lost a whole operand, not an accuracy test.
+    `BRepGProp` integrates a union of near-disjoint solids to about 1e-6 relative,
+    and a tighter band fires on that instead.
+    """
+    try:
+        va, vb = solid_volume_mm3(a), solid_volume_mm3(b)
+    except Exception:
+        va = vb = None
+
+    def bounds(v):
+        if va is None:
+            return True, ""
+        tol = BOOLEAN_VOLUME_TOL * max(va, vb, 1.0)
+        if op is BRepAlgoAPI_Fuse:
+            lo, hi = max(va, vb) - tol, va + vb + tol
+        elif op is BRepAlgoAPI_Cut:
+            lo, hi = va - vb - tol, va + tol
+        else:
+            lo, hi = -tol, min(va, vb) + tol
+        if not lower:
+            lo = -tol
+        return lo <= v <= hi, f"{v:.6g} outside [{lo:.6g}, {hi:.6g}] mm^3"
+
+    sh = _run_boolean(op, a, b)
+    if sh is None:
         raise ShapeDeclined(f"{what}: OCCT boolean did not complete")
-    return _check(algo.Shape(), what)
+    _check(sh, what)
+    ok, msg = bounds(solid_volume_mm3(sh))
+    if ok:
+        return sh
+    retry = _run_boolean(op, _unify(a), _unify(b))
+    if retry is not None and _has_solid(retry):
+        ok2, msg2 = bounds(solid_volume_mm3(retry))
+        if ok2:
+            return retry
+        msg = f"{msg}; after unifying the operands {msg2}"
+    raise ShapeDeclined(
+        f"{what}: OCCT's boolean returned a volume the operands cannot give "
+        f"({msg}); the operation failed silently")
 
 
 # --------------------------------------------------------------------------
@@ -738,7 +814,7 @@ def conv_ctub(sh, s):
         hs.Build()
         if not hs.IsDone():
             raise ShapeDeclined("TGeoCtub: half-space construction failed")
-        base = _boolean(BRepAlgoAPI_Cut, base, hs.Solid(), "TGeoCtub")
+        base = _boolean(BRepAlgoAPI_Cut, base, hs.Solid(), "TGeoCtub", lower=False)
     return base
 
 
@@ -1091,7 +1167,23 @@ class TGeoToStep:
                 continue
             t = tgeo_matrix_to_trsf(m)
             if t is None:
+                # A reflecting or scaling placement cannot be a STEP component
+                # location, so bake it into a private copy of the child solid.
                 self.reflected_nodes.append(f"{name}/{node.GetName()}")
+                csolid = self.definitions.get(child.GetName(), (None, None))[1]
+                if csolid is None:
+                    self._record(child, reason="reflected placement of a volume with "
+                                               "daughters cannot be baked")
+                    continue
+                try:
+                    baked = apply_tgeo_matrix(csolid, m, "reflected placement")
+                except ShapeDeclined as e:
+                    self._record(child, reason=str(e))
+                    continue
+                blab = self.shape_tool.AddShape(baked, False)
+                TDataStd_Name.Set(blab, f"{child.GetName()}__mirrored")
+                self.nbaked += 1
+                comps.append((blab, gp_Trsf(), str(node.GetName())))
                 continue
             comps.append((clab, t, str(node.GetName())))
 
@@ -1636,6 +1728,9 @@ def main(argv=None):
     ap.add_argument("--skip-top-body", action="store_true")
     ap.add_argument("--carve-mothers", action="store_true")
     ap.add_argument("--dedup-world", action="store_true")
+    ap.add_argument("--no-step", dest="write_step", action="store_false",
+                    help="build every solid and write the report, but skip the STEP "
+                         "write (which is where OCCT gives out on very large models)")
     ap.add_argument("--no-verify", dest="verify", action="store_false")
     ap.add_argument("--quiet", action="store_true")
     ap.add_argument("--self-test", action="store_true")
@@ -1661,8 +1756,10 @@ def main(argv=None):
     else:
         conv.build(vol)
     conv.log(f"  {len(conv.definitions)} logical volumes, "
-             f"{conv.ncomponents} components; writing {opts.output}")
-    conv.write(opts.output)
+             f"{conv.ncomponents} components")
+    if opts.write_step:
+        conv.log(f"  writing {opts.output}")
+        conv.write(opts.output)
 
     rep = conv.report(opts.input, opts.output)
     rpath = opts.report or (os.path.splitext(opts.output)[0] + "_report.json")
@@ -1683,8 +1780,9 @@ def main(argv=None):
     for cls, c in sorted(rep["byShapeClass"].items(), key=lambda kv: -(kv[1]["declined"])):
         if c["declined"]:
             print(f"  declined {cls}: {c['declined']} ({c['reasons']})")
-    print(f"report: {rpath}   ({rep['wallSeconds']} s, "
-          f"{os.path.getsize(opts.output) / 1e6:.2f} MB)")
+    size = (f"{os.path.getsize(opts.output) / 1e6:.2f} MB"
+            if opts.write_step else "no STEP written (--no-step)")
+    print(f"report: {rpath}   ({rep['wallSeconds']} s, {size})")
     return 0
 
 
