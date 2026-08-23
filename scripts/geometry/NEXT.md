@@ -59,18 +59,40 @@ statement for the talk.
    curves. Probes in scratch: `probe_parity.cxx` / `probe_dev.cxx`.
 5. **Kernel: loose bounding boxes.** `Stick` claims 40.1 cm in z around an 11.0 cm solid (3.6×,
    verified vs OCCT). Use the cover-box union in `ComputeBBox`.
-6. **TGeo→STEP follow-ups** (`Stream_AD_TGeoToStep.md`): bisect the full-geometry
-   `STEPCAFControl_Writer` segfault / try per-detector `--top` writes; map `TGeoPara` (13
-   volumes); reflected placements of subtree-carrying volumes (98 dropped); localise the
-   1-in-1.69M Contains point. On the record: the **beam pipe places 81 volumes exactly on
-   identical copies of themselves** (TGeo-side; `--dedup-world` handles it; independently
-   reproduced by a second walk, and `CheckOverlaps` is *structurally blind* to it — verified:
-   1 overlap reported in all of PIPE, none a plie — because the coincident discs sit in sibling
-   `TGeoShapeAssembly` wiggles, whose daughters the checker never cross-compares; materially
-   benign since the pairs are identical volumes, which is why a decade of physics never noticed); `BRepAlgoAPI_Fuse`
-   can return `IsDone()` with a silently dropped operand (guarded by a volume invariant);
-   **46/106 PIPE CSG declines are exactly "a TGeoPcon"** — PIPE's 58 Pcons are the measured
-   corpus for Roadmap (h)'s revolved-profile detector.
+6. **TGeo→STEP: the six-module round-trip study is in** (`Stream_AD` PIPE, `Stream_AF` ITS,
+   `Stream_AG` TPC, `Stream_AH` TRD/MAG/ABSO). Headline: **wherever the geometry reaches the
+   STEP, the round trip is exact — ~6.2 M Contains samples over six modules, ONE disagreement
+   total** (PIPE's single point), every accepted CSG at symmetric difference exactly 0, nothing
+   tessellated except one TPC part. Coincidence walks: PIPE 81 (real, checker-blind), ITS/TPC/
+   TRD/MAG/ABSO 0 — the beam pipe is so far unique. The decline histograms **converge on two
+   missing recognisers**: the sloped-prism family (`Trd1`/`Trap`/`Xtru`/`Arb8`/`Pgon`: ITS 47,
+   TRD 149, MAG 14, TPC 27) and the `TGeoPcon` revolved profile (PIPE 46, ITS 18, TPC 13,
+   ABSO 16) — building those two converts essentially every decline; `IBCYSSCone` requires the
+   revolved detector to accept mixed cone/cylinder laterals; `TGeoHalfSpace` costs exactly 5
+   composites in the whole Run 3 geometry.
+
+   **Writer defects found by the studies, in fix order** (no fixes applied — studies were
+   read-only): (i) the definition cache is keyed on volume NAME and TRD reuses names across
+   different shapes (43.5 % of its placements would get the wrong solid, median 29× volume
+   error); (ii) mirror-baking via `BRepBuilderAPI_GTransform` rewrites analytic faces as
+   B-splines AND moves volume 0.5–1.1 % on curved carriers (proved against an analytic Pcon;
+   `gp_Trsf::SetMirror` is bit-exact in a 9-line repro — the fix direction); (iii) reflected
+   placements of subtree-carrying volumes are dropped with the orphan at identity (ABSO's whole
+   front absorber misplaced, TPC loses 44 % of the detector via one reflected `TPC_ENDCAP`,
+   TRD 137 260 placements — and this MANUFACTURES fake coincidence reports downstream);
+   (iv) degenerate prism sections refused (point/line: `dx1=0` Trd1, `rmin` through 0);
+   (v) the bare `depth > 32` chain constant (ITS chains reach depth 60); (vi) the STEP writer
+   segfault is bracketed: 38 676 components write, 74 601 crash. Method note for the tooling:
+   instruments that score a part in its own frame are placement-blind — ABSO scored perfectly
+   with the whole absorber misplaced; the placement-fidelity walk (Stream_AH) is now the fourth
+   mandatory instrument. Older follow-ups still open: `TGeoPara` (all 13 are TPC's, not yet
+   exercised), localise PIPE's 1-in-1.69M point.
+
+   **Hand-written-geometry findings on the record**: the beam pipe's 81 self-coincident plies
+   (checker-blind, materially benign), and a TPC copy-paste typo at
+   `Detectors/TPC/simulation/src/Detector.cxx:1388-1389` — two prepreg strips at z = −177.925,
+   none at +177.925 (`CheckOverlaps` reports 0 on all of TPC; reporting upstream is Sandro's
+   call).
 7. **Track 3b, the real data:** the MCStepLogger→`events.json` exporter (schema in
    `website/README.md`; tree layout in `integration_demo/data/README`), then the website's event
    tab replays the real IRIS/Bagger transports.
