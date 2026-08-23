@@ -80,8 +80,12 @@ statement for the talk.
    decomposition and records each snap; (iii) reflected subtrees emit as shared mirrored
    prototypes — placement fidelity PIPE 1 166/1 166, TPC 36 583/37 315, TRD 636 566/636 567 with
    ZERO spurious placements, TRD's STEP 140 → 33 MB, all manufactured coincidences gone. The
-   world-frame Contains instrument found `TPC_WSEG` is itself **invalid at source**
-   (`BRepCheck_Analyzer`, 4.6 % off its own TGeoShape, pre-existing) — reported, not repaired.
+   world-frame Contains instrument's `TPC_WSEG` finding is RESOLVED (2026-08-23,
+   `c3a79be619`): the TGeo shape is **legal** — the defect was ours, a zero-area face built
+   from three collinear points at the Pgon's z-step, which invalidated the shell and garbled
+   OCCT's classifier (64 % on the operand while its volume integrated exactly). Fixed by a
+   Newell-area guard in `_quad_face`; hole and composite now valid at 0/20 000 mismatches;
+   self-test 101 → **105**. Nothing to fix upstream for WSEG.
 
    **Still open on the writer**: degenerate prism sections (old iv), the bare depth-32 chain
    constant (old v), the STEP writer segfault bracket (38 676 fine / 74 601 crash), `TGeoPara`,
