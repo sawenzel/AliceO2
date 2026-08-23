@@ -408,6 +408,253 @@ def _match_sphere(records, tol):
 
 
 # ------------------------------------------------------------------------------------------
+# The revolved profile: one axis, any number of z sections -> TGeoPcon
+# ------------------------------------------------------------------------------------------
+#
+# `_match_axial_primitive` above stops at two caps and one lateral kind, which is a tube, a tube
+# segment or a cone and nothing else. Most of what the detector corpora decline is the next thing
+# along: one axis, several z sections, cylinders and cones mixed on it -- a `TGeoPcon`. This
+# rebuilds that (r, z) profile.
+#
+# How the profile is read off, and why it is read off this way
+# ------------------------------------------------------------
+# Every lateral face is a straight segment in the (r, z) half-plane (a cylinder is vertical, a
+# cone is slanted) and its endpoints are exact, from `_axial_extent`. The z levels of the profile
+# are therefore the union of every lateral endpoint and every cap plane. Between two adjacent
+# levels the cross-section is an annulus, and *which* annulus is read at the interval's midpoint,
+# where the answer cannot be confused by a face that ends exactly on a level. One radius there
+# means rmin = 0; two mean rmin and rmax; three or more is not a polycone and is declined.
+#
+# Nothing about orientation is used. The first thing measured on a revolved solid built by
+# `O2_TGeoToCAD.conv_pcon` is that its inner faces are *not* reversed and their axis direction is
+# flipped instead, so a rule keyed on `TopAbs_REVERSED` would have read the bore as the barrel on
+# half the corpus.
+#
+# The one quantity that decides
+# -----------------------------
+# `Stream_K_Tier0.md` §3: a recogniser must score every candidate by one measured geometric gap
+# relative to the part's own scale, never by a per-class criterion and never by an angle. So the
+# proposal above is *rebuilt back into* the (r, z) half-plane and `_profile_gap` measures the
+# largest distance from a point that is actually on the solid's boundary -- every vertex, and
+# samples along every lateral -- to the proposed profile. That number, over the bounding-box
+# diagonal, is the acceptance criterion of this matcher. It is also why the matcher may be
+# generous about structure: a reconstruction that drifted anywhere shows up as a distance.
+
+_PROFILE_SAMPLES = (0.0, 0.25, 0.5, 0.75, 1.0)
+
+
+def _merge_levels(values, tol):
+    """Sorted distinct z levels from `(value, exact)` pairs, merging anything within `tol`.
+
+    Within a merged group the value marked exact wins. A cap plane states its own z directly,
+    whereas a lateral face's endpoint comes through a parametric bound and carries a few ulp of
+    arithmetic with it; taking the cap's number keeps the emitted `z` array reading as the
+    engineer wrote it instead of as -8.9e-16.
+    """
+    out = []
+    for value, exact in sorted(values):
+        if out and value - out[-1][0] <= tol:
+            if exact and not out[-1][1]:
+                out[-1] = (value, True)
+            continue
+        out.append((value, exact))
+    return [value for value, _exact in out]
+
+
+def _span_radius_at(span, t):
+    """The lateral's radius at axial coordinate `t`; the segment is straight in (r, z)."""
+    t0, t1, r0, r1 = span[0], span[1], span[2], span[3]
+    if t1 - t0 <= 0.0:
+        return r0
+    return r0 + (r1 - r0) * (t - t0) / (t1 - t0)
+
+
+def _point_segment_distance(p, a, b):
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    length2 = dx * dx + dy * dy
+    if length2 <= 0.0:
+        return math.hypot(p[0] - a[0], p[1] - a[1])
+    s = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / length2
+    s = min(1.0, max(0.0, s))
+    return math.hypot(p[0] - (a[0] + s * dx), p[1] - (a[1] + s * dy))
+
+
+def _profile_gap(profile, samples):
+    """The largest distance, in cm, from a boundary sample `(r, z)` to the profile's outline.
+
+    `profile` is the closed (r, z) ring the candidate will be revolved from. This is the whole
+    acceptance criterion of `_match_revolved` and it is a distance, so it is comparable across
+    parts once divided by the part's scale -- which is the property `Stream_K_Tier0.md` §3 says a
+    recogniser's score must have and which an angle or a per-class residual does not.
+    """
+    worst = 0.0
+    n = len(profile)
+    for sample in samples:
+        best = float("inf")
+        for i in range(n):
+            best = min(best, _point_segment_distance(sample, profile[i], profile[(i + 1) % n]))
+            if best <= 0.0:
+                break
+        worst = max(worst, best)
+    return worst
+
+
+def _solid_vertices(solid):
+    """Every vertex of the solid, in the part frame.
+
+    Taken from the topology rather than from the carriers the profile was built out of, which is
+    what makes `_profile_gap` a measurement and not a restatement.
+    """
+    from OCC.Core.BRep import BRep_Tool
+    from OCC.Core.TopAbs import TopAbs_VERTEX
+    from OCC.Core.TopExp import TopExp_Explorer
+    from OCC.Core.TopoDS import topods
+    out = []
+    seen = set()
+    exp = TopExp_Explorer(solid, TopAbs_VERTEX)
+    while exp.More():
+        pnt = BRep_Tool.Pnt(topods.Vertex(exp.Current()))
+        exp.Next()
+        key = (round(pnt.X(), 9), round(pnt.Y(), 9), round(pnt.Z(), 9))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((pnt.X(), pnt.Y(), pnt.Z()))
+    return out
+
+
+def _match_revolved(solid, records, clusters, caps, wedges, tol, diag):
+    """One axis cluster, any number of z sections: a `TGeoPcon`."""
+    cl = clusters[0]
+    cap = caps[0]
+    wedge = wedges[0]
+
+    # A coordinate axis is taken pointing the positive way, so a part whose axis is the global z
+    # through the global origin comes out with an identity frame and no placement at all -- and
+    # then the emitted TGeoPcon's own parameters are directly comparable with the source shape's.
+    axis = cl["dir"]
+    snapped = _snap_to_coordinate_axis(axis)
+    if snapped is not None and snapped[1] < 0.0:
+        axis = _scale(axis, -1.0)
+    # The axial origin is the foot of the perpendicular from the part frame's origin, for the
+    # same reason: it is the one choice that is a property of the axis rather than of whichever
+    # face happened to be seen first.
+    origin = _sub(cl["loc"], _scale(axis, _dot(cl["loc"], axis)))
+
+    spans = []
+    for member in cl["members"]:
+        t0, t1, r0, r1 = _axial_extent(member, axis, origin)
+        if t1 - t0 <= tol:
+            raise Declined("a lateral face has no axial extent (a cone at its own apex?)")
+        if min(r0, r1) < -tol:
+            raise Declined("a lateral face reaches a negative radius")
+        spans.append((t0, t1, max(r0, 0.0), max(r1, 0.0), member))
+
+    t_caps = [_dot(_sub(c["p"], origin), axis) for c in cap]
+    levels = _merge_levels([(s[0], False) for s in spans] + [(s[1], False) for s in spans]
+                           + [(t, True) for t in t_caps], tol)
+    if len(levels) < 2:
+        raise Declined("the axial faces span fewer than two distinct z levels")
+
+    sections = []                       # (z, rmin, rmax), in profile order
+    for k in range(len(levels) - 1):
+        lo, hi = levels[k], levels[k + 1]
+        mid = 0.5 * (lo + hi)
+        here = [s for s in spans if s[0] - tol <= mid <= s[1] + tol]
+        radii = _distinct_radii([_span_radius_at(s, mid) for s in here], tol)
+        if not radii:
+            raise Declined(f"no lateral face covers the z range [{lo:.6g}, {hi:.6g}]: "
+                           "the solid is not one connected polycone")
+        if len(radii) > 2:
+            raise Declined(f"{len(radii)} distinct coaxial radii between z = {lo:.6g} and "
+                           f"{hi:.6g}, expected 1 or 2")
+        ends = []
+        for t in (lo, hi):
+            at = [_span_radius_at(s, t) for s in here]
+            ends.append((min(at) if len(radii) == 2 else 0.0, max(at)))
+        if k == 0:
+            sections.append((lo, ends[0][0], ends[0][1]))
+        elif (abs(sections[-1][1] - ends[0][0]) > tol
+              or abs(sections[-1][2] - ends[0][1]) > tol):
+            # A z-step: TGeo states it as two sections sharing one z, which is legal and is what
+            # the writer's STEP already contains as a cap annulus at that plane.
+            sections.append((lo, ends[0][0], ends[0][1]))
+        sections.append((hi, ends[1][0], ends[1][1]))
+
+    # Every radial jump in the profile is a face of the solid, so it must be there. This is what
+    # separates a polycone from an open shell that merely looks like one.
+    for k, (z, rmin, rmax) in enumerate(sections):
+        needs_cap = (rmax - rmin > tol) if k in (0, len(sections) - 1) else \
+                    (k + 1 < len(sections) and abs(sections[k + 1][0] - z) <= tol)
+        if needs_cap and not any(abs(tc - z) <= tol for tc in t_caps):
+            raise Declined(f"the profile steps or ends at z = {z:.6g} with no cap plane there")
+
+    if wedge:
+        normals = []
+        for w in wedge:
+            if not any(_collinear(w["n"], n) for n in normals):
+                normals.append(w["n"])
+        if len(normals) > 2:
+            raise Declined(f"{len(normals)} distinct half-planes through the axis: "
+                           "not a single phi wedge")
+
+    # phi is read only off laterals whose own axis runs *with* the frame's, because a face whose
+    # carrier axis is flipped parametrises phi the other way round and would report the wedge
+    # mirrored.
+    oriented = [m for m in cl["members"] if _parallel(m["d"], axis)]
+    # On a coordinate axis the frame is pinned to the coordinate frame, which makes it the
+    # identity, drops the placement, and leaves phi1 stated absolutely -- so the emitted
+    # TGeoPcon's own numbers are the source shape's numbers and `checkKnownSource.py` can compare
+    # them directly. Off a coordinate axis there is no canonical x and a lateral supplies it.
+    ref_x = None if _snap_to_coordinate_axis(axis) is not None else (
+        oriented[0]["x"] if oriented else None)
+    frame = prim.frame_from_axis(origin, axis, ref_x)
+    if wedge:
+        if not oriented:
+            raise Declined("no lateral face runs with the axis, so the phi wedge cannot be read")
+        lo_phi, hi_phi = _phi_range(oriented, frame)
+        phi1, dphi = lo_phi, hi_phi - lo_phi
+    else:
+        phi1, dphi = 0.0, 360.0
+
+    z = [s[0] for s in sections]
+    rmin = [s[1] for s in sections]
+    rmax = [s[2] for s in sections]
+    try:
+        lf = prim.leaf("TGeoPcon", {"phi1": phi1, "dphi": dphi, "z": z, "rmin": rmin,
+                                    "rmax": rmax}, frame)
+    except ValueError as bad:
+        raise Declined(f"the reconstructed profile is not a legal TGeoPcon: {bad}") from bad
+
+    # The one measured quantity.
+    # The same ring `build_occ` will revolve, deduped by the same rule, so the gap is measured
+    # against the candidate that the acceptance test will actually be handed.
+    profile = prim.pcon_profile_rz(lf["params"])
+    if len(profile) < 3:
+        raise Declined("the reconstructed (r, z) profile has fewer than three corners")
+    samples = []
+    for point in _solid_vertices(solid):
+        rel = _sub(point, origin)
+        zc = _dot(rel, axis)
+        samples.append((math.sqrt(max(_dot(rel, rel) - zc * zc, 0.0)), zc))
+    for span in spans:
+        for f in _PROFILE_SAMPLES:
+            t = span[0] + f * (span[1] - span[0])
+            samples.append((_span_radius_at(span, t), t))
+    gap = _profile_gap(profile, samples)
+    scale = max(diag, 1.0)
+    if gap > REL_TOL * scale:
+        raise Declined(f"the boundary is {gap:.3g} cm off the reconstructed profile "
+                       f"({gap / scale:.3g} of the part's {diag:.6g} cm diagonal, "
+                       f"over {REL_TOL:.0e})")
+
+    return prim.candidate("primitive", [lf], "revolved-pcon",
+                          notes={"nz": len(z), "nCaps": len(cap), "nWedges": len(wedge),
+                                 "nLaterals": len(cl["members"]),
+                                 "profileGapCm": gap, "profileGapRelative": gap / scale})
+
+
+# ------------------------------------------------------------------------------------------
 # Tier 2: the two-cluster union
 # ------------------------------------------------------------------------------------------
 
@@ -470,7 +717,17 @@ def recognise(solid):
                            "(Tier 3 territory, deliberately not built)")
         caps, wedges = _split_planes(records, clusters, tol)
         if len(clusters) == 1:
-            return _match_axial_primitive(records, clusters, caps, wedges, tol), None
+            # The revolved matcher runs strictly *after* the whole-part primitive one and only on
+            # what that declines, so no part that is recognised today changes tier or candidate.
+            try:
+                return _match_axial_primitive(records, clusters, caps, wedges, tol), None
+            except Declined as primitive_declined:
+                try:
+                    return _match_revolved(solid, records, clusters, caps, wedges,
+                                           tol, diag), None
+                except Declined as revolved_declined:
+                    raise Declined(f"{primitive_declined}; as a revolved profile: "
+                                   f"{revolved_declined}") from None
         return _match_two_cluster_union(records, clusters, caps, wedges, tol), None
     except Declined as declined:
         return None, f"{declined} [{_structure(records, tol)}]"

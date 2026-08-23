@@ -336,9 +336,11 @@ def self_test(verbose=True, with_root=True):
     """
     import math
     from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Cut, BRepAlgoAPI_Fuse
-    from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Transform
+    from OCC.Core.BRepBuilderAPI import (BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakePolygon,
+                                         BRepBuilderAPI_Transform)
     from OCC.Core.BRepPrimAPI import (BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCone,
-                                      BRepPrimAPI_MakeCylinder, BRepPrimAPI_MakeSphere)
+                                      BRepPrimAPI_MakeCylinder, BRepPrimAPI_MakePrism,
+                                      BRepPrimAPI_MakeRevol, BRepPrimAPI_MakeSphere)
     from OCC.Core.gp import gp_Ax1, gp_Ax2, gp_Dir, gp_Pnt, gp_Trsf, gp_Vec
 
     checks = []
@@ -399,11 +401,89 @@ def self_test(verbose=True, with_root=True):
     ram = BRepAlgoAPI_Fuse(eye, rod).Shape()
     ram_record = expect("rod-and-eye (two-cluster union)", ram, "tier2-tube-union", want_leaves=2)
 
+    # --- the revolved profile: the shapes O2_TGeoToCAD.conv_pcon writes, read back ---
+    # The fixture states the (r, z) ring itself rather than calling `primitives.pcon_profile_rz`,
+    # so the profile the CAD is built from is not the profile the candidate is built from.
+    def revolved(z, rmin, rmax, phi1=0.0, dphi=360.0):
+        nz = len(z)
+        ring = [(rmax[i], z[i]) for i in range(nz)]
+        if all(r <= 0.0 for r in rmin):
+            ring += [(0.0, z[nz - 1]), (0.0, z[0])]
+        else:
+            ring += [(rmin[i], z[i]) for i in range(nz - 1, -1, -1)]
+        deduped = []
+        for pt in ring:
+            if deduped and abs(pt[0] - deduped[-1][0]) < 1e-12 \
+                    and abs(pt[1] - deduped[-1][1]) < 1e-12:
+                continue
+            deduped.append(pt)
+        poly = BRepBuilderAPI_MakePolygon()
+        for (r, zz) in deduped:
+            poly.Add(gp_Pnt(float(r), 0.0, float(zz)))
+        poly.Close()
+        rev = BRepPrimAPI_MakeRevol(BRepBuilderAPI_MakeFace(poly.Wire()).Face(),
+                                    gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)),
+                                    math.radians(dphi))
+        rev.Build()
+        shape = rev.Shape()
+        if abs(phi1) > 1e-12:
+            spin = gp_Trsf()
+            spin.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), math.radians(phi1))
+            shape = BRepBuilderAPI_Transform(shape, spin, True).Shape()
+        return shape
+
+    def expect_pcon(name, solid, z, rmin, rmax, phi1=0.0, dphi=360.0):
+        record = expect(name, solid, "revolved-pcon")
+        if not record["accepted"]:
+            return record
+        p = record["candidate"]["leaves"][0]["params"]
+        worst = max([abs(a - b) for a, b in zip(p["z"], z)]
+                    + [abs(a - b) for a, b in zip(p["rmin"], rmin)]
+                    + [abs(a - b) for a, b in zip(p["rmax"], rmax)]
+                    + [abs(p["phi1"] - phi1), abs(p["dphi"] - dphi)]) \
+            if len(p["z"]) == len(z) else float("inf")
+        check(f"{name} reconstructs the source TGeoPcon parameters",
+              len(p["z"]) == len(z) and worst < 1.0e-9,
+              f"nz {len(p['z'])} vs {len(z)}, worst parameter deviation {worst:.3g}")
+        return record
+
+    # z-steps: duplicate z planes on both rmin and rmax, which the writer emits as cap annuli.
+    step_z, step_rmin, step_rmax = [-5, 0, 0, 5], [1, 1, 2, 2], [3, 3, 4, 4]
+    stepped = revolved(step_z, step_rmin, step_rmax)
+    expect_pcon("stepped polycone (duplicate z planes)", stepped, step_z, step_rmin, step_rmax)
+    # mixed cone and cylinder laterals on one axis -- the IBCYSSCone case, which the whole-part
+    # matcher declines with "mixed lateral surface kinds".
+    expect_pcon("cone and cylinder laterals on one axis",
+                revolved([-5, 0, 5], [1, 1, 2], [2, 3, 3]), [-5, 0, 5], [1, 1, 2], [2, 3, 3])
+    # rmin stepping through 0: the inner lateral is a cone that reaches the axis.
+    expect_pcon("polycone whose rmin steps through 0",
+                revolved([0, 5, 10], [0, 0, 2], [4, 4, 4]), [0, 5, 10], [0, 0, 2], [4, 4, 4])
+    # a half turn, and a partial-phi wedge stated in absolute phi on an identity frame.
+    expect_pcon("half-turn polycone", revolved([-5, 0, 5], [1, 1, 2], [2, 3, 3], 0.0, 180.0),
+                [-5, 0, 5], [1, 1, 2], [2, 3, 3], 0.0, 180.0)
+    expect_pcon("partial-phi stepped polycone",
+                revolved(step_z, step_rmin, step_rmax, 10.0, 120.0),
+                step_z, step_rmin, step_rmax, 10.0, 120.0)
+    # a rotated, translated polycone: the frame machinery on a multi-section leaf.
+    pcon_trsf = gp_Trsf()
+    pcon_trsf.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(1, 1, 0)), 0.7)
+    pcon_shift = gp_Trsf()
+    pcon_shift.SetTranslation(gp_Vec(3.0, -4.0, 5.0))
+    pcon_place = pcon_shift.Multiplied(pcon_trsf)
+    moved_pcon = BRepBuilderAPI_Transform(stepped, pcon_place, True).Shape()
+    moved_pcon_record = expect("placed stepped polycone", moved_pcon, "revolved-pcon")
+    check("a placed polycone travels as one leaf plus a rigid placement",
+          moved_pcon_record["accepted"]
+          and prim.placement_for_candidate(moved_pcon_record["candidate"]) is not None,
+          "placement present" if moved_pcon_record["accepted"] else "not accepted")
+
     # --- negative controls: each must decline or be rejected ---
-    # 1. a blind bore: the recogniser proposes a through tube, the volume must refuse it.
+    # 1. a blind bore. This *is* a polycone -- z = [-5, 3, 3, 5], rmin = [1, 1, 0, 0] -- and the
+    #    revolved matcher now converts it. Before this matcher existed it declined on its third
+    #    cap plane, which is why the expectation moved rather than the shape.
     blind = BRepAlgoAPI_Cut(cyl, BRepPrimAPI_MakeCylinder(
         gp_Ax2(gp_Pnt(0, 0, -6), gp_Dir(0, 0, 1)), 1.0, 9.0).Shape()).Shape()
-    expect_declined("cylinder with a blind bore", blind)
+    expect_pcon("cylinder with a blind bore", blind, [-5, 3, 3, 5], [1, 1, 0, 0], [2, 2, 2, 2])
     # 2. an L-shape: eight planes, no template.
     ell = BRepAlgoAPI_Cut(BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 4.0, 4.0, 1.0).Shape(),
                           BRepPrimAPI_MakeBox(gp_Pnt(2, 2, -1), 4.0, 4.0, 3.0).Shape()).Shape()
@@ -416,6 +496,94 @@ def self_test(verbose=True, with_root=True):
     flatted = BRepAlgoAPI_Cut(cyl, BRepPrimAPI_MakeBox(
         gp_Pnt(1.5, -3, -6), 3.0, 6.0, 12.0).Shape()).Shape()
     expect_declined("cylinder with a milled flat", flatted)
+
+    # --- negative controls for the revolved matcher ---
+    # 5. a TGeoPgon. `conv_pgon` writes its laterals as PLANES at the apothem radius, so a
+    #    polygon is a pseudo-revolution: it looks like a polycone from a distance and is not one.
+    #    Emitting it as a TGeoPcon would inflate every part by the polygon's own sagitta, so it
+    #    must decline here; TGeoPgon emission is a separate recogniser.
+    def prism_ring(apothem, nedges, phi1=0.0, dphi=360.0):
+        dseg = math.radians(dphi) / nedges
+        radius = apothem / math.cos(dseg / 2.0)
+        n = nedges if abs(dphi - 360.0) < 1e-9 else nedges + 1
+        return [(radius * math.cos(math.radians(phi1) + k * dseg),
+                 radius * math.sin(math.radians(phi1) + k * dseg)) for k in range(n)]
+
+    def prism(apothem, nedges, z0, z1):
+        poly = BRepBuilderAPI_MakePolygon()
+        for (x, y) in prism_ring(apothem, nedges):
+            poly.Add(gp_Pnt(x, y, z0))
+        poly.Close()
+        pr = BRepPrimAPI_MakePrism(BRepBuilderAPI_MakeFace(poly.Wire()).Face(),
+                                   gp_Vec(0, 0, z1 - z0))
+        pr.Build()
+        return pr.Shape()
+
+    for nedges in (8, 48):
+        pgon = BRepAlgoAPI_Cut(prism(3.0, nedges, -5.0, 5.0),
+                               prism(1.5, nedges, -6.0, 6.0)).Shape()
+        expect_declined(f"hollow {nedges}-edge polygon (TGeoPgon)", pgon)
+    # 6. the same trap where it is hardest to see: polygonal laterals sharing an axis with a real
+    #    cylinder, so there *is* an axis cluster and the planes reach the cap/wedge split.
+    hybrid = BRepAlgoAPI_Fuse(
+        BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, -5), gp_Dir(0, 0, 1)), 3.0, 5.0).Shape(),
+        prism(3.0, 6, 0.0, 5.0)).Shape()
+    expect_declined("cylinder with a coaxial hexagonal section", hybrid,
+                    "neither a cap nor a wedge")
+    # 7. the near-miss the acceptance exists for: the recogniser cannot see a bore displaced by
+    #    ten model tolerances off the axis and proposes the coaxial polycone anyway; the
+    #    symmetric difference refuses it.
+    for displacement in (1.0e-6, 1.0e-5):
+        off = BRepAlgoAPI_Cut(
+            revolved(step_z, [0, 0, 0, 0], step_rmax),
+            BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(displacement, 0, -6), gp_Dir(0, 0, 1)),
+                                     1.0, 12.0).Shape()).Shape()
+        expect_declined(f"stepped polycone with the bore {displacement:g} cm off axis", off)
+    # 8. a cap plane tilted off perpendicular: not a revolution any more, and it must say so
+    #    rather than emit the polycone it nearly is.
+    tilt = gp_Trsf()
+    tilt.SetRotation(gp_Ax1(gp_Pnt(0, 0, 5), gp_Dir(1, 0, 0)), 1.0e-4)
+    knife = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, 4.9), gp_Dir(0, 0, 1)),
+                                     10.0, 5.0).Shape()
+    expect_declined("stepped polycone with a tilted top cap",
+                    BRepAlgoAPI_Cut(stepped,
+                                    BRepBuilderAPI_Transform(knife, tilt, True).Shape()).Shape(),
+                    "neither a cap nor a wedge")
+
+    # --- the instrument that scores the revolved candidate must be able to say "no" ---
+    # `Stream_K_Tier0.md` §3: one measured quantity decides, so it is worth measuring that the
+    # quantity moves. A profile with one radius displaced must be reported at that displacement.
+    true_profile = prim.pcon_profile_rz({"z": [float(v) for v in step_z],
+                                         "rmin": [float(v) for v in step_rmin],
+                                         "rmax": [float(v) for v in step_rmax]})
+    samples = [(3.0, -2.5), (4.0, 2.5), (1.0, -5.0), (2.0, 5.0), (3.5, 0.0)]
+    check("the profile gap is zero on the profile's own boundary",
+          recognise._profile_gap(true_profile, samples) < 1.0e-12,
+          f"gap {recognise._profile_gap(true_profile, samples):.3g} cm")
+    nudged_profile = [(r + (1.0e-6 if abs(r - 3.0) < 1e-12 else 0.0), z)
+                      for (r, z) in true_profile]
+    nudged_gap = recognise._profile_gap(nudged_profile, samples)
+    check("the profile gap reports a radius displaced by ten model tolerances",
+          abs(nudged_gap - 1.0e-6) < 1.0e-12, f"gap {nudged_gap:.3g} cm, expected 1e-06 cm")
+
+    # --- the description must refuse an illegal TGeoPcon before either builder sees it ---
+    for name, params in (
+            ("unequal array lengths",
+             {"phi1": 0.0, "dphi": 360.0, "z": [0.0, 1.0], "rmin": [0.0], "rmax": [1.0, 1.0]}),
+            ("rmin above rmax",
+             {"phi1": 0.0, "dphi": 360.0, "z": [0.0, 1.0], "rmin": [2.0, 2.0],
+              "rmax": [1.0, 1.0]}),
+            ("a single section",
+             {"phi1": 0.0, "dphi": 360.0, "z": [0.0], "rmin": [0.0], "rmax": [1.0]}),
+            ("z running backwards",
+             {"phi1": 0.0, "dphi": 360.0, "z": [1.0, 0.0], "rmin": [0.0, 0.0],
+              "rmax": [1.0, 1.0]})):
+        try:
+            prim.leaf("TGeoPcon", params, prim.identity_frame())
+            refused = False
+        except ValueError:
+            refused = True
+        check(f"a TGeoPcon description with {name} is refused", refused)
 
     # --- the ROOT half: the emitted TGeoShape must answer like the closed form ---
     if with_root:
@@ -537,6 +705,69 @@ def self_test(verbose=True, with_root=True):
               ram_shape.ClassName() == "TGeoCompositeShape" and ram_placement is None,
               f"{ram_shape.ClassName()}, placement "
               f"{'present' if ram_placement else 'absent'}")
+
+        # --- the ROOT half of the revolved matcher ---
+        stepped_record = process_solid(stepped, "pcon-emission")
+        pcon_shape, pcon_placement = prim.build_root(stepped_record["candidate"], "pconprobe")
+        # 100 pi: pi (3^2 - 1^2) 5 below z = 0 and pi (4^2 - 2^2) 5 above it. Stated here from the
+        # fixture's own numbers, so it is independent of both builders.
+        want_capacity = math.pi * ((3.0 ** 2 - 1.0 ** 2) * 5.0 + (4.0 ** 2 - 2.0 ** 2) * 5.0)
+        rel_capacity = abs(pcon_shape.Capacity() - want_capacity) / want_capacity
+        check("an axis-aligned polycone emits a bare TGeoPcon with an analytic Capacity()",
+              pcon_shape.ClassName() == "TGeoPcon" and pcon_placement is None
+              and rel_capacity < 1.0e-14,
+              f"{pcon_shape.ClassName()}, capacity {pcon_shape.Capacity():.9f} vs "
+              f"{want_capacity:.9f} (rel {rel_capacity:.2e}), placement "
+              f"{'present' if pcon_placement else 'absent'}")
+
+        placed_pcon_shape, placed_pcon_placement = prim.build_root(
+            moved_pcon_record["candidate"], "placedpconprobe")
+        check("a placed polycone is a bare TGeoPcon plus a placement",
+              placed_pcon_shape.ClassName() == "TGeoPcon" and placed_pcon_placement is not None,
+              f"{placed_pcon_shape.ClassName()}, placement "
+              f"{'present' if placed_pcon_placement else 'absent'}")
+        # The closed form is stated through the inverse of the transform that *built* the OCCT
+        # solid, never through the description's own frame, so a placement that is wrong in the
+        # same way in both builders is still caught.
+        pcon_inverse = pcon_place.Inverted()
+        bad_pcon = 0
+        scored_pcon = 0
+        random.seed(23)
+        for _ in range(20000):
+            p3 = (random.uniform(-3, 9), random.uniform(-10, 2), random.uniform(-1, 11))
+            probe = gp_Pnt(*p3)
+            probe.Transform(pcon_inverse)
+            zc, rc = probe.Z(), math.hypot(probe.X(), probe.Y())
+            if min(abs(zc + 5.0), abs(zc), abs(zc - 5.0), abs(rc - 1.0), abs(rc - 2.0),
+                   abs(rc - 3.0), abs(rc - 4.0)) < 1.0e-6:
+                continue
+            scored_pcon += 1
+            want = (1.0 <= rc <= 3.0) if -5.0 <= zc <= 0.0 else (
+                (2.0 <= rc <= 4.0) if 0.0 < zc <= 5.0 else False)
+            got = bool(placed_pcon_shape.Contains(
+                array("d", list(prim.placement_to_local(placed_pcon_placement, p3)))))
+            if want != got:
+                bad_pcon += 1
+        check("the emitted placed polycone answers Contains like the closed form",
+              bad_pcon == 0, f"{bad_pcon} disagreement(s) over {scored_pcon} points")
+        cc = crosscheck_contains(moved_pcon_record["candidate"], moved_pcon)
+        check("the ROOT polycone and the CAD solid agree on Contains",
+              cc["disagreements"] == 0,
+              f"{cc['disagreements']} disagreement(s) over {cc['points']} points")
+
+        pcon_target = Path("/tmp/csg_selftest_pcon.root")
+        write_shape_root(stepped_record["candidate"], pcon_target)
+        fpcon = ROOT.TFile.Open(str(pcon_target))
+        back_pcon = fpcon.Get("shape")
+        sections_ok = (back_pcon is not None and back_pcon.ClassName() == "TGeoPcon"
+                       and back_pcon.GetNz() == 4
+                       and max(abs(back_pcon.GetZ(i) - step_z[i]) for i in range(4)) < 1e-15
+                       and max(abs(back_pcon.GetRmin(i) - step_rmin[i]) for i in range(4)) < 1e-15
+                       and max(abs(back_pcon.GetRmax(i) - step_rmax[i]) for i in range(4)) < 1e-15)
+        check("shape_<part>.root round-trips a TGeoPcon with all its sections", sections_ok,
+              f"read {back_pcon.ClassName() if back_pcon else 'nothing'}, nz "
+              f"{back_pcon.GetNz() if back_pcon else 0}")
+        fpcon.Close()
 
     n_ok = sum(1 for _n, ok, _d in checks if ok)
     if verbose:

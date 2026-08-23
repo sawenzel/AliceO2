@@ -136,7 +136,7 @@ def _unit(a):
 # the description
 # ------------------------------------------------------------------------------------------
 
-LEAF_TYPES = ("TGeoBBox", "TGeoTube", "TGeoTubeSeg", "TGeoCone", "TGeoSphere")
+LEAF_TYPES = ("TGeoBBox", "TGeoTube", "TGeoTubeSeg", "TGeoCone", "TGeoSphere", "TGeoPcon")
 
 _REQUIRED_PARAMS = {
     "TGeoBBox": ("dx", "dy", "dz"),
@@ -144,17 +144,71 @@ _REQUIRED_PARAMS = {
     "TGeoTubeSeg": ("rmin", "rmax", "dz", "phi1", "phi2"),
     "TGeoCone": ("dz", "rmin1", "rmax1", "rmin2", "rmax2"),
     "TGeoSphere": ("rmin", "rmax"),
+    "TGeoPcon": ("phi1", "dphi"),
+}
+
+# Per-type array-valued parameters, stored as plain lists so the description stays
+# JSON-serialisable. All arrays of one leaf type share a length -- that is the only structural
+# rule the generic half enforces; anything else a type needs it states in `_LEAF_VALIDATORS`.
+# `TGeoXtru` will declare `("x", "y")` and `("z", "xoff", "yoff", "scale")` through the same
+# mechanism, which is why it is written once here rather than inside the Pcon branch.
+_REQUIRED_ARRAY_PARAMS = {
+    "TGeoPcon": ("z", "rmin", "rmax"),
+}
+
+_MIN_ARRAY_LENGTH = {
+    "TGeoPcon": 2,
+}
+
+
+def _validate_pcon(p):
+    if not 0.0 < p["dphi"] <= 360.0 + 1.0e-9:
+        raise ValueError(f"TGeoPcon: dphi {p['dphi']} is not in (0, 360]")
+    z, rmin, rmax = p["z"], p["rmin"], p["rmax"]
+    for i in range(len(z)):
+        if rmin[i] < 0.0:
+            raise ValueError(f"TGeoPcon: rmin[{i}] = {rmin[i]} is negative")
+        if rmin[i] > rmax[i]:
+            raise ValueError(f"TGeoPcon: rmin[{i}] = {rmin[i]} exceeds rmax[{i}] = {rmax[i]}")
+    for i in range(1, len(z)):
+        if z[i] < z[i - 1]:
+            raise ValueError(f"TGeoPcon: z is not non-decreasing at section {i} "
+                             f"({z[i]} < {z[i - 1]})")
+    if z[-1] <= z[0]:
+        raise ValueError("TGeoPcon: the profile has no axial extent")
+    for i in range(2, len(z)):
+        if z[i] == z[i - 1] == z[i - 2]:
+            raise ValueError(f"TGeoPcon: three sections share z = {z[i]}")
+
+
+_LEAF_VALIDATORS = {
+    "TGeoPcon": _validate_pcon,
 }
 
 
 def leaf(kind, params, frame):
     if kind not in LEAF_TYPES:
         raise ValueError(f"unknown leaf type {kind!r}")
-    missing = [k for k in _REQUIRED_PARAMS[kind] if k not in params]
+    arrays = _REQUIRED_ARRAY_PARAMS.get(kind, ())
+    missing = [k for k in _REQUIRED_PARAMS[kind] + arrays if k not in params]
     if missing:
         raise ValueError(f"{kind}: missing parameter(s) {missing}")
-    return {"type": kind, "params": {k: float(params[k]) for k in _REQUIRED_PARAMS[kind]},
-            "frame": frame}
+    out = {k: float(params[k]) for k in _REQUIRED_PARAMS[kind]}
+    for k in arrays:
+        out[k] = [float(v) for v in params[k]]
+    if arrays:
+        lengths = {len(out[k]) for k in arrays}
+        if len(lengths) != 1:
+            raise ValueError(f"{kind}: array parameters {list(arrays)} have unequal lengths "
+                             + ", ".join(f"{k}={len(out[k])}" for k in arrays))
+        n = lengths.pop()
+        want = _MIN_ARRAY_LENGTH.get(kind, 1)
+        if n < want:
+            raise ValueError(f"{kind}: needs at least {want} sections, got {n}")
+    validator = _LEAF_VALIDATORS.get(kind)
+    if validator is not None:
+        validator(out)
+    return {"type": kind, "params": out, "frame": frame}
 
 
 def placement_from_frame(frame):
@@ -232,6 +286,11 @@ def describe(cand):
         elif lf["type"] == "TGeoCone":
             parts.append(f"TGeoCone(dz={p['dz']:.4g}, {p['rmin1']:.4g}/{p['rmax1']:.4g} -> "
                          f"{p['rmin2']:.4g}/{p['rmax2']:.4g})")
+        elif lf["type"] == "TGeoPcon":
+            parts.append(f"TGeoPcon(nz={len(p['z'])}, phi1={p['phi1']:.4g}, "
+                         f"dphi={p['dphi']:.4g}, z {p['z'][0]:.4g}..{p['z'][-1]:.4g}, "
+                         f"rmin {min(p['rmin']):.4g}..{max(p['rmin']):.4g}, "
+                         f"rmax {min(p['rmax']):.4g}..{max(p['rmax']):.4g})")
         else:
             parts.append(f"TGeoSphere(rmin={p['rmin']:.4g}, rmax={p['rmax']:.4g})")
     return (" u ".join(parts)) if cand["op"] == "union" else parts[0]
@@ -270,11 +329,85 @@ def _occ_cut(outer, inner):
     return op.Shape()
 
 
+def _dedupe_ring(pts, tol=1.0e-12):
+    """Drop consecutive duplicates in a closed (r, z) ring, the wrap included.
+
+    Same rule as `O2_TGeoToCAD._dedupe_ring`, and it is what makes a `TGeoPcon` whose profile
+    pinches to the axis (rmin = rmax, or a duplicated z plane with no radial jump) build at all:
+    the duplicated corner would otherwise enter the wire as a zero-length edge.
+    """
+    out = []
+    for pt in pts:
+        if out and abs(pt[0] - out[-1][0]) < tol and abs(pt[1] - out[-1][1]) < tol:
+            continue
+        out.append(pt)
+    while len(out) > 1 and abs(out[0][0] - out[-1][0]) < tol and abs(out[0][1] - out[-1][1]) < tol:
+        out.pop()
+    return out
+
+
+def pcon_profile_rz(params, tol=1.0e-12):
+    """The closed (r, z) profile of a `TGeoPcon`, outer chain then inner chain reversed.
+
+    Exactly the ring `O2_TGeoToCAD.conv_pcon` revolves, so the candidate this package builds and
+    the CAD the writer produced from the same numbers are the same construction, not two
+    constructions that happen to agree.
+    """
+    z, rmin, rmax = params["z"], params["rmin"], params["rmax"]
+    nz = len(z)
+    outer = [(rmax[i], z[i]) for i in range(nz)]
+    if all(r <= tol for r in rmin):
+        inner = [(0.0, z[nz - 1]), (0.0, z[0])]
+    else:
+        inner = [(rmin[i], z[i]) for i in range(nz - 1, -1, -1)]
+    return _dedupe_ring(outer + inner, tol)
+
+
+def _occ_pcon(lf):
+    """Revolve the (r, z) profile face: true cone/cylinder/plane faces, nothing tessellated.
+
+    The acceptance test cuts this against the original B-rep, so an approximation could not
+    pass -- `BRepPrimAPI_MakeRevol` of a polygonal profile is the exact construction, and it is
+    the one the writer uses in the other direction.
+    """
+    from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakePolygon
+    from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeRevol
+    from OCC.Core.gp import gp_Ax1, gp_Dir, gp_Pnt
+    p, frame = lf["params"], lf["frame"]
+    pts = pcon_profile_rz(p)
+    if len(pts) < 3:
+        raise ValueError("TGeoPcon: degenerate (r, z) profile "
+                         f"({len(pts)} distinct corner(s))")
+    # OCCT sweeps from the profile's own half-plane, so the profile is laid out at phi1 and the
+    # revolution covers dphi -- the same convention `_occ_leaf` uses for a TGeoTubeSeg.
+    phi1 = math.radians(p["phi1"])
+    xr = _add(_scale(tuple(frame["x"]), math.cos(phi1)),
+              _scale(tuple(frame["y"]), math.sin(phi1)))
+    origin, zax = tuple(frame["origin"]), tuple(frame["z"])
+    poly = BRepBuilderAPI_MakePolygon()
+    for (r, zz) in pts:
+        poly.Add(gp_Pnt(*_add(origin, _add(_scale(xr, r), _scale(zax, zz)))))
+    poly.Close()
+    if not poly.IsDone():
+        raise RuntimeError("TGeoPcon: could not build the (r, z) profile wire")
+    face = BRepBuilderAPI_MakeFace(poly.Wire())
+    if not face.IsDone():
+        raise RuntimeError("TGeoPcon: the (r, z) profile is not a valid planar face")
+    rev = BRepPrimAPI_MakeRevol(face.Face(), gp_Ax1(gp_Pnt(*origin), gp_Dir(*zax)),
+                                math.radians(p["dphi"]))
+    rev.Build()
+    if not rev.IsDone():
+        raise RuntimeError("TGeoPcon: revolution of the (r, z) profile failed")
+    return rev.Shape()
+
+
 def _occ_leaf(lf):
     from OCC.Core.BRepPrimAPI import (BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCone,
                                       BRepPrimAPI_MakeCylinder, BRepPrimAPI_MakeSphere)
     from OCC.Core.gp import gp_Pnt
     kind, p, frame = lf["type"], lf["params"], lf["frame"]
+    if kind == "TGeoPcon":
+        return _occ_pcon(lf)
     if kind == "TGeoBBox":
         corner = tuple(frame["origin"])
         for axis, half in (("x", p["dx"]), ("y", p["dy"]), ("z", p["dz"])):
@@ -464,4 +597,9 @@ def _root_leaf(lf, name):
         return ROOT.TGeoCone(name, p["dz"], p["rmin1"], p["rmax1"], p["rmin2"], p["rmax2"])
     if kind == "TGeoSphere":
         return ROOT.TGeoSphere(name, p["rmin"], p["rmax"])
+    if kind == "TGeoPcon":
+        shape = ROOT.TGeoPcon(name, p["phi1"], p["dphi"], len(p["z"]))
+        for i, (zz, r0, r1) in enumerate(zip(p["z"], p["rmin"], p["rmax"])):
+            shape.DefineSection(i, zz, r0, r1)
+        return shape
     raise ValueError(f"unhandled leaf type {kind!r}")
