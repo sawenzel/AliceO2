@@ -97,6 +97,13 @@ o2_add_test(
   PUBLIC_LINK_LIBRARIES O2::DetectorsBase ROOT::Geom ROOT::RIO
   LABELS detectorsbase)
 
+o2_add_test(
+  BVHAssembly
+  SOURCES test/testBVHAssembly.cxx
+  COMPONENT_NAME DetectorsBase
+  PUBLIC_LINK_LIBRARIES O2::DetectorsBase ROOT::Geom ROOT::RIO
+  LABELS detectorsbase)
+
 o2_add_executable(
   solid-harness
   COMPONENT_NAME DetectorsBase

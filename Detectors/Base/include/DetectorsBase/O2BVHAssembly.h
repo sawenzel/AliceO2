@@ -99,9 +99,9 @@ class O2BVHAssembly : public TGeoShapeAssembly
   /// geometry is still being assembled.
   void EnsureBuilt() const;
 
-  void* fBVH = nullptr;         //!< bvh::v2::Bvh over the daughter placement boxes
-  int fNbuilt = -1;             //!< daughter count the BVH was built for; -1 = never built
-  mutable int fLastNode = -1;   //!< daughter resolved by the last accelerated query
+  void* fBVH = nullptr;       //! bvh::v2::Bvh over the daughter placement boxes
+  int fNbuilt = -1;           //! daughter count the BVH was built for; -1 = never built
+  mutable int fLastNode = -1; //! daughter resolved by the last accelerated query
 
   ClassDefOverride(O2BVHAssembly, 1) // BVH-accelerated assembly shape
 };

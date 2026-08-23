@@ -60,16 +60,9 @@ inline float truncateRoundUp(double value)
   return rounded < value ? std::nextafterf(rounded, std::numeric_limits<float>::infinity()) : rounded;
 }
 
-/// Squared distance from \a point to a BVH node box, evaluated in double from the float corners
-/// (which convert exactly) and then shrunk by a relative guard.
-///
-/// This is the quantity the nearest-daughter traversal prunes on, so its error direction is the
-/// whole argument: it must never come out larger than the true distance from the point to any
-/// daughter inside the node, or a nearer daughter is discarded and Safety() answers too much.
-/// Both sources of error push it down. The arithmetic (three subtractions, three squarings, two
-/// additions) carries a few ulps and is scaled away by (1 - 1e-12); the box itself is inflated by
-/// kBoxTolerance and rounded outward, i.e. it is a superset of the daughter's bounds, and a
-/// larger box is nearer. Same reasoning as O2BVHSurfaceSolid::boxDistanceSq.
+/// Squared Euclidean distance from \a point to a BVH node box, evaluated in double from the float
+/// corners (which convert exactly) and shrunk by a relative guard. Multiply by kSafetyBoundShare
+/// before comparing it against a safety; see below.
 inline double boxDistanceSq(const BVHBBox& box, const double* point)
 {
   double distanceSq = 0.;
@@ -87,6 +80,28 @@ inline double boxDistanceSq(const BVHBBox& box, const double* point)
   }
   return distanceSq * (1. - 1.e-12);
 }
+
+/// The share of a node's squared box distance that is a sound lower bound on the *Safety* any
+/// daughter inside that node can return. One third, and the third is not conservatism -- it is
+/// what ROOT's safety convention costs.
+///
+/// The nearest-daughter traversal must never prune on a value larger than a daughter's answer, or
+/// it discards the winner and Safety() returns too much. The natural bound, the Euclidean distance
+/// to the node box, is *not* sound, because `TGeoBBox::Safety(point, kFALSE)` does not return the
+/// Euclidean distance: it returns the largest per-axis gap, in the daughter's *own* frame. A point
+/// off a box corner by (3, 4, 0) is 5 away and ROOT says 4; rotate the daughter and the two
+/// numbers stop being related by anything but an inequality.
+///
+/// The inequality that does hold: for gaps d_i, max_i d_i >= sqrt(sum_i max(d_i, 0)^2) / sqrt(3),
+/// so a daughter's axis-max answer is at least its Euclidean distance over sqrt(3); a rigid node
+/// matrix preserves that distance; and the daughter's world bounding box is inside the node box,
+/// so the node's box distance is no larger still. Squared, that is one third. It holds through
+/// nested assemblies too, because each level only re-expresses the same Euclidean distance.
+///
+/// This is exactly the step `TGeoShapeAssembly::Safety` omits -- it prunes on the unscaled
+/// Euclidean gap and therefore returns more than the minimum over its own daughters; see
+/// scripts/geometry/Stream_AE_BVHAssembly.md.
+constexpr double kSafetyBoundShare = 1. / 3.;
 
 inline bool boxContains(const BVHBBox& box, const double* point)
 {
@@ -427,7 +442,7 @@ Double_t O2BVHAssembly::Safety(const Double_t* point, Bool_t in) const
   while (!stack.empty()) {
     const auto entry = stack.back();
     stack.pop_back();
-    if (entry.first >= best * best) {
+    if (entry.first * kSafetyBoundShare >= best * best) {
       continue;
     }
     const auto& node = bvh->nodes[entry.second];
@@ -445,18 +460,19 @@ Double_t O2BVHAssembly::Safety(const Double_t* point, Bool_t in) const
     } else {
       const auto firstChild = node.index.first_id();
       const size_t children[2] = {firstChild, firstChild + 1};
-      double distances[2] = {TGeoShape::Big(), TGeoShape::Big()};
+      double distancesSq[2] = {TGeoShape::Big(), TGeoShape::Big()};
       for (int side = 0; side < 2; ++side) {
         if (children[side] < bvh->nodes.size()) {
-          distances[side] = boxDistanceSq(bvh->nodes[children[side]].get_bbox(), point);
+          distancesSq[side] = boxDistanceSq(bvh->nodes[children[side]].get_bbox(), point);
         }
       }
       // push the farther child first so the nearer one is popped, and prunes, first
-      const int order[2] = {distances[0] >= distances[1] ? 0 : 1, distances[0] >= distances[1] ? 1 : 0};
+      const bool leftIsFarther = distancesSq[0] >= distancesSq[1];
+      const int order[2] = {leftIsFarther ? 0 : 1, leftIsFarther ? 1 : 0};
       for (int side = 0; side < 2; ++side) {
         const int which = order[side];
-        if (children[which] < bvh->nodes.size() && distances[which] < best * best) {
-          stack.emplace_back(distances[which], children[which]);
+        if (children[which] < bvh->nodes.size() && distancesSq[which] * kSafetyBoundShare < best * best) {
+          stack.emplace_back(distancesSq[which], children[which]);
         }
       }
     }
