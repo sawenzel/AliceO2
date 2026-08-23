@@ -71,22 +71,22 @@ statement for the talk.
    revolved detector to accept mixed cone/cylinder laterals; `TGeoHalfSpace` costs exactly 5
    composites in the whole Run 3 geometry.
 
-   **Writer defects found by the studies, in fix order** (no fixes applied — studies were
-   read-only): (i) the definition cache is keyed on volume NAME and TRD reuses names across
-   different shapes (43.5 % of its placements would get the wrong solid, median 29× volume
-   error); (ii) mirror-baking via `BRepBuilderAPI_GTransform` rewrites analytic faces as
-   B-splines AND moves volume 0.5–1.1 % on curved carriers (proved against an analytic Pcon;
-   `gp_Trsf::SetMirror` is bit-exact in a 9-line repro — the fix direction); (iii) reflected
-   placements of subtree-carrying volumes are dropped with the orphan at identity (ABSO's whole
-   front absorber misplaced, TPC loses 44 % of the detector via one reflected `TPC_ENDCAP`,
-   TRD 137 260 placements — and this MANUFACTURES fake coincidence reports downstream);
-   (iv) degenerate prism sections refused (point/line: `dx1=0` Trd1, `rmin` through 0);
-   (v) the bare `depth > 32` chain constant (ITS chains reach depth 60); (vi) the STEP writer
-   segfault is bracketed: 38 676 components write, 74 601 crash. Method note for the tooling:
-   instruments that score a part in its own frame are placement-blind — ABSO scored perfectly
-   with the whole absorber misplaced; the placement-fidelity walk (Stream_AH) is now the fourth
-   mandatory instrument. Older follow-ups still open: `TGeoPara` (all 13 are TPC's, not yet
-   exercised), localise PIPE's 1-in-1.69M point.
+   **Writer defects (i)-(iii) are FIXED** (`Stream_AI_WriterFixes.md`, self-test 71 → **101**):
+   (i) the definition cache keys on volume identity/value — TRD's 277 018 wrong-solid placements
+   → 0 at `sharedDefinitionMaxRelDev` 2.7e-16, and the 24 half-plie collisions turn out to have
+   been REAL MATERIAL the name-keyed dedup was silently dropping from the STEP (PIPE now emits
+   1 166); (ii) mirrors bake through `gp_Trsf` — `TPC_CDCE` 8.9e-03 → 6.1e-15, every mirrored
+   face analytic again, with a dimensionless 1e-6 orthogonality band that snaps by polar
+   decomposition and records each snap; (iii) reflected subtrees emit as shared mirrored
+   prototypes — placement fidelity PIPE 1 166/1 166, TPC 36 583/37 315, TRD 636 566/636 567 with
+   ZERO spurious placements, TRD's STEP 140 → 33 MB, all manufactured coincidences gone. The
+   world-frame Contains instrument found `TPC_WSEG` is itself **invalid at source**
+   (`BRepCheck_Analyzer`, 4.6 % off its own TGeoShape, pre-existing) — reported, not repaired.
+
+   **Still open on the writer**: degenerate prism sections (old iv), the bare depth-32 chain
+   constant (old v), the STEP writer segfault bracket (38 676 fine / 74 601 crash), `TGeoPara`,
+   `TGeoHalfSpace` (732 TPC placements), instruments B/C + ITS/MAG re-runs post-fix, and the
+   loud-refusal path for genuine scales (only the self-test exercises it).
 
    **Hand-written-geometry findings on the record — refined 2026-08-23 during the fixes**: the
    beam pipe's "81 self-coincident plies" decomposed into **57 real duplicates** (a copy-paste
