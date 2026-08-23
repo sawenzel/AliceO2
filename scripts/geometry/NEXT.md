@@ -88,11 +88,20 @@ statement for the talk.
    mandatory instrument. Older follow-ups still open: `TGeoPara` (all 13 are TPC's, not yet
    exercised), localise PIPE's 1-in-1.69M point.
 
-   **Hand-written-geometry findings on the record**: the beam pipe's 81 self-coincident plies
-   (checker-blind, materially benign), and a TPC copy-paste typo at
+   **Hand-written-geometry findings on the record — refined 2026-08-23 during the fixes**: the
+   beam pipe's "81 self-coincident plies" decomposed into **57 real duplicates** (a copy-paste
+   block in the RB26/3 section never renamed from s2, filling `voRB26s2Bellow` twice — FIXED,
+   branch `fix-pipe-coincident-bellows-plies` on the sawenzel fork, cherry-picked here as
+   `4fe6b285e0`) plus **24 false positives of any name-keyed walk** (four distinct half-plie
+   `TGeoVolume`s share two names — abutting complementary halves, real material; the name
+   collision itself is a small defect, breaking `GetVolume()` lookup). The same copy-paste hides
+   the larger finding: **`RB26s3Bellow` has ZERO daughters — the RB26/3 compensator bellow
+   contains no plies, missing steel** (`voRB26s3Wiggle` built and never placed). Restoring it
+   CHANGES the material budget → its own future fix, Sandro's call. The TPC copy-paste typo at
    `Detectors/TPC/simulation/src/Detector.cxx:1388-1389` — two prepreg strips at z = −177.925,
-   none at +177.925 (`CheckOverlaps` reports 0 on all of TPC; reporting upstream is Sandro's
-   call).
+   none at +177.925 — FIXED, branch `fix-tpc-prepreg-position` on the sawenzel fork, cherry-picked
+   here as `3755c83277`; verified 4/2 → 3/3 world positions. Upstream PRs: not yet opened, per
+   instruction. The ROOT `TGeoShapeAssembly` defects will be reported later or fixed ourselves.
 7. **Track 3b, the real data:** the MCStepLogger→`events.json` exporter (schema in
    `website/README.md`; tree layout in `integration_demo/data/README`), then the website's event
    tab replays the real IRIS/Bagger transports.
