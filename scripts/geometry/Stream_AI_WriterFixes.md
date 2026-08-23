@@ -182,9 +182,14 @@ STEP file**:
 
 | | TPC before | TPC after | TRD before | TRD after | ABSO before | ABSO after |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| non-quadric faces on mirrored copies | 60 of 60 | **0 of 377** | 26 076 | **0 of 470** | 6 of 6 | **0 of 196** |
-| non-quadric faces in the whole file | 60 of 1 091 | **0 of 1 408** | 26 076 of 33 017 | **0 of 7 250** | 6 of 235 | **0 of 229** |
-| worst mirrored-vs-twin volume | 1.063e-02 | **1.134e-04** | 8.85e-03 | **3.805e-13** | 1.369e-13 | 0.0 |
+| distinct mirrored definitions | 3 | 41 | 42 | 100 | 1 | 25 |
+| non-quadric faces on them | 60 of 60 | **0 of 377** | 207 of 207 | **0 of 470** | 6 of 6 | **0 of 196** |
+| non-quadric faces in the whole file | 60 of 1 091 | **0 of 1 408** | 207 of 7 148 | **0 of 7 250** | 6 of 235 | **0 of 229** |
+| worst mirrored-vs-twin volume | 1.063e-02 | **1.134e-04** | 8.850e-03 | **3.805e-13** | 1.369e-13 | 0.0 |
+
+The face counts are per *distinct definition name*, which is the unit this instrument works in.
+Stream AH's 26 076 counts the same TRD faces once per baked **copy**, of which there were 8 505 over
+those 42 names; both numbers go to zero.
 
 The analytic oracle `Stream_AG` asked for, `TPC_CDCE`, a `TGeoPcon` whose `Capacity()` is exact:
 
@@ -294,11 +299,16 @@ Instrument D, the placement-fidelity walk, over every leaf-solid and mother-body
 | **PIPE** | 1 | 1 | 1 142 / 1 166 (97.94 %) | **1 166 / 1 166 (100 %)** |
 | **ABSO** | **3** | **1** | 3 / 30 (10.00 %) | **29 / 30 (96.67 %)** |
 | **TPC** | **38** | **1** | 20 873 / 37 315 (55.94 %) | **36 583 / 37 315 (98.04 %)** |
-| **TRD** | **32** | **1** | see below | **636 566 / 636 567 (100.00 %)** |
+| **TRD** | **32** | **1** | 352 117 / 636 567 (55.31 %) | **636 566 / 636 567 (100.00 %)** |
 
 and **zero placements in the STEP that are not in TGeo**, in all four — the orphaned free root
 shapes that used to sit on top of each other at the identity are gone, and with them the
 manufactured coincidences they caused downstream (§6).
+
+The "extra" column is the one that says how bad it was. Before the fixes the TRD STEP carried
+**147 172 placements that TGeo does not have** — 135 592 `UTCP` at the wrong transform from fix
+(i)'s collision, the rest `BTSHT*`/`BTOFS*` orphans from fix (iii) — against 284 450 of TGeo's own
+that it did not carry. Both are zero and one now.
 
 Every placement still missing is a volume the forward *mapping* declines, not a placement the
 writer drops:
