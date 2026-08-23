@@ -583,3 +583,72 @@ python3 collide.py     o2sim_geometry.root              # the name-collision dam
 
 `placecmp.py`, `worldscore.py`, `mirrorcheck.py` and `collide.py` live in this session's scratch and
 are not committed; every number they produced is quoted above with the sample size it came from.
+
+---
+
+## Addendum, 2026-08-23 — the TPC round trip after the `TPC_WSEG` fix
+
+§4 reported 29 world-frame disagreements on `TPC_WSEG__mirrored`, showed that the mirror was exact,
+and concluded that the source solid was invalid. The verdict has since moved once more and lands on
+us: the `TGeoShape` is legal, and the invalid solid was our own. `_quad_face` was building a
+zero-area patch from three collinear points at the `TGeoPgon`'s z step — two sections at one z — and
+that patch invalidated the shell and garbled the OCCT classifier on the operand. A Newell-area guard
+now rejects a vanishing patch (`c3a79be619`), and the self-test gained a z-step suite.
+
+This re-runs the TPC pipeline of §6 unchanged. The geometry is the same `o2sim_geometry.root` the
+rest of this document used, written this session by `o2-sim-serial -n 0 -g boxgen -m TPC
+--configKeyValues "align-geom.mDetectors=none"` under `O2_ROOT=$B/stage`; it is post-prepreg-fix,
+which the placement walk confirms directly — `TPC_PRSTR1` sits three times at z = −177.925 and
+three times at +177.925, against Stream AG's 4/2.
+
+### The isolated probe, 40 000 points in the shape's own frame
+
+| | before | after |
+| --- | ---: | ---: |
+| `BRepCheck_Analyzer` on the solid | **False** | **True** |
+| `BRepCheck_Analyzer` on the mirrored prototype | **False** | **True** |
+| OCCT vs `TGeoShape::Contains` | **1 835** | **0** |
+| OCCT mirrored (z → −z) vs `TGeoShape` | **1 835** | **0** |
+| OCCT mirrored vs OCCT original | 0 | 0 |
+| volume | 15838.148356 cm³ | 15838.148356 cm³ |
+
+The volume does not move by a single digit, so the guard removed patches that carried no material —
+which is what a zero-area face is. `TPC_WSEG` and its mirrored prototype each go from 15 planes and
+2 cylinders to **13 planes and 2 cylinders**, and that is the whole of the file's face-count change.
+
+### The pipeline
+
+| | before (§6) | after |
+| --- | ---: | ---: |
+| self-test | 101 checks, 0 failures | **105 checks, 0 failures** |
+| forward: definitions / solids / components / declined | 218 / 171 / 38 714 / 6 | unchanged |
+| capacity check, max / median | 1.478e-02 / 9.080e-16 | unchanged |
+| STEP size | 34 208 339 B | 34 196 447 B |
+| instrument D, placements at TGeo's world transform | 36 583 / 37 315, 1 free root, 0 extra | unchanged |
+| non-quadric faces in the file | 0 of 1 408 | 0 of 1 404 |
+| **A, world frame, 250 parts × 2 000 points** | 499 995 scored, **29 disagreements** | 499 995 scored, **0** |
+| **A, world frame, `TPC_WSEG` ×36 × 20 000 points** | 719 999 scored, **7 415 disagreements** | 719 999 scored, **0** |
+| reverse: leaf solids / placements declared | 172 / 36 619, all distinct | unchanged |
+| coincidence warning | none | **none** |
+| exact-surface extraction | 170 / 172 | **172 / 172** |
+| **tiers CSG / exact surface / tessellated** | 82 / 88 / **2** | 82 / **90** / **0** |
+| reverse wall | 2 min 19 s | 2 min 24 s |
+
+**TPC now has nothing tessellated at all.** Both `TPC_WSEG` and `TPC_WSEG__mirrored` move from the
+mesh tier to exact surfaces; the surface extractor's *"planar polygon wire has fewer than 3 edges"*
+was the two collinear patches and is gone. Neither becomes CSG, and the reason is unchanged and
+genuine — *"a planar face is neither a cap nor a wedge of any axis cluster"*, now over 15 faces
+rather than 17 — so the CSG count stays at 82 and the decline histogram is identical.
+
+The two disagreement counts are the same 250 parts, the same points and the same seed as §4's, so
+they are directly comparable. Nothing else in the pipeline moved: the same 732 placements are still
+missing, and they are still the five `TGeoHalfSpace` composites.
+
+### Dead premise, recorded
+
+- **"`TPC_WSEG`'s `TGeoShape` produces an invalid solid, so the source shape is the problem."** §4
+  said this carefully — it said the *solid* was invalid and identical before and after the three
+  fixes, which was true — but it read as a limit of the shape rather than of our sewing, and it was
+  ours: three collinear points at a z step, one zero-area quad, one invalid shell. "Identical before
+  and after my changes" establishes that a defect is not a regression; it says nothing at all about
+  whose defect it is.
