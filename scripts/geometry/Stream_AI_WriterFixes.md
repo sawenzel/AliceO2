@@ -102,10 +102,12 @@ but they take only 570 distinct values, and only 1 164 distinct (name, value) pa
 
 Where one TGeo name ends up covering several definitions the emitted STEP names are disambiguated
 in build order as `name`, `name#2`, `name#3`, …, and the mapping goes into the report as
-`nameDisambiguation`. On TRD that is **exactly the 11 divergent names** listed above; on PIPE it is
-4 (the half-plie volumes that share two names — `NEXT.md` item 6's "24 false positives of any
-name-keyed walk"); on TPC 2 (`TPC_ENDCAP`, `TPC_SECT` — `TPC_Strip`'s twins are geometrically
-identical and correctly stay one definition); on ABSO 0.
+`nameDisambiguation`. On TRD that is **12 names: the 11 divergent ones listed above, plus `UTC1`**,
+which is two structurally distinct assemblies that happen to share both a name and their own
+`TGeoBBox` — a case `collide.py` cannot see, because it compares shapes and this one differs in its
+content. On PIPE it is 4 (the half-plie volumes that share two names — `NEXT.md` item 6's "24 false
+positives of any name-keyed walk"); on TPC 2 (`TPC_ENDCAP`, `TPC_SECT` — `TPC_Strip`'s twins are
+geometrically identical and correctly stay one definition); on ABSO 0.
 
 ### The self-check that would have caught it
 
