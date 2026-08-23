@@ -136,6 +136,11 @@ statement for the talk.
   (item 2 above): the gate composes both; a bare OCC shell silently loses CSG.
 - **External-detector hits live in `o2sim.root`** (`IRISHit`, `BAGRHit` branches), not in
   per-detector `o2sim_Hits*.root` files, under `o2-sim-serial`.
+- **Testing a rebuilt detector library needs `export O2_ROOT=$B/stage`.** Detector libs are
+  dlopened by ABSOLUTE path from `O2_ROOT`, which alienv points at the installed O2 — a rebuilt
+  stage lib is silently ignored however `LD_LIBRARY_PATH` is ordered (cost two no-op test runs
+  before being caught by `LD_DEBUG=libs`). Use `o2-sim-serial` from `$B/stage/bin`; the parallel
+  `o2-sim` driver additionally spawns worker binaries resolved from the installed PATH.
 - **Reconfiguring CMake on this branch needs Clang on the prefix path**:
   `export CMAKE_PREFIX_PATH=$HOME/alisw/sw/ubuntu2404_aarch64/Clang/v20.1.7-local1:$CMAKE_PREFIX_PATH`
   (alienv omits it; Gandiva's config then corrupts `CMAKE_MODULE_PATH` for every later
