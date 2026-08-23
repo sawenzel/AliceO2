@@ -59,6 +59,10 @@ import math
 # on the geometry itself.
 _IDENTITY_EPS = 1.0e-12
 
+# Below this relative difference a cone's two radii are the same radius, and OCCT wants a
+# cylinder rather than a cone. See `_occ_frustum`.
+_CONE_DEGENERATE_EPS = 1.0e-12
+
 
 def identity_frame(origin=(0.0, 0.0, 0.0)):
     return {"origin": [float(c) for c in origin],
@@ -402,8 +406,8 @@ def _occ_pcon(lf):
 
 
 def _occ_leaf(lf):
-    from OCC.Core.BRepPrimAPI import (BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCone,
-                                      BRepPrimAPI_MakeCylinder, BRepPrimAPI_MakeSphere)
+    from OCC.Core.BRepPrimAPI import (BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCylinder,
+                                      BRepPrimAPI_MakeSphere)
     from OCC.Core.gp import gp_Pnt
     kind, p, frame = lf["type"], lf["params"], lf["frame"]
     if kind == "TGeoPcon":
@@ -445,15 +449,14 @@ def _occ_leaf(lf):
             outer = _occ_cut(outer, inner)
         return outer
     if kind == "TGeoCone":
-        ax2 = _occ_ax2(frame, -p["dz"])
-        outer = BRepPrimAPI_MakeCone(ax2, p["rmax1"], p["rmax2"], 2 * p["dz"]).Shape()
+        outer = _occ_frustum(_occ_ax2(frame, -p["dz"]), p["rmax1"], p["rmax2"], 2 * p["dz"])
         if p["rmin1"] > 0.0 or p["rmin2"] > 0.0:
             pad = _pad(p["dz"])
             slope = (p["rmin2"] - p["rmin1"]) / (2 * p["dz"])
-            inner = BRepPrimAPI_MakeCone(_occ_ax2(frame, -p["dz"] - pad),
-                                         max(p["rmin1"] - slope * pad, 0.0),
-                                         max(p["rmin2"] + slope * pad, 0.0),
-                                         2 * p["dz"] + 2 * pad).Shape()
+            inner = _occ_frustum(_occ_ax2(frame, -p["dz"] - pad),
+                                 max(p["rmin1"] - slope * pad, 0.0),
+                                 max(p["rmin2"] + slope * pad, 0.0),
+                                 2 * p["dz"] + 2 * pad)
             outer = _occ_cut(outer, inner)
         return outer
     if kind == "TGeoSphere":
@@ -464,6 +467,21 @@ def _occ_leaf(lf):
             outer = _occ_cut(outer, inner)
         return outer
     raise ValueError(f"unhandled leaf type {kind!r}")
+
+
+def _occ_frustum(ax2, r1, r2, height):
+    """A cone frustum, or a cylinder when its two radii are the same.
+
+    `BRepPrimAPI_MakeCone` raises `Standard_DomainError("cone with two identic radii")` rather
+    than degenerating gracefully, and a `TGeoCone` with `rmax1 == rmax2` (a cylindrical barrel
+    with a conical bore) or `rmin1 == rmin2` (a conical barrel with a cylindrical bore) is a
+    perfectly ordinary shape -- both occur in ABSO. The non-degenerate call is unchanged, so
+    nothing that builds today builds differently.
+    """
+    from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeCone, BRepPrimAPI_MakeCylinder
+    if abs(r1 - r2) <= _CONE_DEGENERATE_EPS * max(abs(r1), abs(r2), 1.0):
+        return BRepPrimAPI_MakeCylinder(ax2, 0.5 * (r1 + r2), height).Shape()
+    return BRepPrimAPI_MakeCone(ax2, r1, r2, height).Shape()
 
 
 def _pad(dz):

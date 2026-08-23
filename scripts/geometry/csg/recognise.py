@@ -523,6 +523,35 @@ def _solid_vertices(solid):
     return out
 
 
+def _canonical_revolved_leaf(lf, origin, axis, tol):
+    """Say a two-section full-turn profile in the native class it already is.
+
+    A profile that came out with exactly two sections and a full turn is a `TGeoCone`, or a
+    `TGeoTube` when neither radius changes. Emitting it as a two-section `TGeoPcon` would be the
+    same solid, but ROOT's own class carries what it is, so `checkKnownSource.py` compares like
+    with like and nothing downstream has to special-case a polycone that is a cone. A wedge or a
+    z-step needs more than two sections' worth of description and stays a `TGeoPcon`.
+
+    Returns `(leaf, recogniser tag)`.
+    """
+    p = lf["params"]
+    z, rmin, rmax = p["z"], p["rmin"], p["rmax"]
+    if len(z) != 2 or abs(p["dphi"] - 360.0) > 1.0e-9:
+        return lf, "revolved-pcon"
+    # TGeoTube and TGeoCone are centred on their own frame, so the frame's origin moves to the
+    # middle of the section pair; the axis and the reference x are unchanged.
+    frame = dict(lf["frame"])
+    frame["origin"] = [float(c) for c in _add(origin, _scale(axis, 0.5 * (z[0] + z[1])))]
+    dz = 0.5 * (z[1] - z[0])
+    if abs(rmin[0] - rmin[1]) <= tol and abs(rmax[0] - rmax[1]) <= tol:
+        return prim.leaf("TGeoTube", {"rmin": 0.5 * (rmin[0] + rmin[1]),
+                                      "rmax": 0.5 * (rmax[0] + rmax[1]), "dz": dz},
+                         frame), "revolved-tube"
+    return prim.leaf("TGeoCone", {"dz": dz, "rmin1": rmin[0], "rmax1": rmax[0],
+                                  "rmin2": rmin[1], "rmax2": rmax[1]},
+                     frame), "revolved-cone"
+
+
 def _match_revolved(solid, records, clusters, caps, wedges, tol, diag):
     """One axis cluster, any number of z sections: a `TGeoPcon`."""
     cl = clusters[0]
@@ -626,7 +655,9 @@ def _match_revolved(solid, records, clusters, caps, wedges, tol, diag):
     except ValueError as bad:
         raise Declined(f"the reconstructed profile is not a legal TGeoPcon: {bad}") from bad
 
-    # The one measured quantity.
+    # The one measured quantity. It is taken on the reconstructed *profile*, before the leaf is
+    # canonicalised below, because the gap is a property of the reconstruction and not of the
+    # ROOT class it ends up wearing.
     # The same ring `build_occ` will revolve, deduped by the same rule, so the gap is measured
     # against the candidate that the acceptance test will actually be handed.
     profile = prim.pcon_profile_rz(lf["params"])
@@ -648,7 +679,8 @@ def _match_revolved(solid, records, clusters, caps, wedges, tol, diag):
                        f"({gap / scale:.3g} of the part's {diag:.6g} cm diagonal, "
                        f"over {REL_TOL:.0e})")
 
-    return prim.candidate("primitive", [lf], "revolved-pcon",
+    lf, tag = _canonical_revolved_leaf(lf, origin, axis, tol)
+    return prim.candidate("primitive", [lf], tag,
                           notes={"nz": len(z), "nCaps": len(cap), "nWedges": len(wedge),
                                  "nLaterals": len(cl["members"]),
                                  "profileGapCm": gap, "profileGapRelative": gap / scale})
@@ -729,6 +761,33 @@ def recognise(solid):
                     raise Declined(f"{primitive_declined}; as a revolved profile: "
                                    f"{revolved_declined}") from None
         return _match_two_cluster_union(records, clusters, caps, wedges, tol), None
+    except Declined as declined:
+        return None, f"{declined} [{_structure(records, tol)}]"
+
+
+def recognise_revolved(solid):
+    """Propose a revolved profile for a solid, skipping the whole-part matchers entirely.
+
+    `recognise()` reaches `_match_revolved` only where `_match_axial_primitive` *declines*. A
+    whole-part proposal that is instead **rejected by the acceptance test** never gets there, and
+    an all-cone stack is exactly that case: two caps and two cone faces look like one `TGeoCone`
+    to the tier-1 matcher, which proposes a cone that is not the solid and is refused by a volume.
+    `emit.process_solid` calls this after such a rejection, so the retry costs nothing on a part
+    that was accepted the first time and cannot change one.
+
+    Returns `(candidate|None, reason)`, and never raises on a mere mismatch.
+    """
+    records, reason = _face_records(solid)
+    if records is None:
+        return None, reason
+    diag = _bbox_diagonal(solid)
+    tol = REL_TOL * max(diag, 1.0)
+    try:
+        clusters = _cluster_axial(records, tol)
+        if len(clusters) != 1:
+            raise Declined(f"{len(clusters)} axis cluster(s): not a single revolved profile")
+        caps, wedges = _split_planes(records, clusters, tol)
+        return _match_revolved(solid, records, clusters, caps, wedges, tol, diag), None
     except Declined as declined:
         return None, f"{declined} [{_structure(records, tol)}]"
 

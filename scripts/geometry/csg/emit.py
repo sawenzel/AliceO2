@@ -69,8 +69,26 @@ def model_tolerance_cm(shape):
     return worst
 
 
+def _build_and_accept(solid, cand, tol, band_factor):
+    """`(acceptance|None, reason|None)` for one candidate. Never raises on a bad candidate."""
+    try:
+        occ_shape = prim.build_occ(cand)
+    except Exception as exc:                                     # noqa: BLE001
+        return None, f"candidate failed to build in OCCT: {exc}"
+    result = accept.symmetric_difference(solid, occ_shape, tol, band_factor)
+    return result, (None if result.get("accepted") else result.get("reason"))
+
+
 def process_solid(solid, name, tolerance=None, band_factor=1.0):
-    """recognise -> build -> accept. Returns a record; `record['candidate']` is None if declined."""
+    """recognise -> build -> accept. Returns a record; `record['candidate']` is None if declined.
+
+    A candidate the acceptance test **rejects** is retried once as a revolved profile
+    (`recognise.recognise_revolved`), because the whole-part matchers answer before the revolved
+    one and an all-cone stack looks like a single `TGeoCone` to them: they propose, the volume
+    refuses, and without a retry the part ships one tier down. The retry runs only after a
+    rejection, so a part whose first candidate is accepted never reaches it and its record and
+    its candidate are what they were.
+    """
     record = {"part": name, "recognised": False, "accepted": False, "candidate": None,
               "reason": None, "acceptance": None, "recogniser": None, "description": None}
     cand, reason = recognise.recognise(solid)
@@ -81,18 +99,36 @@ def process_solid(solid, name, tolerance=None, band_factor=1.0):
     record["recogniser"] = cand["recogniser"]
     record["description"] = prim.describe(cand)
     tol = model_tolerance_cm(solid) if tolerance is None else tolerance
-    try:
-        occ_shape = prim.build_occ(cand)
-    except Exception as exc:                                     # noqa: BLE001
-        record["reason"] = f"candidate failed to build in OCCT: {exc}"
-        return record
-    result = accept.symmetric_difference(solid, occ_shape, tol, band_factor)
-    record["acceptance"] = result
-    record["accepted"] = bool(result.get("accepted"))
-    if not record["accepted"]:
-        record["reason"] = result.get("reason")
-    else:
+    result, why_not = _build_and_accept(solid, cand, tol, band_factor)
+    if result is not None:
+        record["acceptance"] = result
+        record["accepted"] = bool(result.get("accepted"))
+    if record["accepted"]:
         record["candidate"] = cand
+        return record
+    record["reason"] = why_not
+
+    alternative, alt_declined = recognise.recognise_revolved(solid)
+    if alternative is None or alternative["recogniser"] == cand["recogniser"]:
+        # Either the solid is not a revolved profile at all, or the revolved matcher is what
+        # produced the candidate that was just refused; there is nothing else to try.
+        if alternative is not None:
+            return record
+        record["reason"] = f"{why_not}; as a revolved profile: {alt_declined}"
+        return record
+    alt_result, alt_why_not = _build_and_accept(solid, alternative, tol, band_factor)
+    if alt_result is not None and alt_result.get("accepted"):
+        record["retriedAfter"] = {"recogniser": cand["recogniser"],
+                                  "description": record["description"], "reason": why_not}
+        record["recogniser"] = alternative["recogniser"]
+        record["description"] = prim.describe(alternative)
+        record["acceptance"] = alt_result
+        record["accepted"] = True
+        record["candidate"] = alternative
+        record["reason"] = None
+        return record
+    record["reason"] = (f"{why_not}; retried as {alternative['recogniser']} "
+                        f"({prim.describe(alternative)}): {alt_why_not}")
     return record
 
 
@@ -326,7 +362,32 @@ def summarise(records):
 # self-test
 # ------------------------------------------------------------------------------------------
 
-def self_test(verbose=True, with_root=True):
+# SHA-256 of `json.dumps(candidate, sort_keys=True)` for every whole-part fixture below, taken
+# from the tree before the revolved matcher and the acceptance retry existed. The floor this
+# project actually has to hold is not "the suite is green" but "a part that converts today
+# converts to the same bytes tomorrow", and only a recorded digest can say that. A digest here
+# may be updated only together with a measured statement about which artefacts moved.
+_CANDIDATE_DIGESTS_BEFORE_THE_REVOLVED_MATCHER = {
+    "box":
+        "99ad3ce28270c7aaef6aa08ea6d5d06a5d593384aca04f1404465801a82c968f",
+    "solid cylinder":
+        "7f3cd91ca1c95acb077e83c43cc978c11bdde93c2f9953617819d56d99eabb3d",
+    "tube":
+        "00902589f306881e06554ad039dc425451d620a0f7cc11b54eda0b94ca336cd6",
+    "tube segment":
+        "909afffc42726d5aa6f7f71cc01005c8a44d8f2c5fa8ac561ce8b2abae444263",
+    "cone":
+        "01392dc4dfbcd331a8e24a3278f1f3eee793fda0aea29e05da0771df18b279e6",
+    "sphere":
+        "2c5a7be0c2ee7c6126db54376e627451dccad780b1436504f2792cf99e12dc42",
+    "placed tube":
+        "47190bb1666e38d64f500f7e46350d62a57d2c8acf659184b986a5edf3e4e441",
+    "rod-and-eye (two-cluster union)":
+        "2fd3760396fb15edb0b0ad10cb99df6070678388460a7813f2501f344fd713c9",
+}
+
+
+def self_test(verbose=True, with_root=True):  # noqa: C901
     """Synthetic solids whose recognition and emission are known in closed form.
 
     Every positive case is paired with a negative one, because a recogniser that accepts
@@ -334,6 +395,7 @@ def self_test(verbose=True, with_root=True):
     ROOT half is checked by querying the emitted `TGeoShape` against the closed-form answer for
     the same point set, which is independent of both OCCT and the description's own builders.
     """
+    import hashlib
     import math
     from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Cut, BRepAlgoAPI_Fuse
     from OCC.Core.BRepBuilderAPI import (BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakePolygon,
@@ -350,8 +412,13 @@ def self_test(verbose=True, with_root=True):
         if verbose:
             print(f"  [{'ok ' if condition else 'FAIL'}] {name}" + (f"  {detail}" if detail else ""))
 
+    seen_digests = {}
+
     def expect(name, solid, want_recogniser, want_leaves=1):
         record = process_solid(solid, name)
+        if record["accepted"]:
+            seen_digests[name] = hashlib.sha256(
+                json.dumps(record["candidate"], sort_keys=True).encode()).hexdigest()
         ok = record["accepted"] and record["recogniser"] == want_recogniser and \
             len(record["candidate"]["leaves"]) == want_leaves
         detail = (f"{record['recogniser']}: {record['description']}"
@@ -584,6 +651,73 @@ def self_test(verbose=True, with_root=True):
         except ValueError:
             refused = True
         check(f"a TGeoPcon description with {name} is refused", refused)
+
+    # --- fix round 1: an all-cone stack, retried after the acceptance test refuses tier 1 ---
+    # Two caps and two cone faces read as one TGeoCone to the whole-part matcher, which proposes a
+    # cone that is not the solid; the volume refuses it and `process_solid` retries the revolved
+    # matcher. Without the retry these ship one tier down.
+    stack_record = expect_pcon("all-cone stack (two cones and two caps)",
+                               revolved([-3, 0, 3], [0, 0, 0], [2, 3, 1]),
+                               [-3, 0, 3], [0, 0, 0], [2, 3, 1])
+    check("the all-cone stack was retried after tier 1 was rejected, not merely declined",
+          (stack_record.get("retriedAfter") or {}).get("recogniser") == "tier1-cone",
+          f"retried after {(stack_record.get('retriedAfter') or {}).get('recogniser')}: "
+          f"{(stack_record.get('retriedAfter') or {}).get('reason')}")
+    # An hourglass pinches to the axis in the middle, which is a legal polycone (rmax = 0 there)
+    # and the case that made `BRepPrimAPI_MakeCone` raise on two identical radii.
+    expect("hourglass (two cones meeting on the axis)",
+           revolved([-5, 0, 5], [0, 0, 0], [2, 0, 2]), "revolved-pcon")
+
+    # --- fix round 1: a two-section full-turn profile is said in its native class ---
+    def expect_native(name, solid, want_recogniser, want_type, want_params):
+        record = expect(name, solid, want_recogniser)
+        if not record["accepted"]:
+            return record
+        lf = record["candidate"]["leaves"][0]
+        worst = max(abs(lf["params"][k] - v) for k, v in want_params.items()) \
+            if lf["type"] == want_type else float("inf")
+        check(f"{name} emits a native {want_type} with the source's parameters",
+              lf["type"] == want_type and worst < 1.0e-9,
+              f"{lf['type']}, worst parameter deviation {worst:.3g}")
+        return record
+
+    # The ABSO pair: a TGeoCone with one radius constant arrives as one cylinder and one cone, so
+    # the whole-part matcher declines it with "mixed lateral surface kinds" and the revolved
+    # matcher must give the class back rather than a two-section polycone.
+    expect_native("cone with a cylindrical bore (constant rmin)",
+                  revolved([-25, 25], [4.5, 4.5], [16.22, 25.04]), "revolved-cone", "TGeoCone",
+                  {"dz": 25.0, "rmin1": 4.5, "rmax1": 16.22, "rmin2": 4.5, "rmax2": 25.04})
+    expect_native("cylinder with a conical bore (constant rmax)",
+                  revolved([-3, 3], [6.99, 7.374], [26.02, 26.02]), "revolved-cone", "TGeoCone",
+                  {"dz": 3.0, "rmin1": 6.99, "rmax1": 26.02, "rmin2": 7.374, "rmax2": 26.02})
+    # ... and the two shapes that must NOT be canonicalised, because two sections do not describe
+    # them: a wedge needs phi and a step needs the duplicated plane.
+    expect_pcon("two-section wedge stays a polycone", revolved([-5, 5], [1, 1], [2, 3], 0.0,
+                                                               120.0),
+                [-5, 5], [1, 1], [2, 3], 0.0, 120.0)
+    expect_pcon("a stepped profile stays a polycone", stepped, step_z, step_rmin, step_rmax)
+    # The TGeoTube branch of the canonicalisation is not reachable from CAD -- a full-turn
+    # two-section profile with both radii constant is a tube, and the whole-part matcher gets
+    # there first -- so it is exercised on the description directly.
+    tube_leaf, tube_tag = recognise._canonical_revolved_leaf(
+        prim.leaf("TGeoPcon", {"phi1": 0.0, "dphi": 360.0, "z": [-4.0, 6.0],
+                               "rmin": [1.0, 1.0], "rmax": [2.0, 2.0]}, prim.identity_frame()),
+        (0.0, 0.0, 0.0), (0.0, 0.0, 1.0), 1.0e-9)
+    check("a two-section profile with constant radii canonicalises to a TGeoTube",
+          tube_tag == "revolved-tube" and tube_leaf["type"] == "TGeoTube"
+          and abs(tube_leaf["params"]["dz"] - 5.0) < 1e-12
+          and abs(tube_leaf["frame"]["origin"][2] - 1.0) < 1e-12,
+          f"{tube_tag}, {tube_leaf['type']}, dz {tube_leaf['params']['dz']}, origin "
+          f"{tube_leaf['frame']['origin']}")
+
+    # --- the floor: nothing that converted before this matcher existed converts differently ---
+    check("every whole-part candidate is byte-identical to before the revolved matcher",
+          all(seen_digests.get(name) == digest for name, digest
+              in _CANDIDATE_DIGESTS_BEFORE_THE_REVOLVED_MATCHER.items()),
+          "; ".join(f"{name}: {seen_digests.get(name)} != {digest}" for name, digest
+                    in _CANDIDATE_DIGESTS_BEFORE_THE_REVOLVED_MATCHER.items()
+                    if seen_digests.get(name) != digest)
+          or f"{len(_CANDIDATE_DIGESTS_BEFORE_THE_REVOLVED_MATCHER)} candidates unchanged")
 
     # --- the ROOT half: the emitted TGeoShape must answer like the closed form ---
     if with_root:
