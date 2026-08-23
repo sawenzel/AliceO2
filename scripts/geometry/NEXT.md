@@ -8,10 +8,14 @@ Branch `swenzel/bvhsurfacesolid`. Everything below is committed unless marked ot
 
 ## The next major step (decided 2026-08-23, for a FRESH session)
 
-**The closure test**: real `o2-sim -m PIPE ITS TPC MAG` physics through the round-tripped
-geometry in three representations, scored against the original C++ TGeo as its own oracle —
-same hits (layered acceptance), step counts under control, realistic CPU. The full analysis,
-pain points (media/materials/cuts) and staging: [`Handoff_ClosureTest.md`](Handoff_ClosureTest.md).
+In order, each in its own fresh session:
+1. **The recognition programme** (decided 2026-08-23): the prism-family and revolved-profile
+   recognisers, then optionally the single-cell emitter — most CSG decliners are single
+   primitives, not booleans, and the corpora carry known-right answers.
+   → [`Handoff_Recognition.md`](Handoff_Recognition.md)
+2. **The closure test**: real `o2-sim -m PIPE ITS TPC MAG` physics through the round-tripped
+   geometry in three representations, scored against the original C++ TGeo as its own oracle.
+   → [`Handoff_ClosureTest.md`](Handoff_ClosureTest.md)
 
 ## Read this first
 
