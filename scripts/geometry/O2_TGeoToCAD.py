@@ -77,26 +77,39 @@ geometry with two volumes in the same place has no defined transport through it.
 The default DAG export reproduces the duplicates faithfully -- that is the honest
 thing for a STEP that claims to be the geometry.  `--dedup-world` instead expands
 the assembly tree per occurrence (leaf definitions stay shared, so there is still
-one prototype per TGeoVolume) and drops every repeated (volume, world transform),
-counting them in the report.
+one prototype per (name, shape value)) and drops every repeated
+(definition, world transform), counting them in the report.  The key is the
+*definition*, which is what `O2_CADtoTGeo.py` checks: two distinct volumes that
+happen to share a name are not a coincidence once they are two definitions.
 
-Baking a reflection
--------------------
+Reflections
+-----------
 A STEP component location is a proper rigid motion, so a reflecting `TGeoMatrix`
-cannot be a placement and is baked into a private copy of the child solid instead.
-The bake goes through `gp_Trsf`, not `gp_GTrsf`: the general transform rewrote
-every mirrored plane and cylinder as a B-spline and moved the volume by up to
-1.1 %, measured against a `TGeoPcon`'s analytic `Capacity()`.  `gp_Trsf` carries an
-improper orthogonal matrix exactly, and every bake is now priced against the volume
-an isometry must preserve.
+cannot be a placement.  It does not have to be: writing Z = diag(1, 1, -1) and
+V^ = Z*V for a volume's mirrored prototype, a reflecting placement M of V is
+M*V = (M*Z)*(Z*V) = (M*Z)*V^, and M*Z is proper.  So the reflection moves out of
+the placement and into the definition, and the same identity applied one level
+down pushes it through an assembly to its leaves.  Every volume therefore has at
+most two prototypes -- itself and Z*itself -- shared by every reflected use of it,
+and a reflected placement of a volume *with daughters* is emitted like any other
+instead of being dropped with its subtree orphaned at the identity.
+
+The mirrored solid is built with `gp_Trsf::SetMirror` and `BRepBuilderAPI_Transform`,
+which is exact and keeps the analytic carriers.  The `BRepBuilderAPI_GTransform`
+this replaced rewrote every plane and cylinder as a B-spline and moved the volume
+by up to 1.1 %; it is now used only for a genuine non-uniform scale, which has no
+prototype and is still baked.  Every bake is priced against the volume an isometry
+must preserve.
 
 Report
 ------
-`tgeo2step_report.json`-style: one record per logical volume with
-{name, shapeClass, converted, reason, capacity_cm3, occVolume_cm3, relDev, ...}
-plus a summary keyed by shape class.  A volume that could not be mapped carries a
-machine-readable `reason`, the same decline-reason discipline the reverse
-converter uses.
+`tgeo2step_report.json`-style: one record per definition with
+{name, emittedName, mirrored, shapeClass, converted, reason, capacity_cm3,
+occVolume_cm3, relDev, sharedByVolumes, ...} plus a summary keyed by shape class,
+the `nameDisambiguation` map, and `sharedDefinitionMaxRelDev` -- the worst
+disagreement between a shared definition and a sharing volume's own `Capacity()`.
+A volume that could not be mapped carries a machine-readable `reason`, the same
+decline-reason discipline the reverse converter uses.
 """
 
 import argparse
@@ -513,11 +526,16 @@ def _det3(m):
             + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]))
 
 
-# Hand-written ALICE rotation matrices are only orthogonal to about 1e-7 -- TRD's
+# Hand-written ALICE rotation matrices are not exactly orthogonal.  TRD's
 # `BM49/B051_1` is a TGeoCombiTrans whose cosines were written out to nine digits,
-# and its M^T M departs from the identity by 6.7e-08.  That is 0.3 um over the whole
-# cave, so it is a rigid placement; the band only has to separate it from a genuine
-# non-uniform scale, which is O(0.1).
+# and its M^T M departs from the identity by 6.7e-08 -- 0.3 um over the whole cave.
+# The band is dimensionless and only has to separate "a rotation with hand-written
+# constants" from a genuine non-uniform scale, which is O(0.1); 1e-6 leaves four
+# orders of margin on each side.  A matrix inside the band is *snapped to the
+# nearest rotation* before use rather than passed through, so everything downstream
+# sees an exact isometry, and the size of the snap is recorded per placement in the
+# report instead of being absorbed silently.  A matrix outside the band is refused
+# as a rigid placement, reported, and baked through the general transform.
 _ORTHO_TOL = 1e-6
 
 # The volume a baked isometry must preserve, as a relative band.  Three orders of
@@ -525,34 +543,78 @@ _ORTHO_TOL = 1e-6
 # enough for the input matrices above; what is actually achieved is 0.
 _ISOMETRY_TOL = 1e-6
 
-
-def _is_orthogonal(mat, tol=_ORTHO_TOL):
-    for i in range(3):
-        for j in range(i, 3):
-            d = sum(mat[k][i] * mat[k][j] for k in range(3))
-            if abs(d - (1.0 if i == j else 0.0)) > tol:
-                return False
-    return True
+# Below this a "correction" is the double-precision floor of composing a rotation
+# from angles, not a defect in the source matrix, and is not worth a report entry.
+_ORTHO_NOISE = 1e-12
 
 
-def tgeo_matrix_to_isometry(m):
-    """An exact gp_Trsf for any isometry, reflections included, or None.
+def orthogonality_deviation(mat):
+    """max |M^T M - I| over the nine entries: 0 for an exact rotation or mirror."""
+    return max(abs(sum(mat[k][i] * mat[k][j] for k in range(3))
+                   - (1.0 if i == j else 0.0))
+               for i in range(3) for j in range(3))
+
+
+def _inv3(m):
+    d = _det3(m)
+    if abs(d) < 1e-30:
+        return None
+    c = [[m[(i + 1) % 3][(j + 1) % 3] * m[(i + 2) % 3][(j + 2) % 3]
+          - m[(i + 1) % 3][(j + 2) % 3] * m[(i + 2) % 3][(j + 1) % 3]
+          for j in range(3)] for i in range(3)]
+    return [[c[j][i] / d for j in range(3)] for i in range(3)]
+
+
+def orthonormalise(mat):
+    """(the nearest orthogonal matrix, how far the input was, how far it moved).
+
+    Polar decomposition by Newton's iteration `R <- (R + R^-T)/2`, which converges
+    to the orthogonal factor of `R` and preserves the sign of the determinant, so a
+    reflection stays a reflection.  Snapping is what keeps the exactness downstream:
+    `gp_Trsf` and every world transform composed from it are then built from a
+    matrix that really is an isometry.
+    """
+    dev = orthogonality_deviation(mat)
+    r = [row[:] for row in mat]
+    for _ in range(8):
+        inv = _inv3(r)
+        if inv is None:
+            return mat, dev, 0.0
+        r = [[0.5 * (r[i][j] + inv[j][i]) for j in range(3)] for i in range(3)]
+        if orthogonality_deviation(r) < 1e-15:
+            break
+    corr = max(abs(r[i][j] - mat[i][j]) for i in range(3) for j in range(3))
+    return r, dev, corr
+
+
+def _isometry_trsf(mat, tr, proper_only):
+    """(gp_Trsf, orthogonality deviation, correction) or (None, deviation, 0.0).
 
     A `gp_Trsf` carries an improper orthogonal matrix perfectly well -- OCCT models
     it as a uniform scale of -1 -- and `BRepBuilderAPI_Transform` then moves the
     exact analytic carriers.  Only a genuinely non-uniform scale needs a `gp_GTrsf`.
     """
-    mat, tr = tgeo_matrix_components(m)
-    if not _is_orthogonal(mat) or abs(abs(_det3(mat)) - 1.0) > _ORTHO_TOL:
-        return None
+    dev = orthogonality_deviation(mat)
+    if dev > _ORTHO_TOL:
+        return None, dev, 0.0
+    d = _det3(mat)
+    if abs(abs(d) - 1.0) > _ORTHO_TOL or (proper_only and d < 0.0):
+        return None, dev, 0.0
+    mat, dev, corr = orthonormalise(mat)
     t = gp_Trsf()
     try:
         t.SetValues(mat[0][0], mat[0][1], mat[0][2], tr[0],
                     mat[1][0], mat[1][1], mat[1][2], tr[1],
                     mat[2][0], mat[2][1], mat[2][2], tr[2])
     except Exception:
-        return None
-    return t
+        return None, dev, corr
+    return t, dev, corr
+
+
+def tgeo_matrix_to_isometry(m):
+    """An exact gp_Trsf for any isometry of a TGeoMatrix, reflections included."""
+    mat, tr = tgeo_matrix_components(m)
+    return _isometry_trsf(mat, tr, proper_only=False)[0]
 
 
 def tgeo_matrix_to_trsf(m):
@@ -563,10 +625,8 @@ def tgeo_matrix_to_trsf(m):
     definition instead.  Baking is a different question and takes the isometry
     above, which accepts the reflection.
     """
-    mat, _tr = tgeo_matrix_components(m)
-    if abs(_det3(mat) - 1.0) > 1e-9:
-        return None
-    return tgeo_matrix_to_isometry(m)
+    mat, tr = tgeo_matrix_components(m)
+    return _isometry_trsf(mat, tr, proper_only=True)[0]
 
 
 def tgeo_matrix_to_gtrsf(m):
@@ -607,6 +667,48 @@ def zmirror_trsf():
     t = gp_Trsf()
     t.SetMirror(gp_Ax2(gp_Pnt(0., 0., 0.), gp_Dir(0., 0., 1.)))
     return t
+
+
+def _zmirror_left(mat, tr):
+    """Z * M, with Z = diag(1, 1, -1)."""
+    return ([mat[0][:], mat[1][:], [-v for v in mat[2]]], [tr[0], tr[1], -tr[2]])
+
+
+def _zmirror_right(mat, tr):
+    """M * Z."""
+    return ([[mat[i][0], mat[i][1], -mat[i][2]] for i in range(3)], list(tr))
+
+
+def matrix_reflects(m):
+    """Does this TGeoMatrix reflect?  (A left-handed frame, determinant < 0.)"""
+    mat, _tr = tgeo_matrix_components(m)
+    return _det3(mat) < 0.0
+
+
+def child_location(parent_mirrored, m):
+    """Where a daughter goes, and whether it is the daughter's mirrored prototype.
+
+    Write Z = diag(1, 1, -1) and let V^ = Z*V be a volume's mirrored prototype.
+    A reflecting placement M of V is then M*V = (M*Z)*(Z*V) = (M*Z)*V^, and M*Z is
+    proper -- so a reflection never needs a general transform and never needs a
+    solid to bake into: it becomes a rigid placement of the child's prototype.  The
+    same identity applied to Z*M pushes the reflection through an assembly and down
+    to its leaves, which is why a reflected subtree can be emitted at all.
+
+    Every volume therefore has at most two prototypes, itself and Z*itself, shared
+    by every reflected use of it.
+
+    Returns (gp_Trsf or None, child_mirrored, location matrix, location
+    translation, orthogonality deviation, orthonormalisation correction).
+    """
+    mat, tr = tgeo_matrix_components(m)
+    if parent_mirrored:
+        mat, tr = _zmirror_left(mat, tr)
+    mirrored = _det3(mat) < 0.0
+    if mirrored:
+        mat, tr = _zmirror_right(mat, tr)
+    t, dev, corr = _isometry_trsf(mat, tr, proper_only=True)
+    return t, mirrored, mat, tr, dev, corr
 
 
 def mirror_solid_z(shape, what="mirrored copy"):
@@ -1121,17 +1223,24 @@ class TGeoToStep:
         self.definitions = {}      # definition id -> (label, occ solid or None)
         self.records = {}          # definition id -> report record
         self._intern = {}          # definition key -> definition id
-        self._byvol = {}           # TGeoVolume address -> definition id
+        self._byvol = {}           # (volume address, mirrored) -> definition id
+        self._seen_vols = set()    # distinct TGeoVolume objects visited
         self._sigcache = {}        # TGeoShape address -> value signature
         self._name_slots = {}      # TGeo name -> {slot key: emitted STEP name}
         self._asm_names = {}       # volume address -> per-occurrence assembly name
         self.nvolumes = 0          # distinct TGeoVolume objects visited
         self.ncomponents = 0
         self.nbaked = 0
+        self.nscaled = 0
+        self.northo = 0            # placements snapped to the nearest rotation
+        self.ortho_worst = (0.0, 0.0, None)   # (deviation, correction, where)
+        self.ortho_records = []    # per-placement, capped
+        self.scaled_records = []   # matrices refused as rigid, with the number
         self.placed_world = set()      # (definition id, world key), --dedup-world only
         self.ndropped = 0
         self.dropped_examples = []
-        self.reflected_nodes = []
+        self.reflected_nodes = []   # TGeo placements whose matrix reflects
+        self.nmirrored_components = 0   # components that place a mirrored prototype
         self.share_worst = (0.0, None)   # the shared-definition capacity self-check
         self.t0 = time.time()
 
@@ -1153,6 +1262,7 @@ class TGeoToStep:
             "capacity_cm3": None,
             "occVolume_cm3": None,
             "relDev": None,
+            "mirrored": False,
             "sharedByVolumes": 1,
         })
         rec.update(kw)
@@ -1212,6 +1322,33 @@ class TGeoToStep:
             nm = self._emit_name(vol, ("vol", a))
             self._asm_names[a] = nm
         return nm
+
+    def _note_orthonormalised(self, where, dev, corr):
+        """Record a placement matrix that had to be snapped to the nearest rotation.
+
+        The correction is not absorbed silently: it is counted, the worst is in the
+        report summary and the first 50 are listed with their numbers.
+        """
+        if corr <= _ORTHO_NOISE:
+            return          # double-precision dust, not a correction
+        self.northo += 1
+        if len(self.ortho_records) < 50:
+            self.ortho_records.append({"placement": where,
+                                       "orthogonalityDeviation": dev,
+                                       "rotationCorrection": corr})
+        if dev > self.ortho_worst[0]:
+            self.ortho_worst = (dev, corr, where)
+
+    def _note_scaled(self, where, child, dev):
+        """A placement matrix refused as a rigid one: say so, with the number."""
+        self.nscaled += 1
+        self.scaled_records.append({"placement": where,
+                                    "volume": str(child.GetName()),
+                                    "orthogonalityDeviation": dev})
+        self.log(f"  [WARN] {where}: placement matrix is not an isometry "
+                 f"(|M^T M - I| = {dev:.3e} > {_ORTHO_TOL:.0e}); baking it into a "
+                 f"private copy of {child.GetName()}"
+                 + (", whose daughters cannot follow" if child.GetNdaughters() else ""))
 
     def _note_shared(self, did, vol):
         """Price a shared definition against the sharing volume's own capacity.
@@ -1281,18 +1418,37 @@ class TGeoToStep:
         """Return the XCAF label for `vol`, building it (once) if needed."""
         return self.definitions[self.build_def(vol, depth)][0]
 
-    def build_def(self, vol, depth=0):
-        """The definition id of `vol`; `self.definitions[id]` is (label, solid)."""
+    def build_def(self, vol, depth=0, mirrored=False):
+        """The definition id of `vol`; `self.definitions[id]` is (label, solid).
+
+        `mirrored` asks for the volume's Z-mirrored prototype instead of the volume
+        itself; see `child_location`.
+        """
         a = obj_id(vol)
-        hit = self._byvol.get(a)
+        k = (a, mirrored)
+        hit = self._byvol.get(k)
         if hit is not None:
             return hit
-        self.nvolumes += 1
-        did = self._build_def(vol, depth)
-        self._byvol[a] = did
+        if a not in self._seen_vols:
+            self._seen_vols.add(a)
+            self.nvolumes += 1
+        did = self._build_def(vol, depth, mirrored)
+        self._byvol[k] = did
         return did
 
-    def _build_def(self, vol, depth):
+    def _own_solid(self, vol, wanted, mirrored):
+        """The volume's own OCCT solid, Z-mirrored if this is the prototype."""
+        if not wanted:
+            return None, "excluded by --include-name"
+        occ, reason = self._solid_for(vol)
+        if occ is None or not mirrored:
+            return occ, reason
+        try:
+            return mirror_solid_z(occ, f"{vol.GetName()}: mirrored prototype"), None
+        except ShapeDeclined as e:
+            return None, str(e)
+
+    def _build_def(self, vol, depth, mirrored=False):
         name = str(vol.GetName())
         nd = int(vol.GetNdaughters())
         descend = nd > 0 and (self.opts.max_depth is None or depth < self.opts.max_depth)
@@ -1301,15 +1457,16 @@ class TGeoToStep:
         sig = self._shape_sig(vol)
 
         if not descend:
-            slot = ("shape", sig)
-            did = self._kid(("leaf", name, sig, wanted))
+            did = self._kid(("leaf", name, sig, wanted, mirrored))
             if did in self.definitions:
                 self._note_shared(did, vol)
                 return did
-            occ, reason = ((None, "excluded by --include-name") if not wanted
-                           else self._solid_for(vol))
-            emitted = self._emit_name(vol, slot) if occ is not None else name
-            rec = self._record(did, vol, emitted,
+            occ, reason = self._own_solid(vol, wanted, mirrored)
+            emitted = self._emit_name(vol, ("shape", sig)) if occ is not None else name
+            if occ is not None and mirrored:
+                emitted += "__mirrored"
+                self.nbaked += 1
+            rec = self._record(did, vol, emitted, mirrored=mirrored,
                                converted=occ is not None, reason=reason)
             if occ is None:
                 self.definitions[did] = (None, None)
@@ -1324,30 +1481,42 @@ class TGeoToStep:
         # first, so that the definition key can quote them: two same-named volumes
         # are the same definition only if their own shape AND their whole placed
         # content agree, which is the dedup the name key used to claim.
-        occ, reason = ((None, "excluded by --include-name") if not wanted
-                       else self._solid_for(vol))
+        occ, reason = self._own_solid(vol, wanted, mirrored)
         emit_body = (occ is not None and self.opts.mother_bodies
                      and not (depth == 0 and self.opts.skip_top_body))
         plan = []
         for i in range(nd):
             node = vol.GetNode(i)
-            cdid = self.build_def(node.GetVolume(), depth + 1)
+            child = node.GetVolume()
+            m = node.GetMatrix()
+            t, cmir, lmat, ltr, dev, corr = child_location(mirrored, m)
+            if matrix_reflects(m):
+                self.reflected_nodes.append(f"{name}/{node.GetName()}")
+            if cmir:
+                self.nmirrored_components += 1
+            self._note_orthonormalised(f"{name}/{node.GetName()}", dev, corr)
+            if t is None:
+                # Not an isometry -- a genuine non-uniform scale.  There is no
+                # prototype for that, so it stays a baked private copy.
+                self._bake_scaled(vol, node, child, depth, plan, dev)
+                continue
+            cdid = self.build_def(child, depth + 1, cmir)
             if self.definitions[cdid][0] is None:
                 continue
-            m = node.GetMatrix()
-            cmat, ctr = tgeo_matrix_components(m)
-            plan.append((cdid, self._world_key(cmat, ctr), str(node.GetName()), m,
-                         node.GetVolume()))
+            plan.append((cdid, self._world_key(lmat, ltr), str(node.GetName()), t))
 
-        did = self._kid(("asm", name, sig, wanted, emit_body,
+        did = self._kid(("asm", name, sig, wanted, emit_body, mirrored,
                          bool(self.opts.carve_mothers),
                          tuple((p[0], p[1]) for p in plan)))
         if did in self.definitions:
             self._note_shared(did, vol)
             return did
 
-        emitted = self._emit_name(vol, ("vol", obj_id(vol)))
-        rec = self._record(did, vol, emitted, converted=occ is not None, reason=reason)
+        base = self._emit_name(vol, ("vol", obj_id(vol)))
+        mir = "__mirrored" if mirrored else ""
+        emitted = base + mir
+        rec = self._record(did, vol, emitted, mirrored=mirrored,
+                           converted=occ is not None, reason=reason)
         if occ is not None:
             self._verify(vol, occ, rec)
 
@@ -1355,35 +1524,10 @@ class TGeoToStep:
         TDataStd_Name.Set(asm, emitted)
         ncomp0 = self.ncomponents
         placed_children = []
-        for (cdid, _mk, nodename, m, child) in plan:
-            clab = self.definitions[cdid][0]
-            t = tgeo_matrix_to_trsf(m)
-            if t is None:
-                # A reflecting or scaling placement cannot be a STEP component
-                # location, so bake it into a private copy of the child solid.
-                self.reflected_nodes.append(f"{name}/{nodename}")
-                csolid = self.definitions[cdid][1]
-                if csolid is None:
-                    self._record(cdid, child, self.records.get(cdid, {}).get(
-                        "emittedName", str(child.GetName())),
-                        reason="reflected placement of a volume with daughters "
-                               "cannot be baked")
-                    continue
-                try:
-                    baked = apply_tgeo_matrix(csolid, m, "reflected placement")
-                except ShapeDeclined as e:
-                    self._record(cdid, child, self.records.get(cdid, {}).get(
-                        "emittedName", str(child.GetName())), reason=str(e))
-                    continue
-                blab = self.shape_tool.AddShape(baked, False)
-                cname = self.records.get(cdid, {}).get("emittedName",
-                                                       str(child.GetName()))
-                TDataStd_Name.Set(blab, f"{cname}__mirrored")
-                comp = self.shape_tool.AddComponent(asm, blab, TopLoc_Location(gp_Trsf()))
-                self.nbaked += 1
-            else:
-                comp = self.shape_tool.AddComponent(asm, clab, TopLoc_Location(t))
-                placed_children.append((self.definitions[cdid][1], t))
+        for (cdid, _mk, nodename, t) in plan:
+            comp = self.shape_tool.AddComponent(asm, self.definitions[cdid][0],
+                                                TopLoc_Location(t))
+            placed_children.append((self.definitions[cdid][1], t))
             TDataStd_Name.Set(comp, nodename)
             self.ncomponents += 1
 
@@ -1392,11 +1536,11 @@ class TGeoToStep:
             if self.opts.carve_mothers:
                 body = self._carve(occ, placed_children, name) or occ
             blab = self.shape_tool.AddShape(body, False)
-            TDataStd_Name.Set(blab, f"{emitted}__body")
+            TDataStd_Name.Set(blab, f"{base}__body{mir}")
             comp = self.shape_tool.AddComponent(asm, blab, TopLoc_Location(gp_Trsf()))
-            TDataStd_Name.Set(comp, f"{emitted}__body")
+            TDataStd_Name.Set(comp, f"{base}__body{mir}")
             self.ncomponents += 1
-            rec["bodyComponent"] = f"{emitted}__body"
+            rec["bodyComponent"] = f"{base}__body{mir}"
         elif occ is not None:
             rec["bodyComponent"] = None
             rec["reason"] = "mother solid omitted (--no-mother-bodies/--skip-top-body)"
@@ -1409,6 +1553,28 @@ class TGeoToStep:
             return did
         self.definitions[did] = (asm, occ)
         return did
+
+    def _bake_scaled(self, vol, node, child, depth, plan, dev=None):
+        """A non-uniformly scaling placement: bake it, as there is no prototype."""
+        self._note_scaled(f"{vol.GetName()}/{node.GetName()}", child, dev)
+        cdid = self.build_def(child, depth + 1, False)
+        csolid = self.definitions[cdid][1]
+        cname = self.records.get(cdid, {}).get("emittedName", str(child.GetName()))
+        if csolid is None:
+            self._record(cdid, child, cname,
+                         reason="scaling placement of a volume with daughters "
+                                "cannot be baked")
+            return
+        try:
+            baked = apply_tgeo_matrix(csolid, node.GetMatrix(), "scaling placement")
+        except ShapeDeclined as e:
+            self._record(cdid, child, cname, reason=str(e))
+            return
+        blab = self.shape_tool.AddShape(baked, False)
+        TDataStd_Name.Set(blab, f"{cname}__scaled")
+        sdid = self._kid(("scaled", obj_id(node)))
+        self.definitions[sdid] = (blab, baked)
+        plan.append((sdid, ("scaled", obj_id(node)), str(node.GetName()), gp_Trsf()))
 
     # ------------------------------------------------------------------
 
@@ -1426,19 +1592,20 @@ class TGeoToStep:
         tr = [sum(pmat[i][k] * ctr[k] for k in range(3)) + ptr[i] for i in range(3)]
         return mat, tr
 
-    def _shared_definition(self, vol, kind):
+    def _shared_definition(self, vol, kind, mirrored=False):
         """The shared XCAF definition of a volume's own solid (built once).
 
         `kind` is "leaf" for a volume without daughters and "body" for the mother
         solid of one with daughters; both are keyed on the volume's *name and shape
-        value*, never on the name alone.
+        value*, never on the name alone.  `mirrored` asks for the Z-mirrored
+        prototype, which every reflected use of the volume shares.
         """
         sig = self._shape_sig(vol)
-        did = self._kid((kind, str(vol.GetName()), sig, True))
+        did = self._kid((kind, str(vol.GetName()), sig, True, mirrored))
         if did in self.definitions:
             self._note_shared(did, vol)
             return did
-        occ, reason = self._solid_for(vol)
+        occ, reason = self._own_solid(vol, True, mirrored)
         # A mother body shares the slot of its own assembly label, so the two carry
         # one disambiguated base name between them.
         slot = ("vol", obj_id(vol)) if kind == "body" else ("shape", sig)
@@ -1446,7 +1613,12 @@ class TGeoToStep:
             else str(vol.GetName())
         if kind == "body":
             emitted = emitted + "__body"
-        rec = self._record(did, vol, emitted, converted=occ is not None, reason=reason)
+        if occ is not None and mirrored:
+            emitted = emitted + "__mirrored"
+            self.nbaked += 1
+        # (body first, then the mirror suffix: `X__body__mirrored`)
+        rec = self._record(did, vol, emitted, mirrored=mirrored,
+                           converted=occ is not None, reason=reason)
         if occ is None:
             self.definitions[did] = (None, None)
             return did
@@ -1458,23 +1630,28 @@ class TGeoToStep:
         self.definitions[did] = (lab, occ)
         return did
 
-    def build_world(self, vol, depth=0, wmat=None, wtr=None, path=""):
+    def build_world(self, vol, depth=0, wmat=None, wtr=None, path="",
+                    mirrored=False):
         """Per-occurrence walk that drops coincident (volume, world transform) pairs.
 
         Assembly labels are one per *occurrence* so that a dropped duplicate deep in
         a shared subtree does not delete its needed siblings; leaf solids stay one
-        definition per (name, shape value), which is what the round trip is about.
-        The coincidence key is the *definition*, which is what `O2_CADtoTGeo.py`
-        checks: two distinct volumes that happen to share a name are no longer a
-        coincidence once they are two definitions.
+        definition per (name, shape value, mirrored), which is what the round trip
+        is about.  The coincidence key is the *definition*, which is what
+        `O2_CADtoTGeo.py` checks: two distinct volumes that happen to share a name
+        are no longer a coincidence once they are two definitions.
+
+        `wmat`/`wtr` are the volume's true TGeo world transform, which is what the
+        coincidence key needs; `mirrored` says whether the label being built is the
+        Z-mirrored prototype, which is what the component locations need.
         """
         if wmat is None:
             wmat = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]
             wtr = [0., 0., 0.]
         name = str(vol.GetName())
         a = obj_id(vol)
-        if a not in self._byvol:
-            self._byvol[a] = None
+        if a not in self._seen_vols:
+            self._seen_vols.add(a)
             self.nvolumes += 1
         nd = int(vol.GetNdaughters())
         descend = nd > 0 and (self.opts.max_depth is None or depth < self.opts.max_depth)
@@ -1483,7 +1660,7 @@ class TGeoToStep:
             return None
 
         if not descend:
-            did = self._shared_definition(vol, "leaf")
+            did = self._shared_definition(vol, "leaf", mirrored)
             lab = self.definitions[did][0]
             if lab is None:
                 return None
@@ -1507,43 +1684,26 @@ class TGeoToStep:
             child = node.GetVolume()
             m = node.GetMatrix()
             cmat, ctr = self._compose(wmat, wtr, m)
-            clab = self.build_world(child, depth + 1, cmat, ctr,
-                                    f"{path}/{node.GetName()}")
-            if clab is None:
-                continue
-            t = tgeo_matrix_to_trsf(m)
-            if t is None:
-                # A reflecting or scaling placement cannot be a STEP component
-                # location, so bake it into a private copy of the child solid.
+            t, cmir, _lmat, _ltr, dev, corr = child_location(mirrored, m)
+            if matrix_reflects(m):
                 self.reflected_nodes.append(f"{name}/{node.GetName()}")
-                cdid = self._byvol.get(obj_id(child))
-                csolid = self.definitions.get(cdid, (None, None))[1] \
-                    if cdid is not None else None
-                if csolid is None:
-                    cdid = self._shared_definition(child, "leaf")
-                    csolid = self.definitions[cdid][1]
-                if csolid is None:
-                    self._record(cdid, child, str(child.GetName()),
-                                 reason="reflected placement of a volume with "
-                                        "daughters cannot be baked")
-                    continue
-                try:
-                    baked = apply_tgeo_matrix(csolid, m, "reflected placement")
-                except ShapeDeclined as e:
-                    self._record(cdid, child, str(child.GetName()), reason=str(e))
-                    continue
-                blab = self.shape_tool.AddShape(baked, False)
-                cname = self.records.get(cdid, {}).get("emittedName",
-                                                       str(child.GetName()))
-                TDataStd_Name.Set(blab, f"{cname}__mirrored")
-                self.nbaked += 1
-                comps.append((blab, gp_Trsf(), str(node.GetName())))
+            if cmir:
+                self.nmirrored_components += 1
+            self._note_orthonormalised(f"{name}/{node.GetName()}", dev, corr)
+            if t is None:
+                # Not an isometry -- a genuine non-uniform scale.  There is no
+                # prototype for that, so it stays a baked private copy.
+                self._bake_scaled_world(child, node, cmat, ctr, comps, dev)
+                continue
+            clab = self.build_world(child, depth + 1, cmat, ctr,
+                                    f"{path}/{node.GetName()}", cmir)
+            if clab is None:
                 continue
             comps.append((clab, t, str(node.GetName())))
 
         if (self.opts.mother_bodies
                 and not (depth == 0 and self.opts.skip_top_body)):
-            bdid = self._shared_definition(vol, "body")
+            bdid = self._shared_definition(vol, "body", mirrored)
             blab = self.definitions[bdid][0]
             if blab is not None:
                 key = (bdid, self._world_key(wmat, wtr))
@@ -1557,12 +1717,38 @@ class TGeoToStep:
         if not comps:
             return None
         asm = self.shape_tool.NewShape()
-        TDataStd_Name.Set(asm, self._occ_asm_name(vol))
+        TDataStd_Name.Set(asm, self._occ_asm_name(vol)
+                          + ("__mirrored" if mirrored else ""))
         for (clab, t, cname) in comps:
             comp = self.shape_tool.AddComponent(asm, clab, TopLoc_Location(t))
             TDataStd_Name.Set(comp, cname)
             self.ncomponents += 1
         return asm
+
+    def _bake_scaled_world(self, child, node, cmat, ctr, comps, dev=None):
+        """A non-uniformly scaling placement in the per-occurrence walk."""
+        self._note_scaled(str(node.GetName()), child, dev)
+        cdid = self._shared_definition(child, "leaf", False)
+        csolid = self.definitions[cdid][1]
+        cname = self.records.get(cdid, {}).get("emittedName", str(child.GetName()))
+        if csolid is None:
+            self._record(cdid, child, cname,
+                         reason="scaling placement of a volume with daughters "
+                                "cannot be baked")
+            return
+        key = (("scaled", cdid), self._world_key(cmat, ctr))
+        if key in self.placed_world:
+            self.ndropped += 1
+            return
+        try:
+            baked = apply_tgeo_matrix(csolid, node.GetMatrix(), "scaling placement")
+        except ShapeDeclined as e:
+            self._record(cdid, child, cname, reason=str(e))
+            return
+        self.placed_world.add(key)
+        blab = self.shape_tool.AddShape(baked, False)
+        TDataStd_Name.Set(blab, f"{cname}__scaled")
+        comps.append((blab, gp_Trsf(), str(node.GetName())))
 
     # ------------------------------------------------------------------
 
@@ -1631,7 +1817,15 @@ class TGeoToStep:
                             and not (r["isAssembly"] or r["shapeClass"] == "TGeoShapeAssembly")),
             "assemblies": sum(1 for r in recs if r["ndaughters"] > 0),
             "components": self.ncomponents,
-            "bakedMirrorCopies": self.nbaked,
+            "mirroredPrototypes": self.nbaked,
+            "mirroredComponents": self.nmirrored_components,
+            "scaledPlacementsBaked": self.nscaled,
+            "scaledPlacements": self.scaled_records[:50],
+            "orthonormalisedPlacements": self.northo,
+            "maxOrthogonalityDeviation": self.ortho_worst[0],
+            "maxRotationCorrection": self.ortho_worst[1],
+            "worstOrthogonalityPlacement": self.ortho_worst[2],
+            "orthonormalisations": self.ortho_records[:50],
             "coincidentPlacementsDropped": self.ndropped,
             "coincidentPlacementExamples": self.dropped_examples,
             "reflectedPlacements": self.reflected_nodes[:50],
@@ -2189,8 +2383,156 @@ def self_test():
         caught = True
     r8.append(("the volume invariant rejects a transform that is not an isometry "
                "(negative control)", caught, None, None, None))
+    # The placement matrices ALICE actually writes are not exactly orthogonal, so
+    # the band has to be priced against the input as well as against the defect.
+    sloppy = [[+0.681268213, 0.0, +0.732033940],
+              [0.0, 1.0, 0.0],
+              [-0.732033894, 0.0, +0.681268164]]     # TRD BM49/B051_1, verbatim
+    dev0 = orthogonality_deviation(sloppy)
+    fixed, dev1, corr = orthonormalise(sloppy)
+    print(f"    TRD BM49/B051_1: |M^T M - I| {dev0:.3e} -> "
+          f"{orthogonality_deviation(fixed):.3e}, rotation moved by {corr:.3e}")
+    r8.append((f"a hand-written rotation is snapped to an exact one "
+               f"({dev0:.2e} -> {orthogonality_deviation(fixed):.2e})",
+               dev0 > 1e-9 and orthogonality_deviation(fixed) < 1e-14
+               and 0.0 < corr < 1e-6, None, None, None))
+    exact_rot = tgeo_matrix_components(ROOT.TGeoRotation("orr", 30, 40, 50))[0]
+    r8.append((f"an exact rotation is left alone to the double-precision floor "
+               f"({orthonormalise(exact_rot)[2]:.1e})",
+               orthonormalise(exact_rot)[2] <= 1e-15, None, None, None))
+    sloppy_refl = [[r[0], r[1], -r[2]] for r in sloppy]
+    r8.append(("the snap keeps a reflection a reflection",
+               _det3(orthonormalise(sloppy_refl)[0]) < 0, None, None, None))
+    r8.append(("a genuine non-uniform scale is still refused as a placement "
+               "(negative control)",
+               _isometry_trsf([[1., 0., 0.], [0., 1., 0.], [0., 0., 2.]],
+                              [0., 0., 0.], True)[0] is None, None, None, None))
     total += len(r8)
     failures += _print_suite("mirror baking: exact isometry, analytic carriers", r8)
+
+    # ---- suite 9: a reflected subtree is emitted, and lands where TGeo puts it --
+    # A reflecting placement of a volume *with daughters* used to be dropped, with
+    # the already-built subtree surviving as an orphaned free shape at the identity
+    # -- ABSO's whole front absorber, 44 % of TPC, 137 260 TRD placements.  The
+    # reflection is now pushed down to the leaves as Z-mirrored prototypes, and
+    # TGeoManager's own world matrix is the oracle for where they land.
+    r9 = []
+    mgr3 = ROOT.TGeoManager("stmgr3", "reflected-subtree self-test")
+    w3 = mgr3.MakeBox("rworld", ROOT.nullptr, 100, 100, 100)
+    mgr3.SetTopVolume(w3)
+    grp3 = mgr3.MakeVolumeAssembly("rgrp")        # an assembly: no solid to bake
+    rtube = mgr3.MakeTube("rtube", ROOT.nullptr, 1, 2, 5)
+    rbox = mgr3.MakeBox("rbox", ROOT.nullptr, 1, 2, 3)
+    rflip = mgr3.MakeBox("rflip", ROOT.nullptr, 1, 1, 4)
+    refl3 = ROOT.TGeoRotation("reflz3")
+    refl3.ReflectZ(True)
+    grp3.AddNode(rtube, 1, ROOT.TGeoTranslation(0, 0, 7))
+    grp3.AddNode(rbox, 1, ROOT.TGeoCombiTrans(3, 0, 2,
+                                              ROOT.TGeoRotation("rr3", 20, 30, 40)))
+    grp3.AddNode(rflip, 1, ROOT.TGeoCombiTrans(0, 4, 1, refl3))   # already mirrored
+    w3.AddNode(grp3, 1, ROOT.TGeoTranslation(0, 0, 20))
+    w3.AddNode(grp3, 2, ROOT.TGeoCombiTrans(0, 0, -20, refl3))
+    mgr3.CloseGeometry()
+    conv3 = TGeoToStep(o)
+    conv3.build(mgr3.GetTopVolume())
+    tmp3 = os.path.join(tempfile.mkdtemp(), "reflected.step")
+    conv3.write(tmp3)
+
+    d3 = TDocStd_Document("rb3")
+    rd3 = STEPCAFControl_Reader()
+    rd3.SetNameMode(True)
+    rd3.ReadFile(tmp3)
+    rd3.Transfer(d3)
+    st3 = XCAFDoc_DocumentTool.ShapeTool(d3.Main())
+    roots3 = TDF_LabelSequence()
+    st3.GetFreeShapes(roots3)
+    from OCC.Core.TopLoc import TopLoc_Location as _TL
+    found3 = {}
+
+    def _walk3(lab, loc):
+        ch = TDF_LabelSequence()
+        st3.GetComponents(lab, ch)
+        if ch.Length() == 0:
+            t = loc.Transformation()
+            mat = [[t.Value(i + 1, j + 1) for j in range(3)] for i in range(3)]
+            tr = [t.Value(i + 1, 4) for i in range(3)]
+            nm = str(lab.GetLabelName())
+            if nm.endswith("__mirrored"):
+                mat = [[mat[i][0], mat[i][1], -mat[i][2]] for i in range(3)]
+            found3.setdefault(nm, []).append((mat, tr))
+            return
+        for i in range(ch.Length()):
+            c = ch.Value(i + 1)
+            cloc = loc.Multiplied(st3.GetLocation(c))
+            if st3.IsReference(c):
+                ref = TDF_Label()
+                st3.GetReferredShape(c, ref)
+                _walk3(ref, cloc)
+            else:
+                _walk3(c, cloc)
+
+    for i in range(roots3.Length()):
+        _walk3(roots3.Value(i + 1), _TL())
+
+    def _tgeo_world(path):
+        if not mgr3.cd(path):
+            return None
+        gm = mgr3.GetCurrentMatrix()
+        rr = gm.GetRotationMatrix()
+        tt = gm.GetTranslation()
+        return ([[float(rr[3 * i + j]) for j in range(3)] for i in range(3)],
+                [float(tt[i]) * SCALE_TO_MM for i in range(3)])
+
+    def _worst(step_entries, want):
+        best = None
+        for (mat, tr) in step_entries:
+            d = max(max(abs(mat[i][j] - want[0][i][j]) for j in range(3))
+                    for i in range(3))
+            d = max(d, max(abs(tr[i] - want[1][i]) for i in range(3)))
+            if best is None or d < best:
+                best = d
+        return best if best is not None else float("inf")
+
+    nleaf3 = sum(len(v) for v in found3.values())
+    r9.append((f"exactly one free shape, no orphaned subtree "
+               f"({roots3.Length()} root(s))", roots3.Length() == 1,
+               None, None, None))
+    r9.append((f"every leaf occurrence is emitted ({nleaf3} == 7)",
+               nleaf3 == 7, None, None, None))
+    for (nm, path, mirror_expected) in (
+            ("rtube", "/rworld_1/rgrp_2/rtube_1", True),
+            ("rbox", "/rworld_1/rgrp_2/rbox_1", True),
+            ("rflip", "/rworld_1/rgrp_2/rflip_1", False),
+            ("rtube", "/rworld_1/rgrp_1/rtube_1", False)):
+        want = _tgeo_world(path)
+        key3 = nm + ("__mirrored" if mirror_expected else "")
+        got = found3.get(key3, [])
+        d = _worst(got, want) if want else float("inf")
+        r9.append((f"{path} lands where TGeo puts it, as `{key3}` (worst "
+                   f"|delta| {d:.2e} mm)", bool(got) and d < 1e-9,
+                   None, None, None))
+    # the control on the control: placing the prototype at M instead of M*Z is the
+    # obvious wrong convention, and it must land somewhere else.
+    want = _tgeo_world("/rworld_1/rgrp_2/rbox_1")
+    wrong = [([[m[i][0], m[i][1], -m[i][2]] for i in range(3)], t)
+             for (m, t) in found3.get("rbox__mirrored", [])]
+    dwrong = _worst(wrong, want)
+    r9.append((f"the un-conjugated convention would be wrong by {dwrong:.2e} mm "
+               f"(negative control)", dwrong > 1e-6, None, None, None))
+    # rflip is placed reflected inside rgrp, so it is the mirrored prototype under
+    # the plain rgrp and the plain volume under the reflected one: the parities
+    # multiply, and each shows up exactly once.
+    r9.append(("a reflection under a reflection is the plain volume again",
+               len(found3.get("rflip", [])) == 1
+               and len(found3.get("rflip__mirrored", [])) == 1,
+               None, None, None))
+    r9.append((f"3 mirrored solid definitions carry 4 mirrored components, rather "
+               f"than one bake per placement ({conv3.nbaked}, "
+               f"{conv3.nmirrored_components})",
+               conv3.nbaked == 3 and conv3.nmirrored_components == 4,
+               None, None, None))
+    total += len(r9)
+    failures += _print_suite("reflected subtrees: mirrored prototypes, placed", r9)
 
     print(f"\n{total} checks, {failures} failures")
     sys.stdout.flush()
@@ -2274,7 +2616,18 @@ def main(argv=None):
         print(f"{rep['coincidentPlacementsDropped']} coincident placement(s) dropped "
               f"(--dedup-world); e.g. {rep['coincidentPlacementExamples'][:2]}")
     if rep["nReflectedPlacements"]:
-        print(f"{rep['nReflectedPlacements']} reflecting placements baked as mirrored copies")
+        print(f"{rep['nReflectedPlacements']} reflecting placement(s); "
+              f"{rep['mirroredComponents']} component(s) place a mirrored prototype, "
+              f"drawn from {rep['mirroredPrototypes']} mirrored definition(s)")
+    if rep["scaledPlacementsBaked"]:
+        print(f"[WARN] {rep['scaledPlacementsBaked']} placement matrix/matrices are not "
+              f"isometries and were baked, not placed: "
+              f"{[r['placement'] for r in rep['scaledPlacements'][:3]]}")
+    if rep["orthonormalisedPlacements"]:
+        print(f"{rep['orthonormalisedPlacements']} placement matrix/matrices snapped to "
+              f"the nearest rotation; worst |M^T M - I| "
+              f"{rep['maxOrthogonalityDeviation']:.3e}, correction "
+              f"{rep['maxRotationCorrection']:.3e} ({rep['worstOrthogonalityPlacement']})")
     if rep["nDisambiguatedNames"]:
         ex = sorted(rep["nameDisambiguation"].items())[:3]
         print(f"{rep['nDisambiguatedNames']} TGeo name(s) cover more than one definition "
