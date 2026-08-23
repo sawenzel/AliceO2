@@ -147,12 +147,112 @@ is its reference. This is worth a ROOT bug report.
   changed count (or a geometry read back from a file) rebuilds on the next query, the same lazy
   contract as the base class's `fBBoxOK`.
 
-Usage: `O2BVHAssembly::MakeBVHAssembly(assemblyVolume)` swaps the shape and drops the volume's
-`TGeoVoxelFinder`, which nothing reads any more. It must be called **after**
-`TGeoManager::CloseGeometry()`, because closing re-voxelizes every volume (it does not restore
-ROOT's shape, so the acceleration itself survives an earlier call — only the memory saving is
-lost).
+* **`Safety(point, kFALSE)` prunes on one third of the squared box distance, not on the box
+  distance itself.** ROOT's `TGeoBBox::Safety` from outside returns the largest per-axis gap, in
+  the daughter's own frame, not the Euclidean distance — a point off a corner by (3, 4, 0) is 5
+  away and ROOT says 4. Pruning on the Euclidean distance therefore discards daughters that would
+  have answered less. The sound bound is Euclidean/sqrt(3), because max_i d_i is at least the norm
+  over sqrt(3), a rigid node matrix preserves that norm, and the daughter's box is inside the node
+  box. Squared, one third. `TGeoShapeAssembly::Safety` omits exactly this step; section 7 measures
+  what it costs ROOT.
 
-## 6. Results
+Usage: `O2BVHAssembly::MakeBVHAssembly(assemblyVolume)` swaps the shape, and by default leaves the
+volume's `TGeoVoxelFinder` in place — section 6 says why, and it is not the reason one would
+guess. Call it **after** `TGeoManager::CloseGeometry()`; closing re-voxelizes every volume, which
+does not restore ROOT's shape, so an earlier call still leaves the acceleration in place.
 
-*(section 7 of this document, written after the class was measured)*
+## 6. What the shape level does and does not reach
+
+Measured, and it corrects section 1 in one important place.
+
+`TGeoNavigator::SearchNode`, once it has *descended into* the assembly node, does not go back
+through the shape: it reads `vol->GetVoxels()` and walks the check list itself, falling back to a
+linear loop over all daughters when there is no voxel finder. The shape's `Contains` is called on
+the way *in* — when the assembly is a daughter being tested from its mother, and from
+`IsSameLocation` / `FindInCluster` — but the point-location descent inside the assembly is
+navigator-level code.
+
+The first version of `MakeBVHAssembly` deleted the voxel finder, on the reasoning that nothing
+reads it once the shape answers the queries. That reasoning was wrong, and the measurement says so
+plainly (oTOF, flat):
+
+| | voxel finder kept | voxel finder dropped |
+| --- | --- | --- |
+| `FindNode` | 4.29 µs | 814 µs |
+| transport | 4.23 µs/step | 746 µs/step |
+
+So `dropVoxels` now defaults to false and is documented as a benchmarking switch. What the shape
+level *does* reach is `DistFromOutside`, `Safety(point, kFALSE)`, and the mother-side `Contains`.
+
+## 7. Acceptance
+
+Same corpus, same conditions as section 3 (single-threaded, load average 0.3–0.9), 100 000 query
+points, `MakeBVHAssembly` applied to every assembly volume in the geometry.
+
+**Flat — one assembly, 62 628 daughters.**
+
+| query | ROOT | O2BVHAssembly | |
+| --- | --- | --- | --- |
+| `Contains` | 4.05 µs | **0.95 µs** | 4.3× |
+| `DistFromOutside` | 0.17 µs, 0/100 000 crossings found | 4.05 µs, 99 995/100 000 found | correct where ROOT is not; 224× faster than the 905 µs leaf loop it agrees with (0/300 disagreements) |
+| `Safety(out)` | 43.4 µs | **1.51 µs** | 28.7× |
+| `FindNode` | 4.21 µs | 4.29 µs | 1.0 — section 6 |
+| transport | 27.3 µs/step | **4.23 µs/step** | 6.5× |
+| build | `Voxelize` 0.48 s | 51.5 ms, 66 592 primitives over 208 volumes | 9× cheaper |
+| structure size | — | 4.06 MB | |
+
+**Nested — 207 assemblies, at most 68 daughters each (oTOF as converted).**
+
+| query | ROOT | O2BVHAssembly | |
+| --- | --- | --- | --- |
+| `Contains` | 0.49 µs | 0.68 µs | 0.72× — *slower* |
+| `DistFromOutside` | 0.11 µs, 57/100 000 found | 4.05 µs, 99 995/100 000 found | correct where ROOT is not |
+| `Safety(out)` | 2.07 µs | **1.00 µs** | 2.1× |
+| `FindNode` | 0.77 µs | 0.89 µs | 0.87× — *slower* |
+| transport | 3.32 µs/step | **1.73 µs/step** | 1.9× |
+| build | — | 1.3 ms, 3 964 primitives | |
+| structure size | — | 0.24 MB | |
+
+Read plainly: **the class earns its keep where N is large.** On the flat 62 628-daughter assembly
+it is 4–29× faster on the queries it owns and 6.5× faster in transport. On the nested tree, where
+no single assembly has more than 68 daughters, ROOT's voxel finder is *better* at `Contains` than
+a BVH traversal — the tree walk costs more than 68 box tests do — and only `Safety` and transport
+improve. Transport improves on both, and by more than the per-query numbers suggest, because the
+navigator's `Safety` is a large share of a step and because the crossings ROOT loses are found.
+
+`DistFromOutside` looks 20–35× *slower* than ROOT in these tables. It is not: ROOT is returning
+`Big()` without doing the work (section 4). The honest comparison is against the leaf loop, which
+computes the same answer: 905 µs against 4.05 µs, a factor 224.
+
+## 8. Limitations, and what to decide next
+
+* **No Geant4 transport test.** The class is exercised by ROOT navigation (`FindNode`,
+  `FindNextBoundaryAndStep`) and by the 22-case unit suite, not by an `o2-sim` run with hits. The
+  identity path is the one ROOT uses, so hits should follow, but that is an argument, not a
+  measurement.
+* **Single-threaded only.** The BVH is read-only after construction and holds no per-query state,
+  so it should be thread-safe where ROOT's shape is; not measured. The lazy rebuild is *not*
+  thread-safe, exactly as the base class's `fBBoxOK` is not.
+* **The nested corpus does not want this class.** Applying it to every assembly of the converted
+  oTOF makes `Contains` and `FindNode` slightly worse. If it is used there at all it should be
+  applied selectively, to the assemblies above some daughter count.
+* **`Safety(point, kTRUE)` is inherited unchanged** — it resolves the daughter the navigator is
+  already in and has nothing to accelerate.
+* **The pruning bound costs a factor sqrt(3)** because ROOT's box safety is an axis maximum rather
+  than a distance. A tighter bound would need per-shape knowledge of how loose each `Safety` is.
+
+**For Sandro, the open question:** the shape level cannot reach point location inside the
+assembly, because `TGeoNavigator::SearchNode` enumerates the assembly's daughters through the
+volume's `TGeoVoxelFinder` rather than through the shape. Three ways out, in increasing order of
+intrusiveness:
+
+1. Leave it. The voxel finder stays, costs 0.48 s to build on the flat oTOF, and does that job
+   about as well as a BVH would; the BVH takes the other three queries.
+2. Teach `TGeoVolume` to expose a pluggable daughter-search interface that `SearchNode` asks
+   before the voxel finder — a small, upstreamable ROOT change, and the natural place for an
+   Embree back end too (roadmap item d).
+3. Replace `TGeoNavigator` for these branches, which is the larger conversation the roadmap
+   already has open.
+
+And separately: **two ROOT defects fell out of this** (sections 4 and the `Safety` over-pruning
+in section 7's test messages, 69 of 2000 grid points). Both deserve a report upstream.

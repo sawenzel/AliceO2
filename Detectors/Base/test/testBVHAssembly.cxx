@@ -561,7 +561,7 @@ BOOST_AUTO_TEST_CASE(AddingADaughterRebuildsLazily)
   BOOST_CHECK_EQUAL(shape->GetNbuilt(), 2);
 }
 
-BOOST_AUTO_TEST_CASE(MakeBVHAssemblySwapsTheShapeAndDropsTheVoxels)
+BOOST_AUTO_TEST_CASE(MakeBVHAssemblySwapsTheShapeAndKeepsTheVoxels)
 {
   Grid grid = makeGrid("swap_asm", 5, 3., 1.);
   grid.manager->CloseGeometry();
@@ -569,11 +569,25 @@ BOOST_AUTO_TEST_CASE(MakeBVHAssemblySwapsTheShapeAndDropsTheVoxels)
   auto* shape = O2BVHAssembly::MakeBVHAssembly(grid.assembly);
   BOOST_REQUIRE(shape != nullptr);
   BOOST_CHECK_EQUAL(grid.assembly->GetShape(), static_cast<TGeoShape*>(shape));
-  BOOST_CHECK(grid.assembly->GetVoxels() == nullptr);
   BOOST_CHECK(grid.assembly->IsAssembly());
   BOOST_CHECK(shape->IsAssembly());
   BOOST_CHECK_EQUAL(shape->GetNbuilt(), 125);
+  // the finder stays by default: TGeoNavigator::SearchNode reads it once it is inside the
+  // assembly, and dropping it turns point location into a linear walk
+  BOOST_CHECK(grid.assembly->GetVoxels() != nullptr);
   BOOST_CHECK(O2BVHAssembly::MakeBVHAssembly(nullptr) == nullptr);
+}
+
+BOOST_AUTO_TEST_CASE(MakeBVHAssemblyCanDropTheVoxelsOnRequest)
+{
+  Grid grid = makeGrid("swap_novox_asm", 5, 3., 1.);
+  grid.manager->CloseGeometry();
+  BOOST_REQUIRE(grid.assembly->GetVoxels() != nullptr);
+  auto* shape = O2BVHAssembly::MakeBVHAssembly(grid.assembly, true);
+  BOOST_REQUIRE(shape != nullptr);
+  BOOST_CHECK(grid.assembly->GetVoxels() == nullptr);
+  const double point[3] = {0., 0., 0.};
+  BOOST_CHECK(shape->Contains(point)); // the shape itself is unaffected
 }
 
 BOOST_AUTO_TEST_CASE(NavigationFindsTheSameLeafBeforeAndAfterTheSwap)

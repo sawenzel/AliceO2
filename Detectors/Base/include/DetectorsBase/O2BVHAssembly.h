@@ -88,10 +88,15 @@ class O2BVHAssembly : public TGeoShapeAssembly
                                 Double_t step = TGeoShape::Big()) const;
   Double_t Safety_Loop(const Double_t* point, Bool_t in = kTRUE) const;
 
-  /// Replace \a volume's shape by an O2BVHAssembly and return it. With \a dropVoxels the
-  /// volume's `TGeoVoxelFinder` is deleted: nothing reads it once this shape is in place, and on
-  /// a 62 628-daughter assembly building it costs half a second.
-  static O2BVHAssembly* MakeBVHAssembly(TGeoVolumeAssembly* volume, bool dropVoxels = true);
+  /// Replace \a volume's shape by an O2BVHAssembly and return it.
+  ///
+  /// \a dropVoxels deletes the volume's `TGeoVoxelFinder` as well. **Do not**, unless you are
+  /// measuring: the finder looks redundant once this shape answers the shape-level queries, but
+  /// `TGeoNavigator::SearchNode` reads it directly once it has descended *into* the assembly, and
+  /// without it the point location falls back to a linear walk -- 4.3 to 814 microseconds per
+  /// `FindNode` on the 62 628-placement oTOF assembly. See section 6 of
+  /// scripts/geometry/Stream_AE_BVHAssembly.md.
+  static O2BVHAssembly* MakeBVHAssembly(TGeoVolumeAssembly* volume, bool dropVoxels = false);
 
  private:
   /// Rebuild if the volume gained or lost daughters since the last build (or was never built).
