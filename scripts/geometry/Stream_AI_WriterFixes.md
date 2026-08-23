@@ -27,6 +27,11 @@ mapping* declines for a reason of its own — Stream AH's item 6, degenerate pri
 `TGeoHalfSpace` — and nothing is missing for a placement reason any more. Self-test 71 → 101 checks,
 0 failures, with at least one negative control per fix.
 
+The world-frame instrument also turned up **one part that is genuinely wrong, and it is not one of
+the three**: `TPC_WSEG`'s OCCT solid is invalid and 4.6 % wrong against its `TGeoShape`, identically
+before and after these fixes, and the STEP write/read hides it (§4). That is a new forward-mapping
+defect, reported and not fixed here.
+
 ---
 
 ## 1. What was measured, and against what
@@ -49,7 +54,7 @@ never committed:
   draws points in the world, asks the STEP's own shape through its XCAF location and the source
   `TGeoShape` through `TGeoManager`'s world matrix whether each point is inside, and counts the
   disagreements. A mirrored prototype is scored exactly like any other part, which is the point of
-  having it.
+  having it. It is the only instrument here that found something the three fixes did not cause.
 
 Two lessons about the *instrument* came out of writing it, both worth keeping:
 
@@ -335,10 +340,45 @@ Points drawn in the world, the STEP's shape through its XCAF location against th
 | --- | ---: | ---: | ---: |
 | ABSO, before | 3 | 30 000 | 0 |
 | **ABSO, after** | **29** | **290 000** | **0** |
+| **TPC, after** (first 250 parts) | 250 | 499 995 | **29, all on one part** |
 
 Before the fix only three of ABSO's parts could be matched to a TGeo world transform at all — the
 three above `AFA` — so there was nothing to score. After it, every part of the reflected absorber
 scores, and none of the 290 000 points disagrees.
+
+### The one part that does disagree, and it is not the mirror
+
+TPC's 29 disagreements are all `TPC_WSEG__mirrored`, and running that one part harder makes it
+worse-looking and clearer: **all 18** of its reflected placements disagree at ~2.1 %
+(372–443 of 20 000 each), and **all 18** un-mirrored ones are perfect (0 of 20 000). That looks
+exactly like a mirror defect, and it is not one. Taking the shape out of the geometry and asking the
+three questions separately, 40 000 points in its own frame:
+
+```
+TPC_WSEG: TGeoCompositeShape  Capacity 15795.409418 cm3
+   original  vol 15838.148356   BRepCheck_Analyzer valid: False
+   mirrored  vol 15838.148356   BRepCheck_Analyzer valid: False
+   OCCT original vs TGeo          : 1835 disagreements
+   OCCT mirrored(z -> -z) vs TGeo : 1835 disagreements
+   OCCT mirrored vs OCCT original : 0 disagreements
+```
+
+**The mirror is exact** — the same volume to the last digit and not one disagreeing point in 40 000
+— and what is wrong is `TPC_WSEG`'s own solid, which is 4.6 % wrong against its `TGeoShape` and
+which `BRepCheck_Analyzer` calls **invalid**. Running the same probe against the code as it was
+before all three fixes gives byte-identical numbers: 15838.148356 cm³, invalid, 1 835 disagreements
+(1 436 where OCCT says inside and TGeo says outside, 399 the other way). It is a pre-existing
+forward-mapping defect on one composite, not a regression.
+
+What reconciles it with Stream AG's "129 parts, 1 289 990 points, 0 disagreements" is that Stream
+AG's instrument A scores the shape OCCT reads back **out of the STEP**, and the write/read rebuilds
+the B-rep and repairs it — completely for the un-mirrored part, only partly for the mirrored one.
+So the defect was invisible to every instrument the earlier streams had: the volume check sits
+inside the composite noise band, instrument A scored a healed copy, and `_check()` asks only whether
+the result contains a solid, never whether it is valid. `TPC_WSEG` is also the part `Stream_AG` §4
+already flagged for tessellating on "two degenerate two-edge planar wires" — the same degeneracy,
+seen from the forward side. Adding `BRepCheck_Analyzer` to `_check` is the obvious next move and is
+a change of scope: it would newly decline parts, so it is reported here rather than made.
 
 ## 5. The self-test — 101 checks, 0 failures
 
@@ -457,15 +497,19 @@ named, now has a mirrored prototype that tessellates for the same reason.
    reach the STEP in PIPE, ABSO and TRD: `AFassCentral` and `B045cut`, one each.
 2. **`TGeoHalfSpace`** is the only such reason in TPC, and it is 732 placements over five
    composites. Still the cheapest coverage win on the board.
-3. **A non-uniform scale on a volume with daughters** would still lose its subtree. There is no
+3. **`TPC_WSEG`'s solid is invalid and 4.6 % wrong**, before and after these fixes alike, and
+   `_check()` cannot see it because it only asks whether a solid is present. A validity check on
+   every built solid is the fix, and it is a scope change: it would newly decline parts, so it needs
+   its own measurement of how many.
+4. **A non-uniform scale on a volume with daughters** would still lose its subtree. There is no
    isometry prototype for it and the report counts it, but nothing in PIPE, ABSO, TPC or TRD
    exercises it. Whether the full Run 3 geometry does is unmeasured.
-4. **`TGeoPara`**, the last unmapped Run 3 shape class, is untouched.
-5. **The full-geometry STEP write.** The bracket is unchanged in kind but the numbers moved: TPC
+5. **`TGeoPara`**, the last unmapped Run 3 shape class, is untouched.
+6. **The full-geometry STEP write.** The bracket is unchanged in kind but the numbers moved: TPC
    writes 38 714 components and TRD 15 607, and the full model's 74 601 still segfaults. The fixes
    make the full model *smaller* (the mirror bake was 9 211 private copies), so it is worth
    re-running, and was not.
-6. **The reverse recogniser's two missing detectors** — the sloped prism and the revolved profile —
+7. **The reverse recogniser's two missing detectors** — the sloped prism and the revolved profile —
    are where the decline histograms still point, unchanged by anything here.
 
 ### What was not run, and should be said
@@ -506,6 +550,12 @@ named, now has a mirrored prototype that tessellates for the same reason.
 - **"The mirrored composite that is still 1e-4 off is the mirror."** Both definitions hold the same
   double at build time. The 1.1e-04 is `BRepGProp` integrating two 23-face composites after a STEP
   round trip, and it straddles the build-time value.
+- **"`TPC_WSEG__mirrored` disagreeing at 2.1 % at all 18 reflected placements, with all 18
+  un-mirrored ones clean, is a mirror defect."** It is the most convincing evidence in this whole
+  study and it is wrong. The mirrored solid and the original are the same point set to 0
+  disagreements in 40 000; the original is 4.6 % wrong on its own, identically before the fixes, and
+  the STEP write/read heals the un-mirrored copy while leaving the mirrored one partly broken.
+  "Only the mirrored ones are wrong" was a fact about the *repair*, not about the mirror.
 
 ## 9. Reproducing it
 
