@@ -92,7 +92,10 @@ statement for the talk.
    from three collinear points at the Pgon's z-step, which invalidated the shell and garbled
    OCCT's classifier (64 % on the operand while its volume integrated exactly). Fixed by a
    Newell-area guard in `_quad_face`; hole and composite now valid at 0/20 000 mismatches;
-   self-test 101 → **105**. Nothing to fix upstream for WSEG.
+   self-test 101 → **105**. Nothing to fix upstream for WSEG. **Re-run confirmed**
+   (`8014a988a0`): the 29 world-frame disagreements are 0 over 1.2 M points, volume unchanged to
+   the digit, and TPC's tier table becomes CSG 82 / surface 90 / **tessellated 0** — nothing in
+   TPC ships as mesh any more; exact-surface extraction 172/172.
 
    **Still open on the writer**: degenerate prism sections (old iv), the bare depth-32 chain
    constant (old v), the STEP writer segfault bracket (38 676 fine / 74 601 crash), `TGeoPara`,
