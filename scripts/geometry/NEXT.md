@@ -63,7 +63,11 @@ statement for the talk.
    `STEPCAFControl_Writer` segfault / try per-detector `--top` writes; map `TGeoPara` (13
    volumes); reflected placements of subtree-carrying volumes (98 dropped); localise the
    1-in-1.69M Contains point. On the record: the **beam pipe places 81 volumes exactly on
-   identical copies of themselves** (TGeo-side; `--dedup-world` handles it); `BRepAlgoAPI_Fuse`
+   identical copies of themselves** (TGeo-side; `--dedup-world` handles it; independently
+   reproduced by a second walk, and `CheckOverlaps` is *structurally blind* to it — verified:
+   1 overlap reported in all of PIPE, none a plie — because the coincident discs sit in sibling
+   `TGeoShapeAssembly` wiggles, whose daughters the checker never cross-compares; materially
+   benign since the pairs are identical volumes, which is why a decade of physics never noticed); `BRepAlgoAPI_Fuse`
    can return `IsDone()` with a silently dropped operand (guarded by a volume invariant);
    **46/106 PIPE CSG declines are exactly "a TGeoPcon"** — PIPE's 58 Pcons are the measured
    corpus for Roadmap (h)'s revolved-profile detector.
