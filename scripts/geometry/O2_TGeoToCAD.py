@@ -28,6 +28,16 @@ The mapping
 A logical volume is converted **once** and referenced from every node that places
 it, so a shared volume costs one solid, matching TGeo's own DAG.
 
+Definitions are keyed on volume **identity**, never on the volume name.  A
+`TGeoManager` does not require names to be unique and ALICE's are not -- TRD
+carries 7 752 volumes called `UTCP` covering 7 different shapes -- so a name-keyed
+cache hands 43.5 % of that module's placements another volume's solid, silently.
+Two volumes still share one definition when they agree by *value*: the same shape
+parameters for a leaf, the same shape and the same placed content for a mother.
+Where one TGeo name ends up covering several definitions the emitted STEP names
+are disambiguated in build order as `name`, `name#2`, `name#3`, ... and the
+mapping is written to the report as `nameDisambiguation`.
+
 Mother solids are exported **uncarved**: TGeo's containment semantics (a daughter
 implicitly subtracts itself from its mother) are deliberately *not* applied, so
 every part in the STEP is the shape the TGeo author wrote and per-part capacity
@@ -535,6 +545,114 @@ def apply_tgeo_matrix(shape, m, what):
 
 
 # --------------------------------------------------------------------------
+# volume and shape identity
+# --------------------------------------------------------------------------
+
+_ROOT = None
+
+
+def _root():
+    global _ROOT
+    if _ROOT is None:
+        import ROOT
+        _ROOT = ROOT
+    return _ROOT
+
+
+def obj_id(o):
+    """The address of a ROOT object.
+
+    A `TGeoManager` does not require volume names to be unique and ALICE's are
+    not: TRD carries 7 752 volumes called `UTCP` covering 7 different shapes.  The
+    address is the only thing that identifies a `TGeoVolume`, so it is what the
+    definition cache is keyed on.
+    """
+    return int(_root().addressof(o))
+
+
+def _r(v):
+    return round(float(v), 12)
+
+
+def _rs(seq, n):
+    return tuple(_r(seq[i]) for i in range(n))
+
+
+def _sig_zprofile(sh):
+    nz = int(sh.GetNz())
+    return (nz, tuple((_r(sh.GetZ(i)), _r(sh.GetRmin(i)), _r(sh.GetRmax(i)))
+                      for i in range(nz)))
+
+
+def shape_signature(sh):
+    """A value key for a `TGeoShape`: equal keys mean the same solid.
+
+    Two distinct `TGeoVolume`s that carry equal shapes may share one OCCT solid and
+    one STEP definition -- the dedup the name key used to give by accident, given
+    here on purpose and by value.  A class this does not know by value is keyed on
+    the shape's own address, which shares with nothing else; that is the
+    conservative direction, and `TGeoCompositeShape` deliberately takes it.
+
+    The classes are matched exactly, never by inheritance, so a subclass with extra
+    parameters (`TGeoGtra` under `TGeoTrap`) falls through to the address key
+    rather than being mistaken for its base.
+    """
+    cls = str(sh.ClassName())
+    o = sh.GetOrigin()
+    bbox = (_r(sh.GetDX()), _r(sh.GetDY()), _r(sh.GetDZ()),
+            _r(o[0]), _r(o[1]), _r(o[2]))
+    if cls == "TGeoBBox":
+        return (cls, bbox)
+    if cls == "TGeoTube":
+        return (cls, bbox, _r(sh.GetRmin()), _r(sh.GetRmax()), _r(sh.GetDz()))
+    if cls == "TGeoTubeSeg":
+        return (cls, bbox, _r(sh.GetRmin()), _r(sh.GetRmax()), _r(sh.GetDz()),
+                _r(sh.GetPhi1()), _r(sh.GetPhi2()))
+    if cls == "TGeoCtub":
+        return (cls, bbox, _r(sh.GetRmin()), _r(sh.GetRmax()), _r(sh.GetDz()),
+                _r(sh.GetPhi1()), _r(sh.GetPhi2()),
+                _rs(sh.GetNlow(), 3), _rs(sh.GetNhigh(), 3))
+    if cls == "TGeoCone":
+        return (cls, bbox, _r(sh.GetDz()), _r(sh.GetRmin1()), _r(sh.GetRmax1()),
+                _r(sh.GetRmin2()), _r(sh.GetRmax2()))
+    if cls == "TGeoConeSeg":
+        return (cls, bbox, _r(sh.GetDz()), _r(sh.GetRmin1()), _r(sh.GetRmax1()),
+                _r(sh.GetRmin2()), _r(sh.GetRmax2()),
+                _r(sh.GetPhi1()), _r(sh.GetPhi2()))
+    if cls == "TGeoPcon":
+        return (cls, bbox, _r(sh.GetPhi1()), _r(sh.GetDphi()), _sig_zprofile(sh))
+    if cls == "TGeoPgon":
+        return (cls, bbox, _r(sh.GetPhi1()), _r(sh.GetDphi()), int(sh.GetNedges()),
+                _sig_zprofile(sh))
+    if cls == "TGeoSphere":
+        return (cls, bbox, _r(sh.GetRmin()), _r(sh.GetRmax()),
+                _r(sh.GetTheta1()), _r(sh.GetTheta2()),
+                _r(sh.GetPhi1()), _r(sh.GetPhi2()))
+    if cls == "TGeoTorus":
+        return (cls, bbox, _r(sh.GetR()), _r(sh.GetRmin()), _r(sh.GetRmax()),
+                _r(sh.GetPhi1()), _r(sh.GetDphi()))
+    if cls == "TGeoEltu":
+        return (cls, bbox, _r(sh.GetA()), _r(sh.GetB()), _r(sh.GetDz()))
+    if cls == "TGeoTrd1":
+        return (cls, bbox, _r(sh.GetDx1()), _r(sh.GetDx2()), _r(sh.GetDy()),
+                _r(sh.GetDz()))
+    if cls == "TGeoTrd2":
+        return (cls, bbox, _r(sh.GetDx1()), _r(sh.GetDx2()), _r(sh.GetDy1()),
+                _r(sh.GetDy2()), _r(sh.GetDz()))
+    if cls in ("TGeoArb8", "TGeoTrap"):
+        return (cls, bbox, _r(sh.GetDz()), _rs(sh.GetVertices(), 16))
+    if cls == "TGeoXtru":
+        nv, nz = int(sh.GetNvert()), int(sh.GetNz())
+        return (cls, bbox, nv, tuple((_r(sh.GetX(i)), _r(sh.GetY(i))) for i in range(nv)),
+                nz, tuple((_r(sh.GetZ(k)), _r(sh.GetXOffset(k)), _r(sh.GetYOffset(k)),
+                           _r(sh.GetScale(k))) for k in range(nz)))
+    if cls == "TGeoScaledShape":
+        return (cls, bbox, _rs(sh.GetScale().GetScale(), 3),
+                shape_signature(sh.GetShape()))
+    return ("byAddress", cls, obj_id(sh))
+
+
+# --------------------------------------------------------------------------
 # shape converters -- all output mm, centred as TGeo centres them
 # --------------------------------------------------------------------------
 
@@ -910,14 +1028,21 @@ class TGeoToStep:
         self.opts = opts
         self.doc = TDocStd_Document("O2_TGeoToCAD")
         self.shape_tool = XCAFDoc_DocumentTool.ShapeTool(self.doc.Main())
-        self.definitions = {}      # volume name -> (label, occ solid or None)
-        self.records = {}          # volume name -> report record
+        self.definitions = {}      # definition id -> (label, occ solid or None)
+        self.records = {}          # definition id -> report record
+        self._intern = {}          # definition key -> definition id
+        self._byvol = {}           # TGeoVolume address -> definition id
+        self._sigcache = {}        # TGeoShape address -> value signature
+        self._name_slots = {}      # TGeo name -> {slot key: emitted STEP name}
+        self._asm_names = {}       # volume address -> per-occurrence assembly name
+        self.nvolumes = 0          # distinct TGeoVolume objects visited
         self.ncomponents = 0
         self.nbaked = 0
-        self.placed_world = set()      # (definition name, world key), --dedup-world only
+        self.placed_world = set()      # (definition id, world key), --dedup-world only
         self.ndropped = 0
         self.dropped_examples = []
         self.reflected_nodes = []
+        self.share_worst = (0.0, None)   # the shared-definition capacity self-check
         self.t0 = time.time()
 
     # ------------------------------------------------------------------
@@ -926,9 +1051,10 @@ class TGeoToStep:
         if not self.opts.quiet:
             print(*a, file=sys.stderr, flush=True)
 
-    def _record(self, vol, **kw):
-        rec = self.records.setdefault(vol.GetName(), {
+    def _record(self, did, vol, emitted, **kw):
+        rec = self.records.setdefault(did, {
             "name": str(vol.GetName()),
+            "emittedName": emitted,
             "shapeClass": vol.GetShape().ClassName() if vol.GetShape() else None,
             "ndaughters": int(vol.GetNdaughters()),
             "isAssembly": bool(vol.IsAssembly()),
@@ -937,9 +1063,93 @@ class TGeoToStep:
             "capacity_cm3": None,
             "occVolume_cm3": None,
             "relDev": None,
+            "sharedByVolumes": 1,
         })
         rec.update(kw)
         return rec
+
+    # ------------------------------------------------------------------
+    # definition keys, name disambiguation, and the sharing self-check
+    # ------------------------------------------------------------------
+
+    def _kid(self, key):
+        """Intern a definition key as a small integer.
+
+        Assembly keys quote their children, so without interning the top volume's
+        key would be a nested copy of the whole tree.
+        """
+        i = self._intern.get(key)
+        if i is None:
+            i = len(self._intern) + 1
+            self._intern[key] = i
+        return i
+
+    def _shape_sig(self, vol):
+        sh = vol.GetShape()
+        if sh is None:
+            return ("noShape", obj_id(vol))
+        a = obj_id(sh)
+        s = self._sigcache.get(a)
+        if s is None:
+            s = shape_signature(sh)
+            self._sigcache[a] = s
+        return s
+
+    def _emit_name(self, vol, slot):
+        """The STEP name of a definition: `name`, then `name#2`, `name#3`, ...
+
+        One TGeo name can cover several definitions, so the emitted names are
+        disambiguated in the order the definitions are created, which the
+        depth-first walk makes deterministic.  The mapping goes into the report.
+        """
+        base = str(vol.GetName())
+        slots = self._name_slots.setdefault(base, {})
+        nm = slots.get(slot)
+        if nm is None:
+            nm = base if not slots else f"{base}#{len(slots) + 1}"
+            slots[slot] = nm
+        return nm
+
+    def _occ_asm_name(self, vol):
+        """The STEP name of a per-occurrence assembly label (`--dedup-world`).
+
+        One name per *volume*, not per occurrence, so a shared subtree keeps one
+        name however often it is expanded.
+        """
+        a = obj_id(vol)
+        nm = self._asm_names.get(a)
+        if nm is None:
+            nm = self._emit_name(vol, ("vol", a))
+            self._asm_names[a] = nm
+        return nm
+
+    def _note_shared(self, did, vol):
+        """Price a shared definition against the sharing volume's own capacity.
+
+        This is the check the name-keyed cache never had: every volume that reuses
+        a definition is asked whether that solid really is its own shape.  A
+        `TGeoCompositeShape` is excluded because its `Capacity()` is a Monte Carlo
+        and disagrees with itself.
+        """
+        rec = self.records.get(did)
+        if rec is None:
+            return
+        rec["sharedByVolumes"] = rec.get("sharedByVolumes", 1) + 1
+        occv = rec.get("occVolume_cm3")
+        sh = vol.GetShape()
+        if occv is None or sh is None or sh.ClassName() == "TGeoCompositeShape":
+            return
+        try:
+            cap = float(sh.Capacity())
+        except Exception:
+            return
+        if not cap:
+            return
+        rel = abs(occv - cap) / abs(cap)
+        if rel > rec.get("shareMaxRelDev", 0.0):
+            rec["shareMaxRelDev"] = rel
+        if rel > self.share_worst[0]:
+            self.share_worst = (rel, str(vol.GetName()))
 
     # ------------------------------------------------------------------
 
@@ -979,73 +1189,112 @@ class TGeoToStep:
 
     def build(self, vol, depth=0):
         """Return the XCAF label for `vol`, building it (once) if needed."""
-        name = str(vol.GetName())
-        if name in self.definitions:
-            return self.definitions[name][0]
+        return self.definitions[self.build_def(vol, depth)][0]
 
+    def build_def(self, vol, depth=0):
+        """The definition id of `vol`; `self.definitions[id]` is (label, solid)."""
+        a = obj_id(vol)
+        hit = self._byvol.get(a)
+        if hit is not None:
+            return hit
+        self.nvolumes += 1
+        did = self._build_def(vol, depth)
+        self._byvol[a] = did
+        return did
+
+    def _build_def(self, vol, depth):
+        name = str(vol.GetName())
         nd = int(vol.GetNdaughters())
         descend = nd > 0 and (self.opts.max_depth is None or depth < self.opts.max_depth)
-
         wanted = (self.opts.include_name is None
                   or fnmatch.fnmatch(name, self.opts.include_name))
+        sig = self._shape_sig(vol)
 
-        occ, reason = (None, None)
-        if wanted:
-            occ, reason = self._solid_for(vol)
-        else:
-            reason = "excluded by --include-name"
-        rec = self._record(vol, converted=occ is not None, reason=reason)
+        if not descend:
+            slot = ("shape", sig)
+            did = self._kid(("leaf", name, sig, wanted))
+            if did in self.definitions:
+                self._note_shared(did, vol)
+                return did
+            occ, reason = ((None, "excluded by --include-name") if not wanted
+                           else self._solid_for(vol))
+            emitted = self._emit_name(vol, slot) if occ is not None else name
+            rec = self._record(did, vol, emitted,
+                               converted=occ is not None, reason=reason)
+            if occ is None:
+                self.definitions[did] = (None, None)
+                return did
+            self._verify(vol, occ, rec)
+            lab = self.shape_tool.AddShape(occ, False)
+            TDataStd_Name.Set(lab, emitted)
+            self.definitions[did] = (lab, occ)
+            return did
+
+        # A volume with daughters becomes an assembly.  Its children are resolved
+        # first, so that the definition key can quote them: two same-named volumes
+        # are the same definition only if their own shape AND their whole placed
+        # content agree, which is the dedup the name key used to claim.
+        occ, reason = ((None, "excluded by --include-name") if not wanted
+                       else self._solid_for(vol))
+        emit_body = (occ is not None and self.opts.mother_bodies
+                     and not (depth == 0 and self.opts.skip_top_body))
+        plan = []
+        for i in range(nd):
+            node = vol.GetNode(i)
+            cdid = self.build_def(node.GetVolume(), depth + 1)
+            if self.definitions[cdid][0] is None:
+                continue
+            m = node.GetMatrix()
+            cmat, ctr = tgeo_matrix_components(m)
+            plan.append((cdid, self._world_key(cmat, ctr), str(node.GetName()), m,
+                         node.GetVolume()))
+
+        did = self._kid(("asm", name, sig, wanted, emit_body,
+                         bool(self.opts.carve_mothers),
+                         tuple((p[0], p[1]) for p in plan)))
+        if did in self.definitions:
+            self._note_shared(did, vol)
+            return did
+
+        emitted = self._emit_name(vol, ("vol", obj_id(vol)))
+        rec = self._record(did, vol, emitted, converted=occ is not None, reason=reason)
         if occ is not None:
             self._verify(vol, occ, rec)
 
-        if not descend:
-            if occ is None:
-                self.definitions[name] = (None, None)
-                return None
-            lab = self.shape_tool.AddShape(occ, False)
-            TDataStd_Name.Set(lab, name)
-            self.definitions[name] = (lab, occ)
-            return lab
-
-        # a volume with daughters becomes an assembly
         asm = self.shape_tool.NewShape()
-        TDataStd_Name.Set(asm, name)
-        self.definitions[name] = (asm, occ)
+        TDataStd_Name.Set(asm, emitted)
         ncomp0 = self.ncomponents
-
-        emit_body = (occ is not None and self.opts.mother_bodies
-                     and not (depth == 0 and self.opts.skip_top_body))
         placed_children = []
-        for i in range(nd):
-            node = vol.GetNode(i)
-            child = node.GetVolume()
-            clab = self.build(child, depth + 1)
-            if clab is None:
-                continue
-            m = node.GetMatrix()
+        for (cdid, _mk, nodename, m, child) in plan:
+            clab = self.definitions[cdid][0]
             t = tgeo_matrix_to_trsf(m)
             if t is None:
                 # A reflecting or scaling placement cannot be a STEP component
                 # location, so bake it into a private copy of the child solid.
-                self.reflected_nodes.append(f"{name}/{node.GetName()}")
-                csolid = self.definitions[child.GetName()][1]
+                self.reflected_nodes.append(f"{name}/{nodename}")
+                csolid = self.definitions[cdid][1]
                 if csolid is None:
-                    self._record(child, reason="reflected placement of a volume with "
-                                               "daughters cannot be baked")
+                    self._record(cdid, child, self.records.get(cdid, {}).get(
+                        "emittedName", str(child.GetName())),
+                        reason="reflected placement of a volume with daughters "
+                               "cannot be baked")
                     continue
                 try:
                     baked = apply_tgeo_matrix(csolid, m, "reflected placement")
                 except ShapeDeclined as e:
-                    self._record(child, reason=str(e))
+                    self._record(cdid, child, self.records.get(cdid, {}).get(
+                        "emittedName", str(child.GetName())), reason=str(e))
                     continue
                 blab = self.shape_tool.AddShape(baked, False)
-                TDataStd_Name.Set(blab, f"{child.GetName()}__mirrored")
+                cname = self.records.get(cdid, {}).get("emittedName",
+                                                       str(child.GetName()))
+                TDataStd_Name.Set(blab, f"{cname}__mirrored")
                 comp = self.shape_tool.AddComponent(asm, blab, TopLoc_Location(gp_Trsf()))
                 self.nbaked += 1
             else:
                 comp = self.shape_tool.AddComponent(asm, clab, TopLoc_Location(t))
-                placed_children.append((self.definitions[child.GetName()][1], t))
-            TDataStd_Name.Set(comp, str(node.GetName()))
+                placed_children.append((self.definitions[cdid][1], t))
+            TDataStd_Name.Set(comp, nodename)
             self.ncomponents += 1
 
         if emit_body:
@@ -1053,11 +1302,11 @@ class TGeoToStep:
             if self.opts.carve_mothers:
                 body = self._carve(occ, placed_children, name) or occ
             blab = self.shape_tool.AddShape(body, False)
-            TDataStd_Name.Set(blab, f"{name}__body")
+            TDataStd_Name.Set(blab, f"{emitted}__body")
             comp = self.shape_tool.AddComponent(asm, blab, TopLoc_Location(gp_Trsf()))
-            TDataStd_Name.Set(comp, f"{name}__body")
+            TDataStd_Name.Set(comp, f"{emitted}__body")
             self.ncomponents += 1
-            rec["bodyComponent"] = f"{name}__body"
+            rec["bodyComponent"] = f"{emitted}__body"
         elif occ is not None:
             rec["bodyComponent"] = None
             rec["reason"] = "mother solid omitted (--no-mother-bodies/--skip-top-body)"
@@ -1066,9 +1315,10 @@ class TGeoToStep:
             # every child declined and there is no body: an empty XCAF label reads
             # back as a leaf holding an empty compound, so drop it instead.
             self.shape_tool.RemoveShape(asm)
-            self.definitions[name] = (None, occ)
-            return None
-        return asm
+            self.definitions[did] = (None, occ)
+            return did
+        self.definitions[did] = (asm, occ)
+        return did
 
     # ------------------------------------------------------------------
 
@@ -1086,51 +1336,56 @@ class TGeoToStep:
         tr = [sum(pmat[i][k] * ctr[k] for k in range(3)) + ptr[i] for i in range(3)]
         return mat, tr
 
-    def _leaf_definition(self, vol, depth):
-        """The shared XCAF definition of a volume's own solid (built once)."""
-        name = str(vol.GetName())
-        hit = self.definitions.get(name)
-        if hit is not None:
-            return hit[0]
-        occ, reason = self._solid_for(vol)
-        rec = self._record(vol, converted=occ is not None, reason=reason)
-        if occ is None:
-            self.definitions[name] = (None, None)
-            return None
-        self._verify(vol, occ, rec)
-        lab = self.shape_tool.AddShape(occ, False)
-        TDataStd_Name.Set(lab, name)
-        self.definitions[name] = (lab, occ)
-        return lab
+    def _shared_definition(self, vol, kind):
+        """The shared XCAF definition of a volume's own solid (built once).
 
-    def _body_definition(self, vol):
-        name = str(vol.GetName()) + "__body"
-        hit = self.definitions.get(name)
-        if hit is not None:
-            return hit[0]
+        `kind` is "leaf" for a volume without daughters and "body" for the mother
+        solid of one with daughters; both are keyed on the volume's *name and shape
+        value*, never on the name alone.
+        """
+        sig = self._shape_sig(vol)
+        did = self._kid((kind, str(vol.GetName()), sig, True))
+        if did in self.definitions:
+            self._note_shared(did, vol)
+            return did
         occ, reason = self._solid_for(vol)
-        rec = self._record(vol, converted=occ is not None, reason=reason)
+        # A mother body shares the slot of its own assembly label, so the two carry
+        # one disambiguated base name between them.
+        slot = ("vol", obj_id(vol)) if kind == "body" else ("shape", sig)
+        emitted = self._emit_name(vol, slot) if occ is not None \
+            else str(vol.GetName())
+        if kind == "body":
+            emitted = emitted + "__body"
+        rec = self._record(did, vol, emitted, converted=occ is not None, reason=reason)
         if occ is None:
-            self.definitions[name] = (None, None)
-            return None
+            self.definitions[did] = (None, None)
+            return did
         self._verify(vol, occ, rec)
-        rec["bodyComponent"] = name
+        if kind == "body":
+            rec["bodyComponent"] = emitted
         lab = self.shape_tool.AddShape(occ, False)
-        TDataStd_Name.Set(lab, name)
-        self.definitions[name] = (lab, occ)
-        return lab
+        TDataStd_Name.Set(lab, emitted)
+        self.definitions[did] = (lab, occ)
+        return did
 
     def build_world(self, vol, depth=0, wmat=None, wtr=None, path=""):
         """Per-occurrence walk that drops coincident (volume, world transform) pairs.
 
         Assembly labels are one per *occurrence* so that a dropped duplicate deep in
         a shared subtree does not delete its needed siblings; leaf solids stay one
-        definition per TGeoVolume, which is what the round trip is about.
+        definition per (name, shape value), which is what the round trip is about.
+        The coincidence key is the *definition*, which is what `O2_CADtoTGeo.py`
+        checks: two distinct volumes that happen to share a name are no longer a
+        coincidence once they are two definitions.
         """
         if wmat is None:
             wmat = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]
             wtr = [0., 0., 0.]
         name = str(vol.GetName())
+        a = obj_id(vol)
+        if a not in self._byvol:
+            self._byvol[a] = None
+            self.nvolumes += 1
         nd = int(vol.GetNdaughters())
         descend = nd > 0 and (self.opts.max_depth is None or depth < self.opts.max_depth)
         if not (self.opts.include_name is None
@@ -1138,14 +1393,15 @@ class TGeoToStep:
             return None
 
         if not descend:
-            key = (name, self._world_key(wmat, wtr))
+            did = self._shared_definition(vol, "leaf")
+            lab = self.definitions[did][0]
+            if lab is None:
+                return None
+            key = (did, self._world_key(wmat, wtr))
             if key in self.placed_world:
                 self.ndropped += 1
                 if len(self.dropped_examples) < 50:
                     self.dropped_examples.append(path)
-                return None
-            lab = self._leaf_definition(vol, depth)
-            if lab is None:
                 return None
             self.placed_world.add(key)
             return lab
@@ -1170,18 +1426,26 @@ class TGeoToStep:
                 # A reflecting or scaling placement cannot be a STEP component
                 # location, so bake it into a private copy of the child solid.
                 self.reflected_nodes.append(f"{name}/{node.GetName()}")
-                csolid = self.definitions.get(child.GetName(), (None, None))[1]
+                cdid = self._byvol.get(obj_id(child))
+                csolid = self.definitions.get(cdid, (None, None))[1] \
+                    if cdid is not None else None
                 if csolid is None:
-                    self._record(child, reason="reflected placement of a volume with "
-                                               "daughters cannot be baked")
+                    cdid = self._shared_definition(child, "leaf")
+                    csolid = self.definitions[cdid][1]
+                if csolid is None:
+                    self._record(cdid, child, str(child.GetName()),
+                                 reason="reflected placement of a volume with "
+                                        "daughters cannot be baked")
                     continue
                 try:
                     baked = apply_tgeo_matrix(csolid, m, "reflected placement")
                 except ShapeDeclined as e:
-                    self._record(child, reason=str(e))
+                    self._record(cdid, child, str(child.GetName()), reason=str(e))
                     continue
                 blab = self.shape_tool.AddShape(baked, False)
-                TDataStd_Name.Set(blab, f"{child.GetName()}__mirrored")
+                cname = self.records.get(cdid, {}).get("emittedName",
+                                                       str(child.GetName()))
+                TDataStd_Name.Set(blab, f"{cname}__mirrored")
                 self.nbaked += 1
                 comps.append((blab, gp_Trsf(), str(node.GetName())))
                 continue
@@ -1189,19 +1453,21 @@ class TGeoToStep:
 
         if (self.opts.mother_bodies
                 and not (depth == 0 and self.opts.skip_top_body)):
-            key = (name + "__body", self._world_key(wmat, wtr))
-            if key in self.placed_world:
-                self.ndropped += 1
-            else:
-                blab = self._body_definition(vol)
-                if blab is not None:
+            bdid = self._shared_definition(vol, "body")
+            blab = self.definitions[bdid][0]
+            if blab is not None:
+                key = (bdid, self._world_key(wmat, wtr))
+                if key in self.placed_world:
+                    self.ndropped += 1
+                else:
                     self.placed_world.add(key)
-                    comps.append((blab, gp_Trsf(), f"{name}__body"))
+                    comps.append((blab, gp_Trsf(),
+                                  self.records[bdid]["emittedName"]))
 
         if not comps:
             return None
         asm = self.shape_tool.NewShape()
-        TDataStd_Name.Set(asm, name)
+        TDataStd_Name.Set(asm, self._occ_asm_name(vol))
         for (clab, t, cname) in comps:
             comp = self.shape_tool.AddComponent(asm, clab, TopLoc_Location(t))
             TDataStd_Name.Set(comp, cname)
@@ -1255,14 +1521,20 @@ class TGeoToStep:
                 c["declined"] += 1
                 key = (r["reason"] or "unknown").split(":")[0]
                 c["reasons"][key] = c["reasons"].get(key, 0) + 1
-        recs = sorted(self.records.values(), key=lambda r: r["name"])
+        recs = sorted(self.records.values(),
+                      key=lambda r: (r["name"], r.get("emittedName") or ""))
         devs = [r["relDev"] for r in recs if r.get("relDev") is not None]
+        disambiguated = {}
+        for base, slots in self._name_slots.items():
+            if len(slots) > 1:
+                disambiguated[base] = sorted(set(slots.values()))
         return {
             "source": os.path.abspath(source),
             "output": os.path.abspath(out_step),
             "scaleToMm": SCALE_TO_MM,
             "generator": "O2_TGeoToCAD.py",
             "wallSeconds": round(time.time() - self.t0, 2),
+            "volumesVisited": self.nvolumes,
             "definitions": sum(1 for r in recs if r["converted"]),
             "pureAssemblies": npure,
             "declined": sum(1 for r in recs if not r["converted"]
@@ -1276,6 +1548,10 @@ class TGeoToStep:
             "nReflectedPlacements": len(self.reflected_nodes),
             "maxRelDev": max(devs) if devs else None,
             "medianRelDev": sorted(devs)[len(devs) // 2] if devs else None,
+            "nameDisambiguation": disambiguated,
+            "nDisambiguatedNames": len(disambiguated),
+            "sharedDefinitionMaxRelDev": self.share_worst[0],
+            "sharedDefinitionWorstVolume": self.share_worst[1],
             "byShapeClass": by_class,
             "volumes": recs,
         }
@@ -1694,6 +1970,75 @@ def self_test():
     total += len(r5)
     failures += _print_suite("XCAF assembly document, written and read back", r5)
 
+    # ---- suite 7: the definition cache is keyed on identity, not on the name ----
+    # A TGeoManager does not require volume names to be unique and ALICE's are not:
+    # TRD reuses one name for 7 752 volumes covering 7 shapes, and a name-keyed
+    # cache hands 43.5 % of its 637 373 placements another volume's solid, with
+    # nothing in the log and nothing in the report.  These checks price the keying
+    # itself and the value signature the sharing rests on.
+    r7 = []
+    sig_a = shape_signature(ROOT.TGeoTube("sgA", 1, 2, 5))
+    sig_b = shape_signature(ROOT.TGeoTube("sgB", 1, 2, 5))
+    sig_c = shape_signature(ROOT.TGeoTube("sgC", 0, 2, 5))
+    r7.append(("two equal tubes have equal signatures", sig_a == sig_b,
+               None, None, None))
+    r7.append(("a wrong rmin changes the signature (negative control)",
+               sig_a != sig_c, None, None, None))
+    sgp1 = ROOT.TGeoPcon("sgp1", 0, 360, 3)
+    sgp2 = ROOT.TGeoPcon("sgp2", 0, 360, 3)
+    for p, rin in ((sgp1, 0.5), (sgp2, 0.9)):
+        p.DefineSection(0, -1, 0.5, 1)
+        p.DefineSection(1, 0, 0.5, 2)
+        p.DefineSection(2, 1, rin, 2)
+    r7.append(("a wrong pcon inner radius changes the signature (negative control)",
+               shape_signature(sgp1) != shape_signature(sgp2), None, None, None))
+    _kc = [ROOT.TGeoBBox("kca", 2, 2, 2), ROOT.TGeoTube("kcb", 0, 1, 3)]
+    cs1 = ROOT.TGeoCompositeShape("kc1", "kca - kcb")
+    cs2 = ROOT.TGeoCompositeShape("kc2", "kca - kcb")
+    r7.append(("a composite is keyed on its address, never shared by value",
+               shape_signature(cs1) != shape_signature(cs2)
+               and shape_signature(cs1) == shape_signature(cs1), None, None, None))
+
+    mgr2 = ROOT.TGeoManager("stmgr2", "name-collision self-test")
+    w2 = mgr2.MakeBox("nworld", ROOT.nullptr, 50, 50, 50)
+    mgr2.SetTopVolume(w2)
+    dupA = mgr2.MakeTube("dup", ROOT.nullptr, 0, 2, 5)     # two volumes, one name,
+    dupB = mgr2.MakeTube("dup", ROOT.nullptr, 0, 1, 5)     # four times the volume
+    same1 = mgr2.MakeBox("same", ROOT.nullptr, 1, 1, 1)    # two volumes, one name,
+    same2 = mgr2.MakeBox("same", ROOT.nullptr, 1, 1, 1)    # one shape
+    w2.AddNode(dupA, 1, ROOT.TGeoTranslation(-10, 0, 0))
+    w2.AddNode(dupB, 1, ROOT.TGeoTranslation(10, 0, 0))
+    w2.AddNode(same1, 1, ROOT.TGeoTranslation(0, -10, 0))
+    w2.AddNode(same2, 1, ROOT.TGeoTranslation(0, 10, 0))
+    mgr2.CloseGeometry()
+    conv2 = TGeoToStep(o)
+    conv2.build(mgr2.GetTopVolume())
+    rep2 = conv2.report("in-memory", "none")
+    emitted2 = sorted(r["emittedName"] for r in rep2["volumes"] if r["converted"])
+    r7.append((f"one name, two shapes -> two definitions {emitted2}",
+               emitted2 == ["dup", "dup#2", "nworld", "same"], None, None, None))
+    r7.append(("the disambiguation is recorded in the report",
+               rep2["nameDisambiguation"] == {"dup": ["dup", "dup#2"]},
+               None, None, None))
+    r7.append(("one name, one shape -> still one definition, placed twice",
+               rep2["definitions"] == 4 and conv2.ncomponents == 5,
+               None, None, None))
+    devs2 = [r["relDev"] for r in rep2["volumes"] if r.get("relDev") is not None]
+    shared2 = rep2["sharedDefinitionMaxRelDev"]
+    print(f"    every definition vs its own volume's Capacity(): worst "
+          f"{max(devs2):.3e}, worst over a *shared* definition {shared2:.3e}")
+    r7.append(("every volume gets a solid that is its own shape",
+               max(devs2) <= 1e-9 and shared2 <= 1e-9, None, None, None))
+    capA = float(dupA.GetShape().Capacity())
+    capB = float(dupB.GetShape().Capacity())
+    ratio = abs(capA - capB) / capB
+    print(f"    a name-keyed cache would have given one of them the other's solid:"
+          f" {capA:.6f} vs {capB:.6f} cm3, {ratio:.2f} relative")
+    r7.append((f"the test could have failed: the two shapes differ by {ratio:.2f}",
+               ratio > 1e-2, None, None, None))
+    total += len(r7)
+    failures += _print_suite("definition cache keyed on volume identity", r7)
+
     print(f"\n{total} checks, {failures} failures")
     sys.stdout.flush()
     sys.stderr.flush()
@@ -1755,8 +2100,8 @@ def main(argv=None):
         conv.build_world(vol)
     else:
         conv.build(vol)
-    conv.log(f"  {len(conv.definitions)} logical volumes, "
-             f"{conv.ncomponents} components")
+    conv.log(f"  {conv.nvolumes} logical volumes (by identity), "
+             f"{len(conv.definitions)} definitions, {conv.ncomponents} components")
     if opts.write_step:
         conv.log(f"  writing {opts.output}")
         conv.write(opts.output)
@@ -1777,6 +2122,14 @@ def main(argv=None):
               f"(--dedup-world); e.g. {rep['coincidentPlacementExamples'][:2]}")
     if rep["nReflectedPlacements"]:
         print(f"{rep['nReflectedPlacements']} reflecting placements baked as mirrored copies")
+    if rep["nDisambiguatedNames"]:
+        ex = sorted(rep["nameDisambiguation"].items())[:3]
+        print(f"{rep['nDisambiguatedNames']} TGeo name(s) cover more than one definition "
+              f"and were disambiguated; e.g. {ex}")
+    if rep["sharedDefinitionMaxRelDev"] > 1e-6:
+        print(f"  [WARN] a shared definition disagrees with a sharing volume's own "
+              f"capacity by {rep['sharedDefinitionMaxRelDev']:.3e} "
+              f"({rep['sharedDefinitionWorstVolume']})")
     for cls, c in sorted(rep["byShapeClass"].items(), key=lambda kv: -(kv[1]["declined"])):
         if c["declined"]:
             print(f"  declined {cls}: {c['declined']} ({c['reasons']})")
