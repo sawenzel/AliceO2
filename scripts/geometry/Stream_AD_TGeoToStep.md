@@ -191,7 +191,7 @@ $ python3 scripts/geometry/O2_TGeoToCAD.py --self-test
 71 checks, 0 failures
 ```
 
-Never quote the last line alone; the six suites are 28 + 7 + 3 + 5 + 4 + 16 + 8.
+Never quote the last line alone; the seven suites are 28 + 7 + 3 + 5 + 4 + 16 + 8.
 
 **Suite 1** compares `BRepGProp` on our solid against the analytic `TGeoShape::Capacity()` at
 1e-9 relative, over every mapped primitive including `rmin > 0` tubes and cones, phi wedges, theta
