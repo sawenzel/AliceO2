@@ -57,7 +57,11 @@ list(APPEND O2_ROOT_MACRO_EXCLUSION_LIST
             macro/putCondition.C
             macro/rootlogon.C
             macro/CreateSampleIRFrames.C
-            Detectors/Upgrades/ALICE3/macros/ALICE3Field.C)
+            Detectors/Upgrades/ALICE3/macros/ALICE3Field.C
+            scripts/geometry/integration_demo/analyse_steps.C # Analysis of a demo run, needs its output
+            scripts/geometry/integration_demo/check_geometry.C # Inspects a converted CAD geometry file
+            scripts/geometry/integration_demo/count_hits.C # Counts hits in a demo run's output
+            scripts/geometry/integration_demo/matbudget.C) # Material budget of a demo run's geometry
 
 if(NOT BUILD_SIMULATION)
   # some complete sub_directories are not added to the build when not building
