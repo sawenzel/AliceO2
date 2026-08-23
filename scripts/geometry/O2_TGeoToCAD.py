@@ -51,8 +51,23 @@ Usage
     --no-mother-bodies   omit the `__body` component of volumes with daughters
     --skip-top-body      omit only the top volume's own solid (the `cave` box)
     --carve-mothers      subtract placed daughters from each mother solid
+    --dedup-world        expand the tree per occurrence and drop any placement of a
+                         volume that coincides exactly with another placement of the
+                         same volume (see "coincident placements" below)
     --no-verify          skip the per-definition BRepGProp capacity check
     --quiet
+
+Coincident placements
+---------------------
+TGeo lets the same volume be placed twice at the same world transform, and the
+ALICE Run 3 beam pipe does exactly that 81 times (adjacent bellows convolutions
+share a "plie" disc).  `O2_CADtoTGeo.py` refuses such a model outright, because a
+geometry with two volumes in the same place has no defined transport through it.
+The default DAG export reproduces the duplicates faithfully -- that is the honest
+thing for a STEP that claims to be the geometry.  `--dedup-world` instead expands
+the assembly tree per occurrence (leaf definitions stay shared, so there is still
+one prototype per TGeoVolume) and drops every repeated (volume, world transform),
+counting them in the report.
 
 Report
 ------
@@ -93,7 +108,10 @@ from OCC.Core.BRepPrimAPI import (
 from OCC.Core.BRepBuilderAPI import (
     BRepBuilderAPI_MakePolygon, BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakeEdge,
     BRepBuilderAPI_MakeWire, BRepBuilderAPI_Transform, BRepBuilderAPI_GTransform,
+    BRepBuilderAPI_Sewing, BRepBuilderAPI_MakeSolid,
 )
+from OCC.Core.BRepFill import brepfill
+from OCC.Core.TopoDS import topods
 from OCC.Core.BRepOffsetAPI import BRepOffsetAPI_ThruSections
 from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Cut, BRepAlgoAPI_Fuse, BRepAlgoAPI_Common
 from OCC.Core.BRepGProp import brepgprop
@@ -247,30 +265,124 @@ def _revolve_edges(elements, phi1_deg, dphi_deg, what):
     return _check(sh, what)
 
 
-def _loft_rings(rings, what, ruled=True):
-    """Loft a stack of closed polygons (lists of (x, y, z)) into one solid."""
-    thru = BRepOffsetAPI_ThruSections(True, ruled)   # solid, ruled
-    nadded = 0
+def _signed_volume(shape):
+    props = GProp_GProps()
+    brepgprop.VolumeProperties(shape, props)
+    return props.Mass()
+
+
+def _polygon_wire(pts, what):
+    poly = BRepBuilderAPI_MakePolygon()
+    for (x, y, z) in pts:
+        poly.Add(gp_Pnt(float(x), float(y), float(z)))
+    poly.Close()
+    if not poly.IsDone():
+        raise ShapeDeclined(f"{what}: could not build a polygon wire")
+    return poly.Wire()
+
+
+def _dedupe_ring3(pts, tol=1e-9):
+    out = []
+    for p in pts:
+        if out and max(abs(p[i] - out[-1][i]) for i in range(3)) < tol:
+            continue
+        out.append(p)
+    while len(out) > 1 and max(abs(out[0][i] - out[-1][i]) for i in range(3)) < tol:
+        out.pop()
+    return out
+
+
+def _quad_face(b0, b1, t1, t0, what, tol=1e-7):
+    """One lateral patch of a prism: a planar face when the four corners are
+    coplanar, a ruled face when they are not (a twisted TGeoArb8 side).
+
+    Emitting a plane as a plane matters: the reverse converter's recogniser keys
+    on the analytic surface type, and a lofted B-spline that happens to be flat is
+    reported as a free-form face.
+    """
+    def sub(a, b):
+        return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+    def cross(a, b):
+        return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - a[1] * b[0])
+
+    pts = _dedupe_ring3([b0, b1, t1, t0])
+    if len(pts) < 3:
+        return None
+    if len(pts) == 3:
+        return BRepBuilderAPI_MakeFace(_polygon_wire(pts, what)).Face()
+    n = cross(sub(b1, b0), sub(t0, b0))
+    nn = math.sqrt(sum(c * c for c in n))
+    scale = max(math.sqrt(sum(c * c for c in sub(b1, b0))),
+                math.sqrt(sum(c * c for c in sub(t0, b0))), 1e-30)
+    d = sub(t1, b0)
+    off = abs(sum(n[i] * d[i] for i in range(3))) / nn if nn > 0 else 0.0
+    if nn > 1e-24 and off <= tol * scale:
+        mf = BRepBuilderAPI_MakeFace(_polygon_wire(pts, what))
+        if mf.IsDone():
+            return mf.Face()
+    e1 = BRepBuilderAPI_MakeEdge(gp_Pnt(*b0), gp_Pnt(*b1)).Edge()
+    e2 = BRepBuilderAPI_MakeEdge(gp_Pnt(*t0), gp_Pnt(*t1)).Edge()
+    return brepfill.Face(e1, e2)
+
+
+def _prism_from_rings(outer, inner=None, what="prism"):
+    """Build a solid from a stack of closed sections by sewing explicit faces.
+
+    `outer` (and the optional `inner`, which makes the caps annular) is a list of
+    sections, each a list of (x, y, z) with the same vertex count and order.
+    """
+    outer = [_dedupe_ring3(r) for r in outer]
+    if len(outer) < 2:
+        raise ShapeDeclined(f"{what}: fewer than two sections")
+    nv = len(outer[0])
+    if nv < 3 or any(len(r) != nv for r in outer):
+        raise ShapeDeclined(
+            f"{what}: sections have {sorted(set(len(r) for r in outer))} distinct "
+            "vertices; a prism needs the same count in every section")
+    rings = [outer]
+    if inner is not None:
+        inner = [_dedupe_ring3(r) for r in inner]
+        if any(len(r) != nv for r in inner):
+            raise ShapeDeclined(f"{what}: inner sections do not match the outer count")
+        rings.append(inner)
+
+    faces = []
     for ring in rings:
-        pts = _dedupe_ring([(p[0], p[1]) for p in ring])
-        if len(pts) < 3:
-            raise ShapeDeclined(f"{what}: section with {len(pts)} distinct vertices")
-        if len(pts) != len(rings[0]) and nadded:
-            pass
-        poly = BRepBuilderAPI_MakePolygon()
-        for (x, y) in pts:
-            poly.Add(gp_Pnt(x, y, ring[0][2]))
-        poly.Close()
-        if not poly.IsDone():
-            raise ShapeDeclined(f"{what}: could not build a section wire")
-        thru.AddWire(poly.Wire())
-        nadded += 1
-    if nadded < 2:
-        raise ShapeDeclined(f"{what}: fewer than two usable sections")
-    thru.Build()
-    if not thru.IsDone():
-        raise ShapeDeclined(f"{what}: ThruSections loft failed")
-    return _check(thru.Shape(), what)
+        for k in range(len(ring) - 1):
+            lo, hi = ring[k], ring[k + 1]
+            for i in range(nv):
+                j = (i + 1) % nv
+                f = _quad_face(lo[i], lo[j], hi[j], hi[i], what)
+                if f is not None:
+                    faces.append(f)
+    # caps, annular when there is an inner stack
+    for idx in (0, -1):
+        mf = BRepBuilderAPI_MakeFace(_polygon_wire(outer[idx], what))
+        if inner is not None:
+            mf.Add(topods.Wire(_polygon_wire(inner[idx], what).Reversed()))
+        if not mf.IsDone():
+            raise ShapeDeclined(f"{what}: could not build a cap face")
+        faces.append(mf.Face())
+
+    ext = max(abs(c) for r in outer for p in r for c in p) or 1.0
+    sew = BRepBuilderAPI_Sewing(1e-7 * ext)
+    for f in faces:
+        sew.Add(f)
+    sew.Perform()
+    shell = sew.SewedShape()
+    if shell is None or shell.IsNull():
+        raise ShapeDeclined(f"{what}: sewing produced nothing")
+    try:
+        ms = BRepBuilderAPI_MakeSolid(topods.Shell(shell))
+        ms.Build()
+        solid = ms.Solid()
+    except Exception as e:
+        raise ShapeDeclined(f"{what}: faces did not sew into a closed shell ({e})")
+    if _signed_volume(solid) < 0:
+        solid = topods.Solid(solid.Reversed())
+    return _check(solid, what)
 
 
 def _boolean(op, a, b, what):
@@ -476,10 +588,8 @@ def conv_pgon(sh, s):
         # inner prism separately and subtract.
         outer_rings = [_pgon_ring(rmax[i], z[i], phi1, dphi, nedges, True) for i in range(nz)]
         inner_rings = [_pgon_ring(max(rmin[i], EPS), z[i], phi1, dphi, nedges, True) for i in range(nz)]
-        a = _loft_rings(outer_rings, "TGeoPgon(outer)")
-        b = _loft_rings(inner_rings, "TGeoPgon(inner)")
-        return _boolean(BRepAlgoAPI_Cut, a, b, "TGeoPgon")
-    return _loft_rings(rings, "TGeoPgon")
+        return _prism_from_rings(outer_rings, inner_rings, what="TGeoPgon")
+    return _prism_from_rings(rings, what="TGeoPgon")
 
 
 def conv_sphere(sh, s):
@@ -551,20 +661,20 @@ def conv_eltu(sh, s):
 def conv_trd1(sh, s):
     dx1, dx2 = sh.GetDx1() * s, sh.GetDx2() * s
     dy, dz = sh.GetDy() * s, sh.GetDz() * s
-    return _loft_rings([
+    return _prism_from_rings([
         [(-dx1, -dy, -dz), (dx1, -dy, -dz), (dx1, dy, -dz), (-dx1, dy, -dz)],
         [(-dx2, -dy, dz), (dx2, -dy, dz), (dx2, dy, dz), (-dx2, dy, dz)],
-    ], "TGeoTrd1")
+    ], what="TGeoTrd1")
 
 
 def conv_trd2(sh, s):
     dx1, dx2 = sh.GetDx1() * s, sh.GetDx2() * s
     dy1, dy2 = sh.GetDy1() * s, sh.GetDy2() * s
     dz = sh.GetDz() * s
-    return _loft_rings([
+    return _prism_from_rings([
         [(-dx1, -dy1, -dz), (dx1, -dy1, -dz), (dx1, dy1, -dz), (-dx1, dy1, -dz)],
         [(-dx2, -dy2, dz), (dx2, -dy2, dz), (dx2, dy2, dz), (-dx2, dy2, dz)],
-    ], "TGeoTrd2")
+    ], what="TGeoTrd2")
 
 
 def conv_arb8(sh, s):
@@ -573,12 +683,7 @@ def conv_arb8(sh, s):
     dz = sh.GetDz() * s
     bot = [(v[2 * i] * s, v[2 * i + 1] * s, -dz) for i in range(4)]
     top = [(v[8 + 2 * i] * s, v[8 + 2 * i + 1] * s, dz) for i in range(4)]
-    nb, nt = len(_dedupe_ring([(p[0], p[1]) for p in bot])), len(_dedupe_ring([(p[0], p[1]) for p in top]))
-    if nb != nt:
-        raise ShapeDeclined(
-            f"{sh.ClassName()}: degenerate face ({nb} vs {nt} distinct vertices); "
-            "a ruled loft needs matching vertex counts")
-    return _loft_rings([bot, top], sh.ClassName())
+    return _prism_from_rings([bot, top], what=sh.ClassName())
 
 
 def conv_xtru(sh, s):
@@ -592,7 +697,7 @@ def conv_xtru(sh, s):
         z = sh.GetZ(k) * s
         x0, y0, sc = sh.GetXOffset(k) * s, sh.GetYOffset(k) * s, sh.GetScale(k)
         rings.append([(x0 + sc * x[i] * s, y0 + sc * y[i] * s, z) for i in range(nv)])
-    return _loft_rings(rings, "TGeoXtru")
+    return _prism_from_rings(rings, what="TGeoXtru")
 
 
 def conv_ctub(sh, s):
@@ -733,6 +838,9 @@ class TGeoToStep:
         self.records = {}          # volume name -> report record
         self.ncomponents = 0
         self.nbaked = 0
+        self.placed_world = set()      # (definition name, world key), --dedup-world only
+        self.ndropped = 0
+        self.dropped_examples = []
         self.reflected_nodes = []
         self.t0 = time.time()
 
@@ -827,6 +935,7 @@ class TGeoToStep:
         asm = self.shape_tool.NewShape()
         TDataStd_Name.Set(asm, name)
         self.definitions[name] = (asm, occ)
+        ncomp0 = self.ncomponents
 
         emit_body = (occ is not None and self.opts.mother_bodies
                      and not (depth == 0 and self.opts.skip_top_body))
@@ -877,7 +986,137 @@ class TGeoToStep:
             rec["bodyComponent"] = None
             rec["reason"] = "mother solid omitted (--no-mother-bodies/--skip-top-body)"
             rec["converted"] = False
+        if self.ncomponents == ncomp0:
+            # every child declined and there is no body: an empty XCAF label reads
+            # back as a leaf holding an empty compound, so drop it instead.
+            self.shape_tool.RemoveShape(asm)
+            self.definitions[name] = (None, occ)
+            return None
         return asm
+
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _world_key(mat, tr):
+        return (tuple(round(mat[i][j], 9) for i in range(3) for j in range(3))
+                + tuple(round(v, 6) for v in tr))
+
+    @staticmethod
+    def _compose(pmat, ptr, m):
+        """Compose a parent world transform with a TGeoMatrix, in mm."""
+        cmat, ctr = tgeo_matrix_components(m)
+        mat = [[sum(pmat[i][k] * cmat[k][j] for k in range(3)) for j in range(3)]
+               for i in range(3)]
+        tr = [sum(pmat[i][k] * ctr[k] for k in range(3)) + ptr[i] for i in range(3)]
+        return mat, tr
+
+    def _leaf_definition(self, vol, depth):
+        """The shared XCAF definition of a volume's own solid (built once)."""
+        name = str(vol.GetName())
+        hit = self.definitions.get(name)
+        if hit is not None:
+            return hit[0]
+        occ, reason = self._solid_for(vol)
+        rec = self._record(vol, converted=occ is not None, reason=reason)
+        if occ is None:
+            self.definitions[name] = (None, None)
+            return None
+        self._verify(vol, occ, rec)
+        lab = self.shape_tool.AddShape(occ, False)
+        TDataStd_Name.Set(lab, name)
+        self.definitions[name] = (lab, occ)
+        return lab
+
+    def _body_definition(self, vol):
+        name = str(vol.GetName()) + "__body"
+        hit = self.definitions.get(name)
+        if hit is not None:
+            return hit[0]
+        occ, reason = self._solid_for(vol)
+        rec = self._record(vol, converted=occ is not None, reason=reason)
+        if occ is None:
+            self.definitions[name] = (None, None)
+            return None
+        self._verify(vol, occ, rec)
+        rec["bodyComponent"] = name
+        lab = self.shape_tool.AddShape(occ, False)
+        TDataStd_Name.Set(lab, name)
+        self.definitions[name] = (lab, occ)
+        return lab
+
+    def build_world(self, vol, depth=0, wmat=None, wtr=None, path=""):
+        """Per-occurrence walk that drops coincident (volume, world transform) pairs.
+
+        Assembly labels are one per *occurrence* so that a dropped duplicate deep in
+        a shared subtree does not delete its needed siblings; leaf solids stay one
+        definition per TGeoVolume, which is what the round trip is about.
+        """
+        if wmat is None:
+            wmat = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]
+            wtr = [0., 0., 0.]
+        name = str(vol.GetName())
+        nd = int(vol.GetNdaughters())
+        descend = nd > 0 and (self.opts.max_depth is None or depth < self.opts.max_depth)
+        if not (self.opts.include_name is None
+                or fnmatch.fnmatch(name, self.opts.include_name)):
+            return None
+
+        if not descend:
+            key = (name, self._world_key(wmat, wtr))
+            if key in self.placed_world:
+                self.ndropped += 1
+                if len(self.dropped_examples) < 50:
+                    self.dropped_examples.append(path)
+                return None
+            lab = self._leaf_definition(vol, depth)
+            if lab is None:
+                return None
+            self.placed_world.add(key)
+            return lab
+
+        # Gather the surviving children first: an occurrence whose every child was
+        # dropped as a coincident duplicate must not leave an empty assembly label
+        # behind, because XCAF hands an empty label to the reader as a leaf with an
+        # empty compound and the reverse converter then warns about it, once per
+        # occurrence.
+        comps = []
+        for i in range(nd):
+            node = vol.GetNode(i)
+            child = node.GetVolume()
+            m = node.GetMatrix()
+            cmat, ctr = self._compose(wmat, wtr, m)
+            clab = self.build_world(child, depth + 1, cmat, ctr,
+                                    f"{path}/{node.GetName()}")
+            if clab is None:
+                continue
+            t = tgeo_matrix_to_trsf(m)
+            if t is None:
+                self.reflected_nodes.append(f"{name}/{node.GetName()}")
+                continue
+            comps.append((clab, t, str(node.GetName())))
+
+        if (self.opts.mother_bodies
+                and not (depth == 0 and self.opts.skip_top_body)):
+            key = (name + "__body", self._world_key(wmat, wtr))
+            if key in self.placed_world:
+                self.ndropped += 1
+            else:
+                blab = self._body_definition(vol)
+                if blab is not None:
+                    self.placed_world.add(key)
+                    comps.append((blab, gp_Trsf(), f"{name}__body"))
+
+        if not comps:
+            return None
+        asm = self.shape_tool.NewShape()
+        TDataStd_Name.Set(asm, name)
+        for (clab, t, cname) in comps:
+            comp = self.shape_tool.AddComponent(asm, clab, TopLoc_Location(t))
+            TDataStd_Name.Set(comp, cname)
+            self.ncomponents += 1
+        return asm
+
+    # ------------------------------------------------------------------
 
     def _carve(self, mother, placed, name):
         cutters = [_moved(sh, t) for (sh, t) in placed if sh is not None]
@@ -939,6 +1178,8 @@ class TGeoToStep:
             "assemblies": sum(1 for r in recs if r["ndaughters"] > 0),
             "components": self.ncomponents,
             "bakedMirrorCopies": self.nbaked,
+            "coincidentPlacementsDropped": self.ndropped,
+            "coincidentPlacementExamples": self.dropped_examples,
             "reflectedPlacements": self.reflected_nodes[:50],
             "nReflectedPlacements": len(self.reflected_nodes),
             "maxRelDev": max(devs) if devs else None,
@@ -1037,8 +1278,8 @@ def self_test():
                ROOT.TGeoSphere("s3", 1, 2, 30, 120, 20, 200), band, r1)
     _cap_check("TGeoCtub(0,1,1) straight",
                ROOT.TGeoCtub("ct", 0, 1, 1, 0, 360, 0, 0, -1, 0, 0, 1), band, r1)
-    v = array.array("d", [-1, -1, -1, 1, 1, 1, 1, -1, -2, -2, -2, 2, 2, 2, 2, -2])
-    _cap_check("TGeoArb8 (pyramid frustum)", ROOT.TGeoArb8("a8", 1.0, v), band, r1)
+    arb8v = array.array("d", [-1, -1, -1, 1, 1, 1, 1, -1, -2, -2, -2, 2, 2, 2, 2, -2])
+    _cap_check("TGeoArb8 (pyramid frustum)", ROOT.TGeoArb8("a8", 1.0, arb8v), band, r1)
     _cap_check("TGeoTrap(2,0,0,1,1,1,0,1,1,1,0)",
                ROOT.TGeoTrap("tp", 2, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0), band, r1)
     x = ROOT.TGeoXtru(2)
@@ -1219,7 +1460,72 @@ def self_test():
     total += len(r4)
     failures += _print_suite("negative controls (a wrong parameter must be rejected)", r4)
 
-    # ---- suite 5: the XCAF document, written and read back ----
+    # ---- suite 5: analytic surface types ----
+    # The point of these STEPs is to be test material for the reverse converter,
+    # whose recogniser keys on the analytic surface type. A flat B-spline is not a
+    # plane to it, so "the volume is right" is not enough -- the carriers must be
+    # the analytic surfaces TGeo meant.
+    from OCC.Core.BRepAdaptor import BRepAdaptor_Surface
+    from OCC.Core.GeomAbs import (
+        GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone, GeomAbs_Sphere, GeomAbs_Torus,
+        GeomAbs_BezierSurface, GeomAbs_BSplineSurface, GeomAbs_SurfaceOfRevolution,
+        GeomAbs_SurfaceOfExtrusion, GeomAbs_OffsetSurface, GeomAbs_OtherSurface)
+    _SNAME = {GeomAbs_Plane: "plane", GeomAbs_Cylinder: "cylinder", GeomAbs_Cone: "cone",
+              GeomAbs_Sphere: "sphere", GeomAbs_Torus: "torus",
+              GeomAbs_BezierSurface: "bezier", GeomAbs_BSplineSurface: "bspline",
+              GeomAbs_SurfaceOfRevolution: "revolution",
+              GeomAbs_SurfaceOfExtrusion: "extrusion",
+              GeomAbs_OffsetSurface: "offset", GeomAbs_OtherSurface: "other"}
+
+    def face_types(shape):
+        import collections as _c
+        c = _c.Counter()
+        ex = TopExp_Explorer(shape, TopAbs_FACE)
+        while ex.More():
+            c[_SNAME.get(BRepAdaptor_Surface(topods.Face(ex.Current())).GetType(), "?")] += 1
+            ex.Next()
+        return dict(c)
+
+    pgf = ROOT.TGeoPgon("pgf", 0, 360, 6, 2)
+    pgf.DefineSection(0, -1, 0.5, 1)
+    pgf.DefineSection(1, 1, 0.5, 1)
+    vtw = array.array("d", [-1, -1, -1, 1, 1, 1, 1, -1,
+                            -1.5, -0.5, -0.5, 1.5, 1.5, 0.5, 0.5, -1.5])
+    r6 = []
+    for nm, tsh, want in [
+        ("TGeoBBox", ROOT.TGeoBBox("fb", 1, 2, 3), {"plane": 6}),
+        ("TGeoTube", ROOT.TGeoTube("ft", 1, 2, 5), {"plane": 2, "cylinder": 2}),
+        ("TGeoTubeSeg", ROOT.TGeoTubeSeg("fts", 1, 2, 5, 30, 150),
+         {"plane": 4, "cylinder": 2}),
+        ("TGeoCone", ROOT.TGeoCone("fc", 3, 1, 2, 0.5, 4), {"plane": 2, "cone": 2}),
+        ("TGeoPcon", pc2, {"plane": 2, "cylinder": 2, "cone": 2}),
+        ("TGeoSphere", ROOT.TGeoSphere("fs", 1, 2, 30, 120, 20, 200),
+         {"sphere": 2, "cone": 2, "plane": 2}),
+        ("TGeoTorus", ROOT.TGeoTorus("fto", 10, 1, 2, 45, 120), {"torus": 2, "plane": 2}),
+        ("TGeoEltu", ROOT.TGeoEltu("fe", 2, 3, 4), {"extrusion": 1, "plane": 2}),
+        ("TGeoTrd1", ROOT.TGeoTrd1("fd1", 1, 2, 3, 4), {"plane": 6}),
+        ("TGeoTrd2", ROOT.TGeoTrd2("fd2", 1, 2, 3, 4, 5), {"plane": 6}),
+        ("TGeoXtru", x, {"plane": 6}),
+        ("TGeoPgon hollow", pgf, {"plane": 14}),
+        ("TGeoTrap", ROOT.TGeoTrap("ftp", 2, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0), {"plane": 6}),
+        ("TGeoArb8 planar", ROOT.TGeoArb8("fa8", 1.0, arb8v), {"plane": 6}),
+        ("TGeoArb8 twisted", ROOT.TGeoArb8("fa8t", 1.0, vtw), {"plane": 2, "bspline": 4}),
+        ("TGeoCtub", ROOT.TGeoCtub("fct", 0, 1, 1, 0, 360, 0, -0.6, -0.8, 0, 0.6, 0.8),
+         {"cylinder": 1, "plane": 2}),
+    ]:
+        try:
+            got = face_types(shape_to_occ(tsh, SCALE_TO_MM))
+            ok = got == want
+            if not ok:
+                nm = f"{nm} (got {got}, want {want})"
+        except Exception as e:
+            ok = False
+            nm = f"{nm} [{type(e).__name__}: {e}]"
+        r6.append((f"{nm}", ok, None, None, None))
+    total += len(r6)
+    failures += _print_suite("analytic surface types of every face", r6)
+
+    # ---- suite 6: the XCAF document, written and read back ----
     r5 = []
     import tempfile
     mgr = ROOT.TGeoManager("stmgr", "self-test")
@@ -1244,6 +1550,7 @@ def self_test():
     o.carve_mothers = False
     o.max_depth = None
     o.include_name = None
+    o.dedup_world = False
     conv = TGeoToStep(o)
     conv.build(mgr.GetTopVolume())
     tmp = os.path.join(tempfile.mkdtemp(), "selftest.step")
@@ -1328,6 +1635,7 @@ def main(argv=None):
     ap.add_argument("--no-mother-bodies", dest="mother_bodies", action="store_false")
     ap.add_argument("--skip-top-body", action="store_true")
     ap.add_argument("--carve-mothers", action="store_true")
+    ap.add_argument("--dedup-world", action="store_true")
     ap.add_argument("--no-verify", dest="verify", action="store_false")
     ap.add_argument("--quiet", action="store_true")
     ap.add_argument("--self-test", action="store_true")
@@ -1348,7 +1656,10 @@ def main(argv=None):
 
     conv = TGeoToStep(opts)
     conv.log(f"walking {vol.GetName()} ...")
-    conv.build(vol)
+    if opts.dedup_world:
+        conv.build_world(vol)
+    else:
+        conv.build(vol)
     conv.log(f"  {len(conv.definitions)} logical volumes, "
              f"{conv.ncomponents} components; writing {opts.output}")
     conv.write(opts.output)
@@ -1364,6 +1675,9 @@ def main(argv=None):
     if rep["maxRelDev"] is not None:
         print(f"capacity check: max relative deviation {rep['maxRelDev']:.3e}, "
               f"median {rep['medianRelDev']:.3e}")
+    if rep["coincidentPlacementsDropped"]:
+        print(f"{rep['coincidentPlacementsDropped']} coincident placement(s) dropped "
+              f"(--dedup-world); e.g. {rep['coincidentPlacementExamples'][:2]}")
     if rep["nReflectedPlacements"]:
         print(f"{rep['nReflectedPlacements']} reflecting placements baked as mirrored copies")
     for cls, c in sorted(rep["byShapeClass"].items(), key=lambda kv: -(kv[1]["declined"])):
