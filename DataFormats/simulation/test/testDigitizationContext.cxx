@@ -76,7 +76,7 @@ BOOST_AUTO_TEST_CASE(EmptyTimeframeExtracts)
 {
   long const orbitsPerTF = 6;
   long const nTF = 3;
-  auto ctx = makeContext({0, 2, 13});         // timeframe 1 (orbits 6..11) is empty
+  auto ctx = makeContext({0, 2, 13}); // timeframe 1 (orbits 6..11) is empty
   auto indices = ctx.calcTimeframeIndices(0, orbitsPerTF, 0., nTF);
   BOOST_CHECK_EQUAL(indices.size(), (size_t)nTF);
 

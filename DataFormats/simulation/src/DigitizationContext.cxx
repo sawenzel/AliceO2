@@ -535,7 +535,7 @@ void DigitizationContext::applyMaxCollisionFilter(std::vector<std::tuple<int, in
 
     LOG(info) << "timeframe indices " << previndex << " : " << firstindex << " : " << lastindex;
 
-    int collCount = 0;                            // counting collisions within timeframe
+    int collCount = 0;                                // counting collisions within timeframe
     const size_t nrecords_before = newrecords.size(); // to detect a timeframe that stays empty
     // copy to new structure
     for (int index = previndex >= 0 ? previndex : firstindex; index <= lastindex; ++index) {

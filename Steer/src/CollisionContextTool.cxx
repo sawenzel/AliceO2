@@ -57,7 +57,7 @@ struct Options {
   uint32_t firstBC = 0;    // first bunch crossing (relative to firstOrbit) of the first interaction;
   int orbitsPerTF = 256; // number of orbits per timeframe --> used to calculate start orbit for collisions
   bool useexistingkinematics = false;
-  bool noEmptyTF = false;    // prevent empty timeframes; the first interaction will be shifted backwards to fall within the range given by Options.orbits
+  bool noEmptyTF = false;     // prevent empty timeframes; the first interaction will be shifted backwards to fall within the range given by Options.orbits
   bool failOnEmptyTF = false; // stop rather than continue when a timeframe holds no collision
   int maxCollsPerTF = -1; // the maximal number of hadronic collisions per TF (can be used to constrain number of collisions per timeframe to some maximal value)
   std::string configKeyValues = ""; // string to init config key values
