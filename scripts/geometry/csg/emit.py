@@ -434,6 +434,30 @@ _CELL_CANDIDATE_DIGESTS = {
         "21b1e7406b7f17dca37349d160742135c17af3b6865673225fdb07d61459018b",
 }
 
+# Rung 3's own emissions: the whole-part fixtures whose every carrier arrives Tier-0 canonicalised
+# from a stored B-spline. What is worth freezing here is not just that they convert but that they
+# convert to the SAME description a natively-analytic twin does -- so these digests are asserted
+# against the corresponding rows above as well as against themselves.
+_TIER0_CANDIDATE_DIGESTS = {
+    "NURBS-encoded box":
+        "3ce4f94e64c58317f51cdeee12835f804335d3eafdf0c72125c80f0fd180a806",
+    "NURBS-encoded solid cylinder":
+        "8fb22fddb5e8480b8f7a3fae32754a94dea1b826dec21358856885071844673e",
+    "NURBS-encoded tube segment":
+        "3a18fceec54f3665cef60fa94575d0441e82c027a60881da74fd316dd3a99f95",
+    "NURBS-encoded cone":
+        "b1b1168b57f1f4e1315b695170f70ddd5cfed936482293f8603452737274818a",
+    "NURBS-encoded sphere":
+        "6e9a7e981bb74bcd688d129a9bbe556618ca52e8482e5a18e9b104058cd1ca8d",
+    "NURBS-encoded solid torus":
+        "510e17434832263effc284e3d9689aba4ba9436cef23d8d083ca30bedc30dd60",
+    "NURBS-encoded hollow torus wedge":
+        "5f0a993c08cb82afd05e0b35b3b7e3338b723b45d36f8d57b925a42457d6ffed",
+    "NURBS-encoded cube with an axial through-hole":
+        "04193f9ddb417d5d5cd01e42c67bce2c8ce55cbcfad290fc950083d5d9046e48",
+}
+
+
 # The same floor for rung 2's own emissions: SHA-256 of `json.dumps(candidate, sort_keys=True)`
 # for every prism-family fixture, recorded when the matcher landed. A row here may be updated only
 # together with a measured statement about which artefacts moved.
@@ -1619,6 +1643,180 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
                     in _TORUS_ELTU_CANDIDATE_DIGESTS.items()
                     if seen_digests.get(name) != digest)
           or f"{len(_TORUS_ELTU_CANDIDATE_DIGESTS)} candidates unchanged")
+
+    # --- Tier 0: the quadric a stored B-spline face already is ---
+    #
+    # `Stream_K_Tier0.md` §3's lesson, applied to this rung: the instrument is checked against a
+    # known displacement BEFORE any face is. Every control below is built in-process from OCC
+    # primitives, `BRepBuilderAPI_NurbsConvert` being the exporter artefact the whole service
+    # exists for, rebuilt.
+    from csg import tier0
+    from OCC.Core.BRepAdaptor import BRepAdaptor_Surface
+    from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_GTransform, BRepBuilderAPI_NurbsConvert
+    from OCC.Core.BRepTools import breptools
+    from OCC.Core.GeomAbs import GeomAbs_Cylinder
+    from OCC.Core.TopAbs import TopAbs_FACE
+    from OCC.Core.TopExp import TopExp_Explorer
+    from OCC.Core.gp import gp_Ax3, gp_Cylinder, gp_GTrsf, gp_Mat
+
+    check("the canonicaliser's band is the cascade's own",
+          tier0.REL_TOL == recognise.REL_TOL,
+          f"tier0 {tier0.REL_TOL:.0e} vs recognise {recognise.REL_TOL:.0e}")
+
+    def nurbs(shape):
+        return BRepBuilderAPI_NurbsConvert(shape, True).Shape()
+
+    def faces_of(shape):
+        found = []
+        walk = TopExp_Explorer(shape, TopAbs_FACE)
+        while walk.More():
+            found.append(topods.Face(walk.Current()))
+            walk.Next()
+        return found
+
+    def samples_of(face, n):
+        adaptor = BRepAdaptor_Surface(face, True)
+        import O2_CADtoTGeo as converter
+        return converter._sample_surface_for_recognition(adaptor, *breptools.UVBounds(face), n=n)
+
+    # (c) the instrument: a model displaced by a known amount must be reported at that size.
+    probe_cylinder = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)),
+                                              5.0, 8.0).Shape()
+    probe_points, _probe_normals = samples_of(
+        [f for f in faces_of(probe_cylinder)
+         if BRepAdaptor_Surface(f, True).GetType() == GeomAbs_Cylinder][0], 17)
+    probe_sphere_points, _ = samples_of(faces_of(BRepPrimAPI_MakeSphere(5.0).Shape())[0], 17)
+    probe_torus_points, _ = samples_of(faces_of(BRepPrimAPI_MakeTorus(6.0, 1.5).Shape())[0], 17)
+    for displacement in (1.0e-3, 1.0e-6, 1.0e-9):
+        for label, kind, model, points in (
+                ("cylinder radius", "cylinder",
+                 {"axis": [0.0, 0.0, 1.0], "origin": [0.0, 0.0, 0.0],
+                  "radius": 5.0 + displacement}, probe_points),
+                ("sphere radius", "sphere",
+                 {"centre": [0.0, 0.0, 0.0], "radius": 5.0 + displacement},
+                 probe_sphere_points),
+                ("torus tube radius", "torus",
+                 {"axis": [0.0, 0.0, 1.0], "centre": [0.0, 0.0, 0.0], "major": 6.0,
+                  "minor": 1.5 + displacement}, probe_torus_points)):
+            measured = tier0.surface_gap(kind, model, points)
+            check(f"the gap reports a {label} displaced by {displacement:.0e} cm at its true size",
+                  abs(measured - displacement) <= 1.0e-9 * displacement + 1.0e-13,
+                  f"measured {measured:.6g} cm, displaced {displacement:.0e} cm")
+
+    # Positive controls: the same solid, written as NURBS, must convert to the SAME BODY. This
+    # is the sharpest available statement that canonicalisation is exact -- not merely that the
+    # part converts, but that it converts to what its natively-analytic twin converts to.
+    tier0_pairs = (
+        ("box", BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 2.0, 3.0, 4.0).Shape(), "tier1-box", 1),
+        ("solid cylinder", BRepPrimAPI_MakeCylinder(ax, 2.0, 10.0).Shape(), "tier1-tube", 1),
+        ("tube segment", BRepPrimAPI_MakeCylinder(ax, 2.0, 10.0, math.radians(72.0)).Shape(),
+         "tier1-tubeseg", 1),
+        ("cone", BRepPrimAPI_MakeCone(ax, 3.0, 1.0, 6.0).Shape(), "tier1-cone", 1),
+        ("sphere", BRepPrimAPI_MakeSphere(3.0).Shape(), "tier1-sphere", 1),
+        ("solid torus", BRepPrimAPI_MakeTorus(6.0, 1.5).Shape(), "tier1-torus", 1),
+        ("hollow torus wedge",
+         BRepAlgoAPI_Cut(BRepPrimAPI_MakeTorus(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)),
+                                               6.0, 1.5, math.radians(140.0)).Shape(),
+                         BRepPrimAPI_MakeTorus(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)),
+                                               6.0, 0.7, math.radians(140.0)).Shape()).Shape(),
+         "tier1-torus", 1),
+        ("cube with an axial through-hole",
+         BRepAlgoAPI_Cut(BRepPrimAPI_MakeBox(gp_Pnt(-3, -3, -3), 6.0, 6.0, 6.0).Shape(),
+                         BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, -5), gp_Dir(0, 0, 1)),
+                                                  1.5, 10.0).Shape()).Shape(),
+         "cell-intersection", 2),
+    )
+
+    def realisation_gap(one, other):
+        """The largest distance between the two candidates' realised boundaries, in cm.
+
+        Compared as solids rather than as parameter lists, because the same solid has several
+        equally correct descriptions: the fit is free to choose the sense of a cylinder's axis,
+        which swaps a cone's two radii, and free to choose the direction phi is measured from,
+        which shifts a wedge's `phi1` against its frame's rotation by the same angle. A distance
+        between the two bodies sees through all of that and would still see a wrong radius.
+        """
+        if one is None or other is None:
+            return float("inf")
+        if (one["op"], one["recogniser"], len(one["leaves"])) != \
+                (other["op"], other["recogniser"], len(other["leaves"])):
+            return float("inf")
+        if [lf["type"] for lf in one["leaves"]] != [lf["type"] for lf in other["leaves"]]:
+            return float("inf")
+        return recognise._boundary_gap(prim.build_occ(one), prim.build_occ(other))
+
+    for label, solid, want_recogniser, want_leaves in tier0_pairs:
+        native_record = process_solid(solid, f"tier0 native {label}")
+        encoded = expect(f"NURBS-encoded {label}", nurbs(solid), want_recogniser, want_leaves)
+        deviation = realisation_gap(native_record["candidate"], encoded["candidate"])
+        notes = (encoded["candidate"] or {}).get("notes", {})
+        check(f"the NURBS-encoded {label} realises the analytic one's solid",
+              deviation <= 1.0e-9,
+              f"{notes.get('tier0Faces', 0)} canonicalised carrier(s) at a worst gap of "
+              f"{notes.get('tier0WorstGapRelative', float('nan')):.3g} of the part; the two "
+              f"realisations are {deviation:.3g} cm apart")
+
+    check("every Tier-0 candidate is byte-identical to its recorded digest",
+          all(seen_digests.get(name) == digest for name, digest
+              in _TIER0_CANDIDATE_DIGESTS.items()),
+          "; ".join(f"{name}: {seen_digests.get(name)} != {digest}" for name, digest
+                    in _TIER0_CANDIDATE_DIGESTS.items()
+                    if seen_digests.get(name) != digest)
+          or f"{len(_TIER0_CANDIDATE_DIGESTS)} candidates unchanged")
+
+    # (a) the negative control that matters most: a genuinely free-form face must NOT
+    # canonicalise, and its decline must carry a number rather than a bare "free-form". That
+    # number is the smallest gap any PROPOSED model reaches -- not the distance to the nearest
+    # quadric in the world, which nothing here computes. Said plainly because it is the sort of
+    # claim this project has over-stated before.
+    import O2_CADtoTGeo as converter
+    for label, face in (
+            ("free-form saddle", converter._self_test_bezier_patch(
+                lambda s, t: (10 * s - 5, 10 * t - 5, (10 * s - 5) * (10 * t - 5) / 10.0), 6, 6)),
+            ("narrow free-form ridge", converter._self_test_bezier_patch(
+                lambda s, t: (20 * s - 10, 0.5 * t,
+                              0.02 * (20 * s - 10) ** 2 + 0.3 * (20 * s - 10) * t), 6, 6)),
+            ("swept non-circular profile (bulge 1e-2)",
+             converter._self_test_tapered_near_circle(1.0e-2, 1.0e-4))):
+        adaptor = BRepAdaptor_Surface(face, True)
+        carrier, gap = tier0.canonicalise(face, adaptor, 20.0)
+        check(f"a {label} is not canonicalised, and the gap says how far off it is",
+              carrier is None and gap is not None and gap > 10.0 * tier0.REL_TOL * 20.0,
+              f"{'declined' if carrier is None else 'ACCEPTED as ' + carrier['kind']}, best "
+              f"proposal {gap:.4g} cm away, {gap / 20.0:.3g} of the part against "
+              f"{tier0.REL_TOL:.0e}")
+
+    # (b) a disguised cylinder displaced by ten model tolerances must be refused BY THE GAP --
+    # and the same construction at a tenth of one tolerance must be accepted, because a criterion
+    # that only ever says no is not a criterion either. An exact cylinder is squashed along x by
+    # a `gp_GTrsf`, which scales the poles of the rational patch exactly, so what comes back is
+    # an elliptic cylinder stored as a B-spline whose distance to the best circle is known in
+    # closed form: `(a - b) / 2 = R eps / 2`.
+    squash_radius, squash_scale = 5.0, 20.0
+    squash_base = nurbs(BRepBuilderAPI_MakeFace(
+        gp_Cylinder(gp_Ax3(gp_Pnt(0.0, 0.0, 0.0), gp_Dir(0, 0, 1), gp_Dir(1, 0, 0)),
+                    squash_radius), 0.0, 2.0 * math.pi, 1.0, 9.0).Shape())
+    squash_measured = {}
+    for multiple in (0.1, 1.0, 10.0):
+        intended = multiple * tier0.REL_TOL * squash_scale
+        transform = gp_GTrsf()
+        transform.SetVectorialPart(gp_Mat(1.0 + 2.0 * intended / squash_radius, 0.0, 0.0,
+                                          0.0, 1.0, 0.0, 0.0, 0.0, 1.0))
+        squashed = faces_of(BRepBuilderAPI_GTransform(squash_base, transform, True).Shape())[0]
+        carrier, gap = tier0.canonicalise(squashed, BRepAdaptor_Surface(squashed, True),
+                                          squash_scale)
+        squash_measured[multiple] = gap
+        want_accepted = multiple < 1.0
+        check(f"a disguised cylinder displaced by {multiple:g} model tolerance(s) is "
+              f"{'accepted' if want_accepted else 'refused by the gap'}",
+              (carrier is not None) == want_accepted,
+              f"{'accepted as ' + carrier['kind'] if carrier else 'declined'}, "
+              f"measured gap {gap:.4g} cm, {gap / squash_scale:.3g} of the part against "
+              f"{tier0.REL_TOL:.0e}")
+    ratios = [squash_measured[m] / (m * tier0.REL_TOL * squash_scale) for m in (0.1, 1.0, 10.0)]
+    check("the measured gap is proportional to the displacement that caused it",
+          max(ratios) - min(ratios) <= 1.0e-3 * max(ratios),
+          f"gap / displacement = {', '.join(f'{r:.4f}' for r in ratios)}")
 
     # --- the ROOT half: the emitted TGeoShape must answer like the closed form ---
     if with_root:

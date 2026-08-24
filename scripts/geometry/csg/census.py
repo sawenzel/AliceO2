@@ -239,6 +239,33 @@ def halfspace_side(face, ad, stype):
         return "interior"
     if stype not in ("cylinder", "cone", "sphere", "torus"):
         return None
+    if stype == "sphere":
+        sp = ad.Sphere()
+        carrier = {"kind": "sphere", "p": _xyz(sp.Location())}
+    elif stype == "torus":
+        to = ad.Torus()
+        ax = to.Axis()
+        carrier = {"kind": "torus", "p": _xyz(ax.Location()), "d": _xyz(ax.Direction()),
+                   "r": to.MajorRadius()}
+    else:
+        ax = ad.Cylinder().Axis() if stype == "cylinder" else ad.Cone().Axis()
+        carrier = {"kind": stype, "p": _xyz(ax.Location()), "d": _xyz(ax.Direction())}
+    return halfspace_side_of(face, ad, carrier)
+
+
+def halfspace_side_of(face, ad, carrier):
+    """`halfspace_side` for a face whose carrier is given as parameters rather than read off it.
+
+    Tier-0 canonicalisation (`csg/tier0.py`) needs exactly this: a B-spline face that IS a
+    cylinder has no `ad.Cylinder()` to ask, so the carrier arrives as `{kind, p, d, r}`. The rule
+    is the one above and there is one implementation of it -- the material side is decided by the
+    face's own normal field at the patch centre against the carrier's outward radial direction.
+    """
+    kind = carrier["kind"]
+    if kind == "plane":
+        return "interior"
+    if kind not in ("cylinder", "cone", "sphere", "torus"):
+        return None
     u = 0.5 * (ad.FirstUParameter() + ad.LastUParameter())
     v = 0.5 * (ad.FirstVParameter() + ad.LastVParameter())
     if not all(math.isfinite(x) for x in (u, v)):
@@ -250,28 +277,32 @@ def halfspace_side(face, ad, stype):
         p = _xyz(ad.Value(u, v))
     except Exception:
         return None
-    if stype == "sphere":
-        out = _sub(p, _xyz(ad.Sphere().Location()))
-    elif stype == "torus":
-        to = ad.Torus()
-        ax = to.Axis()
-        loc, d = _xyz(ax.Location()), _xyz(ax.Direction())
-        rel = _sub(p, loc)
-        axial = _dot(rel, d)
-        radial = _sub(rel, tuple(c * axial for c in d))
-        rl = _norm(radial)
-        if rl < 1e-30:
-            return None
-        centre = tuple(loc[i] + radial[i] / rl * to.MajorRadius() for i in range(3))
-        out = _sub(p, centre)
-    else:
-        ax = ad.Cylinder().Axis() if stype == "cylinder" else ad.Cone().Axis()
-        loc, d = _xyz(ax.Location()), _xyz(ax.Direction())
-        rel = _sub(p, loc)
-        out = _sub(rel, tuple(c * _dot(rel, d) for c in d))
-    if _norm(out) < 1e-30:
+    out = _outward_of_carrier(carrier, p)
+    if out is None or _norm(out) < 1e-30:
         return None
     return "interior" if _dot(n, out) > 0.0 else "exterior"
+
+
+def _outward_of_carrier(carrier, p):
+    """The direction that points out of `carrier` at `p`, or None where it is not defined.
+
+    For a cylinder and a cone this is the radial component, which does not depend on which point
+    of the axis is taken -- so a cone stated by its apex answers the same as one stated by its
+    reference circle.
+    """
+    kind = carrier["kind"]
+    if kind == "sphere":
+        return _sub(p, carrier["p"])
+    loc, d = carrier["p"], carrier["d"]
+    rel = _sub(p, loc)
+    radial = _sub(rel, tuple(c * _dot(rel, d) for c in d))
+    if kind != "torus":
+        return radial
+    rl = _norm(radial)
+    if rl < 1e-30:
+        return None
+    centre = tuple(loc[i] + radial[i] / rl * carrier["r"] for i in range(3))
+    return _sub(p, centre)
 
 
 def classify_face(face, canonical_tol, do_canonical=True):

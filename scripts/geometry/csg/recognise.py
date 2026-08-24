@@ -41,7 +41,7 @@ intrude into the eye's bore and fill a hole that must stay open.
 
 import math
 
-from csg import primitives as prim
+from csg import primitives as prim, tier0
 from csg.primitives import _add, _cross, _dot, _norm, _scale, _sub, _unit
 
 # Relative tolerance on directions, radii and offsets, scaled by the part's bounding-box
@@ -86,8 +86,29 @@ def _candidate(op, leaves, recogniser, notes=None):
 # face analysis
 # ------------------------------------------------------------------------------------------
 
+class _LazyScale:
+    """`max(bounding-box diagonal, 1 cm)` of a solid, measured on first use and then kept."""
+
+    def __init__(self, solid):
+        self._solid = solid
+        self._value = None
+
+    @property
+    def value(self):
+        if self._value is None:
+            self._value = max(_bbox_diagonal(self._solid), 1.0)
+        return self._value
+
+
 def _face_records(solid):
-    """[{kind, ...carrier..., uv bounds}] for every face, or a reason why the solid is out."""
+    """[{kind, ...carrier..., uv bounds}] for every face, or a reason why the solid is out.
+
+    A face whose *stored* surface is a B-spline may still be exactly a quadric -- that is what a
+    CAD exporter does with a cylinder -- so a face no adaptor branch below claims goes to
+    `csg/tier0.py` before it is written off as free-form. What comes back is a carrier in this
+    same vocabulary plus the measured gap it was accepted on, and it is flagged `canonicalised`
+    so that every report downstream can say when a conversion rested on Tier 0.
+    """
     from OCC.Core.BRepAdaptor import BRepAdaptor_Surface
     from OCC.Core.BRepTools import breptools
     from OCC.Core.GeomAbs import (GeomAbs_Cone, GeomAbs_Cylinder, GeomAbs_Plane,
@@ -99,6 +120,11 @@ def _face_records(solid):
     records = []
     n_freeform = 0
     n_faces = 0
+    n_canonical = 0
+    best_declined = None
+    # Measured only if a face actually needs canonicalising, so a part whose faces are all
+    # natively analytic -- which is every part of every detector corpus -- costs what it did.
+    scale = _LazyScale(solid)
     exp = TopExp_Explorer(solid, TopAbs_FACE)
     while exp.More():
         face = topods.Face(exp.Current())
@@ -135,15 +161,33 @@ def _face_records(solid):
                        r=to.MajorRadius(), rt=to.MinorRadius())
         else:
             ellipse = _extruded_ellipse(ad)
-            if ellipse is None:
-                n_freeform += 1
-                continue
-            rec.update(kind="eltu", **ellipse)
+            if ellipse is not None:
+                rec.update(kind="eltu", **ellipse)
+            else:
+                canonical, gap = tier0.canonicalise(face, ad, scale.value)
+                if canonical is None:
+                    n_freeform += 1
+                    if gap is not None and (best_declined is None or gap < best_declined):
+                        best_declined = gap
+                    continue
+                rec.update(**canonical)
+                if rec["kind"] == "plane" and rec["reversed"]:
+                    # The service returns the underlying surface's own normal, exactly as
+                    # `ad.Plane().Axis()` does above, so the face's flag is applied here in the
+                    # one place that applies it.
+                    rec["n"] = _scale(rec["n"], -1.0)
+                n_canonical += 1
         records.append(rec)
     if n_freeform:
+        how_far = ("" if best_declined is None else
+                   f"; the nearest canonical surface any of them proposes is "
+                   f"{best_declined:.3g} cm away, {best_declined / scale.value:.3g} of the part, "
+                   f"against {tier0.REL_TOL:.0e}")
+        rescued = f"; {n_canonical} canonicalised" if n_canonical else ""
         return None, (f"free-form faces: {n_freeform} of {n_faces} "
-                      "(surface kind outside plane/cylinder/cone/sphere/torus; a twisted "
-                      "TGeoArb8 side is one of these and is out of scope)")
+                      "(surface kind outside plane/cylinder/cone/sphere/torus and not a quadric "
+                      "in disguise; a twisted TGeoArb8 side is one of these and is out of "
+                      f"scope){rescued}{how_far}")
     if not records:
         return None, "no faces"
     return records, None
@@ -1449,6 +1493,10 @@ def _halfspace_carriers(solid, tol):
     compares it against the carrier's outward radial direction, and the census cross-checks that
     verdict against `TopAbs_REVERSED` in its own self-test. A rule keyed on the orientation flag
     alone has already been measured to be wrong on revolved solids (see `_match_revolved`).
+
+    A face whose stored surface is not analytic goes through `csg/tier0.py` first, so a cylinder a
+    CAD exporter wrote as a B-spline is a carrier here like any other; the side is then decided by
+    the same census rule against the *canonical* carrier rather than one read off the adaptor.
     """
     from csg import census
     from OCC.Core.BRepAdaptor import BRepAdaptor_Surface
@@ -1456,6 +1504,7 @@ def _halfspace_carriers(solid, tol):
     from OCC.Core.TopExp import TopExp_Explorer
     from OCC.Core.TopoDS import topods
 
+    scale = _LazyScale(solid)
     carriers = []
     exp = TopExp_Explorer(solid, TopAbs_FACE)
     while exp.More():
@@ -1463,13 +1512,22 @@ def _halfspace_carriers(solid, tol):
         exp.Next()
         ad = BRepAdaptor_Surface(face, True)
         kind = census.SURFACE_TYPE_NAME.get(ad.GetType(), "other")
+        canonical = None
         if kind not in ("plane", "cylinder", "cone", "sphere", "torus"):
-            raise Declined(f"a {kind} face is outside the single-cell emitter's carriers")
-        side = census.halfspace_side(face, ad, kind)
-        if side is None:
-            raise Declined(f"a {kind} face's material side could not be decided")
-        rec = {"kind": kind, "side": side}
-        if kind == "plane":
+            canonical, gap = tier0.canonicalise(face, ad, scale.value)
+            if canonical is None:
+                how_far = ("" if gap is None else
+                           f" (the nearest canonical surface it proposes is {gap:.3g} cm away, "
+                           f"{gap / scale.value:.3g} of the part)")
+                raise Declined(f"a {kind} face is outside the single-cell emitter's "
+                               f"carriers{how_far}")
+            kind = canonical["kind"]
+        rec = {"kind": kind, "side": None}
+        if canonical is not None:
+            rec.update({k: v for k, v in canonical.items() if k != "uv"})
+            if kind == "plane" and face.Orientation() == TopAbs_REVERSED:
+                rec["n"] = _scale(rec["n"], -1.0)
+        elif kind == "plane":
             axis = ad.Plane().Axis()
             normal = _xyz(axis.Direction())
             if face.Orientation() == TopAbs_REVERSED:
@@ -1492,6 +1550,10 @@ def _halfspace_carriers(solid, tol):
             rec.update(d=_unit(_xyz(to.Axis().Direction())), p=_xyz(to.Position().Location()),
                        x=_xyz(to.Position().XDirection()), r=to.MajorRadius(),
                        rt=to.MinorRadius())
+        rec["side"] = (tier0.carrier_side(face, ad, rec) if canonical is not None
+                       else census.halfspace_side(face, ad, kind))
+        if rec["side"] is None:
+            raise Declined(f"a {kind} face's material side could not be decided")
         for existing in carriers:
             if _same_carrier(existing, rec, tol):
                 if existing["side"] != rec["side"]:
@@ -1927,6 +1989,26 @@ def _measured_gap(solid, cand, diag, what):
 # entry point
 # ------------------------------------------------------------------------------------------
 
+def _with_tier0_notes(cand, records):
+    """Record on the candidate what Tier-0 canonicalisation the part rested on.
+
+    Attached only where at least one carrier was canonicalised, so a part built entirely from
+    natively-analytic faces keeps the candidate it had before this rung, byte for byte -- which is
+    what the digest tables in `csg/emit.py --self-test` assert.
+
+    The number is the worst gap over the part's canonicalised *faces*, which is an upper bound on
+    the worst over the carriers a given template actually used; a reader who sees it knows the
+    conversion is no better than that, which is the direction a bound has to err in.
+    """
+    canonical = [r for r in records if r.get("canonicalised")]
+    if cand is None or not canonical:
+        return cand
+    cand["notes"]["tier0Faces"] = len(canonical)
+    cand["notes"]["tier0WorstGapCm"] = max(r["tier0GapCm"] for r in canonical)
+    cand["notes"]["tier0WorstGapRelative"] = max(r["tier0GapRelative"] for r in canonical)
+    return cand
+
+
 def recognise(solid):
     """Propose a CSG description for one leaf solid in cm. Returns (candidate|None, reason)."""
     records, reason = _face_records(solid)
@@ -1934,6 +2016,12 @@ def recognise(solid):
         return None, reason
     diag = _bbox_diagonal(solid)
     tol = REL_TOL * max(diag, 1.0)
+    cand, reason = _cascade(solid, records, tol, diag)
+    return _with_tier0_notes(cand, records), reason
+
+
+def _cascade(solid, records, tol, diag):
+    """The matcher ladder itself, in order of increasing generality."""
     try:
         if any(r["kind"] == "eltu" for r in records):
             # Same reasoning as the torus below: an extruded ellipse was a free-form decline
@@ -2010,7 +2098,7 @@ def recognise_single_cell(solid):
     diag = _bbox_diagonal(solid)
     tol = REL_TOL * max(diag, 1.0)
     try:
-        return _match_single_cell(solid, records, tol, diag), None
+        return _with_tier0_notes(_match_single_cell(solid, records, tol, diag), records), None
     except Declined as declined:
         return None, f"{declined} [{_structure(records, tol)}]"
 
@@ -2037,7 +2125,8 @@ def recognise_revolved(solid):
         if len(clusters) != 1:
             raise Declined(f"{len(clusters)} axis cluster(s): not a single revolved profile")
         caps, wedges = _split_planes(records, clusters, tol)
-        return _match_revolved(solid, records, clusters, caps, wedges, tol, diag), None
+        return _with_tier0_notes(
+            _match_revolved(solid, records, clusters, caps, wedges, tol, diag), records), None
     except Declined as declined:
         return None, f"{declined} [{_structure(records, tol)}]"
 
@@ -2052,4 +2141,10 @@ def _structure(records, tol):
     except Exception:                                            # noqa: BLE001
         n_clusters = -1
     breakdown = ", ".join(f"{n} {k}" for k, n in sorted(kinds.items()))
-    return f"{len(records)} faces: {breakdown}; {n_clusters} axis cluster(s)"
+    canonical = [r for r in records if r.get("canonicalised")]
+    tier0_note = ""
+    if canonical:
+        worst = max(r["tier0GapRelative"] for r in canonical)
+        tier0_note = (f"; {len(canonical)} canonicalised at a worst gap of {worst:.3g} "
+                      "of the part")
+    return f"{len(records)} faces: {breakdown}; {n_clusters} axis cluster(s){tier0_note}"
