@@ -43,6 +43,7 @@ o2_add_library(DetectorsBase
                        src/O2SolidHarness.cxx
                        src/TGeoGeometryUtils.cxx
                        src/CADGeometryUtils.cxx
+                       src/O2FlatCSG.cxx
                PUBLIC_LINK_LIBRARIES FairRoot::Base
                                      O2::CommonUtils
                                      O2::DetectorsCommonDataFormats
@@ -88,6 +89,7 @@ o2_target_root_dictionary(DetectorsBase
                                   include/DetectorsBase/O2Tessellated.h
                                   include/DetectorsBase/O2BVHSurfaceSolid.h
                                   include/DetectorsBase/O2BVHAssembly.h
+                                  include/DetectorsBase/O2FlatCSG.h
                                   )
 
 o2_add_test(
@@ -107,6 +109,13 @@ o2_add_test(
 o2_add_test(
   BVHAssembly
   SOURCES test/testBVHAssembly.cxx
+  COMPONENT_NAME DetectorsBase
+  PUBLIC_LINK_LIBRARIES O2::DetectorsBase ROOT::Geom ROOT::RIO
+  LABELS detectorsbase)
+
+o2_add_test(
+  FlatCSG
+  SOURCES test/testFlatCSG.cxx
   COMPONENT_NAME DetectorsBase
   PUBLIC_LINK_LIBRARIES O2::DetectorsBase ROOT::Geom ROOT::RIO
   LABELS detectorsbase)
