@@ -1308,8 +1308,10 @@ _CELL_MARGIN = 0.25
 
 # A cell wider than this ships as a boolean tree of that many leaves, and `Stream_AA_FlatCSG.md`
 # §3.3 measures a composite's node entry at about 7x a primitive's. The budget is the AND-length
-# of the cell, the same quantity §2 tabulates as `max cell`, and a part over it is declined
-# rather than shipped expensive. Measured on the five detector corpora, nothing is refused by it.
+# of the cell, the same quantity §2 tabulates as `max cell`, and a part over it is declined rather
+# than shipped expensive. Measured on the five detector corpora it refuses two parts, both ITS
+# connector blocks at 10 halfspaces, and admits 17 at 2 or 3; raising it is a decision with
+# evidence behind it either way, which is why the number is here and not inlined.
 _CELL_MAX_LEAVES = 8
 
 # At most this many boundary samples per side feed the gap. The samples are strided rather than
