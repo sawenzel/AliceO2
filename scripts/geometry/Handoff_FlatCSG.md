@@ -43,7 +43,17 @@ conversion (`ST2487455_01`, a torus-carrying cell) and now declines its fillet b
 a crash on its self-intersecting tori forced `InvalidDescription` (a typed "the numbers are not a
 legal solid") to be declined at every proposal site, with a bad matcher still raising. The
 same-name resolution in `checkKnownSource.py` now uses the exact bounding box, never a
-Monte-Carlo capacity. Next: **R3 (Tier-0)**, then R4; R6 (the census) can run any time.
+Monte-Carlo capacity. **R3 + R4 are DONE** (2026-08-24/25, commits `5e57015d4f`, `09ffc512b3`, `7d3a203504`): Tier-0
+canonicalises 1082 ALICE3 faces (1014 at ≤1e-7 relative — gate 1 passed); the decomposition rung
+converts **+86 detector parts** (union-of-cells, every one at dV_sym exactly 0, Contains
+0/343 999) — corpora now PIPE 166/9/1, ITS 250/14/0, TPC 163/9/0, ABSO **29/0/0**, TRD 1167/3/0,
+known-source **1775/1775**; ALICE3 3 → 6; the fixtures gate's shape column is **10/10** (all ten
+fixtures ship as csg, `torus_union_cyl` included). Composite-sourced rate **153/188 (81 %)**. A
+false accept was caught and closed (`accept.contains_disagreements`: OCCT `Cut` can return
+`IsDone()` with zero solids both ways — `ST0923290_01#b19`). R5's demand is measured: 21 parts
+over the cell/leaf budgets (task-r4-report §7), plus 24 declines where a dihedrally-convex piece
+is not a carrier-arrangement cell — the split-at-every-carrier-crossing trade is R5's to price.
+Next: **R5 (`TGeoBVHCSG`)** and/or **R6 (the census)** — R6 is cheap and sharpens R5's demand.
 
 ## 2. The rungs, in order
 

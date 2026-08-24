@@ -40,12 +40,12 @@ deep review with the verification appendix; [`INDEX.md`](INDEX.md) orders every 
 | --- | --- |
 | `ctest -R BVHSurfaceSolid` / `BVHAssembly` | **113 + 22 cases**, green |
 | `O2_CADtoTGeo.py --self-test` | **54 checks** = 18+8+10+12+6 — never quote the last line alone |
-| `csg/emit.py --self-test` | **238** (11 acceptance + 227 recognise/emit, incl. four candidate-digest tables) |
+| `csg/emit.py --self-test` | **301** (11 acceptance + 290 recognise/emit, incl. six candidate-digest tables) |
 | `checkKnownSource.py --self-test` | **17/17** — the third acceptance test: emitted shape vs the source `TGeoShape` (same-name resolution by exact bounding box) |
 | `runOracleGate.py --self-test` / xray `--self-test` | 17/17 · clean |
 | Bagger gate | **13/13, CSG 7 / surfaces 6 / tessellated 0, exit 0**, bit-identical through all three rungs |
-| fixtures gate | **exit 0, 9/10 csg** (only `torus_union_cyl` declines); the two sliver rays remain only in the side-by-side surface columns, no shipped verdict carries one |
-| detector corpora (regenerated, converted, known-source-checked) | PIPE **162**/13/1 of 176 (post flat-CSG R1+R2: Eltu, torus, bellows plies) · ITS **207**/57/0 of 264 (post depth-guard fix; the five deep cages ship as surface) · TPC **146**/26/0 of 172 · ABSO **26**/3/0 of 29 · TRD **1148**/22/0 of 1170 — every accepted CSG at dV_sym = 0, known-source 1689/1689 |
+| fixtures gate | **exit 0, 10/10 csg** (`torus_union_cyl` converts as a union of cells); the two sliver rays remain only in the side-by-side surface columns |
+| detector corpora (regenerated, converted, known-source-checked) | PIPE **166**/9/1 · ITS **250**/14/0 of 264 · TPC **163**/9/0 · ABSO **29**/0/0 · TRD **1167**/3/0 (post flat-CSG R1-R4) · ITS **207**/57/0 of 264 (post depth-guard fix; the five deep cages ship as surface) · TPC **146**/26/0 of 172 · ABSO **26**/3/0 of 29 · TRD **1148**/22/0 of 1170 — every accepted CSG at dV_sym = 0, known-source 1775/1775 |
 | **Geant integration demo** | works: IRIS + Bagger as sensitive external detectors, real hits, zero stuck tracks / nav errors (`Stream_Z_IntegrationDemo.md`) |
 | material budget, exact vs tessellated | 0.039 % aggregate over 512 Fibonacci geantino rays; sole 8192-ray divergence is `BucketLink2`, the not-closed mesh |
 | costs, exact vs tessellated | 1.94× transport, +42 s one-off build (IRIS CloseShape), +174 MB; exact is *smaller on disk* |
@@ -68,7 +68,7 @@ X-ray's lost rays are a **navigation** loss in `O2Tessellated`'s stepping, not h
 3. **Converter: parallel `--csg auto` runs race** (two parallel conversions lost shapes):
    serialize/lock the deferred emit. And score **oTOF through the oracle gate** (converts, never
    scored).
-4. **Flat-CSG programme, R1+R2 DONE 2026-08-24** (`Handoff_FlatCSG.md` §1.1 — torus + Eltu landed, PIPE 162/13/1); NEXT there: R3 Tier-0, R4 splitter, R6 census. Remaining small items from `Stream_AJ_Recognition.md` §7: `TGeoEltu`
+4. **Flat-CSG programme, R1-R4 DONE 2026-08-25** (`Handoff_FlatCSG.md` §1.1 — torus, Eltu, Tier-0, union-of-cells; composite-sourced rate 81 %); NEXT there: R5 TGeoBVHCSG (demand measured: 21 over-budget parts) and R6 census. Remaining small items from `Stream_AJ_Recognition.md` §7: `TGeoEltu`
    (PIPE's 22-part elliptical population — needs the face reader to learn the elliptic
    carrier); run + score the **MAG corpus** (demand 14 prisms, never converted); the cell leaf
    budget (8) vs ITS's two 10-halfspace connector blocks; Xtru parameter comparison in

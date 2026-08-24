@@ -14,7 +14,7 @@
    "model": "Bagger",
    "lid": "0:1:1:3",
    "shipsAs": "surface",
-   "whyNotCSG": "7 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built); as a single cell: 16 trusted concave edge(s) of 122: the part is more than one cell, and decomposition is deliberately not built [44 faces: 16 cylinder, 28 plane; 7 axis cluster(s)]",
+   "whyNotCSG": "7 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built); as a single cell: 16 trusted concave edge(s) of 122: the part is more than one cell; as a union of cells: the union of cells's boundary is 3.09 cm from the part's (0.169 of the part's 18.2362 cm diagonal, over 1e-06) [44 faces: 16 cylinder, 28 plane; 7 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 44
   },
@@ -23,7 +23,7 @@
    "model": "Bagger",
    "lid": "0:1:1:4",
    "shipsAs": "surface",
-   "whyNotCSG": "6 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built); as a single cell: 6 trusted concave edge(s) of 87: the part is more than one cell, and decomposition is deliberately not built [31 faces: 14 cylinder, 17 plane; 6 axis cluster(s)]",
+   "whyNotCSG": "6 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built); as a single cell: 6 trusted concave edge(s) of 87: the part is more than one cell; as a union of cells: the union of cells's boundary is 17.9 cm from the part's (0.366 of the part's 48.7706 cm diagonal, over 1e-06) [31 faces: 14 cylinder, 17 plane; 6 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 31
   },
@@ -32,7 +32,7 @@
    "model": "Bagger",
    "lid": "0:1:1:5",
    "shipsAs": "surface",
-   "whyNotCSG": "6 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built); as a single cell: 8 trusted concave edge(s) of 66: the part is more than one cell, and decomposition is deliberately not built [24 faces: 12 cylinder, 12 plane; 6 axis cluster(s)]",
+   "whyNotCSG": "6 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built); as a single cell: 8 trusted concave edge(s) of 66: the part is more than one cell; as a union of cells: the union of cells's boundary is 8.67 cm from the part's (0.214 of the part's 40.4742 cm diagonal, over 1e-06) [24 faces: 12 cylinder, 12 plane; 6 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 24
   },
@@ -41,7 +41,7 @@
    "model": "Bagger",
    "lid": "0:1:1:6",
    "shipsAs": "surface",
-   "whyNotCSG": "a torus together with ['cylinder', 'sphere'] is not a whole torus; as a single cell: 68 trusted concave edge(s) of 247: the part is more than one cell, and decomposition is deliberately not built [97 faces: 22 cylinder, 69 plane, 4 sphere, 2 torus; 13 axis cluster(s)]",
+   "whyNotCSG": "a torus together with ['cylinder', 'sphere'] is not a whole torus; as a single cell: 68 trusted concave edge(s) of 247: the part is more than one cell; as a union of cells: 28 cells of 68+ halfspaces in total, over the part budget of 64: it would ship as a boolean tree that wide [97 faces: 22 cylinder, 69 plane, 4 sphere, 2 torus; 13 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 97
   },
@@ -50,7 +50,7 @@
    "model": "Bagger",
    "lid": "0:1:1:7",
    "shipsAs": "surface",
-   "whyNotCSG": "3 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built); as a single cell: 18 trusted concave edge(s) of 57: the part is more than one cell, and decomposition is deliberately not built [23 faces: 11 cylinder, 12 plane; 3 axis cluster(s)]",
+   "whyNotCSG": "3 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built); as a single cell: 18 trusted concave edge(s) of 57: the part is more than one cell; as a union of cells: the union of cells's boundary is 2.97 cm from the part's (0.3 of the part's 9.89906 cm diagonal, over 1e-06) [23 faces: 11 cylinder, 12 plane; 3 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 23
   },
@@ -59,7 +59,7 @@
    "model": "Bagger",
    "lid": "0:1:1:8",
    "shipsAs": "surface",
-   "whyNotCSG": "a planar face is neither a cap nor a wedge of any axis cluster; as a single cell: 10 trusted concave edge(s) of 54: the part is more than one cell, and decomposition is deliberately not built [22 faces: 10 cylinder, 12 plane; 2 axis cluster(s)]",
+   "whyNotCSG": "a planar face is neither a cap nor a wedge of any axis cluster; as a single cell: 10 trusted concave edge(s) of 54: the part is more than one cell; as a union of cells: the union of cells's boundary is 1.73 cm from the part's (0.23 of the part's 7.52519 cm diagonal, over 1e-06) [22 faces: 10 cylinder, 12 plane; 2 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 22
   },
@@ -122,7 +122,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:5",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 4 of 50 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "a sphere with additional faces is out of scope (no theta/phi cuts); as a single cell: 28 trusted concave edge(s) of 104: the part is more than one cell; as a union of cells: 1 piece(s) of 13 could not be cut at their own witness edge, so the decomposition is incomplete [50 faces: 10 cone, 28 cylinder, 8 plane, 4 sphere; 1 axis cluster(s); 4 canonicalised at a worst gap of 2.47e-07 of the part]",
    "whyNotSurface": "2 face(s): bspline face extraction not implemented yet",
    "nFaces": 50
   },
@@ -131,7 +131,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:7#b1",
    "shipsAs": "surface",
-   "whyNotCSG": "8 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built); as a single cell: 25 trusted concave edge(s) of 198: the part is more than one cell, and decomposition is deliberately not built [66 faces: 2 cone, 31 cylinder, 33 plane; 8 axis cluster(s)]",
+   "whyNotCSG": "8 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built); as a single cell: 25 trusted concave edge(s) of 198: the part is more than one cell; as a union of cells: the split moved 1.4e-05 of the part's volume, over 1e-06: OCCT's splitter did not conserve it and the decomposition is not the part [66 faces: 2 cone, 31 cylinder, 33 plane; 8 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 66
   },
@@ -149,7 +149,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:7#b3",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 40 of 245 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 40 of 245 (surface kind outside plane/cylinder/cone/sphere/torus and not a quadric in disguise; a twisted TGeoArb8 side is one of these and is out of scope); the nearest canonical surface any of them proposes is 2e-05 cm away, 4.35e-06 of the part, against 1e-06",
    "whyNotSurface": "40 face(s): bspline face extraction not implemented yet",
    "nFaces": 245
   },
@@ -158,7 +158,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:8",
    "shipsAs": "surface",
-   "whyNotCSG": "19 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built); as a single cell: 9 trusted concave edge(s) of 177: the part is more than one cell, and decomposition is deliberately not built [65 faces: 9 cone, 36 cylinder, 20 plane; 19 axis cluster(s)]",
+   "whyNotCSG": "19 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built); as a single cell: 9 trusted concave edge(s) of 177: the part is more than one cell; as a union of cells: 13 cells of 67+ halfspaces in total, over the part budget of 64: it would ship as a boolean tree that wide [65 faces: 9 cone, 36 cylinder, 20 plane; 19 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 65
   },
@@ -167,7 +167,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:9",
    "shipsAs": "surface",
-   "whyNotCSG": "13 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built); as a single cell: 9 trusted concave edge(s) of 141: the part is more than one cell, and decomposition is deliberately not built [53 faces: 9 cone, 24 cylinder, 20 plane; 13 axis cluster(s)]",
+   "whyNotCSG": "13 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built); as a single cell: 9 trusted concave edge(s) of 141: the part is more than one cell; as a union of cells: 10 cells of 69+ halfspaces in total, over the part budget of 64: it would ship as a boolean tree that wide [53 faces: 9 cone, 24 cylinder, 20 plane; 13 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 53
   },
@@ -176,7 +176,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:11",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 37 of 148 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 18 of 148 (surface kind outside plane/cylinder/cone/sphere/torus and not a quadric in disguise; a twisted TGeoArb8 side is one of these and is out of scope); 19 canonicalised; the nearest canonical surface any of them proposes is 1.7e-05 cm away, 1.05e-06 of the part, against 1e-06",
    "whyNotSurface": "19 face(s): bspline face extraction not implemented yet; 18 face(s): extrusion face extraction not implemented yet",
    "nFaces": 148
   },
@@ -185,7 +185,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:12#b1",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 14 of 22 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "7 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built); as a single cell: the proposal is empty: these carriers have no common interior, so the part is not one cell; as a union of cells: the decomposition is 1 piece(s): not a union of cells [22 faces: 14 cylinder, 8 plane; 7 axis cluster(s); 14 canonicalised at a worst gap of 2.65e-07 of the part]",
    "whyNotSurface": "14 face(s): extrusion face extraction not implemented yet",
    "nFaces": 22
   },
@@ -212,7 +212,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:12#b4",
    "shipsAs": "surface",
-   "whyNotCSG": "a planar face is neither a cap nor a wedge of any axis cluster; as a single cell: OCCT could not measure a boundary sample against the proposal, so the gap is unknown [10 faces: 2 cylinder, 8 plane; 1 axis cluster(s)]",
+   "whyNotCSG": "a planar face is neither a cap nor a wedge of any axis cluster; as a single cell: the proposal is empty: these carriers have no common interior, so the part is not one cell; as a union of cells: the decomposition is 1 piece(s): not a union of cells [10 faces: 2 cylinder, 8 plane; 1 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 10
   },
@@ -221,7 +221,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:13",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 37 of 148 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 18 of 148 (surface kind outside plane/cylinder/cone/sphere/torus and not a quadric in disguise; a twisted TGeoArb8 side is one of these and is out of scope); 19 canonicalised; the nearest canonical surface any of them proposes is 1.7e-05 cm away, 1.05e-06 of the part, against 1e-06",
    "whyNotSurface": "19 face(s): bspline face extraction not implemented yet; 18 face(s): extrusion face extraction not implemented yet",
    "nFaces": 148
   },
@@ -230,7 +230,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:14",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 69 of 996 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 69 of 996 (surface kind outside plane/cylinder/cone/sphere/torus and not a quadric in disguise; a twisted TGeoArb8 side is one of these and is out of scope); the nearest canonical surface any of them proposes is 0.000792 cm away, 1.13e-05 of the part, against 1e-06",
    "whyNotSurface": "69 face(s): bspline face extraction not implemented yet",
    "nFaces": 996
   },
@@ -239,7 +239,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:15#b1",
    "shipsAs": "surface",
-   "whyNotCSG": "a torus together with ['cone', 'cylinder'] is not a whole torus; as a single cell: 6 trusted concave edge(s) of 474: the part is more than one cell, and decomposition is deliberately not built [202 faces: 6 cone, 91 cylinder, 23 plane, 82 torus; 73 axis cluster(s)]",
+   "whyNotCSG": "a torus together with ['cone', 'cylinder'] is not a whole torus; as a single cell: 6 trusted concave edge(s) of 474: the part is more than one cell; as a union of cells: the split moved 7.87e-06 of the part's volume, over 1e-06: OCCT's splitter did not conserve it and the decomposition is not the part [202 faces: 6 cone, 91 cylinder, 23 plane, 82 torus; 73 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 202
   },
@@ -248,7 +248,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:15#b2",
    "shipsAs": "surface",
-   "whyNotCSG": "a torus together with ['cone', 'cylinder'] is not a whole torus; as a single cell: TGeoTorus: rmax 0.1 exceeds the major radius 0.0428825434729, so this is a self-intersecting torus (a fillet blend) that TGeoTorus cannot state [10 faces: 2 cone, 2 cylinder, 2 plane, 4 torus; 1 axis cluster(s)]",
+   "whyNotCSG": "a torus together with ['cone', 'cylinder'] is not a whole torus; as a single cell: TGeoTorus: rmax 0.1 exceeds the major radius 0.0428825434729, so this is a self-intersecting torus (a fillet blend) that TGeoTorus cannot state; as a union of cells: the decomposition is 1 piece(s): not a union of cells [10 faces: 2 cone, 2 cylinder, 2 plane, 4 torus; 1 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 10
   },
@@ -257,7 +257,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:15#b3",
    "shipsAs": "surface",
-   "whyNotCSG": "a torus together with ['cone', 'cylinder'] is not a whole torus; as a single cell: TGeoTorus: rmax 0.1 exceeds the major radius 0.0428825434729, so this is a self-intersecting torus (a fillet blend) that TGeoTorus cannot state [10 faces: 2 cone, 2 cylinder, 2 plane, 4 torus; 1 axis cluster(s)]",
+   "whyNotCSG": "a torus together with ['cone', 'cylinder'] is not a whole torus; as a single cell: TGeoTorus: rmax 0.1 exceeds the major radius 0.0428825434729, so this is a self-intersecting torus (a fillet blend) that TGeoTorus cannot state; as a union of cells: the decomposition is 1 piece(s): not a union of cells [10 faces: 2 cone, 2 cylinder, 2 plane, 4 torus; 1 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 10
   },
@@ -266,7 +266,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:15#b4",
    "shipsAs": "surface",
-   "whyNotCSG": "a torus together with ['cone', 'cylinder'] is not a whole torus; as a single cell: TGeoTorus: rmax 0.1 exceeds the major radius 0.0428825434729, so this is a self-intersecting torus (a fillet blend) that TGeoTorus cannot state [10 faces: 2 cone, 2 cylinder, 2 plane, 4 torus; 1 axis cluster(s)]",
+   "whyNotCSG": "a torus together with ['cone', 'cylinder'] is not a whole torus; as a single cell: TGeoTorus: rmax 0.1 exceeds the major radius 0.0428825434729, so this is a self-intersecting torus (a fillet blend) that TGeoTorus cannot state; as a union of cells: the decomposition is 1 piece(s): not a union of cells [10 faces: 2 cone, 2 cylinder, 2 plane, 4 torus; 1 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 10
   },
@@ -275,7 +275,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:16",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 69 of 128 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 59 of 128 (surface kind outside plane/cylinder/cone/sphere/torus and not a quadric in disguise; a twisted TGeoArb8 side is one of these and is out of scope); 10 canonicalised; the nearest canonical surface any of them proposes is 1.78e-05 cm away, 1.08e-06 of the part, against 1e-06",
    "whyNotSurface": "46 face(s): bspline face extraction not implemented yet; 23 face(s): extrusion face extraction not implemented yet",
    "nFaces": 128
   },
@@ -283,8 +283,8 @@
    "name": "ST2487721_01",
    "model": "ALICE3",
    "lid": "0:1:1:17",
-   "shipsAs": "surface",
-   "whyNotCSG": "7 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built); as a single cell: 4 trusted concave edge(s) of 76: the part is more than one cell, and decomposition is deliberately not built [32 faces: 8 cone, 20 cylinder, 4 plane; 7 axis cluster(s)]",
+   "shipsAs": "csg",
+   "whyNotCSG": null,
    "whyNotSurface": null,
    "nFaces": 32
   },
@@ -293,7 +293,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:18",
    "shipsAs": "surface",
-   "whyNotCSG": "a torus together with ['cone', 'cylinder'] is not a whole torus; as a single cell: 4 trusted concave edge(s) of 219: the part is more than one cell, and decomposition is deliberately not built [80 faces: 13 cone, 23 cylinder, 30 plane, 14 torus; 10 axis cluster(s)]",
+   "whyNotCSG": "a torus together with ['cone', 'cylinder'] is not a whole torus; as a single cell: 4 trusted concave edge(s) of 219: the part is more than one cell; as a union of cells: the split moved 3.24e-06 of the part's volume, over 1e-06: OCCT's splitter did not conserve it and the decomposition is not the part [80 faces: 13 cone, 23 cylinder, 30 plane, 14 torus; 10 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 80
   },
@@ -302,7 +302,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:19",
    "shipsAs": "surface",
-   "whyNotCSG": "0 cap plane(s) perpendicular to the axis, expected 2; as a revolved profile: the profile steps or ends at z = -600 with no cap plane there; as a single cell: 1 distinct carrier(s): not a composite [2 faces: 2 cone; 1 axis cluster(s)]",
+   "whyNotCSG": "0 cap plane(s) perpendicular to the axis, expected 2; as a revolved profile: the profile steps or ends at z = -600 with no cap plane there; as a single cell: 1 distinct carrier(s): not a composite; as a union of cells: the decomposition is 1 piece(s): not a union of cells [2 faces: 2 cone; 1 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 2
   },
@@ -311,7 +311,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:20#b1",
    "shipsAs": "surface",
-   "whyNotCSG": "a torus together with ['cone', 'cylinder'] is not a whole torus; as a single cell: 472 trusted concave edge(s) of 2748: the part is more than one cell, and decomposition is deliberately not built [1052 faces: 142 cone, 511 cylinder, 383 plane, 16 torus; 248 axis cluster(s)]",
+   "whyNotCSG": "a torus together with ['cone', 'cylinder'] is not a whole torus; as a single cell: 472 trusted concave edge(s) of 2748: the part is more than one cell; as a union of cells: the decomposition stopped: the cell budget of 64 was exceeded after 51 split(s) into 59 cell(s) [1052 faces: 142 cone, 511 cylinder, 383 plane, 16 torus; 248 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 1052
   },
@@ -320,7 +320,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:20#b2",
    "shipsAs": "surface",
-   "whyNotCSG": "a torus together with ['cone', 'cylinder'] is not a whole torus; as a single cell: 888 trusted concave edge(s) of 2400: the part is more than one cell, and decomposition is deliberately not built [965 faces: 102 cone, 308 cylinder, 535 plane, 20 torus; 166 axis cluster(s)]",
+   "whyNotCSG": "a torus together with ['cone', 'cylinder'] is not a whole torus; as a single cell: 888 trusted concave edge(s) of 2400: the part is more than one cell; as a union of cells: the decomposition stopped: the cell budget of 64 was exceeded after 48 split(s) into 57 cell(s) [965 faces: 102 cone, 308 cylinder, 535 plane, 20 torus; 166 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 965
   },
@@ -329,7 +329,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:20#b3",
    "shipsAs": "surface",
-   "whyNotCSG": "a torus together with ['cone', 'cylinder'] is not a whole torus; as a single cell: 191 trusted concave edge(s) of 558: the part is more than one cell, and decomposition is deliberately not built [236 faces: 24 cone, 80 cylinder, 112 plane, 20 torus; 20 axis cluster(s)]",
+   "whyNotCSG": "a torus together with ['cone', 'cylinder'] is not a whole torus; as a single cell: 191 trusted concave edge(s) of 558: the part is more than one cell; as a union of cells: the decomposition stopped: the cell budget of 64 was exceeded after 49 split(s) into 59 cell(s) [236 faces: 24 cone, 80 cylinder, 112 plane, 20 torus; 20 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 236
   },
@@ -338,7 +338,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:20#b4",
    "shipsAs": "surface",
-   "whyNotCSG": "a torus together with ['cone', 'cylinder'] is not a whole torus; as a single cell: 436 trusted concave edge(s) of 1824: the part is more than one cell, and decomposition is deliberately not built [720 faces: 56 cone, 268 cylinder, 363 plane, 33 torus; 49 axis cluster(s)]",
+   "whyNotCSG": "a torus together with ['cone', 'cylinder'] is not a whole torus; as a single cell: 436 trusted concave edge(s) of 1824: the part is more than one cell; as a union of cells: the decomposition stopped: the cell budget of 64 was exceeded after 56 split(s) into 59 cell(s) [720 faces: 56 cone, 268 cylinder, 363 plane, 33 torus; 49 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 720
   },
@@ -347,7 +347,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:21",
    "shipsAs": "surface",
-   "whyNotCSG": "a torus together with ['cylinder'] is not a whole torus; as a single cell: 28 trusted concave edge(s) of 144: the part is more than one cell, and decomposition is deliberately not built [50 faces: 20 cylinder, 18 plane, 12 torus; 1 axis cluster(s)]",
+   "whyNotCSG": "a torus together with ['cylinder'] is not a whole torus; as a single cell: 28 trusted concave edge(s) of 144: the part is more than one cell; as a union of cells: 15 cells of 68+ halfspaces in total, over the part budget of 64: it would ship as a boolean tree that wide [50 faces: 20 cylinder, 18 plane, 12 torus; 1 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 50
   },
@@ -356,7 +356,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b1",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 274 of 352 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 28 of 352 (surface kind outside plane/cylinder/cone/sphere/torus and not a quadric in disguise; a twisted TGeoArb8 side is one of these and is out of scope); 246 canonicalised; the nearest canonical surface any of them proposes is 0.00116 cm away, 3.23e-05 of the part, against 1e-06",
    "whyNotSurface": "68 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cone but recognized quadric boundary edge is not axis-aligned in (phi, h/theta); 28 face(s): bspline face extraction not implemented yet; 8 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cylinder but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 352
   },
@@ -365,7 +365,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b2",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "a sphere with additional faces is out of scope (no theta/phi cuts); as a single cell: 23 trusted concave edge(s) of 60: the part is more than one cell; as a union of cells: the union of cells's boundary is 3.84e-05 cm from the part's (1.12e-05 of the part's 3.44131 cm diagonal, over 1e-06) [24 faces: 6 cylinder, 15 plane, 3 sphere; 1 axis cluster(s); 9 canonicalised at a worst gap of 3.59e-12 of the part]",
    "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 24
   },
@@ -374,7 +374,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b3",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "a sphere with additional faces is out of scope (no theta/phi cuts); as a single cell: 23 trusted concave edge(s) of 60: the part is more than one cell; as a union of cells: the union of cells's boundary is 3.84e-05 cm from the part's (1.12e-05 of the part's 3.44131 cm diagonal, over 1e-06) [24 faces: 6 cylinder, 15 plane, 3 sphere; 1 axis cluster(s); 9 canonicalised at a worst gap of 3.61e-12 of the part]",
    "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 24
   },
@@ -383,7 +383,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b4",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "a sphere with additional faces is out of scope (no theta/phi cuts); as a single cell: 23 trusted concave edge(s) of 60: the part is more than one cell; as a union of cells: the union of cells's boundary is 3.84e-05 cm from the part's (1.12e-05 of the part's 3.44131 cm diagonal, over 1e-06) [24 faces: 6 cylinder, 15 plane, 3 sphere; 1 axis cluster(s); 9 canonicalised at a worst gap of 3.59e-12 of the part]",
    "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 24
   },
@@ -392,7 +392,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b5",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "a sphere with additional faces is out of scope (no theta/phi cuts); as a single cell: 23 trusted concave edge(s) of 60: the part is more than one cell; as a union of cells: the union of cells's boundary is 3.84e-05 cm from the part's (1.12e-05 of the part's 3.44131 cm diagonal, over 1e-06) [24 faces: 6 cylinder, 15 plane, 3 sphere; 1 axis cluster(s); 9 canonicalised at a worst gap of 3.62e-12 of the part]",
    "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 24
   },
@@ -401,7 +401,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b6",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 29 of 45 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 5 of 45 (surface kind outside plane/cylinder/cone/sphere/torus and not a quadric in disguise; a twisted TGeoArb8 side is one of these and is out of scope); 24 canonicalised; the nearest canonical surface any of them proposes is 0.00636 cm away, 0.000517 of the part, against 1e-06",
    "whyNotSurface": "6 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cone but recognized quadric boundary edge is not axis-aligned in (phi, h/theta); 5 face(s): bspline face extraction not implemented yet; 3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cylinder but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 45
   },
@@ -410,7 +410,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b7",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 29 of 45 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 5 of 45 (surface kind outside plane/cylinder/cone/sphere/torus and not a quadric in disguise; a twisted TGeoArb8 side is one of these and is out of scope); 24 canonicalised; the nearest canonical surface any of them proposes is 0.00636 cm away, 0.000517 of the part, against 1e-06",
    "whyNotSurface": "6 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cone but recognized quadric boundary edge is not axis-aligned in (phi, h/theta); 5 face(s): bspline face extraction not implemented yet; 3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cylinder but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 45
   },
@@ -419,7 +419,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b8",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 29 of 45 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 5 of 45 (surface kind outside plane/cylinder/cone/sphere/torus and not a quadric in disguise; a twisted TGeoArb8 side is one of these and is out of scope); 24 canonicalised; the nearest canonical surface any of them proposes is 0.00636 cm away, 0.000517 of the part, against 1e-06",
    "whyNotSurface": "6 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cone but recognized quadric boundary edge is not axis-aligned in (phi, h/theta); 5 face(s): bspline face extraction not implemented yet; 3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cylinder but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 45
   },
@@ -428,7 +428,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b9",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 29 of 45 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 5 of 45 (surface kind outside plane/cylinder/cone/sphere/torus and not a quadric in disguise; a twisted TGeoArb8 side is one of these and is out of scope); 24 canonicalised; the nearest canonical surface any of them proposes is 0.00636 cm away, 0.000517 of the part, against 1e-06",
    "whyNotSurface": "6 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cone but recognized quadric boundary edge is not axis-aligned in (phi, h/theta); 5 face(s): bspline face extraction not implemented yet; 3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cylinder but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 45
   },
@@ -437,7 +437,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b10",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 29 of 86 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 6 of 86 (surface kind outside plane/cylinder/cone/sphere/torus and not a quadric in disguise; a twisted TGeoArb8 side is one of these and is out of scope); 23 canonicalised; the nearest canonical surface any of them proposes is 0.0558 cm away, 0.00427 of the part, against 1e-06",
    "whyNotSurface": "6 face(s): bspline face extraction not implemented yet",
    "nFaces": 86
   },
@@ -446,7 +446,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b11",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 161 of 193 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "a sphere with additional faces is out of scope (no theta/phi cuts); as a single cell: 73 trusted concave edge(s) of 541: the part is more than one cell; as a union of cells: 1 piece(s) of 25 could not be cut at their own witness edge, so the decomposition is incomplete [193 faces: 42 cone, 117 cylinder, 32 plane, 2 sphere; 34 axis cluster(s); 161 canonicalised at a worst gap of 6e-07 of the part]",
    "whyNotSurface": "28 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cone but recognized quadric boundary edge is not axis-aligned in (phi, h/theta); 26 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cylinder but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 193
   },
@@ -455,7 +455,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b12",
    "shipsAs": "surface",
-   "whyNotCSG": "free-form faces: 4 of 10 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "4 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built); as a single cell: the proposal is empty: these carriers have no common interior, so the part is not one cell; as a union of cells: the decomposition is 1 piece(s): not a union of cells [10 faces: 4 cylinder, 6 plane; 4 axis cluster(s); 4 canonicalised at a worst gap of 8.61e-15 of the part]",
    "whyNotSurface": null,
    "nFaces": 10
   },
@@ -463,8 +463,8 @@
    "name": "ST0923290_01",
    "model": "ALICE3",
    "lid": "0:1:1:22#b13",
-   "shipsAs": "surface",
-   "whyNotCSG": "free-form faces: 9 of 20 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "shipsAs": "csg",
+   "whyNotCSG": null,
    "whyNotSurface": null,
    "nFaces": 20
   },
@@ -473,7 +473,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b14",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 101 of 138 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "22 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built); as a single cell: 68 trusted concave edge(s) of 351: the part is more than one cell; as a union of cells: 6 cells of 85+ halfspaces in total, over the part budget of 64: it would ship as a boolean tree that wide [138 faces: 6 cone, 95 cylinder, 37 plane; 22 axis cluster(s); 101 canonicalised at a worst gap of 3.77e-14 of the part]",
    "whyNotSurface": "6 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cone but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 138
   },
@@ -482,7 +482,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b15",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 185 of 246 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 68 of 246 (surface kind outside plane/cylinder/cone/sphere/torus and not a quadric in disguise; a twisted TGeoArb8 side is one of these and is out of scope); 117 canonicalised; the nearest canonical surface any of them proposes is 0.0066 cm away, 0.000543 of the part, against 1e-06",
    "whyNotSurface": "68 face(s): bspline face extraction not implemented yet; 12 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cylinder but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 246
   },
@@ -491,7 +491,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b16",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 41 of 59 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "13 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built); as a single cell: 20 trusted concave edge(s) of 150: the part is more than one cell; as a union of cells: the union of cells's boundary is 0.51 cm from the part's (0.0496 of the part's 10.2892 cm diagonal, over 1e-06) [59 faces: 5 cone, 36 cylinder, 18 plane; 13 axis cluster(s); 41 canonicalised at a worst gap of 3.93e-13 of the part]",
    "whyNotSurface": "5 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cone but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 59
   },
@@ -500,7 +500,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b17",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "a sphere with additional faces is out of scope (no theta/phi cuts); as a single cell: 23 trusted concave edge(s) of 60: the part is more than one cell; as a union of cells: the union of cells's boundary is 4.37e-05 cm from the part's (2.54e-05 of the part's 1.72398 cm diagonal, over 1e-06) [24 faces: 6 cylinder, 15 plane, 3 sphere; 1 axis cluster(s); 9 canonicalised at a worst gap of 2.21e-12 of the part]",
    "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 24
   },
@@ -509,7 +509,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b18",
    "shipsAs": "surface",
-   "whyNotCSG": "free-form faces: 27 of 48 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "5 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built); as a single cell: 22 trusted concave edge(s) of 138: the part is more than one cell; as a union of cells: the union of cells's boundary is 0.1 cm from the part's (0.0221 of the part's 4.52615 cm diagonal, over 1e-06) [48 faces: 27 cylinder, 21 plane; 5 axis cluster(s); 27 canonicalised at a worst gap of 2.44e-12 of the part]",
    "whyNotSurface": null,
    "nFaces": 48
   },
@@ -518,7 +518,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b19",
    "shipsAs": "surface",
-   "whyNotCSG": "free-form faces: 30 of 44 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "8 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built); as a single cell: 24 trusted concave edge(s) of 102: the part is more than one cell; as a union of cells: the union of cells disagrees with the part about 1 of 4000 classified point(s), the farthest 0.0217 cm from the part's boundary: the decomposition is not the part, whatever the symmetric difference says [44 faces: 30 cylinder, 14 plane; 8 axis cluster(s); 30 canonicalised at a worst gap of 7.19e-13 of the part]",
    "whyNotSurface": null,
    "nFaces": 44
   },
@@ -527,7 +527,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b20",
    "shipsAs": "surface",
-   "whyNotCSG": "free-form faces: 17 of 37 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "4 axis clusters: beyond the recogniser's scope (Tier 3 territory, deliberately not built); as a single cell: 19 trusted concave edge(s) of 93: the part is more than one cell; as a union of cells: the union of cells's boundary is 0.25 cm from the part's (0.0489 of the part's 5.11518 cm diagonal, over 1e-06) [37 faces: 17 cylinder, 20 plane; 4 axis cluster(s); 17 canonicalised at a worst gap of 1.55e-12 of the part]",
    "whyNotSurface": null,
    "nFaces": 37
   },
@@ -535,8 +535,8 @@
    "name": "ST0923290_01",
    "model": "ALICE3",
    "lid": "0:1:1:22#b21",
-   "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 16 of 33 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "shipsAs": "csg",
+   "whyNotCSG": null,
    "whyNotSurface": "1 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cone but recognized quadric trim wire has fewer than 3 edges",
    "nFaces": 33
   },
@@ -545,7 +545,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b22",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "a sphere with additional faces is out of scope (no theta/phi cuts); as a single cell: 23 trusted concave edge(s) of 60: the part is more than one cell; as a union of cells: the union of cells's boundary is 4.37e-05 cm from the part's (2.54e-05 of the part's 1.72398 cm diagonal, over 1e-06) [24 faces: 6 cylinder, 15 plane, 3 sphere; 1 axis cluster(s); 9 canonicalised at a worst gap of 4.19e-12 of the part]",
    "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 24
   },
@@ -554,7 +554,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b23",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "a sphere with additional faces is out of scope (no theta/phi cuts); as a single cell: 23 trusted concave edge(s) of 60: the part is more than one cell; as a union of cells: the union of cells's boundary is 4.37e-05 cm from the part's (2.54e-05 of the part's 1.72398 cm diagonal, over 1e-06) [24 faces: 6 cylinder, 15 plane, 3 sphere; 1 axis cluster(s); 9 canonicalised at a worst gap of 4.48e-12 of the part]",
    "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 24
   },
@@ -563,7 +563,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b24",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "a sphere with additional faces is out of scope (no theta/phi cuts); as a single cell: 23 trusted concave edge(s) of 60: the part is more than one cell; as a union of cells: the union of cells's boundary is 4.37e-05 cm from the part's (2.54e-05 of the part's 1.72398 cm diagonal, over 1e-06) [24 faces: 6 cylinder, 15 plane, 3 sphere; 1 axis cluster(s); 9 canonicalised at a worst gap of 4.04e-12 of the part]",
    "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 24
   },
@@ -572,7 +572,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b25",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "a sphere with additional faces is out of scope (no theta/phi cuts); as a single cell: 23 trusted concave edge(s) of 60: the part is more than one cell; as a union of cells: the union of cells's boundary is 4.37e-05 cm from the part's (2.54e-05 of the part's 1.72398 cm diagonal, over 1e-06) [24 faces: 6 cylinder, 15 plane, 3 sphere; 1 axis cluster(s); 9 canonicalised at a worst gap of 3e-12 of the part]",
    "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 24
   },
@@ -581,7 +581,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b26",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "a sphere with additional faces is out of scope (no theta/phi cuts); as a single cell: 23 trusted concave edge(s) of 60: the part is more than one cell; as a union of cells: the union of cells's boundary is 4.37e-05 cm from the part's (2.54e-05 of the part's 1.72398 cm diagonal, over 1e-06) [24 faces: 6 cylinder, 15 plane, 3 sphere; 1 axis cluster(s); 9 canonicalised at a worst gap of 2.88e-12 of the part]",
    "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 24
   },
@@ -590,7 +590,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b27",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "a sphere with additional faces is out of scope (no theta/phi cuts); as a single cell: 23 trusted concave edge(s) of 60: the part is more than one cell; as a union of cells: the union of cells's boundary is 4.66e-05 cm from the part's (1.43e-05 of the part's 3.25656 cm diagonal, over 1e-06) [24 faces: 6 cylinder, 15 plane, 3 sphere; 1 axis cluster(s); 9 canonicalised at a worst gap of 2.83e-12 of the part]",
    "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 24
   },
@@ -599,7 +599,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b28",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "a sphere with additional faces is out of scope (no theta/phi cuts); as a single cell: 23 trusted concave edge(s) of 60: the part is more than one cell; as a union of cells: the union of cells's boundary is 4.66e-05 cm from the part's (1.43e-05 of the part's 3.25656 cm diagonal, over 1e-06) [24 faces: 6 cylinder, 15 plane, 3 sphere; 1 axis cluster(s); 9 canonicalised at a worst gap of 1.99e-12 of the part]",
    "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 24
   },
@@ -608,7 +608,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:23",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 138 of 182 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 118 of 182 (surface kind outside plane/cylinder/cone/sphere/torus and not a quadric in disguise; a twisted TGeoArb8 side is one of these and is out of scope); 20 canonicalised; the nearest canonical surface any of them proposes is 4.78e-05 cm away, 4.61e-06 of the part, against 1e-06",
    "whyNotSurface": "138 face(s): bspline face extraction not implemented yet",
    "nFaces": 182
   },
@@ -617,7 +617,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:24",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 924 of 2034 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 924 of 2034 (surface kind outside plane/cylinder/cone/sphere/torus and not a quadric in disguise; a twisted TGeoArb8 side is one of these and is out of scope); the nearest canonical surface any of them proposes is 6.97e-05 cm away, 6.29e-06 of the part, against 1e-06",
    "whyNotSurface": "924 face(s): bspline face extraction not implemented yet",
    "nFaces": 2034
   },
@@ -697,8 +697,8 @@
    "name": "torus_union_cyl",
    "model": "torus_union_cyl",
    "lid": "0:1:1:1",
-   "shipsAs": "surface",
-   "whyNotCSG": "a torus together with ['cylinder'] is not a whole torus; as a single cell: 2 trusted concave edge(s) of 9: the part is more than one cell, and decomposition is deliberately not built [6 faces: 2 cylinder, 2 plane, 2 torus; 1 axis cluster(s)]",
+   "shipsAs": "csg",
+   "whyNotCSG": null,
    "whyNotSurface": null,
    "nFaces": 6
   },
