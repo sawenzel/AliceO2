@@ -12,6 +12,13 @@ Branch `swenzel/bvhsurfacesolid`. Everything below is committed unless marked ot
 geometry in three representations, scored against the original C++ TGeo as its own oracle.
 → [`Handoff_ClosureTest.md`](Handoff_ClosureTest.md)
 
+**Decided 2026-08-24 (Sandro): the flat-CSG programme runs in any case** — finish composite
+recognition (torus cells, TGeoEltu, Tier-0, splitter decomposition; measured start 56/183 = 31 %
+of composite-sourced parts recognised), then build `TGeoBVHCSG` as the optimisation layer for
+complex composites (general DNF + cell BVH, in the spirit of Geant4's G4MultiUnion but not
+union-only). → [`Handoff_FlatCSG.md`](Handoff_FlatCSG.md). Ordering vs the closure test is
+Sandro's call; its R1/R2 (torus + Eltu) would lift PIPE to ~145/176 csg first.
+
 The recognition programme that was queued before it is **DONE** (2026-08-24):
 → [`Stream_AJ_Recognition.md`](Stream_AJ_Recognition.md) is the record. Headline: every native
 primitive class the writer emits is recognised at 100 % on PIPE/ITS/TPC/ABSO/TRD; 1655/1655 CSG
@@ -61,7 +68,7 @@ X-ray's lost rays are a **navigation** loss in `O2Tessellated`'s stepping, not h
 3. **Converter: parallel `--csg auto` runs race** (two parallel conversions lost shapes):
    serialize/lock the deferred emit. And score **oTOF through the oracle gate** (converts, never
    scored).
-4. **Recognition follow-ups** (all recorded in `Stream_AJ_Recognition.md` §7): `TGeoEltu`
+4. **Recognition follow-ups — now folded into [`Handoff_FlatCSG.md`](Handoff_FlatCSG.md)** (details in `Stream_AJ_Recognition.md` §7): `TGeoEltu`
    (PIPE's 22-part elliptical population — needs the face reader to learn the elliptic
    carrier); run + score the **MAG corpus** (demand 14 prisms, never converted); the cell leaf
    budget (8) vs ITS's two 10-halfspace connector blocks; Xtru parameter comparison in
