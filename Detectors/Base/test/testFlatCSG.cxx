@@ -17,6 +17,7 @@
 #include "DetectorsBase/O2FlatCSG.h"
 
 #include "TGeoBBox.h"
+#include "TGeoShape.h"
 #include "TGeoTube.h"
 #include "TMath.h"
 
@@ -170,4 +171,129 @@ BOOST_AUTO_TEST_CASE(two_disjoint_cells_are_a_union)
   BOOST_CHECK(solid.Contains_Loop(inFirst));
   BOOST_CHECK(solid.Contains_Loop(inSecond));
   BOOST_CHECK(!solid.Contains_Loop(between));
+}
+
+BOOST_AUTO_TEST_CASE(box_distances_match_TGeoBBox)
+{
+  O2FlatCSG solid("box_dist");
+  addBoxCell(solid, 3., 4., 5.);
+  TGeoBBox reference(3., 4., 5.);
+
+  Rng rng(4242ULL);
+  for (int trial = 0; trial < 20000; ++trial) {
+    double point[3] = {rng.uniform(-12., 12.), rng.uniform(-12., 12.), rng.uniform(-12., 12.)};
+    double dir[3];
+    double norm = 0.;
+    do {
+      for (int index = 0; index < 3; ++index) {
+        dir[index] = rng.uniform(-1., 1.);
+      }
+      norm = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+    } while (norm < 1.e-3);
+    for (int index = 0; index < 3; ++index) {
+      dir[index] /= norm;
+    }
+    const bool inside = reference.Contains(point);
+    if (inside != static_cast<bool>(solid.Contains_Loop(point))) {
+      continue; // a boundary point; task 1 already covers classification
+    }
+    const double mine = inside ? solid.DistFromInside_Loop(point, dir, TGeoShape::Big())
+                               : solid.DistFromOutside_Loop(point, dir, TGeoShape::Big());
+    const double theirs = inside ? reference.DistFromInside(point, dir, 3, TGeoShape::Big(), nullptr)
+                                 : reference.DistFromOutside(point, dir, 3, TGeoShape::Big(), nullptr);
+    if (theirs >= TGeoShape::Big()) {
+      BOOST_REQUIRE_GE(mine, TGeoShape::Big());
+    } else {
+      BOOST_REQUIRE_SMALL(mine - theirs, 1.e-9);
+    }
+  }
+}
+
+BOOST_AUTO_TEST_CASE(tube_distances_match_TGeoTube_through_the_bore)
+{
+  // the complemented inner cylinder makes the occupancy along a ray TWO intervals for a ray that
+  // crosses the bore, which is the case a convexity assumption would get wrong
+  O2FlatCSG solid("tube_dist");
+  double coeff[10];
+  zCylinderQuadric(5., coeff);
+  solid.AddQuadric(1., coeff);
+  zCylinderQuadric(2., coeff);
+  solid.AddQuadric(-1., coeff);
+  const double up[3] = {0., 0., 1.};
+  const double down[3] = {0., 0., -1.};
+  const double top[3] = {0., 0., 7.};
+  const double bottom[3] = {0., 0., -7.};
+  planeQuadric(up, top, coeff);
+  solid.AddQuadric(1., coeff);
+  planeQuadric(down, bottom, coeff);
+  solid.AddQuadric(1., coeff);
+  solid.AddCell(0, 4, 0.);
+
+  TGeoTube reference(2., 5., 7.);
+  // a ray straight along +x at z = 0 enters the wall at x = -5, leaves it at x = -2, re-enters at
+  // x = +2 and leaves at x = +5
+  const double origin[3] = {-9., 0., 0.};
+  const double dir[3] = {1., 0., 0.};
+  BOOST_CHECK_SMALL(solid.DistFromOutside_Loop(origin, dir, TGeoShape::Big()) - 4., 1.e-12);
+
+  const double inWall[3] = {-4., 0., 0.};
+  BOOST_CHECK_SMALL(solid.DistFromInside_Loop(inWall, dir, TGeoShape::Big()) - 2., 1.e-12);
+
+  const double inBore[3] = {0., 0., 0.};
+  BOOST_CHECK(!solid.Contains_Loop(inBore));
+  BOOST_CHECK_SMALL(solid.DistFromOutside_Loop(inBore, dir, TGeoShape::Big()) - 2., 1.e-12);
+
+  Rng rng(99ULL);
+  for (int trial = 0; trial < 20000; ++trial) {
+    double point[3] = {rng.uniform(-9., 9.), rng.uniform(-9., 9.), rng.uniform(-10., 10.)};
+    double direction[3];
+    double norm = 0.;
+    do {
+      for (int index = 0; index < 3; ++index) {
+        direction[index] = rng.uniform(-1., 1.);
+      }
+      norm = std::sqrt(direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2]);
+    } while (norm < 1.e-3);
+    for (int index = 0; index < 3; ++index) {
+      direction[index] /= norm;
+    }
+    const bool inside = reference.Contains(point);
+    if (inside != static_cast<bool>(solid.Contains_Loop(point))) {
+      continue;
+    }
+    const double mine = inside ? solid.DistFromInside_Loop(point, direction, TGeoShape::Big())
+                               : solid.DistFromOutside_Loop(point, direction, TGeoShape::Big());
+    const double theirs = inside ? reference.DistFromInside(point, direction, 3, TGeoShape::Big(), nullptr)
+                                 : reference.DistFromOutside(point, direction, 3, TGeoShape::Big(), nullptr);
+    if (theirs >= TGeoShape::Big()) {
+      BOOST_REQUIRE_GE(mine, TGeoShape::Big());
+    } else {
+      BOOST_REQUIRE_SMALL(mine - theirs, 1.e-8);
+    }
+  }
+}
+
+BOOST_AUTO_TEST_CASE(a_ray_leaving_one_cell_into_a_touching_one_does_not_stop_between_them)
+{
+  // two unit boxes sharing the face at x = 1: the union's DistFromInside from the origin along +x
+  // is 3, not 1. This is why DistFromInside needs the union across cells and not one cell's exit.
+  O2FlatCSG solid("touching");
+  addBoxCell(solid, 1., 1., 1.);
+  const int first = solid.GetNhalfspaces();
+  const double planes[6][2][3] = {{{1., 0., 0.}, {3., 0., 0.}},
+                                  {{-1., 0., 0.}, {1., 0., 0.}},
+                                  {{0., 1., 0.}, {0., 1., 0.}},
+                                  {{0., -1., 0.}, {0., -1., 0.}},
+                                  {{0., 0., 1.}, {0., 0., 1.}},
+                                  {{0., 0., -1.}, {0., 0., -1.}}};
+  for (const auto& plane : planes) {
+    double coeff[10];
+    planeQuadric(plane[0], plane[1], coeff);
+    solid.AddQuadric(1., coeff);
+  }
+  solid.AddCell(first, 6, 8.);
+
+  const double origin[3] = {0., 0., 0.};
+  const double dir[3] = {1., 0., 0.};
+  BOOST_CHECK_SMALL(solid.DistFromInside_Loop(origin, dir, TGeoShape::Big()) - 3., 1.e-12);
 }
