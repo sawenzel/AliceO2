@@ -1442,9 +1442,19 @@ def _boundary_gap(a, b, most=_CELL_GAP_SAMPLES):
     other shape rather than against its samples removes that artefact without weakening anything
     -- a sample that is genuinely off the other boundary still reports its true distance.
     """
+    samples = (_solid_samples(a), _solid_samples(b))
+    if not samples[0] or not samples[1]:
+        # One of the two has no boundary at all. In practice that is always the proposal, and it
+        # means the halfspaces it was folded from have no common interior -- four pins on four
+        # parallel axes read as one cell intersect to nothing. Measured on ALICE3's
+        # `ST0923290_01#b12`, which has zero trusted concave edges because its pieces share no
+        # edge, not because it is convex. Said here rather than left to the distance below, which
+        # would report every sample as unmeasurable and blame OCCT for it.
+        raise Declined("the proposal is empty: these carriers have no common interior, so the "
+                       "part is not one cell")
     worst = 0.0
-    for shape, other in ((a, b), (b, a)):
-        for point in _stride(_solid_samples(shape), most):
+    for points, other in ((samples[0], b), (samples[1], a)):
+        for point in _stride(points, most):
             distance = _point_to_shape_distance(point, other)
             if not math.isfinite(distance):
                 # `BRepExtrema_DistShapeShape` gave up. That is a measurement that did not

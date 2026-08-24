@@ -1818,6 +1818,21 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
           max(ratios) - min(ratios) <= 1.0e-3 * max(ratios),
           f"gap / displacement = {', '.join(f'{r:.4f}' for r in ratios)}")
 
+    # Canonicalisation carried ALICE3's `ST0923290_01#b12` as far as the cell emitter, where its
+    # four pins on four parallel axes fold to an intersection of nothing. The gap then reported
+    # every sample as unmeasurable and blamed OCCT; an empty proposal has to say so itself.
+    empty_common = BRepAlgoAPI_Common(
+        BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 1.0, 1.0, 1.0).Shape(),
+        BRepPrimAPI_MakeBox(gp_Pnt(9, 9, 9), 1.0, 1.0, 1.0).Shape()).Shape()
+    try:
+        recognise._boundary_gap(BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 1.0, 1.0, 1.0).Shape(),
+                                empty_common)
+        empty_reason = "no decline"
+    except recognise.Declined as declined:
+        empty_reason = str(declined)
+    check("an empty proposal declines as empty, not as an OCCT measurement failure",
+          "the proposal is empty" in empty_reason, empty_reason)
+
     # --- the ROOT half: the emitted TGeoShape must answer like the closed form ---
     if with_root:
         import ROOT
