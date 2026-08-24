@@ -1148,10 +1148,16 @@ _BOOL_OPS = {
     "TGeoIntersection": (BRepAlgoAPI_Common, "intersection"),
 }
 
+# A cycle/runaway guard on the boolean-tree walk, not a format or precision limit. The deepest
+# real chain in the Run 3 geometry is ITS's EndWheelCBasis*/IBCYSSFlange* at depth 60, which the
+# old bound of 32 silently withheld from every STEP corpus; 512 keeps every real chain
+# convertible while still refusing a self-referential tree loudly.
+MAX_BOOLEAN_DEPTH = 512
+
 
 def conv_composite(sh, s, depth=0):
-    if depth > 32:
-        raise ShapeDeclined("TGeoCompositeShape: boolean tree deeper than 32")
+    if depth > MAX_BOOLEAN_DEPTH:
+        raise ShapeDeclined(f"TGeoCompositeShape: boolean tree deeper than {MAX_BOOLEAN_DEPTH}")
     bn = sh.GetBoolNode()
     if bn is None:
         raise ShapeDeclined("TGeoCompositeShape: no boolean node")
@@ -2026,6 +2032,35 @@ def self_test():
     vmc0, sig0 = mc_volume(cs0)
     r2.append((f"a +2% wrong volume would be rejected ({0.02 * vmc0 / sig0:.1f} sigma)",
                abs(1.02 * vmc0 - vmc0) > 4.0 * sig0, None, None, None))
+    # A union chain deeper than the old bound of 32: MAX_BOOLEAN_DEPTH is a runaway guard, not
+    # a limit on real geometry (ITS carries depth-60 chains), so a depth-40 chain must convert,
+    # and its volume is known in closed form (41 disjoint unit boxes).
+    chain = ROOT.TGeoBBox("chain0", 1, 1, 1)
+    ROOT.SetOwnership(chain, False)
+    for i in range(1, 41):
+        box = ROOT.TGeoBBox(f"chain{i}", 1, 1, 1)
+        shift = ROOT.TGeoTranslation(f"chainT{i}", 2.5 * i, 0, 0)
+        node = ROOT.TGeoUnion(chain, box, ROOT.nullptr, shift)
+        for obj in (box, shift, node):
+            ROOT.SetOwnership(obj, False)
+        chain = ROOT.TGeoCompositeShape(f"chainC{i}", node)
+        ROOT.SetOwnership(chain, False)
+    try:
+        v_chain = solid_volume_mm3(shape_to_occ(chain, SCALE_TO_MM)) / 1000.0
+        ok_chain = abs(v_chain - 41 * 8.0) <= 1.0e-9 * 41 * 8.0
+        chain_detail = f"OCC {v_chain:.9f} vs closed form {41 * 8.0}"
+    except Exception as e:
+        ok_chain, chain_detail = False, f"{type(e).__name__}: {e}"
+    r2.append((f"a depth-40 union chain converts exactly ({chain_detail})", ok_chain,
+               None, None, None))
+    # ... and the guard still refuses loudly past the real bound.
+    try:
+        shape_to_occ(chain, SCALE_TO_MM, MAX_BOOLEAN_DEPTH)
+        guarded, guard_msg = False, "no exception"
+    except ShapeDeclined as e:
+        guarded, guard_msg = str(MAX_BOOLEAN_DEPTH) in str(e), str(e)
+    r2.append((f"the depth guard still refuses past {MAX_BOOLEAN_DEPTH}", guarded,
+               None, None, None))
     total += len(r2)
     failures += _print_suite("composites vs an independent MC of TGeo (N=200k, 4 sigma)", r2)
 
