@@ -16,8 +16,9 @@ plan this executes — its §5 gate 2, the single-cell emitter, is DONE), `Strea
 
 ## 1. The measured starting point (2026-08-24, rung-3 corpora)
 
-Composite-sourced parts recognised: PIPE 7/31, ITS 12/64, TPC 1/27, ABSO 0/3, TRD 36/58 —
-**56/183, 31 %**. What the remaining 127 are, from the reports and the source-tree measurement:
+Composite-sourced parts recognised: PIPE 7/31, ITS 12/69, TPC 1/27, ABSO 0/3, TRD 36/58 —
+**56/188, 30 %** (ITS regenerated 2026-08-24 after the depth-guard fix; its five deep cages
+are now in the corpus). What the remaining 127 are, from the reports and the source-tree measurement:
 
 - **~20 torus-carrying single cells** (PIPE's 16 bellows plies at 2–7 faces, `RB24ValveMA2`,
   RB24/RB26 plies) — blocked only by the missing torus carrier, not by decomposition;
@@ -58,8 +59,10 @@ gate, known-source (composite sources score by containment; capacity is Monte-Ca
 flagged not-comparable). Known risks, all recorded with evidence: OCCT splitter volume drift
 (2/16 on ALICE3 — the acceptance rejects those, they fall one tier, nothing loosens); the
 near-tangential blind band of the trust filter (the notch ladder — the volume closes it);
-**the writer's bare depth-32 chain constant must be understood or made loud before ITS's
-depth-60 cages are treated as ground truth**.
+the writer's depth-32 chain constant is FIXED (`6241b9b118`, `MAX_BOOLEAN_DEPTH = 512`):
+ITS's depth-35-to-60 cages convert to B-rep, ship as surface solids, and decline CSG with
+measured cell structure (EndWheelCBasis* at only 4 trusted concave edges each — cheap first
+splitter targets; IBCYSSFlangeA at 47).
 
 **R5 — `TGeoBVHCSG`.** The new C++ shape class, only now: flat DNF cell blob (fixed-length
 halfspace coefficient blocks — deliberately the AOT-codegen-friendly layout), BVH over cell
@@ -81,7 +84,7 @@ can run early and cheaply in parallel with R1/R2 (conversions strictly serial as
 
 ## 3. Definition of done
 
-- The composite-sourced recognition rate (§1's 56/183 baseline, extended by R6's census) is
+- The composite-sourced recognition rate (§1's 56/188 baseline, extended by R6's census) is
   **100 % minus an explicitly named remainder** — every surviving decline carries a recorded
   reason a reader can act on (twisted ruled sides, scaled shapes, whatever R6 surfaces).
 - Every conversion passes the three tests; every floor of `Handoff_Recognition.md` §4 holds

@@ -45,7 +45,7 @@ deep review with the verification appendix; [`INDEX.md`](INDEX.md) orders every 
 | `runOracleGate.py --self-test` / xray `--self-test` | 17/17 · clean |
 | Bagger gate | **13/13, CSG 7 / surfaces 6 / tessellated 0, exit 0**, bit-identical through all three rungs |
 | fixtures gate | **exit 0, 9/10 csg** (only `torus_union_cyl` declines); the two sliver rays remain only in the side-by-side surface columns, no shipped verdict carries one |
-| detector corpora (regenerated, converted, known-source-checked) | PIPE **128**/25/23 of 176 · ITS **207**/52/0 of 259 · TPC **146**/26/0 of 172 · ABSO **26**/3/0 of 29 · TRD **1148**/22/0 of 1170 — every accepted CSG at dV_sym = 0, known-source 1655/1655 |
+| detector corpora (regenerated, converted, known-source-checked) | PIPE **128**/25/23 of 176 · ITS **207**/57/0 of 264 (post depth-guard fix; the five deep cages ship as surface) · TPC **146**/26/0 of 172 · ABSO **26**/3/0 of 29 · TRD **1148**/22/0 of 1170 — every accepted CSG at dV_sym = 0, known-source 1655/1655 |
 | **Geant integration demo** | works: IRIS + Bagger as sensitive external detectors, real hits, zero stuck tracks / nav errors (`Stream_Z_IntegrationDemo.md`) |
 | material budget, exact vs tessellated | 0.039 % aggregate over 512 Fibonacci geantino rays; sole 8192-ray divergence is `BucketLink2`, the not-closed mesh |
 | costs, exact vs tessellated | 1.94× transport, +42 s one-off build (IRIS CloseShape), +174 MB; exact is *smaller on disk* |
@@ -79,11 +79,14 @@ X-ray's lost rays are a **navigation** loss in `O2Tessellated`'s stepping, not h
    then widened crossing acceptance near identified shared edges or trim-snapping.
 6. **Kernel: loose bounding boxes.** `Stick` claims 40.1 cm in z around an 11.0 cm solid (3.6×).
    Use the cover-box union in `ComputeBBox`.
-7. **Writer (still frozen, now with a measured customer):** degenerate prism sections block the
-   last TRD demand case (`B045cut`, a `TGeoTrd1` with `dx1 = 0` — declined as "[2, 4] distinct
-   vertices"); plus the standing items: bare depth-32 chain constant, STEP-writer segfault
-   bracket (38 676 fine / 74 601 crash), `TGeoPara`, `TGeoHalfSpace` (732 TPC placements),
-   instruments B/C + ITS/MAG re-runs post-fix, loud-refusal path for genuine scales.
+7. **Writer:** degenerate prism sections block the last TRD demand case (`B045cut`, a
+   `TGeoTrd1` with `dx1 = 0`) and ITS's `IBGammaConvWireOuterSupport` — declined as "[2, 4]
+   distinct vertices". The depth-32 chain constant is FIXED (2026-08-24, `6241b9b118`:
+   `MAX_BOOLEAN_DEPTH = 512`, self-test 105 → 107; ITS regenerated at 264 leaf solids with the
+   five deep cages now in the corpus as surface solids, zero changes elsewhere). Still open:
+   STEP-writer segfault bracket (38 676 fine / 74 601 crash), `TGeoPara`, `TGeoHalfSpace`
+   (732 TPC placements), instruments B/C + ITS/MAG re-runs post-fix, loud-refusal path for
+   genuine scales.
 8. **Hand-written-geometry findings on the record** (unchanged, Sandro's call on upstreaming):
    PIPE bellows duplicates FIXED on fork branch (`4fe6b285e0` here); **`RB26s3Bellow` has ZERO
    daughters — missing steel**, restoring it changes the material budget; TPC prepreg z-typo
