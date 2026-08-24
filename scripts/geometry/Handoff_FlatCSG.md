@@ -99,6 +99,33 @@ mapping and is part of this rung's design work). Emission policy: cells above a 
 crossover (Stream_AA derives ≥10; verify) ship as `TGeoBVHCSG`, below it as plain composite.
 This is the weeks-scale rung; it is the point of the programme, not a maybe.
 
+**R5's measured demand and inputs (from R4, 2026-08-25; self-contained here because the
+engineering reports live in the git-ignored `.superpowers/sdd/Handoff_FlatCSG/` workspace —
+read `task-r3-report.md` and `task-r4-report.md` there while they exist):**
+
+- 21 parts decline against a named budget (cells > 64 or leaves > ~64):
+  TRD `BREF1` (47 cells / 66+ leaves), `VolTOFrail` (37/65+), `B077__body` (20/68+);
+  Bagger `Bucket` (28/68+); ITS `BPSupportLowerCollar` (21/70+),
+  `SpaceFrameVolumeLay3/4/5/6__body` (17 each/71+), `IBCYSSFlangeC` (12/72+),
+  `IBCYSSFlangeA` (≥59 cells); TPC `TPC_OCGEM` + mirror (12/66+ — the two-hole cap decomposes
+  fine, only the budget refuses it); ALICE3 `ST1782525_01` (15/68+), `ST1A38495_01` (13/67+),
+  `ST1A38526_01` (10/69+), `ST0923290_01#b11` (6/85+), `ST1829909_01` ×4 (≥57 cells each).
+- 24 further parts decline because a dihedrally-convex splitter piece is NOT a cell of the
+  carrier arrangement (boundary 2–23 % off, median 2 % — Bagger's rams are the type specimen).
+  Splitting at every carrier crossing instead of only at concave edges would fix them and
+  multiply the cell count — that price/benefit is R5's first design decision.
+- The false-accept guard (`accept.contains_disagreements`) runs on the union path; R5's
+  acceptance must keep it (or generalise it) — OCCT `Cut` can return `IsDone()` with zero
+  solids in both directions (`ST0923290_01#b19`).
+- Machinery in place: `csg/decompose.py` (the splitter loop with budgets and the volume guard),
+  the two-level union-of-cells description in `csg/primitives.py` with both builders,
+  `csg/tier0.py` (canonical carriers), six candidate-digest tables in `csg/emit.py --self-test`
+  (301 checks) that MUST stay green, and `checkKnownSource.py` (17 checks).
+- Floors at handover: corpora PIPE 166/9/1 · ITS 250/14/0 · TPC 163/9/0 · ABSO 29/0/0 ·
+  TRD 1167/3/0; known-source 1775/1775; fixtures gate 10/10 csg exit 0; Bagger 13/13 + 7/7
+  exit 0, CSG 7 bit-identical since the recognition programme; `O2_TGeoToCAD.py` self-test 107;
+  ctest `BVHSurfaceSolid` 113 + `BVHAssembly` 22.
+
 **R6 — breadth: the full composite census.** Convert and score the remaining Run 3 modules
 (MAG, TOF, TRD is done, MFT, MCH, MID, FT0, FV0, ZDC, EMC, PHS, CPV, HMP — whatever
 `o2-sim-serial -m` accepts), one command each now, so the 100 %-of-composite-sourced claim and
