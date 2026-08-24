@@ -88,11 +88,12 @@ The carrier-to-quadric map, for the record:
 | elliptic cylinder, axes `x̂, ŷ`, semi-axes `a, b` | `x̂x̂ᵀ/a² + ŷŷᵀ/b²` | `−2Ap` | `pᵀAp − 1` |
 
 The **torus** is the one carrier that is not a quadric. It gets a second block type carrying its
-canonical parameters `(p, d, x̂, R, r)` — eleven doubles — because both things the class needs
+canonical parameters `(p, d, R, r)` — eight doubles — because both things the class needs
 from it are cleaner in canonical form than in expanded quartic coefficients: the ray intersection
 is a quartic the kernel already knows how to solve (it solves them for the surface representation),
 and the range bound of §4.2 wants the exact signed distance, which the canonical form gives and
-the quartic does not.
+the quartic does not. No reference direction is stored: a carrier torus is a full
+surface of revolution, and whatever bounds it in phi is a plane carrier of the same cell.
 
 Both block types are fixed length. A part's halfspaces live in one flat array; a cell is a
 `(first, count)` pair into it.
