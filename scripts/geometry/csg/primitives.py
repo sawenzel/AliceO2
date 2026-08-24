@@ -140,7 +140,8 @@ def _unit(a):
 # the description
 # ------------------------------------------------------------------------------------------
 
-LEAF_TYPES = ("TGeoBBox", "TGeoTube", "TGeoTubeSeg", "TGeoCone", "TGeoSphere", "TGeoPcon")
+LEAF_TYPES = ("TGeoBBox", "TGeoTube", "TGeoTubeSeg", "TGeoCone", "TGeoSphere", "TGeoPcon",
+              "TGeoTrd1", "TGeoTrd2", "TGeoArb8", "TGeoXtru", "TGeoPgon")
 
 _REQUIRED_PARAMS = {
     "TGeoBBox": ("dx", "dy", "dz"),
@@ -149,19 +150,35 @@ _REQUIRED_PARAMS = {
     "TGeoCone": ("dz", "rmin1", "rmax1", "rmin2", "rmax2"),
     "TGeoSphere": ("rmin", "rmax"),
     "TGeoPcon": ("phi1", "dphi"),
+    "TGeoTrd1": ("dx1", "dx2", "dy", "dz"),
+    "TGeoTrd2": ("dx1", "dx2", "dy1", "dy2", "dz"),
+    "TGeoArb8": ("dz",),
+    "TGeoXtru": (),
+    "TGeoPgon": ("phi1", "dphi", "nedges"),
 }
 
 # Per-type array-valued parameters, stored as plain lists so the description stays
-# JSON-serialisable. All arrays of one leaf type share a length -- that is the only structural
-# rule the generic half enforces; anything else a type needs it states in `_LEAF_VALIDATORS`.
-# `TGeoXtru` will declare `("x", "y")` and `("z", "xoff", "yoff", "scale")` through the same
-# mechanism, which is why it is written once here rather than inside the Pcon branch.
+# JSON-serialisable. By default all arrays of one leaf type share a length -- that is the only
+# structural rule the generic half enforces; anything else a type needs it states in
+# `_LEAF_VALIDATORS`.
 _REQUIRED_ARRAY_PARAMS = {
     "TGeoPcon": ("z", "rmin", "rmax"),
+    "TGeoPgon": ("z", "rmin", "rmax"),
+    "TGeoArb8": ("vertices",),
+    "TGeoXtru": ("x", "y", "z", "xoff", "yoff", "scale"),
 }
 
 _MIN_ARRAY_LENGTH = {
     "TGeoPcon": 2,
+    "TGeoPgon": 2,
+    "TGeoArb8": 16,
+}
+
+# The one type whose arrays do *not* all share a length: a `TGeoXtru` is one polygon of `nvert`
+# corners swept through `nz` sections, and the two counts are independent. Stated as groups, each
+# with its own minimum; a type absent from here keeps the single-group rule above unchanged.
+_ARRAY_LENGTH_GROUPS = {
+    "TGeoXtru": ((("x", "y"), 3), (("z", "xoff", "yoff", "scale"), 2)),
 }
 
 
@@ -185,8 +202,59 @@ def _validate_pcon(p):
             raise ValueError(f"TGeoPcon: three sections share z = {z[i]}")
 
 
+def _validate_pgon(p):
+    _validate_pcon(p)
+    if p["nedges"] < 1 or abs(p["nedges"] - round(p["nedges"])) > 1.0e-9:
+        raise ValueError(f"TGeoPgon: nedges {p['nedges']} is not a positive whole number")
+
+
+def _validate_trd1(p):
+    if p["dy"] <= 0.0 or p["dz"] <= 0.0:
+        raise ValueError(f"TGeoTrd1: dy {p['dy']} and dz {p['dz']} must both be positive")
+    if min(p["dx1"], p["dx2"]) < 0.0 or max(p["dx1"], p["dx2"]) <= 0.0:
+        raise ValueError(f"TGeoTrd1: dx1 {p['dx1']}, dx2 {p['dx2']} do not bound a solid")
+
+
+def _validate_trd2(p):
+    if p["dz"] <= 0.0:
+        raise ValueError(f"TGeoTrd2: dz {p['dz']} must be positive")
+    for a, b in (("dx1", "dx2"), ("dy1", "dy2")):
+        if min(p[a], p[b]) < 0.0 or max(p[a], p[b]) <= 0.0:
+            raise ValueError(f"TGeoTrd2: {a} {p[a]}, {b} {p[b]} do not bound a solid")
+
+
+def _validate_arb8(p):
+    if p["dz"] <= 0.0:
+        raise ValueError(f"TGeoArb8: dz {p['dz']} must be positive")
+    if len(p["vertices"]) != 16:
+        raise ValueError(f"TGeoArb8: needs 16 vertex coordinates, got {len(p['vertices'])}")
+    for half, name in ((p["vertices"][:8], "-dz"), (p["vertices"][8:], "+dz")):
+        corners = [(half[2 * i], half[2 * i + 1]) for i in range(4)]
+        if len({(round(c[0], 12), round(c[1], 12)) for c in corners}) < 3:
+            raise ValueError(f"TGeoArb8: the {name} face has fewer than three distinct corners")
+
+
+def _validate_xtru(p):
+    z, scale = p["z"], p["scale"]
+    for i in range(1, len(z)):
+        if z[i] <= z[i - 1]:
+            raise ValueError(f"TGeoXtru: z is not strictly increasing at section {i} "
+                             f"({z[i]} <= {z[i - 1]})")
+    for i, s in enumerate(scale):
+        if s <= 0.0:
+            raise ValueError(f"TGeoXtru: scale[{i}] = {s} is not positive")
+    corners = {(round(a, 12), round(b, 12)) for a, b in zip(p["x"], p["y"])}
+    if len(corners) != len(p["x"]):
+        raise ValueError("TGeoXtru: the polygon repeats a corner")
+
+
 _LEAF_VALIDATORS = {
     "TGeoPcon": _validate_pcon,
+    "TGeoPgon": _validate_pgon,
+    "TGeoTrd1": _validate_trd1,
+    "TGeoTrd2": _validate_trd2,
+    "TGeoArb8": _validate_arb8,
+    "TGeoXtru": _validate_xtru,
 }
 
 
@@ -201,14 +269,16 @@ def leaf(kind, params, frame):
     for k in arrays:
         out[k] = [float(v) for v in params[k]]
     if arrays:
-        lengths = {len(out[k]) for k in arrays}
-        if len(lengths) != 1:
-            raise ValueError(f"{kind}: array parameters {list(arrays)} have unequal lengths "
-                             + ", ".join(f"{k}={len(out[k])}" for k in arrays))
-        n = lengths.pop()
-        want = _MIN_ARRAY_LENGTH.get(kind, 1)
-        if n < want:
-            raise ValueError(f"{kind}: needs at least {want} sections, got {n}")
+        groups = _ARRAY_LENGTH_GROUPS.get(kind,
+                                          ((arrays, _MIN_ARRAY_LENGTH.get(kind, 1)),))
+        for names, want in groups:
+            lengths = {len(out[k]) for k in names}
+            if len(lengths) != 1:
+                raise ValueError(f"{kind}: array parameters {list(names)} have unequal lengths "
+                                 + ", ".join(f"{k}={len(out[k])}" for k in names))
+            n = lengths.pop()
+            if n < want:
+                raise ValueError(f"{kind}: needs at least {want} of {list(names)}, got {n}")
     validator = _LEAF_VALIDATORS.get(kind)
     if validator is not None:
         validator(out)
@@ -290,6 +360,26 @@ def describe(cand):
         elif lf["type"] == "TGeoCone":
             parts.append(f"TGeoCone(dz={p['dz']:.4g}, {p['rmin1']:.4g}/{p['rmax1']:.4g} -> "
                          f"{p['rmin2']:.4g}/{p['rmax2']:.4g})")
+        elif lf["type"] == "TGeoTrd1":
+            parts.append(f"TGeoTrd1(dx {p['dx1']:.4g} -> {p['dx2']:.4g}, dy={p['dy']:.4g}, "
+                         f"dz={p['dz']:.4g})")
+        elif lf["type"] == "TGeoTrd2":
+            parts.append(f"TGeoTrd2(dx {p['dx1']:.4g} -> {p['dx2']:.4g}, "
+                         f"dy {p['dy1']:.4g} -> {p['dy2']:.4g}, dz={p['dz']:.4g})")
+        elif lf["type"] == "TGeoArb8":
+            v = p["vertices"]
+            parts.append(f"TGeoArb8(dz={p['dz']:.4g}, x {min(v[0::2]):.4g}..{max(v[0::2]):.4g}, "
+                         f"y {min(v[1::2]):.4g}..{max(v[1::2]):.4g})")
+        elif lf["type"] == "TGeoXtru":
+            parts.append(f"TGeoXtru(nvert={len(p['x'])}, nz={len(p['z'])}, "
+                         f"z {p['z'][0]:.4g}..{p['z'][-1]:.4g}, "
+                         f"scale {min(p['scale']):.4g}..{max(p['scale']):.4g})")
+        elif lf["type"] == "TGeoPgon":
+            parts.append(f"TGeoPgon(nedges={int(round(p['nedges']))}, nz={len(p['z'])}, "
+                         f"phi1={p['phi1']:.4g}, dphi={p['dphi']:.4g}, "
+                         f"z {p['z'][0]:.4g}..{p['z'][-1]:.4g}, "
+                         f"rmin {min(p['rmin']):.4g}..{max(p['rmin']):.4g}, "
+                         f"rmax {min(p['rmax']):.4g}..{max(p['rmax']):.4g})")
         elif lf["type"] == "TGeoPcon":
             parts.append(f"TGeoPcon(nz={len(p['z'])}, phi1={p['phi1']:.4g}, "
                          f"dphi={p['dphi']:.4g}, z {p['z'][0]:.4g}..{p['z'][-1]:.4g}, "
@@ -405,6 +495,244 @@ def _occ_pcon(lf):
     return rev.Shape()
 
 
+# ------------------------------------------------------------------------------------------
+# the prism family: Trd1 / Trd2 / Arb8 / Xtru / Pgon
+# ------------------------------------------------------------------------------------------
+#
+# All five are the same construction -- a stack of closed sections, corresponding corner by
+# corner, with the corners of section k joined to the corners of section k+1 -- and they differ
+# only in how the sections are *stated*. So exactly one function turns a description into rings
+# (`prism_rings`), and everything else reads those: `build_occ` sews them into a solid, the
+# recogniser's score measures against them, and `build_root` hands ROOT the parameters they came
+# from. `O2_TGeoToCAD._prism_from_rings` is the same construction in the other direction, which is
+# why the acceptance test can be exact rather than approximate.
+
+_PRISM_TYPES = ("TGeoTrd1", "TGeoTrd2", "TGeoArb8", "TGeoXtru", "TGeoPgon")
+
+
+def _dedupe_ring3(pts, tol=1.0e-9):
+    """Drop consecutive duplicate corners in a closed 3-D ring, the wrap included.
+
+    The same rule and the same tolerance as `O2_TGeoToCAD._dedupe_ring3`, so a section that
+    pinches -- a `TGeoPgon` wedge closing on its own axis -- enters the wire as the writer's CAD
+    has it, without a zero-length edge.
+    """
+    out = []
+    for q in pts:
+        if out and max(abs(q[i] - out[-1][i]) for i in range(3)) < tol:
+            continue
+        out.append(tuple(float(c) for c in q))
+    while len(out) > 1 and max(abs(out[0][i] - out[-1][i]) for i in range(3)) < tol:
+        out.pop()
+    return out
+
+
+def _pgon_section_ring(r_apothem, z, phi1_deg, dphi_deg, nedges, full):
+    """One `TGeoPgon` section polygon. ROOT's rmin/rmax are inscribed-circle radii.
+
+    Byte-for-byte the convention of `O2_TGeoToCAD._pgon_ring`, which is the only statement of it:
+    the laterals are planes at the **apothem** radius, so the circumscribed radius the corners sit
+    on is `r / cos(dseg / 2)`.
+    """
+    dseg = math.radians(dphi_deg) / nedges
+    radius = r_apothem / math.cos(dseg / 2.0)
+    n = nedges if full else nedges + 1
+    return [(radius * math.cos(math.radians(phi1_deg) + k * dseg),
+             radius * math.sin(math.radians(phi1_deg) + k * dseg), z) for k in range(n)]
+
+
+def pgon_rings(params):
+    """`(outer_stack, inner_stack|None)` for a `TGeoPgon`, as `conv_pgon` builds them."""
+    z, rmin, rmax = params["z"], params["rmin"], params["rmax"]
+    phi1, dphi, nedges = params["phi1"], params["dphi"], int(round(params["nedges"]))
+    full = abs(dphi - 360.0) < 1.0e-9
+    hollow = any(r > 0.0 for r in rmin)
+    if hollow and full:
+        # An annular section is two disjoint rings, which no single wire can express: the outer
+        # and the inner prism are separate stacks and the caps are annular.
+        return ([_pgon_section_ring(rmax[i], z[i], phi1, dphi, nedges, True)
+                 for i in range(len(z))],
+                [_pgon_section_ring(max(rmin[i], 0.0), z[i], phi1, dphi, nedges, True)
+                 for i in range(len(z))])
+    rings = []
+    for i in range(len(z)):
+        outer = _pgon_section_ring(rmax[i], z[i], phi1, dphi, nedges, full)
+        if hollow:
+            inner = _pgon_section_ring(max(rmin[i], 0.0), z[i], phi1, dphi, nedges, full)
+            rings.append(outer + list(reversed(inner)))
+        elif full:
+            rings.append(outer)
+        else:
+            rings.append(outer + [(0.0, 0.0, z[i])])
+    return rings, None
+
+
+def prism_rings(lf):
+    """`(outer_stack, inner_stack|None)`: the leaf's sections, in the leaf's own frame.
+
+    Every ring is a closed polygon in corner order, and corner `i` of section `k` is joined to
+    corner `i` of section `k + 1`. Ring lengths agree across the stack by construction.
+    """
+    kind, p = lf["type"], lf["params"]
+    if kind == "TGeoTrd1":
+        dx1, dx2, dy, dz = p["dx1"], p["dx2"], p["dy"], p["dz"]
+        return ([[(-dx1, -dy, -dz), (dx1, -dy, -dz), (dx1, dy, -dz), (-dx1, dy, -dz)],
+                 [(-dx2, -dy, dz), (dx2, -dy, dz), (dx2, dy, dz), (-dx2, dy, dz)]], None)
+    if kind == "TGeoTrd2":
+        dx1, dx2, dy1, dy2, dz = p["dx1"], p["dx2"], p["dy1"], p["dy2"], p["dz"]
+        return ([[(-dx1, -dy1, -dz), (dx1, -dy1, -dz), (dx1, dy1, -dz), (-dx1, dy1, -dz)],
+                 [(-dx2, -dy2, dz), (dx2, -dy2, dz), (dx2, dy2, dz), (-dx2, dy2, dz)]], None)
+    if kind == "TGeoArb8":
+        v, dz = p["vertices"], p["dz"]
+        return ([[(v[2 * i], v[2 * i + 1], -dz) for i in range(4)],
+                 [(v[8 + 2 * i], v[8 + 2 * i + 1], dz) for i in range(4)]], None)
+    if kind == "TGeoXtru":
+        x, y, z = p["x"], p["y"], p["z"]
+        xoff, yoff, sc = p["xoff"], p["yoff"], p["scale"]
+        return ([[(xoff[k] + sc[k] * x[i], yoff[k] + sc[k] * y[i], z[k])
+                  for i in range(len(x))] for k in range(len(z))], None)
+    if kind == "TGeoPgon":
+        return pgon_rings(p)
+    raise ValueError(f"{kind} is not a prism-family leaf")
+
+
+def _to_part(frame, q):
+    return _add(tuple(frame["origin"]),
+                _add(_scale(tuple(frame["x"]), q[0]),
+                     _add(_scale(tuple(frame["y"]), q[1]), _scale(tuple(frame["z"]), q[2]))))
+
+
+def prism_samples(lf):
+    """Every corner and every edge midpoint of a prism-family leaf, in the **part** frame.
+
+    This is what the recogniser's one measured quantity is taken against. Corners alone would
+    not do: a hexahedron read out in the wrong corner order has the same eight corners and a
+    different solid, and only the edges say so.
+    """
+    outer, inner = prism_rings(lf)
+    frame = lf["frame"]
+    out = []
+    for stack in (outer, inner):
+        if stack is None:
+            continue
+        rings = [_dedupe_ring3(r) for r in stack]
+        for k, ring in enumerate(rings):
+            n = len(ring)
+            for i, q in enumerate(ring):
+                out.append(_to_part(frame, q))
+                nxt = ring[(i + 1) % n]
+                out.append(_to_part(frame, _scale(_add(q, nxt), 0.5)))
+                if k + 1 < len(rings) and len(rings[k + 1]) == n:
+                    up = rings[k + 1][i]
+                    out.append(_to_part(frame, _scale(_add(q, up), 0.5)))
+    return out
+
+
+def _occ_quad_face(b0, b1, t1, t0, tol=1.0e-7):
+    """One lateral patch: planar when its corners are coplanar, ruled when they are not.
+
+    The same rule as `O2_TGeoToCAD._quad_face`, including the Newell area test that drops a patch
+    bounding nothing (a `TGeoPgon` section repeated at one z collapses its closure edges onto a
+    line). Returning the ruled face rather than refusing it is what lets the description express a
+    twisted `TGeoArb8` exactly, even though the recogniser never proposes one.
+    """
+    from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeEdge, BRepBuilderAPI_MakeFace
+    from OCC.Core.BRepFill import brepfill
+    from OCC.Core.gp import gp_Pnt
+    pts = _dedupe_ring3([b0, b1, t1, t0])
+    if len(pts) < 3:
+        return None
+    nrm = [0.0, 0.0, 0.0]
+    for i in range(len(pts)):
+        a, b = pts[i], pts[(i + 1) % len(pts)]
+        nrm[0] += (a[1] - b[1]) * (a[2] + b[2])
+        nrm[1] += (a[2] - b[2]) * (a[0] + b[0])
+        nrm[2] += (a[0] - b[0]) * (a[1] + b[1])
+    span = max(_norm(_sub(q, pts[0])) for q in pts[1:])
+    if _norm(nrm) <= tol * span * span:
+        return None
+    if len(pts) == 3:
+        return BRepBuilderAPI_MakeFace(_occ_polygon_wire(pts)).Face()
+    n = _cross(_sub(b1, b0), _sub(t0, b0))
+    nn = _norm(n)
+    scale = max(_norm(_sub(b1, b0)), _norm(_sub(t0, b0)), 1.0e-30)
+    off = abs(_dot(n, _sub(t1, b0))) / nn if nn > 0.0 else 0.0
+    if nn > 1.0e-24 and off <= tol * scale:
+        mf = BRepBuilderAPI_MakeFace(_occ_polygon_wire(pts))
+        if mf.IsDone():
+            return mf.Face()
+    e1 = BRepBuilderAPI_MakeEdge(gp_Pnt(*b0), gp_Pnt(*b1)).Edge()
+    e2 = BRepBuilderAPI_MakeEdge(gp_Pnt(*t0), gp_Pnt(*t1)).Edge()
+    return brepfill.Face(e1, e2)
+
+
+def _occ_polygon_wire(pts):
+    from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakePolygon
+    from OCC.Core.gp import gp_Pnt
+    poly = BRepBuilderAPI_MakePolygon()
+    for q in pts:
+        poly.Add(gp_Pnt(float(q[0]), float(q[1]), float(q[2])))
+    poly.Close()
+    if not poly.IsDone():
+        raise RuntimeError("prism: could not build a section wire")
+    return poly.Wire()
+
+
+def _occ_prism(lf):
+    """Sew a prism-family leaf out of explicit faces -- no tessellation, no approximation."""
+    from OCC.Core.BRepBuilderAPI import (BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakeSolid,
+                                         BRepBuilderAPI_Sewing)
+    from OCC.Core.BRepGProp import brepgprop
+    from OCC.Core.GProp import GProp_GProps
+    from OCC.Core.TopoDS import topods
+    kind = lf["type"]
+    outer, inner = prism_rings(lf)
+    frame = lf["frame"]
+    stacks = []
+    for stack in (outer, inner):
+        if stack is None:
+            continue
+        rings = [_dedupe_ring3([_to_part(frame, q) for q in ring]) for ring in stack]
+        nv = len(rings[0])
+        if nv < 3 or any(len(r) != nv for r in rings):
+            raise ValueError(f"{kind}: sections carry "
+                             f"{sorted({len(r) for r in rings})} distinct corner counts")
+        stacks.append(rings)
+    faces = []
+    for rings in stacks:
+        nv = len(rings[0])
+        for k in range(len(rings) - 1):
+            lo, hi = rings[k], rings[k + 1]
+            for i in range(nv):
+                j = (i + 1) % nv
+                face = _occ_quad_face(lo[i], lo[j], hi[j], hi[i])
+                if face is not None:
+                    faces.append(face)
+    for idx in (0, -1):
+        mf = BRepBuilderAPI_MakeFace(_occ_polygon_wire(stacks[0][idx]))
+        if len(stacks) == 2:
+            mf.Add(topods.Wire(_occ_polygon_wire(stacks[1][idx]).Reversed()))
+        if not mf.IsDone():
+            raise ValueError(f"{kind}: could not build a cap face")
+        faces.append(mf.Face())
+    extent = max(abs(c) for rings in stacks for r in rings for q in r for c in q) or 1.0
+    sew = BRepBuilderAPI_Sewing(1.0e-7 * extent)
+    for face in faces:
+        sew.Add(face)
+    sew.Perform()
+    shell = sew.SewedShape()
+    if shell is None or shell.IsNull():
+        raise ValueError(f"{kind}: sewing the sections produced nothing")
+    ms = BRepBuilderAPI_MakeSolid(topods.Shell(shell))
+    ms.Build()
+    solid = ms.Solid()
+    props = GProp_GProps()
+    brepgprop.VolumeProperties(solid, props)
+    if props.Mass() < 0.0:
+        solid = topods.Solid(solid.Reversed())
+    return solid
+
+
 def _occ_leaf(lf):
     from OCC.Core.BRepPrimAPI import (BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCylinder,
                                       BRepPrimAPI_MakeSphere)
@@ -412,6 +740,8 @@ def _occ_leaf(lf):
     kind, p, frame = lf["type"], lf["params"], lf["frame"]
     if kind == "TGeoPcon":
         return _occ_pcon(lf)
+    if kind in _PRISM_TYPES:
+        return _occ_prism(lf)
     if kind == "TGeoBBox":
         corner = tuple(frame["origin"])
         for axis, half in (("x", p["dx"]), ("y", p["dy"]), ("z", p["dz"])):
@@ -619,5 +949,26 @@ def _root_leaf(lf, name):
         shape = ROOT.TGeoPcon(name, p["phi1"], p["dphi"], len(p["z"]))
         for i, (zz, r0, r1) in enumerate(zip(p["z"], p["rmin"], p["rmax"])):
             shape.DefineSection(i, zz, r0, r1)
+        return shape
+    if kind == "TGeoPgon":
+        shape = ROOT.TGeoPgon(name, p["phi1"], p["dphi"], int(round(p["nedges"])), len(p["z"]))
+        for i, (zz, r0, r1) in enumerate(zip(p["z"], p["rmin"], p["rmax"])):
+            shape.DefineSection(i, zz, r0, r1)
+        return shape
+    if kind == "TGeoTrd1":
+        return ROOT.TGeoTrd1(name, p["dx1"], p["dx2"], p["dy"], p["dz"])
+    if kind == "TGeoTrd2":
+        return ROOT.TGeoTrd2(name, p["dx1"], p["dx2"], p["dy1"], p["dy2"], p["dz"])
+    if kind == "TGeoArb8":
+        from array import array
+        return ROOT.TGeoArb8(name, p["dz"], array("d", [float(v) for v in p["vertices"]]))
+    if kind == "TGeoXtru":
+        from array import array
+        shape = ROOT.TGeoXtru(len(p["z"]))
+        shape.SetName(name)
+        shape.DefinePolygon(len(p["x"]), array("d", [float(v) for v in p["x"]]),
+                            array("d", [float(v) for v in p["y"]]))
+        for k in range(len(p["z"])):
+            shape.DefineSection(k, p["z"][k], p["xoff"][k], p["yoff"][k], p["scale"][k])
         return shape
     raise ValueError(f"unhandled leaf type {kind!r}")

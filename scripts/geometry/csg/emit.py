@@ -387,6 +387,65 @@ _CANDIDATE_DIGESTS_BEFORE_THE_REVOLVED_MATCHER = {
 }
 
 
+# The same floor for rung 2's own emissions: SHA-256 of `json.dumps(candidate, sort_keys=True)`
+# for every prism-family fixture, recorded when the matcher landed. A row here may be updated only
+# together with a measured statement about which artefacts moved.
+_PRISM_CANDIDATE_DIGESTS = {
+    "L-shaped plate":
+        "ef0c21358c50346fc6f1d19b801303791d63dbe4053538ffceff721bd7f411ba",
+    "hollow 8-edge polygon (TGeoPgon)":
+        "8b1b3ec817347271a435447ff843af5e42c14d42294c947f2b44784ac82a29da",
+    "hollow 48-edge polygon (TGeoPgon)":
+        "7dda853698a50f5d4ec9b27a62b26f80e6ebe1a84b8385563838944367e0e34a",
+    "Trd1 (slanted x faces)":
+        "b431f79ac92bfe13a7feed4274c300b82b7875b9fe168cfa3becf9c3001e1b3b",
+    "Trd1 (taper reversed)":
+        "68aa7c84b337248cddb582549445c4f7bed450b60edd2f872101166b54a79d2d",
+    "Trd1 (TPC_IRB1's 0.5 % slant)":
+        "26236a3814890b3441b243512c76ae135440fd2e658bea506223963b6ba86bf9",
+    "Trd2 (both half-widths vary)":
+        "e5b7757fda5785561119641cb371f786ec1ec13d4e9f38bd4a0725da9da33071",
+    "Trd2 (isotropic taper, also a legal Xtru)":
+        "c572219aa3ae096a62eeadc483cd966d840fa9cba04b3276aea65f7323c8fa3e",
+    "Arb8 (parallelepiped)":
+        "3532421c9f89a5ecd56d890ad321843608e7d25e7316ca39cc5eae7356dda322",
+    "Arb8 (TPC_IHSTR's trapezoidal prism)":
+        "3403de111d8ee4f6b7ff05fade7512f5208e92fb68807b7c0a6762eaa6f0bf27",
+    "Arb8 (sheared in x only)":
+        "cb46f4bad49306bb733634d2cf66e695ddd7e1aa7cc779562f33493a416758ac",
+    "Arb8 (a TGeoTrap's eight corners)":
+        "880bda4e01fc55380db99d46fbd139b455fbdd3d31e165f553bf5fd0620ca4ec",
+    "Xtru (non-convex L section)":
+        "3d3e1a41938efbef89e7bc0417dc312dc96c96c31866e6f95b0eb9f4b71f27f8",
+    "Xtru (ITS ConeARibVol0's eight-corner section)":
+        "991006456f492b5fe4f65b3da99b8cecd369c74c02484b6420705aa6c722a667",
+    "Xtru (a triangular section)":
+        "ce0549763513bc6a210183ac65614906e65d8b5e9565d36022934c7740fa7cb0",
+    "Xtru (three sections, offset and scaled)":
+        "0903971bfb0a916e10502b17aed38fb6e0be24ae1179096ec7ac2a31b527b37f",
+    "Pgon (solid hexagonal prism)":
+        "618c29e16c6396b50de9706150cc546fb83460c1085ed1dabf15075fc98ceab5",
+    "Pgon (tapered eight-edge prism)":
+        "782ba06f5261b5b9580ef34f7c390595e1a6ceb4fd560943821035e087e63d43",
+    "Pgon (hollow 8-edge prism)":
+        "e3db6ffd7d881c2e106c51cc0bfb65c6579399c066ea44a65b248262d5db0f22",
+    "Pgon (hollow 48-edge prism)":
+        "170bbe1bad0f51b45a67d34dde81e963063f5e233950f909518bd73dd707151d",
+    "Pgon (TPC_Strip's thin 18-edge shell)":
+        "878dac70124d695802949cef6e4326856d97cdee20d6f53d88d24dcbde03ce53",
+    "Pgon (three hollow sections)":
+        "b88d2382aea8dce7a35b6a76aaa1ac1f149d52242cea029c9ffc6ec3a5820a10",
+    "Pgon (a 90 deg wedge closing on the axis)":
+        "992f31e97db7c23aaff4b41d4bc1e1a7c5d728b10c15fc316ed133af4cdcfb13",
+    "Pgon (a wedge across phi = 0)":
+        "c3f918d0cc48576351c6ef5e63ff8724235181eb99630b79667ce7939bcbfbb2",
+    "placed Trd1":
+        "9b73e1a0c2a8d6cda0ed4f4790335dd7d2b0618d467d49e39a42cc7240a743d6",
+    "placed Xtru (non-convex L section)":
+        "3b69eaed1fa0e63b8aaa5ab2d5c5d4d2af9078535173d7bb8ea27d61e1a8e821",
+}
+
+
 def self_test(verbose=True, with_root=True):  # noqa: C901
     """Synthetic solids whose recognition and emission are known in closed form.
 
@@ -398,11 +457,16 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
     import hashlib
     import math
     from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Cut, BRepAlgoAPI_Fuse
-    from OCC.Core.BRepBuilderAPI import (BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakePolygon,
-                                         BRepBuilderAPI_Transform)
+    from OCC.Core.BRepBuilderAPI import (BRepBuilderAPI_MakeEdge, BRepBuilderAPI_MakeFace,
+                                         BRepBuilderAPI_MakePolygon, BRepBuilderAPI_MakeSolid,
+                                         BRepBuilderAPI_Sewing, BRepBuilderAPI_Transform)
+    from OCC.Core.BRepFill import brepfill
+    from OCC.Core.BRepGProp import brepgprop
     from OCC.Core.BRepPrimAPI import (BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCone,
                                       BRepPrimAPI_MakeCylinder, BRepPrimAPI_MakePrism,
                                       BRepPrimAPI_MakeRevol, BRepPrimAPI_MakeSphere)
+    from OCC.Core.GProp import GProp_GProps
+    from OCC.Core.TopoDS import topods
     from OCC.Core.gp import gp_Ax1, gp_Ax2, gp_Dir, gp_Pnt, gp_Trsf, gp_Vec
 
     checks = []
@@ -551,10 +615,12 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
     blind = BRepAlgoAPI_Cut(cyl, BRepPrimAPI_MakeCylinder(
         gp_Ax2(gp_Pnt(0, 0, -6), gp_Dir(0, 0, 1)), 1.0, 9.0).Shape()).Shape()
     expect_pcon("cylinder with a blind bore", blind, [-5, 3, 3, 5], [1, 1, 0, 0], [2, 2, 2, 2])
-    # 2. an L-shape: eight planes, no template.
+    # 2. an L-shape: eight planes. This *is* a right prism on a six-corner section, and rung 2's
+    #    prism matcher now converts it as a TGeoXtru. Before that matcher existed it declined on
+    #    the plane count, which is why the expectation moved rather than the shape.
     ell = BRepAlgoAPI_Cut(BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 4.0, 4.0, 1.0).Shape(),
                           BRepPrimAPI_MakeBox(gp_Pnt(2, 2, -1), 4.0, 4.0, 3.0).Shape()).Shape()
-    expect_declined("L-shaped plate", ell)
+    expect("L-shaped plate", ell, "rung2-xtru")
     # 3. a torus: in scope for the surface solid, out of scope here, and it must say so.
     from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeTorus
     expect_declined("torus", BRepPrimAPI_MakeTorus(5.0, 1.0).Shape(), "toroidal")
@@ -576,7 +642,7 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
         return [(radius * math.cos(math.radians(phi1) + k * dseg),
                  radius * math.sin(math.radians(phi1) + k * dseg)) for k in range(n)]
 
-    def prism(apothem, nedges, z0, z1):
+    def swept_polygon(apothem, nedges, z0, z1):
         poly = BRepBuilderAPI_MakePolygon()
         for (x, y) in prism_ring(apothem, nedges):
             poly.Add(gp_Pnt(x, y, z0))
@@ -586,15 +652,17 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
         pr.Build()
         return pr.Shape()
 
+    #    Rung 2 gave that recogniser: they are now converted as TGeoPgon, and the assertion that
+    #    matters is that they are NOT converted as a polycone -- the class is the whole point.
     for nedges in (8, 48):
-        pgon = BRepAlgoAPI_Cut(prism(3.0, nedges, -5.0, 5.0),
-                               prism(1.5, nedges, -6.0, 6.0)).Shape()
-        expect_declined(f"hollow {nedges}-edge polygon (TGeoPgon)", pgon)
+        pgon = BRepAlgoAPI_Cut(swept_polygon(3.0, nedges, -5.0, 5.0),
+                               swept_polygon(1.5, nedges, -6.0, 6.0)).Shape()
+        expect(f"hollow {nedges}-edge polygon (TGeoPgon)", pgon, "rung2-pgon")
     # 6. the same trap where it is hardest to see: polygonal laterals sharing an axis with a real
     #    cylinder, so there *is* an axis cluster and the planes reach the cap/wedge split.
     hybrid = BRepAlgoAPI_Fuse(
         BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, -5), gp_Dir(0, 0, 1)), 3.0, 5.0).Shape(),
-        prism(3.0, 6, 0.0, 5.0)).Shape()
+        swept_polygon(3.0, 6, 0.0, 5.0)).Shape()
     expect_declined("cylinder with a coaxial hexagonal section", hybrid,
                     "neither a cap nor a wedge")
     # 7. the near-miss the acceptance exists for: the recogniser cannot see a bore displaced by
@@ -709,6 +777,367 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
           and abs(tube_leaf["frame"]["origin"][2] - 1.0) < 1e-12,
           f"{tube_tag}, {tube_leaf['type']}, dz {tube_leaf['params']['dz']}, origin "
           f"{tube_leaf['frame']['origin']}")
+
+    # --- rung 2: the prism family, the shapes `_prism_from_rings` writes, read back ---
+    # The fixture sews its own explicit faces from ring coordinates it states itself, so the CAD
+    # a candidate is measured against is not built by the code that builds the candidate.
+    def prism(rings, inner=None):
+        stacks = [[[tuple(float(c) for c in q) for q in ring] for ring in rings]]
+        if inner is not None:
+            stacks.append([[tuple(float(c) for c in q) for q in ring] for ring in inner])
+        faces = []
+        for stack in stacks:
+            nv = len(stack[0])
+            for k in range(len(stack) - 1):
+                lo, hi = stack[k], stack[k + 1]
+                for i in range(nv):
+                    j = (i + 1) % nv
+                    poly = BRepBuilderAPI_MakePolygon()
+                    for q in (lo[i], lo[j], hi[j], hi[i]):
+                        poly.Add(gp_Pnt(*q))
+                    poly.Close()
+                    made = BRepBuilderAPI_MakeFace(poly.Wire())
+                    if made.IsDone():
+                        faces.append(made.Face())
+        for idx in (0, -1):
+            poly = BRepBuilderAPI_MakePolygon()
+            for q in stacks[0][idx]:
+                poly.Add(gp_Pnt(*q))
+            poly.Close()
+            made = BRepBuilderAPI_MakeFace(poly.Wire())
+            if len(stacks) == 2:
+                hole = BRepBuilderAPI_MakePolygon()
+                for q in stacks[1][idx]:
+                    hole.Add(gp_Pnt(*q))
+                hole.Close()
+                made.Add(topods.Wire(hole.Wire().Reversed()))
+            faces.append(made.Face())
+        extent = max(abs(c) for stack in stacks for r in stack for q in r for c in q) or 1.0
+        sew = BRepBuilderAPI_Sewing(1.0e-7 * extent)
+        for face in faces:
+            sew.Add(face)
+        sew.Perform()
+        ms = BRepBuilderAPI_MakeSolid(topods.Shell(sew.SewedShape()))
+        ms.Build()
+        solid = ms.Solid()
+        props = GProp_GProps()
+        brepgprop.VolumeProperties(solid, props)
+        if props.Mass() < 0.0:
+            solid = topods.Solid(solid.Reversed())
+        return solid
+
+    def polygon_ring(corners, z):
+        return [(x, y, z) for (x, y) in corners]
+
+    def regular_ring(apothem, nedges, z, phi1=0.0, dphi=360.0):
+        dseg = math.radians(dphi) / nedges
+        radius = apothem / math.cos(dseg / 2.0)
+        n = nedges if abs(dphi - 360.0) < 1e-9 else nedges + 1
+        return [(radius * math.cos(math.radians(phi1) + k * dseg),
+                 radius * math.sin(math.radians(phi1) + k * dseg), z) for k in range(n)]
+
+    def expect_prism(name, solid, want_recogniser, want_type, want_params):
+        record = expect(name, solid, want_recogniser)
+        if not record["accepted"]:
+            return record
+        lf = record["candidate"]["leaves"][0]
+        worst = 0.0
+        if lf["type"] != want_type:
+            worst = float("inf")
+        else:
+            for key, want in want_params.items():
+                got = lf["params"][key]
+                if isinstance(want, (list, tuple)):
+                    worst = (float("inf") if len(got) != len(want)
+                             else max([worst] + [abs(a - b) for a, b in zip(got, want)]))
+                else:
+                    worst = max(worst, abs(got - want))
+        check(f"{name} emits a native {want_type} with the source's parameters",
+              lf["type"] == want_type and worst < 1.0e-9,
+              f"{lf['type']}, worst parameter deviation {worst:.3g}")
+        return record
+
+    def trd_rings(dx1, dx2, dy1, dy2, dz):
+        return [[(-dx1, -dy1, -dz), (dx1, -dy1, -dz), (dx1, dy1, -dz), (-dx1, dy1, -dz)],
+                [(-dx2, -dy2, dz), (dx2, -dy2, dz), (dx2, dy2, dz), (-dx2, dy2, dz)]]
+
+    # TGeoTrd1: the slanted prism behind TPC's 44 "a box face has no opposite partner" declines.
+    expect_prism("Trd1 (slanted x faces)", prism(trd_rings(3, 1, 2, 2, 5)), "rung2-trd1",
+                 "TGeoTrd1", {"dx1": 3.0, "dx2": 1.0, "dy": 2.0, "dz": 5.0})
+    # The taper the other way round, and the barely-slanted TPC_IRB1, whose two half-widths differ
+    # by 0.076 cm on 14.2 -- the case a per-class angular criterion would have called a box.
+    expect_prism("Trd1 (taper reversed)", prism(trd_rings(1, 3, 2, 2, 4)), "rung2-trd1",
+                 "TGeoTrd1", {"dx1": 1.0, "dx2": 3.0, "dy": 2.0, "dz": 4.0})
+    expect_prism("Trd1 (TPC_IRB1's 0.5 % slant)",
+                 prism(trd_rings(14.205637404580152, 14.281551908396947, 2.06, 2.06, 0.2)),
+                 "rung2-trd1", "TGeoTrd1",
+                 {"dx1": 14.205637404580152, "dx2": 14.281551908396947, "dy": 2.06, "dz": 0.2})
+    # TGeoTrd2: both half-widths vary. The isotropic one is also a legal TGeoXtru, and must not
+    # be said as one -- the more specific class wins.
+    expect_prism("Trd2 (both half-widths vary)", prism(trd_rings(3, 1, 2, 4, 5)), "rung2-trd2",
+                 "TGeoTrd2", {"dx1": 3.0, "dx2": 1.0, "dy1": 2.0, "dy2": 4.0, "dz": 5.0})
+    expect_prism("Trd2 (isotropic taper, also a legal Xtru)", prism(trd_rings(3, 1.5, 2, 1, 5)),
+                 "rung2-trd2", "TGeoTrd2",
+                 {"dx1": 3.0, "dx2": 1.5, "dy1": 2.0, "dy2": 1.0, "dz": 5.0})
+
+    # TGeoArb8: a sheared hexahedron, and TPC_IHSTR's trapezoidal prism stated corner for corner.
+    para = prism([[(-2, -2, -3), (2, -2, -3), (2, 2, -3), (-2, 2, -3)],
+                  [(-1, -1.5, 3), (3, -1.5, 3), (3, 2.5, 3), (-1, 2.5, 3)]])
+    expect_prism("Arb8 (parallelepiped)", para, "rung2-arb8", "TGeoArb8",
+                 {"dz": 3.0, "vertices": [-2, -2, 2, -2, 2, 2, -2, 2,
+                                          -1, -1.5, 3, -1.5, 3, 2.5, -1, 2.5]})
+    ihstr = [(0.0, 0.0), (0.0, 1.08), (2.3, 1.08), (3.38, 0.0)]
+    expect_prism("Arb8 (TPC_IHSTR's trapezoidal prism)",
+                 prism([polygon_ring(ihstr, -0.6), polygon_ring(ihstr, 0.6)]),
+                 "rung2-arb8", "TGeoArb8",
+                 {"dz": 0.6, "vertices": [0, 0, 3.38, 0, 2.3, 1.08, 0, 1.08,
+                                          0, 0, 3.38, 0, 2.3, 1.08, 0, 1.08]})
+    # A hexahedron sheared in x only: neither a Trd (the section centres do not share a line) nor
+    # an Xtru (the scale is not isotropic).
+    expect("Arb8 (sheared in x only)",
+           prism([[(-2, -1, -2), (2, -1, -2), (2, 1, -2), (-2, 1, -2)],
+                  [(-2, -1, 2), (4, -1, 2), (4, 1, 2), (-2, 1, 2)]]), "rung2-arb8")
+    # ABSO's two TGeoTrap volumes arrive as a planar hexahedron and are said as one. The corners
+    # are ROOT's own, from `TGeoTrap(5, 10, 20, 2, 3, 4, 5, 2, 3, 4, 5).GetVertices()`.
+    trap_bottom = [(-4.003443140137866, -2.301536896070458),
+                   (-4.653488486034171, 1.698463103929542),
+                   (3.3465115139658295, 1.698463103929542),
+                   (1.996556859862133, -2.301536896070458)]
+    trap_top = [(-2.346511513965829, -1.698463103929542),
+                (-2.996556859862133, 2.301536896070458),
+                (5.003443140137866, 2.301536896070458),
+                (3.653488486034171, -1.698463103929542)]
+    expect("Arb8 (a TGeoTrap's eight corners)",
+           prism([polygon_ring(trap_bottom, -5.0), polygon_ring(trap_top, 5.0)]), "rung2-arb8")
+
+    # TGeoXtru: ITS's 23 Xtru volumes are all right prisms on a general, often non-convex polygon.
+    ell_poly = [(0, 0), (3, 0), (3, 1), (1, 1), (1, 3), (0, 3)]
+    expect_prism("Xtru (non-convex L section)",
+                 prism([polygon_ring(ell_poly, -2), polygon_ring(ell_poly, 2)]),
+                 "rung2-xtru", "TGeoXtru",
+                 {"x": [0, 3, 3, 1, 1, 0], "y": [0, 0, 1, 1, 3, 3], "z": [-2, 2],
+                  "xoff": [0, 0], "yoff": [0, 0], "scale": [1, 1]})
+    rib = [(0, 0), (4.2, 0), (4.2, 0.1), (5.05, 0.1), (9.803, 1.83), (5.9, 1.83), (5.0, 2.73),
+           (0, 2.73)]
+    expect("Xtru (ITS ConeARibVol0's eight-corner section)",
+           prism([polygon_ring(rib, -0.045), polygon_ring(rib, 0.045)]), "rung2-xtru")
+    expect("Xtru (a triangular section)",
+           prism([polygon_ring([(0, 0), (0.05, 0), (0, 0.074)], -14.5),
+                  polygon_ring([(0, 0), (0.05, 0), (0, 0.074)], 14.5)]), "rung2-xtru")
+    # Three sections with a per-section offset and an isotropic scale, which is the full
+    # vocabulary ROOT gives a TGeoXtru and the only part of it OCC can build exactly.
+    scaled_poly = [(0, 0), (2, 0), (2, 1), (1, 2), (0, 2)]
+    scaled = prism([[(0.0 + 1.0 * x, 0.0 + 1.0 * y, -3.0) for x, y in scaled_poly],
+                    [(0.5 + 1.4 * x, -0.25 + 1.4 * y, 0.0) for x, y in scaled_poly],
+                    [(1.0 + 0.6 * x, 0.0 + 0.6 * y, 3.0) for x, y in scaled_poly]])
+    expect_prism("Xtru (three sections, offset and scaled)", scaled, "rung2-xtru", "TGeoXtru",
+                 {"z": [-3, 0, 3], "xoff": [0, 0.5, 1.0], "yoff": [0, -0.25, 0],
+                  "scale": [1.0, 1.4, 0.6]})
+
+    # TGeoPgon: the laterals are planes at the APOTHEM radius, so the corners sit at
+    # `r / cos(dseg/2)` and that is what the recogniser inverts. The 48-edge case is the one that
+    # looks like a polycone from a distance: it must be said as a polygon, not revolved.
+    expect_prism("Pgon (solid hexagonal prism)",
+                 prism([regular_ring(3, 6, -5), regular_ring(3, 6, 5)]), "rung2-pgon",
+                 "TGeoPgon", {"nedges": 6, "phi1": 0.0, "dphi": 360.0, "z": [-5, 5],
+                              "rmin": [0, 0], "rmax": [3, 3]})
+    expect_prism("Pgon (tapered eight-edge prism)",
+                 prism([regular_ring(3, 8, -5), regular_ring(1.5, 8, 5)]), "rung2-pgon",
+                 "TGeoPgon", {"nedges": 8, "phi1": 0.0, "dphi": 360.0, "z": [-5, 5],
+                              "rmin": [0, 0], "rmax": [3, 1.5]})
+    for nedges in (8, 48):
+        hollow = prism([regular_ring(3, nedges, -5), regular_ring(3, nedges, 5)],
+                       inner=[regular_ring(1.5, nedges, -5), regular_ring(1.5, nedges, 5)])
+        expect_prism(f"Pgon (hollow {nedges}-edge prism)", hollow, "rung2-pgon", "TGeoPgon",
+                     {"nedges": nedges, "phi1": 0.0, "dphi": 360.0, "z": [-5, 5],
+                      "rmin": [1.5, 1.5], "rmax": [3, 3]})
+    # TPC_Strip: 18 edges, a 1 mm wall on an 85 cm radius, 250 cm long -- the annular section no
+    # single wire can express and the one case only TGeoPgon carries.
+    expect_prism("Pgon (TPC_Strip's thin 18-edge shell)",
+                 prism([regular_ring(85.235, 18, -124.8), regular_ring(85.235, 18, 124.8)],
+                       inner=[regular_ring(85.225, 18, -124.8), regular_ring(85.225, 18, 124.8)]),
+                 "rung2-pgon", "TGeoPgon",
+                 {"nedges": 18, "phi1": 0.0, "dphi": 360.0, "z": [-124.8, 124.8],
+                  "rmin": [85.225, 85.225], "rmax": [85.235, 85.235]})
+    # Three sections, hollow, with the radii stepping: the profile a TGeoPcon would carry, on a
+    # polygon.
+    expect_prism("Pgon (three hollow sections)",
+                 prism([regular_ring(3, 6, -5), regular_ring(3, 6, 0), regular_ring(4, 6, 5)],
+                       inner=[regular_ring(1, 6, -5), regular_ring(1, 6, 0),
+                              regular_ring(2, 6, 5)]),
+                 "rung2-pgon", "TGeoPgon",
+                 {"nedges": 6, "phi1": 0.0, "dphi": 360.0, "z": [-5, 0, 5],
+                  "rmin": [1, 1, 2], "rmax": [3, 3, 4]})
+    # A phi wedge, closing on its own axis, and one that crosses phi = 0 -- where the angular
+    # reading has to find the gap rather than sort.
+    expect_prism("Pgon (a 90 deg wedge closing on the axis)",
+                 prism([regular_ring(4, 3, -2, 10.0, 90.0) + [(0.0, 0.0, -2.0)],
+                        regular_ring(4, 3, 2, 10.0, 90.0) + [(0.0, 0.0, 2.0)]]),
+                 "rung2-pgon", "TGeoPgon",
+                 {"nedges": 3, "phi1": 10.0, "dphi": 90.0, "z": [-2, 2], "rmin": [0, 0],
+                  "rmax": [4, 4]})
+    expect_prism("Pgon (a wedge across phi = 0)",
+                 prism([regular_ring(4, 2, -2, 350.0, 20.0) + [(0.0, 0.0, -2.0)],
+                        regular_ring(4, 2, 2, 350.0, 20.0) + [(0.0, 0.0, 2.0)]]),
+                 "rung2-pgon", "TGeoPgon",
+                 {"nedges": 2, "phi1": 350.0, "dphi": 20.0, "z": [-2, 2], "rmin": [0, 0],
+                  "rmax": [4, 4]})
+
+    # A placed prism: the frame machinery on a leaf that has no origin of its own.
+    prism_trsf = gp_Trsf()
+    prism_trsf.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(1, 1, 0)), 0.7)
+    prism_shift = gp_Trsf()
+    prism_shift.SetTranslation(gp_Vec(3.0, -4.0, 5.0))
+    prism_place = prism_shift.Multiplied(prism_trsf)
+    moved_trd = BRepBuilderAPI_Transform(prism(trd_rings(3, 1, 2, 2, 5)), prism_place,
+                                         True).Shape()
+    moved_trd_record = expect("placed Trd1", moved_trd, "rung2-trd1")
+    check("a placed Trd1 travels as one leaf plus a rigid placement",
+          moved_trd_record["accepted"]
+          and prim.placement_for_candidate(moved_trd_record["candidate"]) is not None,
+          "placement present" if moved_trd_record["accepted"] else "not accepted")
+    moved_xtru = BRepBuilderAPI_Transform(
+        prism([polygon_ring(ell_poly, -2), polygon_ring(ell_poly, 2)]), prism_place,
+        True).Shape()
+    expect("placed Xtru (non-convex L section)", moved_xtru, "rung2-xtru")
+
+    # --- rung 2 negative controls ---
+    # 1. A genuinely twisted TGeoArb8. `_quad_face` writes its four lateral patches as ruled
+    #    brepfill surfaces, which are B-splines and not planes, so the solid is declined before
+    #    any matcher sees it. That is this rung's scope ruling and it is asserted, not assumed.
+    twisted_faces = []
+    twist_bottom = [(-2, -2, -2), (-2, 2, -2), (2, 2, -2), (2, -2, -2)]
+    twist_top = [(-1.41, -2.73, 2), (-2.73, 1.41, 2), (1.41, 2.73, 2), (2.73, -1.41, 2)]
+    for i in range(4):
+        j = (i + 1) % 4
+        e1 = BRepBuilderAPI_MakeEdge(gp_Pnt(*twist_bottom[i]), gp_Pnt(*twist_bottom[j])).Edge()
+        e2 = BRepBuilderAPI_MakeEdge(gp_Pnt(*twist_top[i]), gp_Pnt(*twist_top[j])).Edge()
+        twisted_faces.append(brepfill.Face(e1, e2))
+    for ring in (twist_bottom, twist_top):
+        poly = BRepBuilderAPI_MakePolygon()
+        for q in ring:
+            poly.Add(gp_Pnt(*q))
+        poly.Close()
+        twisted_faces.append(BRepBuilderAPI_MakeFace(poly.Wire()).Face())
+    sew_twist = BRepBuilderAPI_Sewing(1.0e-6)
+    for face in twisted_faces:
+        sew_twist.Add(face)
+    sew_twist.Perform()
+    twist_solid = BRepBuilderAPI_MakeSolid(topods.Shell(sew_twist.SewedShape()))
+    twist_solid.Build()
+    expect_declined("twisted hexahedron (a ruled TGeoArb8 side)", twist_solid.Solid(),
+                    "free-form faces")
+
+    # 2. The near-miss, at two displacements, and they fail on different legs. A rectangular
+    #    three-section prism whose middle section is stretched in y only is not a TGeoXtru (that
+    #    scale is isotropic), and every lateral of it is still a plane, so the structure alone
+    #    cannot say no.
+    #      1e-06 cm, ten model tolerances: the recogniser cannot see it and proposes the Xtru;
+    #                the symmetric difference refuses it at 1.28e-05 cm^3 against a 6.4e-06 band.
+    #      1e-05 cm: the recogniser's own measured gap refuses it, at 8.94e-06 cm on a 6 cm
+    #                diagonal against the 1e-06 relative bound.
+    for displacement in (1.0e-6, 1.0e-5):
+        near = prism([[(-2, -1, -2), (2, -1, -2), (2, 1, -2), (-2, 1, -2)],
+                      [(-2, -1 - displacement, 0), (2, -1 - displacement, 0),
+                       (2, 1 + displacement, 0), (-2, 1 + displacement, 0)],
+                      [(-2, -1, 2), (2, -1, 2), (2, 1, 2), (-2, 1, 2)]])
+        expect_declined(f"prism with one section {displacement:g} cm out of similarity", near)
+
+    # 3. A polycone must not be taken by a prism template, and a many-edged polygon must not be
+    #    taken by the revolved one. The pair is the point: the two matchers key on the same
+    #    structure from opposite sides, and only `_match_box` declining first separates them.
+    check("a polycone reaches the revolved matcher, not the prism one",
+          process_solid(stepped, "pcon-vs-prism")["recogniser"] == "revolved-pcon",
+          f"{process_solid(stepped, 'pcon-vs-prism')['recogniser']}")
+
+    # --- the instrument that scores a prism candidate must be able to say "no" ---
+    exact_ring = [(-2.0, -1.0, -2.0), (2.0, -1.0, -2.0), (2.0, 1.0, -2.0), (-2.0, 1.0, -2.0)]
+    nudged = [(x + (1.0e-6 if i == 0 else 0.0), y, z)
+              for i, (x, y, z) in enumerate(exact_ring)]
+    check("the point-set gap is zero on the point set itself",
+          recognise._point_set_gap(exact_ring, exact_ring) == 0.0,
+          f"gap {recognise._point_set_gap(exact_ring, exact_ring):.3g} cm")
+    nudged_gap = recognise._point_set_gap(exact_ring, nudged)
+    check("the point-set gap reports a corner displaced by ten model tolerances",
+          abs(nudged_gap - 1.0e-6) < 1.0e-15, f"gap {nudged_gap:.3g} cm, expected 1e-06 cm")
+    # ... and it must report a hexahedron read out in the wrong corner order, which has exactly
+    # the same eight corners. This is why `prism_samples` carries the edge midpoints.
+    good_arb8 = prim.leaf("TGeoArb8", {"dz": 3.0,
+                                       "vertices": [-2, -2, 2, -2, 2, 2, -2, 2,
+                                                    -1, -1.5, 3, -1.5, 3, 2.5, -1, 2.5]},
+                          prim.identity_frame())
+    swapped = list(good_arb8["params"]["vertices"])
+    swapped[2:4], swapped[4:6] = swapped[4:6], swapped[2:4]
+    bad_arb8 = prim.leaf("TGeoArb8", {"dz": 3.0, "vertices": swapped}, prim.identity_frame())
+    corner_only_gap = recognise._point_set_gap(
+        [tuple(q) for q in prim.prism_samples(good_arb8)[0::3]],
+        [tuple(q) for q in prim.prism_samples(bad_arb8)[0::3]])
+    order_gap = recognise._point_set_gap(prim.prism_samples(good_arb8),
+                                         prim.prism_samples(bad_arb8))
+    check("the edge midpoints are what catch a hexahedron read in the wrong corner order",
+          corner_only_gap == 0.0 and order_gap > 0.1,
+          f"corners alone {corner_only_gap:.3g} cm, corners and edge midpoints "
+          f"{order_gap:.3g} cm")
+
+    # --- the description must refuse an illegal prism before either builder sees it ---
+    for name, kind, params in (
+            ("a TGeoXtru whose z runs backwards", "TGeoXtru",
+             {"x": [0, 1, 0], "y": [0, 0, 1], "z": [1.0, 0.0], "xoff": [0, 0], "yoff": [0, 0],
+              "scale": [1, 1]}),
+            ("a TGeoXtru with a repeated corner", "TGeoXtru",
+             {"x": [0, 1, 1], "y": [0, 0, 0], "z": [0.0, 1.0], "xoff": [0, 0], "yoff": [0, 0],
+              "scale": [1, 1]}),
+            ("a TGeoXtru with two corners", "TGeoXtru",
+             {"x": [0, 1], "y": [0, 0], "z": [0.0, 1.0], "xoff": [0, 0], "yoff": [0, 0],
+              "scale": [1, 1]}),
+            ("a TGeoXtru with a zero scale", "TGeoXtru",
+             {"x": [0, 1, 0], "y": [0, 0, 1], "z": [0.0, 1.0], "xoff": [0, 0], "yoff": [0, 0],
+              "scale": [1, 0]}),
+            ("a TGeoArb8 with fifteen coordinates", "TGeoArb8",
+             {"dz": 1.0, "vertices": [0.0] * 15}),
+            ("a TGeoArb8 with a collapsed face", "TGeoArb8",
+             {"dz": 1.0, "vertices": [0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1]}),
+            ("a TGeoTrd1 with both half-widths zero", "TGeoTrd1",
+             {"dx1": 0.0, "dx2": 0.0, "dy": 1.0, "dz": 1.0}),
+            ("a TGeoTrd2 with a negative half-width", "TGeoTrd2",
+             {"dx1": -1.0, "dx2": 1.0, "dy1": 1.0, "dy2": 1.0, "dz": 1.0}),
+            ("a TGeoPgon with no edges", "TGeoPgon",
+             {"phi1": 0.0, "dphi": 360.0, "nedges": 0, "z": [0.0, 1.0], "rmin": [0.0, 0.0],
+              "rmax": [1.0, 1.0]})):
+        try:
+            prim.leaf(kind, params, prim.identity_frame())
+            refused = False
+        except ValueError:
+            refused = True
+        check(f"{name} is refused", refused)
+
+    # The two independent array lengths a TGeoXtru needs -- a polygon count and a section count --
+    # go through the same declaration Pcon's single length does, so a mismatch inside one group
+    # is still refused.
+    try:
+        prim.leaf("TGeoXtru", {"x": [0, 1, 0], "y": [0, 0], "z": [0.0, 1.0], "xoff": [0, 0],
+                               "yoff": [0, 0], "scale": [1, 1]}, prim.identity_frame())
+        refused = False
+    except ValueError:
+        refused = True
+    check("a TGeoXtru whose x and y differ in length is refused", refused)
+    xtru_two_lengths = prim.leaf(
+        "TGeoXtru", {"x": [0, 2, 2, 0], "y": [0, 0, 1, 1], "z": [-1.0, 0.0, 1.0],
+                     "xoff": [0, 0, 0], "yoff": [0, 0, 0], "scale": [1, 1, 1]},
+        prim.identity_frame())
+    check("a TGeoXtru carries four corners and three sections in one description",
+          len(xtru_two_lengths["params"]["x"]) == 4 and len(xtru_two_lengths["params"]["z"]) == 3,
+          f"{len(xtru_two_lengths['params']['x'])} corners, "
+          f"{len(xtru_two_lengths['params']['z'])} sections")
+
+    # --- the floor for rung 2's own emissions ---
+    check("every prism-family candidate is byte-identical to its recorded digest",
+          all(seen_digests.get(name) == digest for name, digest
+              in _PRISM_CANDIDATE_DIGESTS.items()),
+          "; ".join(f"{name}: {seen_digests.get(name)} != {digest}" for name, digest
+                    in _PRISM_CANDIDATE_DIGESTS.items()
+                    if seen_digests.get(name) != digest)
+          or f"{len(_PRISM_CANDIDATE_DIGESTS)} candidates unchanged")
 
     # --- the floor: nothing that converted before this matcher existed converts differently ---
     check("every whole-part candidate is byte-identical to before the revolved matcher",
@@ -902,6 +1331,87 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
               f"read {back_pcon.ClassName() if back_pcon else 'nothing'}, nz "
               f"{back_pcon.GetNz() if back_pcon else 0}")
         fpcon.Close()
+
+        # --- the ROOT half of the prism family ---
+        # Each class must come out as itself, not as a composite and not as the more general
+        # class next door, and each must report an analytic Capacity() -- which is the whole
+        # reason for emitting the specific class rather than a general one.
+        for name, solid, want_class, want_capacity in (
+                ("Trd1", prism(trd_rings(3, 1, 2, 2, 5)), "TGeoTrd1",
+                 4.0 * 2.0 * (3.0 + 1.0) * 5.0),
+                ("Trd2", prism(trd_rings(3, 1, 2, 4, 5)), "TGeoTrd2", None),
+                ("Arb8", para, "TGeoArb8", None),
+                ("Xtru", prism([polygon_ring(ell_poly, -2), polygon_ring(ell_poly, 2)]),
+                 "TGeoXtru", 5.0 * 4.0),
+                ("Pgon", prism([regular_ring(3, 6, -5), regular_ring(3, 6, 5)]), "TGeoPgon",
+                 6.0 * 9.0 * math.tan(math.pi / 6.0) * 10.0)):
+            record = process_solid(solid, f"{name}-emission")
+            if not record["accepted"]:
+                check(f"an axis-aligned {want_class} emits a bare {want_class}", False,
+                      f"not accepted: {record['reason']}")
+                continue
+            shape, placed = prim.build_root(record["candidate"], f"{name}probe")
+            ok = shape.ClassName() == want_class and placed is None
+            detail = (f"{shape.ClassName()}, capacity {shape.Capacity():.9f}, placement "
+                      f"{'present' if placed else 'absent'}")
+            if want_capacity is not None:
+                rel = abs(shape.Capacity() - want_capacity) / want_capacity
+                ok = ok and rel < 1.0e-12
+                detail += f", closed form {want_capacity:.9f} (rel {rel:.2e})"
+            check(f"an axis-aligned {want_class} emits a bare {want_class} with an analytic "
+                  "Capacity()", ok, detail)
+
+        # A placed Trd1: the closed form is stated through the inverse of the transform that
+        # *built* the OCCT solid, never through the description's own frame, so a placement that
+        # is wrong in the same way in both builders is still caught.
+        trd_shape, trd_placement = prim.build_root(moved_trd_record["candidate"], "movedtrdprobe")
+        check("a placed Trd1 is a bare TGeoTrd1 plus a placement",
+              trd_shape.ClassName() == "TGeoTrd1" and trd_placement is not None,
+              f"{trd_shape.ClassName()}, placement "
+              f"{'present' if trd_placement else 'absent'}")
+        trd_inverse = prism_place.Inverted()
+        bad_trd = 0
+        scored_trd = 0
+        random.seed(37)
+        for _ in range(20000):
+            p3 = (random.uniform(-3, 9), random.uniform(-10, 2), random.uniform(-2, 12))
+            probe = gp_Pnt(*p3)
+            probe.Transform(trd_inverse)
+            xc, yc, zc = probe.X(), probe.Y(), probe.Z()
+            half = 2.0 - 0.2 * zc                      # dx1 = 3, dx2 = 1, dz = 5
+            if min(abs(abs(zc) - 5.0), abs(abs(yc) - 2.0), abs(abs(xc) - half)) < 1.0e-6:
+                continue
+            scored_trd += 1
+            want = abs(zc) <= 5.0 and abs(yc) <= 2.0 and abs(xc) <= half
+            got = bool(trd_shape.Contains(
+                array("d", list(prim.placement_to_local(trd_placement, p3)))))
+            if want != got:
+                bad_trd += 1
+        check("the emitted placed Trd1 answers Contains like the closed form",
+              bad_trd == 0, f"{bad_trd} disagreement(s) over {scored_trd} points")
+        cc_prism = crosscheck_contains(moved_trd_record["candidate"], moved_trd)
+        check("the ROOT Trd1 and the CAD solid agree on Contains",
+              cc_prism["disagreements"] == 0,
+              f"{cc_prism['disagreements']} disagreement(s) over {cc_prism['points']} points")
+
+        # The artefact must carry a TGeoXtru's polygon and its sections, which is the one class
+        # here whose parameters do not fit in a constructor call.
+        xtru_record = process_solid(scaled, "xtru-emission")
+        xtru_target = Path("/tmp/csg_selftest_xtru.root")
+        write_shape_root(xtru_record["candidate"], xtru_target)
+        fxtru = ROOT.TFile.Open(str(xtru_target))
+        back_xtru = fxtru.Get("shape")
+        xtru_ok = (back_xtru is not None and back_xtru.ClassName() == "TGeoXtru"
+                   and back_xtru.GetNvert() == 5 and back_xtru.GetNz() == 3
+                   and max(abs(back_xtru.GetZ(k) - z) for k, z in enumerate((-3.0, 0.0, 3.0)))
+                   < 1e-12
+                   and max(abs(back_xtru.GetScale(k) - v)
+                           for k, v in enumerate((1.0, 1.4, 0.6))) < 1e-12)
+        check("shape_<part>.root round-trips a TGeoXtru with its polygon and its sections",
+              xtru_ok, f"read {back_xtru.ClassName() if back_xtru else 'nothing'}, "
+                       f"nvert {back_xtru.GetNvert() if back_xtru else 0}, "
+                       f"nz {back_xtru.GetNz() if back_xtru else 0}")
+        fxtru.Close()
 
     n_ok = sum(1 for _n, ok, _d in checks if ok)
     if verbose:
