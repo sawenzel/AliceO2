@@ -40,19 +40,19 @@ deep review with the verification appendix; [`INDEX.md`](INDEX.md) orders every 
 | --- | --- |
 | `ctest -R BVHSurfaceSolid` / `BVHAssembly` | **113 + 22 cases**, green |
 | `O2_CADtoTGeo.py --self-test` | **54 checks** = 18+8+10+12+6 — never quote the last line alone |
-| `csg/emit.py --self-test` | **184** (11 acceptance + 173 recognise/emit, incl. three candidate-digest tables) |
-| `checkKnownSource.py --self-test` (new) | **15/15** — the third acceptance test: emitted shape vs the source `TGeoShape` |
+| `csg/emit.py --self-test` | **238** (11 acceptance + 227 recognise/emit, incl. four candidate-digest tables) |
+| `checkKnownSource.py --self-test` | **17/17** — the third acceptance test: emitted shape vs the source `TGeoShape` (same-name resolution by exact bounding box) |
 | `runOracleGate.py --self-test` / xray `--self-test` | 17/17 · clean |
 | Bagger gate | **13/13, CSG 7 / surfaces 6 / tessellated 0, exit 0**, bit-identical through all three rungs |
 | fixtures gate | **exit 0, 9/10 csg** (only `torus_union_cyl` declines); the two sliver rays remain only in the side-by-side surface columns, no shipped verdict carries one |
-| detector corpora (regenerated, converted, known-source-checked) | PIPE **128**/25/23 of 176 · ITS **207**/57/0 of 264 (post depth-guard fix; the five deep cages ship as surface) · TPC **146**/26/0 of 172 · ABSO **26**/3/0 of 29 · TRD **1148**/22/0 of 1170 — every accepted CSG at dV_sym = 0, known-source 1655/1655 |
+| detector corpora (regenerated, converted, known-source-checked) | PIPE **162**/13/1 of 176 (post flat-CSG R1+R2: Eltu, torus, bellows plies) · ITS **207**/57/0 of 264 (post depth-guard fix; the five deep cages ship as surface) · TPC **146**/26/0 of 172 · ABSO **26**/3/0 of 29 · TRD **1148**/22/0 of 1170 — every accepted CSG at dV_sym = 0, known-source 1689/1689 |
 | **Geant integration demo** | works: IRIS + Bagger as sensitive external detectors, real hits, zero stuck tracks / nav errors (`Stream_Z_IntegrationDemo.md`) |
 | material budget, exact vs tessellated | 0.039 % aggregate over 512 Fibonacci geantino rays; sole 8192-ray divergence is `BucketLink2`, the not-closed mesh |
 | costs, exact vs tessellated | 1.94× transport, +42 s one-off build (IRIS CloseShape), +174 MB; exact is *smaller on disk* |
-| website (`website/`) | mesh viewer, charts, JS exact raytracer bit-true vs the kernel, event-display player, self-check 30/30; `website_data/decline_reasons.json` regenerated 2026-08-24 (Bagger + ALICE3 + fixtures) |
+| website (`website/`) | mesh viewer, charts, JS exact raytracer bit-true vs the kernel, event-display player, self-check 30/30; `website_data/decline_reasons.json` regenerated 2026-08-24 post-R1/R2 (Bagger + ALICE3 + fixtures) |
 | ray bridge (`tgeoRayService.py`) | the real kernel serving pixels: 10k rays in 4 ms |
 | oTOF converts | 20 prototypes / 62 628 placements, 20/20 exact surfaces, 19/20 CSG `TGeoBBox` at dV_sym = 0 (`Stream_AC_OTOFTraversal.md`) |
-| TGeo → STEP round trip | `O2_TGeoToCAD.py` self-test **105** (frozen through the recognition work); six-module study: ~7.4 M Contains samples, ONE disagreement (`Stream_AD/AF/AG/AH/AI`) |
+| TGeo → STEP round trip | `O2_TGeoToCAD.py` self-test **107** (depth guard fixed); six-module study: ~7.4 M Contains samples, ONE disagreement (`Stream_AD/AF/AG/AH/AI`) |
 | benchmark JSON (`website_data/`) | five hero parts complete; timing under load flagged `timingPreliminary` |
 
 **Quote it correctly (unchanged):** `cyl_inter_cyl`'s mesh is closed as a triangle set; the
@@ -68,7 +68,7 @@ X-ray's lost rays are a **navigation** loss in `O2Tessellated`'s stepping, not h
 3. **Converter: parallel `--csg auto` runs race** (two parallel conversions lost shapes):
    serialize/lock the deferred emit. And score **oTOF through the oracle gate** (converts, never
    scored).
-4. **Recognition follow-ups — now folded into [`Handoff_FlatCSG.md`](Handoff_FlatCSG.md)** (details in `Stream_AJ_Recognition.md` §7): `TGeoEltu`
+4. **Flat-CSG programme, R1+R2 DONE 2026-08-24** (`Handoff_FlatCSG.md` §1.1 — torus + Eltu landed, PIPE 162/13/1); NEXT there: R3 Tier-0, R4 splitter, R6 census. Remaining small items from `Stream_AJ_Recognition.md` §7: `TGeoEltu`
    (PIPE's 22-part elliptical population — needs the face reader to learn the elliptic
    carrier); run + score the **MAG corpus** (demand 14 prisms, never converted); the cell leaf
    budget (8) vs ITS's two 10-halfspace connector blocks; Xtru parameter comparison in

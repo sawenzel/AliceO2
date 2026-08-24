@@ -41,7 +41,7 @@
    "model": "Bagger",
    "lid": "0:1:1:6",
    "shipsAs": "surface",
-   "whyNotCSG": "toroidal faces: 2 of 97 (out of the recogniser's scope)",
+   "whyNotCSG": "a torus together with ['cylinder', 'sphere'] is not a whole torus; as a single cell: 68 trusted concave edge(s) of 247: the part is more than one cell, and decomposition is deliberately not built [97 faces: 22 cylinder, 69 plane, 4 sphere, 2 torus; 13 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 97
   },
@@ -122,7 +122,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:5",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 4 of 50 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 4 of 50 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "2 face(s): bspline face extraction not implemented yet",
    "nFaces": 50
   },
@@ -139,8 +139,8 @@
    "name": "ST2487455_01",
    "model": "ALICE3",
    "lid": "0:1:1:7#b2",
-   "shipsAs": "surface",
-   "whyNotCSG": "toroidal faces: 1 of 6 (out of the recogniser's scope)",
+   "shipsAs": "csg",
+   "whyNotCSG": null,
    "whyNotSurface": null,
    "nFaces": 6
   },
@@ -149,7 +149,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:7#b3",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 40 of 245 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope); toroidal faces: 120 of 245 (out of the recogniser's scope)",
+   "whyNotCSG": "free-form faces: 40 of 245 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "40 face(s): bspline face extraction not implemented yet",
    "nFaces": 245
   },
@@ -176,7 +176,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:11",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 37 of 148 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope); toroidal faces: 14 of 148 (out of the recogniser's scope)",
+   "whyNotCSG": "free-form faces: 37 of 148 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "19 face(s): bspline face extraction not implemented yet; 18 face(s): extrusion face extraction not implemented yet",
    "nFaces": 148
   },
@@ -185,7 +185,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:12#b1",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 14 of 22 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 14 of 22 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "14 face(s): extrusion face extraction not implemented yet",
    "nFaces": 22
   },
@@ -212,7 +212,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:12#b4",
    "shipsAs": "surface",
-   "whyNotCSG": "a planar face is neither a cap nor a wedge of any axis cluster; as a single cell: the cell's boundary is inf cm from the part's (inf of the part's 50.0118 cm diagonal, over 1e-06) [10 faces: 2 cylinder, 8 plane; 1 axis cluster(s)]",
+   "whyNotCSG": "a planar face is neither a cap nor a wedge of any axis cluster; as a single cell: OCCT could not measure a boundary sample against the proposal, so the gap is unknown [10 faces: 2 cylinder, 8 plane; 1 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 10
   },
@@ -221,7 +221,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:13",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 37 of 148 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope); toroidal faces: 14 of 148 (out of the recogniser's scope)",
+   "whyNotCSG": "free-form faces: 37 of 148 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "19 face(s): bspline face extraction not implemented yet; 18 face(s): extrusion face extraction not implemented yet",
    "nFaces": 148
   },
@@ -230,7 +230,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:14",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 69 of 996 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 69 of 996 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "69 face(s): bspline face extraction not implemented yet",
    "nFaces": 996
   },
@@ -239,7 +239,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:15#b1",
    "shipsAs": "surface",
-   "whyNotCSG": "toroidal faces: 82 of 202 (out of the recogniser's scope)",
+   "whyNotCSG": "a torus together with ['cone', 'cylinder'] is not a whole torus; as a single cell: 6 trusted concave edge(s) of 474: the part is more than one cell, and decomposition is deliberately not built [202 faces: 6 cone, 91 cylinder, 23 plane, 82 torus; 73 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 202
   },
@@ -248,7 +248,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:15#b2",
    "shipsAs": "surface",
-   "whyNotCSG": "toroidal faces: 4 of 10 (out of the recogniser's scope)",
+   "whyNotCSG": "a torus together with ['cone', 'cylinder'] is not a whole torus; as a single cell: TGeoTorus: rmax 0.1 exceeds the major radius 0.0428825434729, so this is a self-intersecting torus (a fillet blend) that TGeoTorus cannot state [10 faces: 2 cone, 2 cylinder, 2 plane, 4 torus; 1 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 10
   },
@@ -257,7 +257,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:15#b3",
    "shipsAs": "surface",
-   "whyNotCSG": "toroidal faces: 4 of 10 (out of the recogniser's scope)",
+   "whyNotCSG": "a torus together with ['cone', 'cylinder'] is not a whole torus; as a single cell: TGeoTorus: rmax 0.1 exceeds the major radius 0.0428825434729, so this is a self-intersecting torus (a fillet blend) that TGeoTorus cannot state [10 faces: 2 cone, 2 cylinder, 2 plane, 4 torus; 1 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 10
   },
@@ -266,7 +266,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:15#b4",
    "shipsAs": "surface",
-   "whyNotCSG": "toroidal faces: 4 of 10 (out of the recogniser's scope)",
+   "whyNotCSG": "a torus together with ['cone', 'cylinder'] is not a whole torus; as a single cell: TGeoTorus: rmax 0.1 exceeds the major radius 0.0428825434729, so this is a self-intersecting torus (a fillet blend) that TGeoTorus cannot state [10 faces: 2 cone, 2 cylinder, 2 plane, 4 torus; 1 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 10
   },
@@ -275,7 +275,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:16",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 69 of 128 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope); toroidal faces: 4 of 128 (out of the recogniser's scope)",
+   "whyNotCSG": "free-form faces: 69 of 128 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "46 face(s): bspline face extraction not implemented yet; 23 face(s): extrusion face extraction not implemented yet",
    "nFaces": 128
   },
@@ -293,7 +293,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:18",
    "shipsAs": "surface",
-   "whyNotCSG": "toroidal faces: 14 of 80 (out of the recogniser's scope)",
+   "whyNotCSG": "a torus together with ['cone', 'cylinder'] is not a whole torus; as a single cell: 4 trusted concave edge(s) of 219: the part is more than one cell, and decomposition is deliberately not built [80 faces: 13 cone, 23 cylinder, 30 plane, 14 torus; 10 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 80
   },
@@ -311,7 +311,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:20#b1",
    "shipsAs": "surface",
-   "whyNotCSG": "toroidal faces: 16 of 1052 (out of the recogniser's scope)",
+   "whyNotCSG": "a torus together with ['cone', 'cylinder'] is not a whole torus; as a single cell: 472 trusted concave edge(s) of 2748: the part is more than one cell, and decomposition is deliberately not built [1052 faces: 142 cone, 511 cylinder, 383 plane, 16 torus; 248 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 1052
   },
@@ -320,7 +320,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:20#b2",
    "shipsAs": "surface",
-   "whyNotCSG": "toroidal faces: 20 of 965 (out of the recogniser's scope)",
+   "whyNotCSG": "a torus together with ['cone', 'cylinder'] is not a whole torus; as a single cell: 888 trusted concave edge(s) of 2400: the part is more than one cell, and decomposition is deliberately not built [965 faces: 102 cone, 308 cylinder, 535 plane, 20 torus; 166 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 965
   },
@@ -329,7 +329,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:20#b3",
    "shipsAs": "surface",
-   "whyNotCSG": "toroidal faces: 20 of 236 (out of the recogniser's scope)",
+   "whyNotCSG": "a torus together with ['cone', 'cylinder'] is not a whole torus; as a single cell: 191 trusted concave edge(s) of 558: the part is more than one cell, and decomposition is deliberately not built [236 faces: 24 cone, 80 cylinder, 112 plane, 20 torus; 20 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 236
   },
@@ -338,7 +338,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:20#b4",
    "shipsAs": "surface",
-   "whyNotCSG": "toroidal faces: 33 of 720 (out of the recogniser's scope)",
+   "whyNotCSG": "a torus together with ['cone', 'cylinder'] is not a whole torus; as a single cell: 436 trusted concave edge(s) of 1824: the part is more than one cell, and decomposition is deliberately not built [720 faces: 56 cone, 268 cylinder, 363 plane, 33 torus; 49 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 720
   },
@@ -347,7 +347,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:21",
    "shipsAs": "surface",
-   "whyNotCSG": "toroidal faces: 12 of 50 (out of the recogniser's scope)",
+   "whyNotCSG": "a torus together with ['cylinder'] is not a whole torus; as a single cell: 28 trusted concave edge(s) of 144: the part is more than one cell, and decomposition is deliberately not built [50 faces: 20 cylinder, 18 plane, 12 torus; 1 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 50
   },
@@ -356,7 +356,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b1",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 274 of 352 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 274 of 352 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "68 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cone but recognized quadric boundary edge is not axis-aligned in (phi, h/theta); 28 face(s): bspline face extraction not implemented yet; 8 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cylinder but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 352
   },
@@ -365,7 +365,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b2",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 24
   },
@@ -374,7 +374,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b3",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 24
   },
@@ -383,7 +383,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b4",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 24
   },
@@ -392,7 +392,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b5",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 24
   },
@@ -401,7 +401,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b6",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 29 of 45 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 29 of 45 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "6 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cone but recognized quadric boundary edge is not axis-aligned in (phi, h/theta); 5 face(s): bspline face extraction not implemented yet; 3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cylinder but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 45
   },
@@ -410,7 +410,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b7",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 29 of 45 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 29 of 45 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "6 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cone but recognized quadric boundary edge is not axis-aligned in (phi, h/theta); 5 face(s): bspline face extraction not implemented yet; 3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cylinder but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 45
   },
@@ -419,7 +419,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b8",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 29 of 45 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 29 of 45 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "6 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cone but recognized quadric boundary edge is not axis-aligned in (phi, h/theta); 5 face(s): bspline face extraction not implemented yet; 3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cylinder but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 45
   },
@@ -428,7 +428,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b9",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 29 of 45 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 29 of 45 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "6 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cone but recognized quadric boundary edge is not axis-aligned in (phi, h/theta); 5 face(s): bspline face extraction not implemented yet; 3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cylinder but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 45
   },
@@ -437,7 +437,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b10",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 29 of 86 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 29 of 86 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "6 face(s): bspline face extraction not implemented yet",
    "nFaces": 86
   },
@@ -446,7 +446,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b11",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 161 of 193 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 161 of 193 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "28 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cone but recognized quadric boundary edge is not axis-aligned in (phi, h/theta); 26 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cylinder but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 193
   },
@@ -455,7 +455,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b12",
    "shipsAs": "surface",
-   "whyNotCSG": "free-form faces: 4 of 10 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 4 of 10 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": null,
    "nFaces": 10
   },
@@ -464,7 +464,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b13",
    "shipsAs": "surface",
-   "whyNotCSG": "free-form faces: 9 of 20 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 9 of 20 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": null,
    "nFaces": 20
   },
@@ -473,7 +473,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b14",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 101 of 138 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 101 of 138 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "6 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cone but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 138
   },
@@ -482,7 +482,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b15",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 185 of 246 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 185 of 246 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "68 face(s): bspline face extraction not implemented yet; 12 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cylinder but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 246
   },
@@ -491,7 +491,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b16",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 41 of 59 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 41 of 59 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "5 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cone but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 59
   },
@@ -500,7 +500,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b17",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 24
   },
@@ -509,7 +509,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b18",
    "shipsAs": "surface",
-   "whyNotCSG": "free-form faces: 27 of 48 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 27 of 48 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": null,
    "nFaces": 48
   },
@@ -518,7 +518,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b19",
    "shipsAs": "surface",
-   "whyNotCSG": "free-form faces: 30 of 44 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 30 of 44 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": null,
    "nFaces": 44
   },
@@ -527,7 +527,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b20",
    "shipsAs": "surface",
-   "whyNotCSG": "free-form faces: 17 of 37 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 17 of 37 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": null,
    "nFaces": 37
   },
@@ -536,7 +536,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b21",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 16 of 33 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 16 of 33 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "1 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as cone but recognized quadric trim wire has fewer than 3 edges",
    "nFaces": 33
   },
@@ -545,7 +545,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b22",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 24
   },
@@ -554,7 +554,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b23",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 24
   },
@@ -563,7 +563,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b24",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 24
   },
@@ -572,7 +572,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b25",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 24
   },
@@ -581,7 +581,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b26",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 24
   },
@@ -590,7 +590,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b27",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 24
   },
@@ -599,7 +599,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:22#b28",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 9 of 24 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "3 face(s): bspline face extraction not implemented yet; recognition attempted: recognized as sphere but recognized quadric boundary edge is not axis-aligned in (phi, h/theta)",
    "nFaces": 24
   },
@@ -608,7 +608,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:23",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 138 of 182 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 138 of 182 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "138 face(s): bspline face extraction not implemented yet",
    "nFaces": 182
   },
@@ -617,7 +617,7 @@
    "model": "ALICE3",
    "lid": "0:1:1:24",
    "shipsAs": "mesh",
-   "whyNotCSG": "free-form faces: 924 of 2034 (surface kind outside plane/cylinder/cone/sphere; a twisted TGeoArb8 side is one of these and is out of scope)",
+   "whyNotCSG": "free-form faces: 924 of 2034 (surface kind outside plane/cylinder/cone/sphere/torus; a twisted TGeoArb8 side is one of these and is out of scope)",
    "whyNotSurface": "924 face(s): bspline face extraction not implemented yet",
    "nFaces": 2034
   },
@@ -698,7 +698,7 @@
    "model": "torus_union_cyl",
    "lid": "0:1:1:1",
    "shipsAs": "surface",
-   "whyNotCSG": "toroidal faces: 2 of 6 (out of the recogniser's scope)",
+   "whyNotCSG": "a torus together with ['cylinder'] is not a whole torus; as a single cell: 2 trusted concave edge(s) of 9: the part is more than one cell, and decomposition is deliberately not built [6 faces: 2 cylinder, 2 plane, 2 torus; 1 axis cluster(s)]",
    "whyNotSurface": null,
    "nFaces": 6
   },

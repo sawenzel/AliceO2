@@ -32,6 +32,19 @@ are now in the corpus). What the remaining 127 are, from the reports and the sou
 Separately, PIPE's 22 `TGeoEltu` are not composite-sourced but are the largest surviving
 primitive population anywhere and belong in this programme's first stage.
 
+## 1.1 Progress
+
+**R1 + R2 are DONE** (2026-08-24, commits `9b4708b4c5`, `67ac71a315`, `d138313796`): PIPE
+128 → **162 csg / 13 surface / 1 mesh** (+22 `tier1-eltu`, +1 `tier1-torus`, +11 bellows plies as
+torus-carrying cells, all at `dV_sym = 0`, class and capacity matching their sources to 1.1e-14);
+zero movement on ITS/TPC/ABSO/TRD; known-source 1689/1689; fixtures and Bagger gates exit 0
+unchanged. The composite-sourced rate moved 56/188 → **67/188 (36 %)**. ALICE3 gains one
+conversion (`ST2487455_01`, a torus-carrying cell) and now declines its fillet blends readably —
+a crash on its self-intersecting tori forced `InvalidDescription` (a typed "the numbers are not a
+legal solid") to be declined at every proposal site, with a bad matcher still raising. The
+same-name resolution in `checkKnownSource.py` now uses the exact bounding box, never a
+Monte-Carlo capacity. Next: **R3 (Tier-0)**, then R4; R6 (the census) can run any time.
+
 ## 2. The rungs, in order
 
 **R1 — torus carriers (small).** `TGeoTorus` leaf in `csg/primitives.py` with BOTH builders
