@@ -47,6 +47,122 @@ _BAND_FACTOR = 1.0
 _SANITY_VOLUME_RATIO = 4.0
 
 
+def model_tolerance_cm(shape):
+    """The shape's own statement about how well its boundary is defined, in cm.
+
+    The same quantity `O2_CADtoTGeo.shape_model_tolerance()` and `occtOracle.shape_tolerance()`
+    compute. It lives here rather than in `csg/emit.py` because `csg/recognise.py` needs it too
+    and must not import the emitter that imports it; `emit.model_tolerance_cm` is this function.
+    """
+    from OCC.Core.BRep import BRep_Tool
+    from OCC.Core.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
+    from OCC.Core.TopExp import TopExp_Explorer
+    from OCC.Core.TopoDS import topods
+    worst = 0.0
+    for kind, getter in ((TopAbs_FACE, lambda s: BRep_Tool.Tolerance(topods.Face(s))),
+                         (TopAbs_EDGE, lambda s: BRep_Tool.Tolerance(topods.Edge(s))),
+                         (TopAbs_VERTEX, lambda s: BRep_Tool.Tolerance(topods.Vertex(s)))):
+        walk = TopExp_Explorer(shape, kind)
+        while walk.More():
+            worst = max(worst, getter(walk.Current()))
+            walk.Next()
+    return worst
+
+
+def contains_disagreements(original, cand_shape, model_tol, n_points=4000, seed=1234):
+    """Classify points against both solids; `(disagreements, scored, worst distance)`.
+
+    **Why a sample-based check sits next to a proof-of-equality.** The symmetric difference is
+    the proof, and it has one failure mode this module's own docstring already names: OCCT's
+    boolean returns `IsDone()` with an *empty result* rather than an error. Both cuts coming back
+    empty is what an exactly-right candidate looks like -- and it is also what happens when the
+    kernel cannot resolve the difference at all. Measured on ALICE3's `ST0923290_01#b19`: the two
+    solids differ over a region 0.02 cm from the part's boundary, `Cut` both ways returns zero
+    solids, and `dV_sym` therefore reports 0.0 against a band of 6.7e-04.
+
+    So this is not a second opinion for its own sake. It is the one instrument that can tell an
+    empty cut from an equal pair, it needs no ROOT (so it cannot make acceptance depend on which
+    interpreter is running), and it is deliberately *reported*, not thresholded: any disagreement
+    outside the model-tolerance band is one too many.
+
+    Points within `model_tol` of either boundary are skipped, since neither side claims to decide
+    those. `worst` is the largest distance from a disagreeing point to the original's boundary,
+    which is what says whether a disagreement is a sliver or a region.
+    """
+    import random
+    from OCC.Core.BRepClass3d import BRepClass3d_SolidClassifier
+    from OCC.Core.TopAbs import TopAbs_IN, TopAbs_ON
+    from OCC.Core.gp import gp_Pnt
+    from csg.recognise import _point_to_shape_distance
+
+    # Measured against the original's FACES, not against the solid: `BRepExtrema_DistShapeShape`
+    # against a solid reports 0 for any point in its interior, so a disagreement where the
+    # candidate is MISSING material would come back as "0 cm from the boundary" and say nothing.
+    boundary = _faces_of(original)
+    box = _bbox(original)
+    if box is None:
+        return 0, 0, 0.0
+    xmin, ymin, zmin, xmax, ymax, zmax = box
+    pad = 0.05 * max(xmax - xmin, ymax - ymin, zmax - zmin)
+    tol = max(model_tol, 1.0e-9)
+    original_cls = BRepClass3d_SolidClassifier(original)
+    candidate_cls = BRepClass3d_SolidClassifier(cand_shape)
+    rng = random.Random(seed)
+    disagreements = scored = 0
+    worst = 0.0
+    for _ in range(n_points):
+        point = (rng.uniform(xmin - pad, xmax + pad), rng.uniform(ymin - pad, ymax + pad),
+                 rng.uniform(zmin - pad, zmax + pad))
+        gp = gp_Pnt(*point)
+        original_cls.Perform(gp, tol)
+        if original_cls.State() == TopAbs_ON:
+            continue
+        candidate_cls.Perform(gp, tol)
+        if candidate_cls.State() == TopAbs_ON:
+            continue
+        scored += 1
+        if (original_cls.State() == TopAbs_IN) != (candidate_cls.State() == TopAbs_IN):
+            disagreements += 1
+            if disagreements <= _WORST_DISTANCE_SAMPLES:
+                distance = _point_to_shape_distance(point, boundary)
+                if distance == distance and distance != float("inf"):
+                    worst = max(worst, distance)
+    return disagreements, scored, worst
+
+
+# `worst` is a reporting number, so it is measured on the first few disagreements rather than on
+# all of them; a part that disagrees hundreds of times has already declined.
+_WORST_DISTANCE_SAMPLES = 24
+
+
+def _faces_of(shape):
+    """The shape's faces as one compound: its boundary, as something to measure a distance to."""
+    from OCC.Core.BRep import BRep_Builder
+    from OCC.Core.TopAbs import TopAbs_FACE
+    from OCC.Core.TopExp import TopExp_Explorer
+    from OCC.Core.TopoDS import TopoDS_Compound, topods
+    compound = TopoDS_Compound()
+    builder = BRep_Builder()
+    builder.MakeCompound(compound)
+    walk = TopExp_Explorer(shape, TopAbs_FACE)
+    while walk.More():
+        builder.Add(compound, topods.Face(walk.Current()))
+        walk.Next()
+    return compound
+
+
+def _bbox(shape):
+    from OCC.Core.Bnd import Bnd_Box
+    from OCC.Core.BRepBndLib import brepbndlib
+    box = Bnd_Box()
+    brepbndlib.Add(shape, box)
+    box.SetGap(0.0)
+    try:
+        return box.Get()
+    except Exception:                                            # noqa: BLE001
+        return None
+
+
 def _props(shape):
     from OCC.Core.BRepGProp import brepgprop
     from OCC.Core.GProp import GProp_GProps
@@ -214,6 +330,41 @@ def self_test(verbose=True):
     r = symmetric_difference(moved, prim.build_occ(flat), tol)
     check("the same tube without the rotation is rejected", not r["accepted"],
           f"dV={r['symmetricDifference']:.3g}")
+
+    # --- the containment corroboration, checked as an instrument before it is trusted ---
+    #
+    # `contains_disagreements` exists because a symmetric difference of zero is also what an
+    # empty cut looks like, so the first thing to establish is that it can say both words.
+    box = BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 4.0, 3.0, 2.0).Shape()
+    same, scored, worst = contains_disagreements(box, BRepPrimAPI_MakeBox(
+        gp_Pnt(0, 0, 0), 4.0, 3.0, 2.0).Shape(), 1.0e-7)
+    check("the containment corroboration reports no disagreement for an identical pair",
+          same == 0 and scored > 3000, f"{same} of {scored} scored")
+    for grow, want_worst in ((0.02, 0.02), (0.2, 0.2)):
+        bigger = BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 4.0 + grow, 3.0, 2.0).Shape()
+        n_bad, n_scored, far = contains_disagreements(box, bigger, 1.0e-7)
+        check(f"the containment corroboration sees a face displaced by {grow} cm",
+              n_bad > 0 and abs(far - want_worst) <= 0.1 * want_worst,
+              f"{n_bad} of {n_scored} scored, the farthest {far:.4g} cm from the boundary "
+              f"(the slab is {want_worst} cm thick)")
+    # The mirror case, and the reason `_faces_of` exists: when the candidate is SMALLER, the
+    # disagreeing points are INSIDE the original, and a distance measured against the original
+    # solid would report 0 for every one of them.
+    smaller = BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 4.0 - 0.2, 3.0, 2.0).Shape()
+    n_bad, n_scored, far = contains_disagreements(box, smaller, 1.0e-7)
+    check("the containment corroboration measures a MISSING slab at its true size, not at zero",
+          n_bad > 0 and 0.5 * 0.2 <= far <= 1.05 * 0.2,
+          f"{n_bad} of {n_scored} scored, the farthest {far:.4g} cm from the boundary "
+          f"(the missing slab is 0.2 cm thick; measured against the solid instead of its faces "
+          f"this number would be 0)")
+
+    # And the pairing that motivates it: a difference the symmetric difference cannot see must
+    # still be seen here. A box against itself grown by a hundredth of a model tolerance is
+    # below every threshold in this module -- the corroboration must NOT cry wolf on it.
+    hair = BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 4.0 + 1.0e-9, 3.0, 2.0).Shape()
+    n_bad, n_scored, _far = contains_disagreements(box, hair, 1.0e-7)
+    check("the containment corroboration does not cry wolf on a sub-tolerance difference",
+          n_bad == 0, f"{n_bad} of {n_scored} scored")
 
     n_ok = sum(1 for _n, ok, _d in checks if ok)
     if verbose:

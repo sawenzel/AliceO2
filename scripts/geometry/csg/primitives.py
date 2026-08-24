@@ -420,8 +420,53 @@ def candidate(op, leaves, recogniser, notes=None):
     return {"op": op, "leaves": leaves, "recogniser": recogniser, "notes": notes or {}}
 
 
+CELL_OPS = ("primitive", "intersection")
+
+
+def cell(op, leaves):
+    """One cell of a two-level DNF: a bare placed primitive, or an intersection of halfspaces.
+
+    Validated by `candidate` itself, so a cell obeys every rule a one-level description obeys --
+    the first leaf of an intersection cannot be a complement, a primitive takes exactly one leaf
+    -- and then stripped to `{op, leaves}`. It carries no recogniser and no notes of its own:
+    what recognised the part is a property of the part, and putting it on every cell would put
+    the same string in the description N times and in the frozen digests with it.
+    """
+    if op not in CELL_OPS:
+        raise ValueError(f"a cell is {' or '.join(CELL_OPS)}, not {op!r}")
+    described = candidate(op, leaves, "cell")
+    return {"op": described["op"], "leaves": described["leaves"]}
+
+
+def union_of_cells(cells, recogniser, notes=None):
+    """A union of intersection-cells: the flat two-level DNF of `Stream_AA_FlatCSG.md` §5 step 3.
+
+    `{op: "unionOfCells", cells: [...], recogniser, notes}` -- and deliberately **no `leaves`
+    key**, so that nothing which reads a one-level candidate can silently read half of a
+    two-level one and get a wrong solid rather than a `KeyError`.
+
+    **Two levels, and no more.** A cell that is itself a union is refused here rather than left
+    to a builder to flatten: the whole point of a DNF is that its depth is a constant, and the
+    depth is what `build_root` turns into a balanced tree of a known height.
+    """
+    if len(cells) < 2:
+        raise ValueError("op 'unionOfCells' takes at least two cells; one cell is that cell")
+    for i, c in enumerate(cells):
+        if not isinstance(c, dict) or set(c) != {"op", "leaves"}:
+            raise ValueError(f"cell {i} is not a bare {{op, leaves}} description: "
+                             f"{sorted(c) if isinstance(c, dict) else type(c).__name__}")
+        if c["op"] not in CELL_OPS:
+            raise ValueError(f"cell {i} has op {c['op']!r}: a DNF is two levels deep, so a cell "
+                             f"is {' or '.join(CELL_OPS)} and never a union")
+        cell(c["op"], c["leaves"])
+    return {"op": "unionOfCells", "cells": cells, "recogniser": recogniser, "notes": notes or {}}
+
+
 def describe(cand):
     """One line, for reports."""
+    if cand["op"] == "unionOfCells":
+        return " u ".join(f"({describe(c)})" if len(c["leaves"]) > 1 else describe(c)
+                          for c in cand["cells"])
     parts = []
     for lf in cand["leaves"]:
         p = lf["params"]
@@ -482,6 +527,8 @@ def describe(cand):
 def build_occ(cand):
     """Realise the description as a `TopoDS_Shape` in OCCT. Requires pythonOCC."""
     from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Common, BRepAlgoAPI_Cut, BRepAlgoAPI_Fuse
+    if cand["op"] == "unionOfCells":
+        return _occ_balanced_union([build_occ(c) for c in cand["cells"]])
     leaves = cand["leaves"]
     out = _occ_leaf(leaves[0])
     for lf in leaves[1:]:
@@ -498,6 +545,31 @@ def build_occ(cand):
             raise RuntimeError(f"{what} failed while building the candidate")
         out = op.Shape()
     return out
+
+
+def _occ_balanced_union(shapes):
+    """Fuse the cells pairwise, level by level, so the OCCT tree has the ROOT tree's shape.
+
+    The realisation the acceptance test measures should be the realisation that ships, and the
+    ROOT side builds a balanced tree (`Stream_P_RepresentationBench.md` §3 reading 4). Fusing
+    left-deep here instead would still give the same *solid*, but the two builders would no
+    longer be doing the same thing, which is exactly the property that makes the two acceptance
+    tests independent evidence rather than one test run twice.
+    """
+    from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Fuse
+    level = list(shapes)
+    while len(level) > 1:
+        higher = []
+        for i in range(0, len(level) - 1, 2):
+            op = BRepAlgoAPI_Fuse(level[i], level[i + 1])
+            op.Build()
+            if not op.IsDone():
+                raise RuntimeError("BRepAlgoAPI_Fuse failed while building the candidate")
+            higher.append(op.Shape())
+        if len(level) % 2:
+            higher.append(level[-1])
+        level = higher
+    return level[0]
 
 
 def _occ_ax2(frame, along_z=0.0):
@@ -994,6 +1066,8 @@ def build_root(cand, name="shape"):
     """
     import ROOT
     placement = placement_for_candidate(cand)
+    if cand["op"] == "unionOfCells":
+        return _root_balanced_union(name, cand["cells"]), None
     if cand["op"] == "primitive":
         lf = cand["leaves"][0]
         frame = lf["frame"]
@@ -1009,6 +1083,56 @@ def build_root(cand, name="shape"):
               for i, lf in enumerate(cand["leaves"])]
     outside = [bool(lf.get("outside")) for lf in cand["leaves"]]
     return _root_composite(name, shapes, cand["op"], outside), placement
+
+
+def _root_cell(c, name):
+    """`(shape, frame)` for one cell of a DNF.
+
+    An intersection cell comes back as a `TGeoCompositeShape` already expressed in the part
+    frame, so its frame is the identity; a primitive cell comes back as the bare shape in its own
+    canonical frame, and the frame that places it travels beside it into the union node. That is
+    the same split `build_root` makes for a whole part -- a bare primitive plus a transform --
+    only here the transform goes into a `TGeoBoolNode` instead of into `shape_<part>.root`.
+    """
+    if c["op"] == "primitive":
+        lf = c["leaves"][0]
+        return _root_leaf(lf, name), lf["frame"]
+    shapes = [(_root_leaf(lf, f"{name}_l{i}"), lf["frame"]) for i, lf in enumerate(c["leaves"])]
+    outside = [bool(lf.get("outside")) for lf in c["leaves"]]
+    return _root_composite(name, shapes, "intersection", outside), identity_frame()
+
+
+def _root_balanced_union(name, cells):
+    """The cells unioned as a BALANCED binary tree of `TGeoUnion` nodes.
+
+    `Stream_P_RepresentationBench.md` §3 reading 4, measured: tree shape is worth nothing to
+    `Contains` or `DistFromOutside`, which visit every leaf either way, and a great deal to
+    `Safety` and `DistFromInside`, where a left-deep chain is *super*-linear -- 20.8 ns to 3343 ns
+    for sixteen times the leaves, against 1059 ns balanced. Depth ceil(log2 N) instead of N, at no
+    engineering cost, is the one free thing on that page and this is where it is spent.
+    """
+    import ROOT
+    level = [_root_cell(c, f"{name}_c{i}") for i, c in enumerate(cells)]
+    step = 0
+    while len(level) > 1:
+        higher = []
+        for i in range(0, len(level) - 1, 2):
+            (left, left_frame), (right, right_frame) = level[i], level[i + 1]
+            ROOT.SetOwnership(left, False)
+            ROOT.SetOwnership(right, False)
+            node = ROOT.TGeoUnion(left, right, _root_matrix(left_frame, f"{name}_u{step}a"),
+                                  _root_matrix(right_frame, f"{name}_u{step}b"))
+            ROOT.SetOwnership(node, False)
+            comp = ROOT.TGeoCompositeShape(f"{name}_u{step}", node)
+            ROOT.SetOwnership(comp, False)
+            higher.append((comp, identity_frame()))
+            step += 1
+        if len(level) % 2:
+            higher.append(level[-1])
+        level = higher
+    shape = level[0][0]
+    shape.SetName(name)
+    return shape
 
 
 def root_placement_matrix(placement, name="placement"):

@@ -1398,13 +1398,25 @@ def _match_two_cluster_union(records, clusters, caps, wedges, tol):
 # whose box was twice the solid on `oblique_cut_cyl`, and ROOT rejects rays against that box.
 _CELL_MARGIN = 0.25
 
-# A cell wider than this ships as a boolean tree of that many leaves, and `Stream_AA_FlatCSG.md`
-# §3.3 measures a composite's node entry at about 7x a primitive's. The budget is the AND-length
-# of the cell, the same quantity §2 tabulates as `max cell`, and a part over it is declined rather
-# than shipped expensive. Measured on the five detector corpora it refuses two parts, both ITS
-# connector blocks at 10 halfspaces, and admits 17 at 2 or 3; raising it is a decision with
-# evidence behind it either way, which is why the number is here and not inlined.
-_CELL_MAX_LEAVES = 8
+# The budget on what a part may ship as, in boolean leaves -- summed over all its cells, since
+# that is the size of the tree ROOT will walk. It replaces the per-cell budget of 8 that rung 3
+# carried, which was the right bound while a part was one cell and the wrong one the moment a
+# part could be several.
+#
+# 64 is one doubling past `Stream_P_RepresentationBench.md` §3's measured ladder, taken along
+# that ladder's own dead-linear law -- 5.7 ns per leaf on `Contains`, 24-36 ns on
+# `DistFromOutside`, measured constant from K=2 to K=32. Extrapolated once: ~365 ns and ~1.5-2.3
+# us at 64 leaves, against the 0.4-2.1 us and 2.6-10.8 us those parts measure TODAY as exact
+# surface solids (`Stream_AA_FlatCSG.md` §3.3). So the bound is where the composite stops being
+# the cheaper of the two representations, and the extrapolation is labelled as one.
+#
+# It is a dial, and it was measured before it was set: over the five detector corpora, of the 99
+# declining parts whose decomposition passes its own boundary gap, a budget of 8 admits 33, 16
+# admits 44, 32 admits 78, 64 admits 89 and 128 admits 98. The parts above 64 -- `BREF1` at 282
+# leaves, `B077__body` at 122, `VolTOFrail` at 92 -- are precisely the demand `Stream_AA` §5 step
+# 4 says a flat `TGeoBVHCSG` has to be justified on, so declining them here is what leaves that
+# decision measurable instead of pre-empting it.
+_PART_MAX_LEAVES = 64
 
 # At most this many boundary samples per side feed the gap. The samples are strided rather than
 # truncated so a part with many edges is still sampled all over.
@@ -1753,23 +1765,20 @@ def _leaf_bbox_volume(lf):
     return 8.0 * p["rmax"] ** 3
 
 
-def _match_single_cell(solid, records, tol, diag):
-    """One intersection cell of the part's own halfspaces: a `TGeoCompositeShape`."""
-    from csg import census
-    counts = census.edge_census(solid)
-    trusted = (counts["concave"] + counts["mixed"]
-               - counts["concaveNearTangential"] - counts["mixedNearTangential"])
-    if trusted:
-        raise Declined(f"{trusted} trusted concave edge(s) of {counts['edges']}: the part is "
-                       "more than one cell, and decomposition is deliberately not built")
-    if counts["nonManifold"] or counts["error"]:
-        raise Declined(f"{counts['nonManifold']} non-manifold and {counts['error']} undecidable "
-                       "edge(s): the cell test cannot be trusted here")
+def _cell_leaves(solid, tol, diag, whole_part=True):
+    """The ordered halfspace leaves of one cell, or a `Declined` saying why it is not one.
 
+    Shared by the single-cell matcher, where the cell is the whole part, and by the multi-cell
+    one, where it is one terminal piece of the decomposition. `whole_part` carries the two guards
+    that are statements about a *part* and not about a cell: an all-planar body belongs to the
+    prism family's templates, and a body with one carrier is not a composite. Neither is true of
+    a piece -- an L-plate splits into two boxes, and a sphere cut off a body is one carrier and a
+    perfectly good cell.
+    """
     carriers = _halfspace_carriers(solid, tol)
-    if len(carriers) < 2:
+    if whole_part and len(carriers) < 2:
         raise Declined(f"{len(carriers)} distinct carrier(s): not a composite")
-    if all(c["kind"] == "plane" for c in carriers):
+    if whole_part and all(c["kind"] == "plane" for c in carriers):
         # An all-planar body is the prism family's, and rung 2 has real templates for it. Read as
         # halfspaces it would ship as a pile of boolean nodes where a TGeoXtru or a TGeoArb8 says
         # the same solid in one -- so the boundary between the two matchers is drawn here rather
@@ -1786,14 +1795,30 @@ def _match_single_cell(solid, records, tol, diag):
     # Tightest first, so `TGeoIntersection::ComputeBBox`'s running overlap starts small and the
     # emitted composite reports a bounding box of the part's own size.
     inside_leaves.sort(key=_leaf_bbox_volume)
-    leaves = inside_leaves + outside_leaves
+    return inside_leaves + outside_leaves, carriers, outside_leaves
+
+
+def _match_single_cell(solid, records, tol, diag):
+    """One intersection cell of the part's own halfspaces: a `TGeoCompositeShape`."""
+    from csg import census
+    counts = census.edge_census(solid)
+    trusted = (counts["concave"] + counts["mixed"]
+               - counts["concaveNearTangential"] - counts["mixedNearTangential"])
+    if trusted:
+        raise Declined(f"{trusted} trusted concave edge(s) of {counts['edges']}: the part is "
+                       "more than one cell")
+    if counts["nonManifold"] or counts["error"]:
+        raise Declined(f"{counts['nonManifold']} non-manifold and {counts['error']} undecidable "
+                       "edge(s): the cell test cannot be trusted here")
+
+    leaves, carriers, outside_leaves = _cell_leaves(solid, tol, diag)
     # The fold can collapse the whole cell into one native primitive -- six coplanar-face
     # carriers that are a box, one cylinder and its two caps that are a tube. That is not an
     # intersection of anything and is described as the primitive it is; the tag says which of the
     # two happened, because the two answer differently to the query cost this stream exists for.
-    if len(leaves) > _CELL_MAX_LEAVES:
-        raise Declined(f"the cell is {len(leaves)} halfspaces wide, over the budget of "
-                       f"{_CELL_MAX_LEAVES}: it would ship as a boolean tree that deep")
+    if len(leaves) > _PART_MAX_LEAVES:
+        raise Declined(f"the cell is {len(leaves)} halfspaces wide, over the part budget of "
+                       f"{_PART_MAX_LEAVES}: it would ship as a boolean tree that deep")
     op = "primitive" if len(leaves) == 1 else "intersection"
     cand = _candidate(op, leaves,
                           "cell-primitive" if op == "primitive" else "cell-intersection",
@@ -1818,6 +1843,131 @@ def _match_single_cell(solid, records, tol, diag):
     cand["notes"]["cellGapCm"] = gap
     cand["notes"]["cellGapRelative"] = gap / scale
     return cand
+
+
+# ------------------------------------------------------------------------------------------
+# The union of cells: the flat two-level DNF
+# ------------------------------------------------------------------------------------------
+
+def _match_union_of_cells(solid, records, tol, diag, max_cells=None, max_leaves=None):
+    """The part decomposed into cells and emitted as their union.
+
+    `Stream_AA_FlatCSG.md` §5 step 3, and the last rung before a flat solid would be built for
+    speed rather than for coverage. The decomposition is `csg/decompose.py` -- the probe's own
+    measured loop -- and every terminal piece goes through the *existing* single-cell machinery,
+    so a cell here is the same object the single-cell emitter has been shipping since rung 3 and
+    nothing about how a cell is read is new.
+
+    Four things can go wrong and all four decline rather than ship:
+
+      * the decomposition hits a budget, or a piece cannot be cut at its own witness edge;
+      * the split does not conserve volume -- OCCT's splitter is a tolerant boolean core and not
+        an exact arrangement, and `Stream_AA` §3.2 measured two ALICE3 parts drifting above their
+        band. Those are refused here and fall one tier, which is the whole point of measuring it;
+      * a piece is not a cell after all, or the part would ship as a tree wider than the budget;
+      * the realised union classifies a point differently from the part.
+
+    That last one is not redundant with the boundary gap or with the symmetric difference, and
+    rung 4 measured why. Two defects live in this path that neither of those instruments can
+    see: the splitter can hand back a piece that is not a subset of the part, and a cell can
+    claim material its own piece does not while its boundary still hugs the piece's -- and on
+    the part where both happen, `BRepAlgoAPI_Cut` returns zero solids in both directions, so the
+    symmetric difference reports 0.0 against a band of 6.7e-04. `Stream_AA` §3.2's honesty notes
+    say never to assume this residue small; the corroboration is what stops it being assumed at
+    all.
+    """
+    from csg import decompose as decomp
+    scale = max(diag, 1.0)
+    max_cells = decomp.PART_MAX_CELLS if max_cells is None else max_cells
+    max_leaves = _PART_MAX_LEAVES if max_leaves is None else max_leaves
+    report = decomp.split_into_cells(solid, max_cells=max_cells, scale=scale)
+    if report["stop"]:
+        raise Declined(f"the decomposition stopped: {report['stop']} after {report['splits']} "
+                       f"split(s) into {len(report['pieces'])} cell(s)")
+    if report["unresolved"]:
+        raise Declined(f"{len(report['unresolved'])} piece(s) of {len(report['pieces']) + len(report['unresolved'])} "
+                       "could not be cut at their own witness edge, so the decomposition is "
+                       "incomplete")
+    if not report["volumeConserved"]:
+        raise Declined(f"the split moved {report['volumeDrift']:.3g} of the part's volume, over "
+                       f"{decomp.VOLUME_REL_TOL:.0e}: OCCT's splitter did not conserve it and "
+                       "the decomposition is not the part")
+    pieces = report["pieces"]
+    if len(pieces) < 2:
+        raise Declined(f"the decomposition is {len(pieces)} piece(s): not a union of cells")
+
+    cells, total_leaves, n_carriers, n_outside = [], 0, 0, 0
+    for index, piece in enumerate(pieces):
+        piece_diag = decomp.bbox_diagonal(piece)
+        try:
+            leaves, carriers, outside = _cell_leaves(piece, tol, piece_diag, whole_part=False)
+        except Declined as declined:
+            raise Declined(f"cell {index + 1} of {len(pieces)}: {declined}") from None
+        total_leaves += len(leaves)
+        n_carriers += len(carriers)
+        n_outside += len(outside)
+        if total_leaves > max_leaves:
+            raise Declined(f"{len(pieces)} cells of {total_leaves}+ halfspaces in total, over "
+                           f"the part budget of {max_leaves}: it would ship as a boolean tree "
+                           "that wide")
+        cells.append(_cell(len(leaves), leaves, index, len(pieces)))
+
+    cand = _union_of_cells(cells, "cells-union",
+                           notes={"nCells": len(cells),
+                                  "nComponents": report["components"],
+                                  "nSplits": report["splits"],
+                                  "nLeaves": total_leaves,
+                                  "nCarriers": n_carriers,
+                                  "nOutside": n_outside,
+                                  "cellLeaves": [len(c["leaves"]) for c in cells],
+                                  "volumeDriftRelative": report["volumeDrift"],
+                                  "marginDiagonals": _CELL_MARGIN})
+    gap = _measured_gap(solid, cand, diag, "the union of cells")
+
+    # The containment corroboration, and it is not belt-and-braces. Both defects this rung
+    # measured are invisible to a boundary distance AND to the symmetric difference:
+    # `BRepAlgoAPI_Splitter` can hand back a piece that is not a subset of the part (OCCT's
+    # tolerant boolean core, `Stream_AA_FlatCSG.md` §3.2's first honesty note), and a cell can
+    # claim material its own piece does not while its boundary still hugs the piece's. On
+    # ALICE3's `ST0923290_01#b19` both happen, `BRepAlgoAPI_Cut` returns zero solids in both
+    # directions, and `dV_sym` reports 0.0 against a band of 6.7e-04. A classification sees it.
+    disagreements, scored, worst = accept_module().contains_disagreements(
+        solid, prim.build_occ(cand), accept_module().model_tolerance_cm(solid))
+    if disagreements:
+        raise Declined(f"the union of cells disagrees with the part about {disagreements} of "
+                       f"{scored} classified point(s), the farthest {worst:.3g} cm from the "
+                       "part's boundary: the decomposition is not the part, whatever the "
+                       "symmetric difference says")
+    cand["notes"]["cellGapCm"] = gap
+    cand["notes"]["cellGapRelative"] = gap / scale
+    cand["notes"]["containsScored"] = scored
+    return cand
+
+
+def accept_module():
+    """`csg.accept`, imported lazily to keep this module importable without pythonOCC."""
+    from csg import accept
+    return accept
+
+
+def _cell(n_leaves, leaves, index, total):
+    """`primitives.cell`, with an illegal cell turned into a decline naming which cell it was."""
+    try:
+        return prim.cell("primitive" if n_leaves == 1 else "intersection", leaves)
+    except prim.InvalidDescription as illegal:
+        raise Declined(f"cell {index + 1} of {total}: {illegal}") from None
+    except ValueError as illegal:
+        raise Declined(f"cell {index + 1} of {total}: {illegal}") from None
+
+
+def _union_of_cells(cells, recogniser, notes=None):
+    """`primitives.union_of_cells`, with an illegal description turned into a decline."""
+    try:
+        return prim.union_of_cells(cells, recogniser, notes)
+    except prim.InvalidDescription as illegal:
+        raise Declined(str(illegal)) from None
+    except ValueError as illegal:
+        raise Declined(str(illegal)) from None
 
 
 # ------------------------------------------------------------------------------------------
@@ -2087,8 +2237,14 @@ def _cascade(solid, records, tol, diag):
         try:
             return _match_single_cell(solid, records, tol, diag), None
         except Declined as cell_declined:
-            return None, (f"{declined}; as a single cell: {cell_declined} "
-                          f"[{_structure(records, tol)}]")
+            # And the decomposition runs only on what the single cell declines, so it cannot
+            # change a decision any matcher above it ever made. It is the last rung: a part that
+            # reaches it has been refused by every whole-part template and by the one-cell read.
+            try:
+                return _match_union_of_cells(solid, records, tol, diag), None
+            except Declined as union_declined:
+                return None, (f"{declined}; as a single cell: {cell_declined}; as a union of "
+                              f"cells: {union_declined} [{_structure(records, tol)}]")
 
 
 def recognise_single_cell(solid):
@@ -2109,6 +2265,30 @@ def recognise_single_cell(solid):
     tol = REL_TOL * max(diag, 1.0)
     try:
         return _with_tier0_notes(_match_single_cell(solid, records, tol, diag), records), None
+    except Declined as declined:
+        return None, f"{declined} [{_structure(records, tol)}]"
+
+
+def recognise_union_of_cells(solid, max_cells=None, max_leaves=None):
+    """Propose a union of cells for a solid, skipping every matcher above it.
+
+    The counterpart of `recognise_single_cell`: `recognise()` reaches `_match_union_of_cells`
+    only where everything above it *declines*, and a proposal that is instead **rejected by the
+    acceptance test** never gets there. `emit.process_solid` calls this after such a rejection,
+    so a part whose whole-part proposal was a superset of it -- the case the retry chain exists
+    for -- gets the decomposition tried on it too.
+
+    Returns `(candidate|None, reason)`, and never raises on a mere mismatch.
+    """
+    records, reason = _face_records(solid)
+    if records is None:
+        return None, reason
+    diag = _bbox_diagonal(solid)
+    tol = REL_TOL * max(diag, 1.0)
+    try:
+        return _with_tier0_notes(
+            _match_union_of_cells(solid, records, tol, diag, max_cells, max_leaves),
+            records), None
     except Declined as declined:
         return None, f"{declined} [{_structure(records, tol)}]"
 

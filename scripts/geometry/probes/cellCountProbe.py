@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """The cell-count table Tier 3 was gated on: how many flat CSG cells a decomposition needs.
 
+**The loop itself now lives in `csg/decompose.py`**, promoted there by rung 4 so that what the
+converter runs and what this probe measures are the same code. This file keeps the measurement
+columns, the corpus plumbing and the closed-form self-test -- which is now a test of the shipping
+decomposition, not of a copy of it.
+
 `CSG_Pipeline.md` §8 step 7 gates the flat `O2CSGSolid`/`TGeoBVHCSG` decision on "the cell-count
 and success-rate table over the eligible ALICE3 and Bagger solids", and `Stream_A_CSG.md` §3
 tightened the gate to *trusted* concave edges. This probe produces that table by actually running
@@ -44,132 +49,11 @@ from csg.occ_env import ensure_occ  # noqa: E402
 ensure_occ()
 
 from csg import census  # noqa: E402
-from csg.census import (NEAR_TANGENTIAL_SIN, FaceEdgeOrientations,  # noqa: E402
-                        edge_dihedral, _carriers, carrier_clusters, distinct_carriers,
-                        volume_of, solid_faces)
-
-
-def bbox_diag(shape):
-    box = census.bounding_box(shape)
-    if box is None:
-        return 1.0
-    xmin, ymin, zmin, xmax, ymax, zmax = box
-    return math.sqrt((xmax - xmin) ** 2 + (ymax - ymin) ** 2 + (zmax - zmin) ** 2)
-
-from OCC.Core.BRep import BRep_Tool  # noqa: E402
-from OCC.Core.BRepAdaptor import BRepAdaptor_Surface  # noqa: E402
-from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Splitter  # noqa: E402
-from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeFace  # noqa: E402
-from OCC.Core.Geom import (Geom_ConicalSurface, Geom_CylindricalSurface, Geom_Plane,  # noqa: E402
-                           Geom_SphericalSurface, Geom_ToroidalSurface)
-from OCC.Core.GeomAbs import (GeomAbs_Cone, GeomAbs_Cylinder, GeomAbs_Plane,  # noqa: E402
-                              GeomAbs_Sphere, GeomAbs_Torus)
-from OCC.Core.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_SOLID  # noqa: E402
-from OCC.Core.TopExp import TopExp_Explorer, topexp  # noqa: E402
-from OCC.Core.TopTools import (TopTools_IndexedDataMapOfShapeListOfShape,  # noqa: E402
-                               TopTools_ListOfShape)
-from OCC.Core.TopoDS import topods  # noqa: E402
-
-
-# ------------------------------------------------------------------------------------------
-# finding the split witness: the first trusted concave/mixed edge, with its two faces
-# ------------------------------------------------------------------------------------------
-
-def first_trusted_concave_edge(solid):
-    """(edge, face1, face2) of a trusted concave or mixed dihedral, or None.
-
-    "Trusted" is `Stream_A_CSG.md` §1.4's filter: a concave/mixed verdict whose |n1 x n2| stays
-    below NEAR_TANGENTIAL_SIN is a blend seam at the noise floor and no decomposition should
-    split on it. Preference order: the sharpest (largest max-sin) witness, so the split happens
-    where the reflex is best conditioned.
-    """
-    amap = TopTools_IndexedDataMapOfShapeListOfShape()
-    topexp.MapShapesAndAncestors(solid, TopAbs_EDGE, TopAbs_FACE, amap)
-    orients = FaceEdgeOrientations(solid)
-    best = None
-    for i in range(1, amap.Size() + 1):
-        edge = topods.Edge(amap.FindKey(i))
-        if BRep_Tool.Degenerated(edge):
-            continue
-        faces = list(amap.FindFromIndex(i))
-        distinct = []
-        for f in faces:
-            if not any(f.IsSame(g) for g in distinct):
-                distinct.append(f)
-        if len(distinct) != 2:
-            continue
-        f1, f2 = topods.Face(distinct[0]), topods.Face(distinct[1])
-        verdict, max_sin = edge_dihedral(edge, f1, f2, orients)
-        if verdict in ("concave", "mixed") and max_sin >= NEAR_TANGENTIAL_SIN:
-            if best is None or max_sin > best[3]:
-                best = (edge, f1, f2, max_sin)
-    return None if best is None else best[:3]
-
-
-def count_trusted_concave(solid):
-    counts = census.edge_census(solid)
-    return (counts["concave"] + counts["mixed"]
-            - counts["concaveNearTangential"] - counts["mixedNearTangential"])
-
-
-# ------------------------------------------------------------------------------------------
-# extending a face's carrier into a splitting tool
-# ------------------------------------------------------------------------------------------
-
-def carrier_tool_face(face, extent):
-    """A face covering the whole carrier of `face`, big enough to cut anything within `extent`.
-
-    For a plane and the lateral quadrics the parametric window is widened to `extent` (the
-    caller passes a few bounding-box diagonals); a sphere and a torus are already closed.
-    Returns None when the carrier type is not one of the five families.
-    """
-    ad = BRepAdaptor_Surface(face, True)
-    t = ad.GetType()
-    two_pi = 2.0 * math.pi
-    try:
-        if t == GeomAbs_Plane:
-            surf = Geom_Plane(ad.Plane())
-            return BRepBuilderAPI_MakeFace(surf, -extent, extent, -extent, extent,
-                                           1.0e-7).Face()
-        if t == GeomAbs_Cylinder:
-            surf = Geom_CylindricalSurface(ad.Cylinder())
-            return BRepBuilderAPI_MakeFace(surf, 0.0, two_pi, -extent, extent, 1.0e-7).Face()
-        if t == GeomAbs_Cone:
-            surf = Geom_ConicalSurface(ad.Cone())
-            return BRepBuilderAPI_MakeFace(surf, 0.0, two_pi, -extent, extent, 1.0e-7).Face()
-        if t == GeomAbs_Sphere:
-            surf = Geom_SphericalSurface(ad.Sphere())
-            return BRepBuilderAPI_MakeFace(surf, 0.0, two_pi, -0.5 * math.pi, 0.5 * math.pi,
-                                           1.0e-7).Face()
-        if t == GeomAbs_Torus:
-            surf = Geom_ToroidalSurface(ad.Torus())
-            return BRepBuilderAPI_MakeFace(surf, 0.0, two_pi, 0.0, two_pi, 1.0e-7).Face()
-    except Exception:
-        return None
-    return None
-
-
-def split_solid(piece, tool):
-    """Split `piece` by `tool`; returns the list of solids, or None on failure."""
-    splitter = BRepAlgoAPI_Splitter()
-    args = TopTools_ListOfShape()
-    args.Append(piece)
-    tools = TopTools_ListOfShape()
-    tools.Append(tool)
-    splitter.SetArguments(args)
-    splitter.SetTools(tools)
-    try:
-        splitter.Build()
-    except Exception:
-        return None
-    if not splitter.IsDone():
-        return None
-    out = []
-    exp = TopExp_Explorer(splitter.Shape(), TopAbs_SOLID)
-    while exp.More():
-        out.append(topods.Solid(exp.Current()))
-        exp.Next()
-    return out or None
+from csg.census import _carriers, carrier_clusters, distinct_carriers, solid_faces  # noqa: E402
+from csg.decompose import (bbox_diagonal as bbox_diag,  # noqa: E402
+                           carrier_tool_face, count_trusted_concave,
+                           first_trusted_concave_edge, solid_components, split_into_cells,
+                           split_solid)
 
 
 # ------------------------------------------------------------------------------------------
@@ -177,84 +61,45 @@ def split_solid(piece, tool):
 # ------------------------------------------------------------------------------------------
 
 def decompose(solid, max_cells=128, max_splits=256, timeout_s=300.0, verbose=False):
-    """Split at trusted concave edges until every piece is one cell, or the budget runs out."""
-    t0 = time.time()
-    diag = bbox_diag(solid)
-    extent = 4.0 * max(diag, 1.0)
-    vol0 = volume_of(solid)
-    pending = [solid]
-    cells = []
-    unresolved = []          # pieces whose witness could not be split (both tools failed)
-    n_splits = 0
-    n_split_failures = 0
-    budget = None
-    while pending:
-        if len(cells) + len(pending) + len(unresolved) > max_cells:
-            budget = f"cell budget {max_cells} exceeded"
-            break
-        if n_splits >= max_splits:
-            budget = f"split budget {max_splits} exceeded"
-            break
-        if time.time() - t0 > timeout_s:
-            budget = f"timeout {timeout_s:.0f} s exceeded"
-            break
-        piece = pending.pop()
-        witness = first_trusted_concave_edge(piece)
-        if witness is None:
-            cells.append(piece)
-            continue
-        _edge, f1, f2 = witness
-        # Prefer the planar carrier as the knife: OCCT's boolean core is most robust on planes.
-        faces = sorted((f1, f2), key=lambda f: BRepAdaptor_Surface(f, True).GetType()
-                       != GeomAbs_Plane)
-        parts = None
-        for face in faces:
-            tool = carrier_tool_face(face, extent)
-            if tool is None:
-                continue
-            parts = split_solid(piece, tool)
-            if parts is not None and len(parts) > 1:
-                break
-            parts = None
-        if parts is None:
-            n_split_failures += 1
-            unresolved.append(piece)
-            continue
-        n_splits += 1
-        pending.extend(parts)
-        if verbose:
-            print(f"    split {n_splits}: {len(parts)} piece(s), "
-                  f"{len(cells)} cell(s) so far, {len(pending)} pending")
+    """The measurement columns of `csg.decompose.split_into_cells`.
 
+    The loop is the shipping one; what is added here is what the *table* needs and the converter
+    does not -- the per-cell halfspace counts (the AND-lengths of the flat DNF) and the residual
+    untrusted concave edges left inside cells, which is the blend-seam number `Stream_AA` §3.2
+    reports and nothing in the converter reads.
+    """
+    from csg.census import volume_of
+    report = split_into_cells(solid, max_cells=max_cells, max_splits=max_splits,
+                              timeout_s=timeout_s, verbose=verbose)
+    diag = report["diagonal"]
+    cells = report["pieces"]
     per_cell_halfspaces = []
     residual_untrusted = 0
-    for cell in cells:
-        faces = solid_faces(cell)
+    for piece in cells:
+        faces = solid_faces(piece)
         carriers = _carriers(faces)
         n_h = distinct_carriers(carriers, max(diag, 1.0)) if carriers else len(faces)
         per_cell_halfspaces.append(n_h if n_h is not None else len(faces))
-        counts = census.edge_census(cell)
+        counts = census.edge_census(piece)
         residual_untrusted += (counts["concaveNearTangential"] + counts["mixedNearTangential"])
-
-    vol_cells = sum(volume_of(c) for c in cells) + sum(volume_of(u) for u in unresolved)
-    conserved = (abs(vol_cells - vol0) <= 1.0e-6 * max(abs(vol0), 1.0)) if budget is None else None
-    complete = budget is None and not unresolved
+    n_unresolved, n_pending = len(report["unresolved"]), len(report["pending"])
     return {
-        "cells": len(cells) + len(unresolved) + len(pending),
+        "cells": len(cells) + n_unresolved + n_pending,
         "cellsClean": len(cells),
-        "unresolvedPieces": len(unresolved),
-        "pendingAtBudget": len(pending),
-        "splits": n_splits,
-        "splitFailures": n_split_failures,
-        "budgetStop": budget,
-        "complete": complete,
-        "volumeConserved": conserved,
-        "volumeOriginal": vol0,
-        "volumePieces": vol_cells,
+        "unresolvedPieces": n_unresolved,
+        "pendingAtBudget": n_pending,
+        "splits": report["splits"],
+        "splitFailures": report["splitFailures"],
+        "budgetStop": report["stop"],
+        "complete": report["stop"] is None and not report["unresolved"],
+        "volumeConserved": report["volumeConserved"],
+        "volumeOriginal": report["volumeOriginal"],
+        "volumePieces": report["volumePieces"],
+        "components": report["components"],
         "perCellHalfspaces": sorted(per_cell_halfspaces, reverse=True),
         "sumCellHalfspaces": sum(per_cell_halfspaces),
         "residualUntrustedConcave": residual_untrusted,
-        "seconds": round(time.time() - t0, 2),
+        "seconds": report["seconds"],
     }
 
 

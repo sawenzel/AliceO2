@@ -47,33 +47,17 @@ from csg import accept, primitives as prim, recognise  # noqa: E402
 # per-solid pipeline
 # ------------------------------------------------------------------------------------------
 
-def model_tolerance_cm(shape):
-    """The shape's own statement about how well its boundary is defined, in cm.
-
-    Same quantity `O2_CADtoTGeo.shape_model_tolerance()` and `occtOracle.shape_tolerance()`
-    compute, and the same one the gate uses as its band. The shape here is already in cm, so
-    there is no scale factor.
-    """
-    from OCC.Core.BRep import BRep_Tool
-    from OCC.Core.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
-    from OCC.Core.TopExp import TopExp_Explorer
-    from OCC.Core.TopoDS import topods
-    worst = 0.0
-    for kind, getter in ((TopAbs_FACE, lambda s: BRep_Tool.Tolerance(topods.Face(s))),
-                         (TopAbs_EDGE, lambda s: BRep_Tool.Tolerance(topods.Edge(s))),
-                         (TopAbs_VERTEX, lambda s: BRep_Tool.Tolerance(topods.Vertex(s)))):
-        exp = TopExp_Explorer(shape, kind)
-        while exp.More():
-            worst = max(worst, getter(exp.Current()))
-            exp.Next()
-    return worst
+# The shape-tolerance helper lives in `csg/accept.py`, because `csg/recognise.py` needs it too
+# and must not import this module. Re-exported here under its long-standing name.
+model_tolerance_cm = accept.model_tolerance_cm
 
 
 # What `process_solid` tries, in order, when the cascade's own candidate is REJECTED by the
 # acceptance test rather than declined by a matcher. Each entry answers about the whole solid and
 # skips every earlier matcher, so the order here is the order of increasing generality.
 _RETRIES = (("a revolved profile", recognise.recognise_revolved),
-            ("a single cell", recognise.recognise_single_cell))
+            ("a single cell", recognise.recognise_single_cell),
+            ("a union of cells", recognise.recognise_union_of_cells))
 
 
 def _build_and_accept(solid, cand, tol, band_factor):
@@ -434,6 +418,21 @@ _CELL_CANDIDATE_DIGESTS = {
         "21b1e7406b7f17dca37349d160742135c17af3b6865673225fdb07d61459018b",
 }
 
+# Rung 4's own emissions: the two-level DNF. What is frozen is the whole `unionOfCells`
+# description -- the cells, their order, and every leaf in them -- because a decomposition that
+# silently reorders or re-folds its cells tomorrow is exactly the drift a digest exists to catch.
+_UNION_OF_CELLS_CANDIDATE_DIGESTS = {
+    "a cylinder with a hexagonal collar":
+        "056503ec6d01870b075b59bef50c0702e251a543da8869141fbb3c33d40e37f8",
+    "two rods sharing no edge":
+        "450a9f7857fd1114ba1e8115abcd02fec08121ee5c349a6a7f976d201a29c35a",
+    "a torus with a cylinder through it":
+        "ad897f27f24c758cc0f853025fbb339956f7270ff92843bba6172464a5de706e",
+    "three disjoint boxes":
+        "d5db83ca1fd3baf02430ad34d29937a673415ebd7221050710de545fccaafb65",
+}
+
+
 # Rung 3's own emissions: the whole-part fixtures whose every carrier arrives Tier-0 canonicalised
 # from a stored B-spline. What is worth freezing here is not just that they convert but that they
 # convert to the SAME description a natively-analytic twin does -- so these digests are asserted
@@ -568,6 +567,20 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
             detail += f" -- rejected: {record['reason']}"
         check(f"{name} recognised as {want_recogniser} and accepted", ok, detail)
         return record
+
+    def expect_single_cell_declined(name, solid, needle):
+        """The single-cell verdict, asserted at the level the control was written about.
+
+        Rung 4 converts genuinely multi-cell bodies, so several controls that used to end at
+        "not converted as CSG" now end one rung further down. What they were written to protect
+        is the ONE-CELL read's verdict -- that a body with a trusted concave edge is not one
+        cell, and that it says so -- and that is asserted here, unchanged, against the matcher
+        that makes it. What the part then converts to is a separate assertion beside this one.
+        """
+        _cand, why = recognise.recognise_single_cell(solid)
+        ok = _cand is None and needle in (why or "")
+        check(f"{name} is refused by the one-cell read", ok, f"reason: {why}")
+        return why
 
     def expect_declined(name, solid, needle=""):
         record = process_solid(solid, name)
@@ -745,8 +758,15 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
     hybrid = BRepAlgoAPI_Fuse(
         BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, -5), gp_Dir(0, 0, 1)), 3.0, 5.0).Shape(),
         swept_polygon(3.0, 6, 0.0, 5.0)).Shape()
-    expect_declined("cylinder with a coaxial hexagonal section", hybrid,
-                    "neither a cap nor a wedge")
+    # It is not a polycone and not a prism, and the whole-part matchers must say so. Since
+    # rung 4 it *is* converted -- as the two cells it genuinely is, asserted below beside the
+    # rest of the decomposition controls -- so what is checked here is the class it must never
+    # be given, which is what this ladder has always been about.
+    hybrid_single = recognise.recognise_single_cell(hybrid)[1]
+    check("a cylinder with a coaxial hexagonal section is no whole-part primitive",
+          recognise.recognise(hybrid)[0]["recogniser"] == "cells-union"
+          and "neither a cap nor a wedge" in (recognise.recognise_revolved(hybrid)[1] or ""),
+          f"one-cell read: {(hybrid_single or '')[:90]}")
     # 7. the near-miss the acceptance exists for: the recogniser cannot see a bore displaced by
     #    ten model tolerances off the axis and proposes the coaxial polycone anyway; the
     #    symmetric difference refuses it.
@@ -1299,11 +1319,23 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
             return BRepBuilderAPI_Transform(slab, spin, True).Shape()
         return BRepAlgoAPI_Cut(cyl, BRepAlgoAPI_Common(knife(1.0), knife(-1.0)).Shape()).Shape()
 
-    notch_trusted = expect_declined("cylinder with a 2e-03 rad notch (a trusted concave edge)",
-                                    notched_cylinder(2.0e-3), "trusted concave edge")
+    notch_trusted = expect_single_cell_declined(
+        "a cylinder with a 2e-03 rad notch (a trusted concave edge)",
+        notched_cylinder(2.0e-3), "trusted concave edge")
     check("the concave decline names how many edges it counted",
-          "1 trusted concave edge(s) of 9" in (notch_trusted["reason"] or ""),
-          (notch_trusted["reason"] or "")[:120])
+          "1 trusted concave edge(s) of 9" in (notch_trusted or ""),
+          (notch_trusted or "")[:120])
+    # And since rung 4 the notch above the trust filter is not merely refused as one cell, it is
+    # CONVERTED as the two cells it is. That is the ladder's whole point read forwards: the
+    # filter's job was always to say which side of the blind band a reflex is on, and on the
+    # trusted side there is now something to do about it.
+    notch_converted = process_solid(notched_cylinder(2.0e-3), "notched cylinder (trusted)")
+    check("the notch above the trust filter converts as two cells, exactly",
+          notch_converted["accepted"] and notch_converted["recogniser"] == "cells-union"
+          and notch_converted["candidate"]["notes"]["nCells"] == 2
+          and notch_converted["acceptance"]["symmetricDifference"] == 0.0,
+          f"{notch_converted['recogniser']}: {notch_converted['description']}, "
+          f"dV_sym={notch_converted['acceptance']['symmetricDifference'] if notch_converted['accepted'] else 'n/a'}")
     notch_gap = expect_declined("cylinder with a 1e-05 rad notch (below the trust filter)",
                                 notched_cylinder(1.0e-5), "the cell's boundary is")
     check("the gap is what refuses the notch the trust filter let through",
@@ -1449,11 +1481,22 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
         torus_at(2.5, 0.8),
         BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, -2.0), gp_Dir(0, 0, 1)),
                                  2.0, 4.0).Shape()).Shape()
-    torus_cyl_record = expect_declined("torus fused with a coaxial cylinder through it",
-                                       torus_cyl, "trusted concave edge")
+    torus_cyl_why = expect_single_cell_declined("a torus fused with a coaxial cylinder through it",
+                                               torus_cyl, "trusted concave edge")
+    # The torus template's own verdict, asked of the template rather than read out of a decline
+    # chain: since rung 4 the part converts, so there is no chain to read it out of, but what the
+    # control was written to protect -- that the template says what it found instead of being
+    # silently skipped -- is asserted here directly.
+    torus_cyl_records, _why = recognise._face_records(torus_cyl)
+    torus_cyl_diag = recognise._bbox_diagonal(torus_cyl)
+    try:
+        recognise._match_torus(torus_cyl, torus_cyl_records,
+                               recognise.REL_TOL * max(torus_cyl_diag, 1.0), torus_cyl_diag)
+        torus_template_why = "the template accepted it"
+    except recognise.Declined as declined:
+        torus_template_why = str(declined)
     check("the torus template says what it found before the cell test refuses it",
-          "is not a whole torus" in (torus_cyl_record["reason"] or ""),
-          (torus_cyl_record["reason"] or "")[:120])
+          "is not a whole torus" in torus_template_why, torus_template_why[:120])
     # A shell whose bore is displaced off the barrel's axis, as a ladder, because the answer
     # changes with the displacement and only a ladder says where. `tol` here is the recogniser's
     # declared resolution, REL_TOL times the part's 16.2 cm diagonal, i.e. 1.6e-05 cm.
@@ -1832,6 +1875,194 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
         empty_reason = str(declined)
     check("an empty proposal declines as empty, not as an OCCT measurement failure",
           "the proposal is empty" in empty_reason, empty_reason)
+
+    from OCC.Core.BRep import BRep_Builder
+    from OCC.Core.TopoDS import TopoDS_Compound
+
+    # --- Rung 4: the union of cells ---
+    #
+    # `Stream_AA_FlatCSG.md` §5 step 3. Every body here is one whose cell count is known in
+    # closed form, which is what makes "2 cells" or "3 cells" an assertion rather than an
+    # observation; the probe's own self-test asserts the same counts on the same shapes through
+    # the same loop (`probes/cellCountProbe.py --self-test`, 7/7).
+    from csg import decompose as decomp
+
+    def expect_cells(name, solid, want_cells, want_leaves=None, **kwargs):
+        record = process_solid(solid, name, **kwargs)
+        seen_recognisers[name] = record["recogniser"] if record["accepted"] else None
+        if record["accepted"]:
+            seen_digests[name] = hashlib.sha256(
+                json.dumps(record["candidate"], sort_keys=True).encode()).hexdigest()
+        notes = (record["candidate"] or {}).get("notes", {})
+        ok = (record["accepted"] and record["recogniser"] == "cells-union"
+              and notes.get("nCells") == want_cells
+              and (want_leaves is None or notes.get("nLeaves") == want_leaves))
+        detail = (f"{notes.get('nCells')} cell(s) of {notes.get('cellLeaves')} leaves, "
+                  f"{notes.get('nSplits')} split(s), volume drift "
+                  f"{notes.get('volumeDriftRelative', float('nan')):.3g}, gap "
+                  f"{notes.get('cellGapCm', float('nan')):.3g} cm"
+                  if record["accepted"] else f"declined: {record['reason']}")
+        check(f"{name} converts as {want_cells} cells", ok, detail)
+        return record
+
+    l_plate = BRepAlgoAPI_Cut(BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 4.0, 4.0, 1.0).Shape(),
+                              BRepPrimAPI_MakeBox(gp_Pnt(2, 2, -1), 4.0, 4.0, 3.0).Shape()).Shape()
+    grooved = BRepAlgoAPI_Cut(BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 6.0, 4.0, 3.0).Shape(),
+                              BRepPrimAPI_MakeBox(gp_Pnt(2, -1, 1), 2.0, 6.0, 3.0).Shape()).Shape()
+    # An L-plate and a grooved block are the prism family's before they are the decomposition's,
+    # and that ordering is the point: the multi-cell path runs only on what everything above it
+    # declines. They are driven through `recognise_union_of_cells` directly so that the cell
+    # counts are still asserted on the shapes whose counts are known.
+    for label, solid, want in (("an L-plate", l_plate, 2), ("a grooved block", grooved, 3)):
+        cand, why = recognise.recognise_union_of_cells(solid)
+        gap = (None if cand is None else
+               recognise._boundary_gap(prim.build_occ(cand), solid))
+        check(f"{label} decomposes into {want} cells and realises the solid",
+              cand is not None and cand["notes"]["nCells"] == want and gap <= 1.0e-9,
+              (f"{cand['notes']['nCells']} cells of {cand['notes']['cellLeaves']} leaves, "
+               f"{gap:.3g} cm from the part" if cand else f"declined: {why}"))
+
+    # A hexagonal collar on a cylinder: genuinely two cells, and one of them is eight halfspaces
+    # wide, so it exercises a cell that is neither a box nor a tube.
+    hex_collar = BRepAlgoAPI_Fuse(
+        BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, -5), gp_Dir(0, 0, 1)), 3.0, 5.0).Shape(),
+        swept_polygon(3.0, 6, 0.0, 5.0)).Shape()
+    expect_cells("a cylinder with a hexagonal collar", hex_collar, 2, want_leaves=9)
+
+    # Two rods on parallel axes, sharing no edge at all: R3 §6.1's lesson as a control. It has
+    # ZERO trusted concave edges, so nothing but the connectivity split can find its two cells,
+    # and before that split existed the cell emitter read it as an empty intersection.
+    disjoint = TopoDS_Compound()
+    builder = BRep_Builder()
+    builder.MakeCompound(disjoint)
+    builder.Add(disjoint, BRepPrimAPI_MakeCylinder(
+        gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 1.0, 5.0).Shape())
+    builder.Add(disjoint, BRepPrimAPI_MakeCylinder(
+        gp_Ax2(gp_Pnt(6, 0, 0), gp_Dir(0, 0, 1)), 1.0, 5.0).Shape())
+    disjoint_record = expect_cells("two rods sharing no edge", disjoint, 2, want_leaves=2)
+    check("the disjoint pair is found by connectivity and needs no split at all",
+          disjoint_record["accepted"]
+          and disjoint_record["candidate"]["notes"]["nComponents"] == 2
+          and disjoint_record["candidate"]["notes"]["nSplits"] == 0
+          and decomp.count_trusted_concave(disjoint) == 0,
+          f"{decomp.count_trusted_concave(disjoint)} trusted concave edge(s), "
+          f"{(disjoint_record['candidate'] or {}).get('notes', {}).get('nSplits')} split(s)")
+
+    # A torus with a cylinder through it -- the fixture ladder's `torus_union_cyl`, and the one
+    # multi-cell body in the suite whose cells are not all planar.
+    torus_through = BRepAlgoAPI_Fuse(
+        torus_at(2.5, 0.8),
+        BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, -2.0), gp_Dir(0, 0, 1)),
+                                 2.0, 4.0).Shape()).Shape()
+    expect_cells("a torus with a cylinder through it", torus_through, 2, want_leaves=3)
+
+    # (a) THE VOLUME GUARD, against a real corruption rather than a turned knob: a decomposition
+    # that genuinely loses a piece. Three disjoint boxes, with the component walk made to hand
+    # back only two of them -- so the pieces really do sum to less than the part, by the third
+    # box's volume -- must be refused, and the decline must say by how much.
+    three_boxes = TopoDS_Compound()
+    builder = BRep_Builder()
+    builder.MakeCompound(three_boxes)
+    for x in (0.0, 4.0, 8.0):
+        builder.Add(three_boxes, BRepPrimAPI_MakeBox(gp_Pnt(x, 0, 0), 2.0, 2.0, 2.0).Shape())
+    expect_cells("three disjoint boxes", three_boxes, 3, want_leaves=3)
+    intact_components = decomp.solid_components
+    try:
+        decomp.solid_components = lambda shape: intact_components(shape)[:-1]
+        _lost, lost_why = recognise.recognise_union_of_cells(three_boxes)
+    finally:
+        decomp.solid_components = intact_components
+    check("a decomposition that loses a cell is refused by the volume guard",
+          _lost is None and "volume" in (lost_why or ""), lost_why or "ACCEPTED")
+    check("the volume guard reports the drift it measured, at its true size",
+          _lost is None and "0.333" in (lost_why or ""),
+          f"one box of three is 1/3 of the part; the decline says: "
+          f"{(lost_why or '')[:120]}")
+
+    # (b) the budgets, each declining by name. Passed as arguments rather than by reaching into
+    # the module, so the control says what it is testing.
+    _over_cells, cells_why = recognise.recognise_union_of_cells(grooved, max_cells=2)
+    check("a part over the cell budget declines naming the bound",
+          _over_cells is None and "cell budget of 2" in (cells_why or ""), cells_why or "ACCEPTED")
+    _over_leaves, leaves_why = recognise.recognise_union_of_cells(grooved, max_leaves=2)
+    check("a part over the leaf budget declines naming the bound",
+          _over_leaves is None and "part budget of 2" in (leaves_why or ""),
+          leaves_why or "ACCEPTED")
+
+    # (c) the DNF is two levels and the emitter refuses a third.
+    flat_cell = prim.cell("primitive", [prim.leaf("TGeoBBox", {"dx": 1.0, "dy": 1.0, "dz": 1.0},
+                                                 prim.identity_frame())])
+    for label, cells_in in (
+            ("a cell that is itself a union",
+             [flat_cell, {"op": "union", "leaves": [flat_cell["leaves"][0]] * 2}]),
+            ("a cell carrying a recogniser of its own",
+             [flat_cell, {"op": "primitive", "leaves": flat_cell["leaves"],
+                          "recogniser": "nested"}]),
+            ("a single cell called a union", [flat_cell])):
+        try:
+            prim.union_of_cells(cells_in, "self-test")
+            refused = False
+        except (ValueError, prim.InvalidDescription):
+            refused = True
+        check(f"a description with {label} is refused", refused)
+
+    # The balanced tree, asserted as a depth rather than as a hope: N cells must give a
+    # ceil(log2 N) tree, which is the whole of `Stream_P` §3 reading 4's free win.
+    if with_root:
+        import ROOT as _ROOT
+
+        def union_depth(shape):
+            if shape.ClassName() != "TGeoCompositeShape":
+                return 0
+            node = shape.GetBoolNode()
+            return 1 + max(union_depth(node.GetLeftShape()), union_depth(node.GetRightShape()))
+
+        ladder = []
+        for n_cells in (2, 3, 5, 8):
+            comp = TopoDS_Compound()
+            builder = BRep_Builder()
+            builder.MakeCompound(comp)
+            for i in range(n_cells):
+                builder.Add(comp, BRepPrimAPI_MakeBox(gp_Pnt(4.0 * i, 0, 0),
+                                                      2.0, 2.0, 2.0).Shape())
+            cand, why = recognise.recognise_union_of_cells(comp)
+            shape, _placement = prim.build_root(cand, f"balanced{n_cells}") if cand else (None, None)
+            want = math.ceil(math.log2(n_cells))
+            got = union_depth(shape) if shape is not None else -1
+            ladder.append((n_cells, got, want))
+            check(f"{n_cells} cells emit a balanced union tree of depth {want}", got == want,
+                  f"depth {got}" if cand else f"declined: {why}")
+        check("the union tree's depth is logarithmic in the cell count, not linear",
+              all(got == want for _n, got, want in ladder),
+              ", ".join(f"{n}->{got}" for n, got, _w in ladder))
+
+    # The description has to survive the round trip through `csg_<part>.json`, because that is
+    # how a two-level candidate reaches ROOT at all under `runOracleGate.py`: the converter
+    # there has pythonOCC and no PyROOT, writes the JSON, and `--from-json` completes it in a
+    # second interpreter. A `unionOfCells` is the first description with a nested level to make
+    # that trip.
+    if with_root:
+        round_trip = json.loads(json.dumps(disjoint_record["candidate"]))
+        rebuilt, rebuilt_placement = prim.build_root(round_trip, "roundtrip")
+        direct, _direct_placement = prim.build_root(disjoint_record["candidate"], "direct")
+        check("a two-level description survives the JSON round trip byte for byte",
+              json.dumps(round_trip, sort_keys=True)
+              == json.dumps(disjoint_record["candidate"], sort_keys=True)
+              and rebuilt.ClassName() == direct.ClassName() and rebuilt_placement is None,
+              f"{rebuilt.ClassName()}, placement "
+              f"{'present' if rebuilt_placement else 'absent'}")
+        gap = recognise._boundary_gap(prim.build_occ(round_trip),
+                                      prim.build_occ(disjoint_record["candidate"]))
+        check("the round-tripped description realises the same solid", gap <= 1.0e-12,
+              f"{gap:.3g} cm apart")
+
+    check("every union-of-cells candidate is byte-identical to its recorded digest",
+          all(seen_digests.get(name) == digest for name, digest
+              in _UNION_OF_CELLS_CANDIDATE_DIGESTS.items()),
+          "; ".join(f"{name}: {seen_digests.get(name)} != {digest}" for name, digest
+                    in _UNION_OF_CELLS_CANDIDATE_DIGESTS.items()
+                    if seen_digests.get(name) != digest)
+          or f"{len(_UNION_OF_CELLS_CANDIDATE_DIGESTS)} candidates unchanged")
 
     # --- the ROOT half: the emitted TGeoShape must answer like the closed form ---
     if with_root:
