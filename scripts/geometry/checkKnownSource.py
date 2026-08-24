@@ -32,6 +32,16 @@ to 1e-9, and the flag is where that shows up. `--strict` makes flags fatal too.
 Points nearer the boundary than `--skin` are not scored, because neither side claims to decide
 them; the count of skipped points is reported so the number cannot quietly become the whole set.
 
+One thing about the *converter's* bookkeeping it has to respect as well. An XCAF leaf label whose
+shape is a compound of several disjoint solid bodies is split by `O2_CADtoTGeo.py` into one
+logical volume per body (`#b1`, `#b2`, ..., which reach the report as parts named `..._b1`,
+`..._b2`); TRD's eighteen BTOF barrels carry two bodies each. The *source* volume is still the
+whole label, so for such a part only one direction of the containment test is a statement about
+it: every point inside the emitted body must be inside the source, while a point inside the source
+and outside this body belongs to a sibling body. Those parts are therefore scored one-way, their
+capacity is reported as not comparable, and both facts are flagged so the weaker test is never
+mistaken for the full one.
+
 Two things about the writer's own bookkeeping that this has to respect: a geometry may hold
 several distinct volumes under one name (the writer disambiguates them as `name#2`, `name#3`), and
 a volume placed by a reflecting matrix is written as a Z-mirrored prototype named
@@ -51,6 +61,7 @@ import argparse
 import json
 import math
 import random
+import re
 import sys
 from pathlib import Path
 
@@ -161,13 +172,31 @@ def _bbox_of(shape):
     return origin, half
 
 
+_ONE_BODY_OF_MANY = re.compile(r"_b\d+$")
+
+
+def part_is_one_body_of_many(part):
+    """True when the part is one body of a CAD label whose shape carried several.
+
+    `O2_CADtoTGeo.py` gives every solid body of a multi-body XCAF leaf its own logical volume,
+    keyed `#b1`, `#b2`, ...; the source volume is still the whole label. Measured on TRD: each of
+    the eighteen BTOF barrels is two bodies, and `_b2` is exactly half the source's capacity.
+    """
+    return bool(_ONE_BODY_OF_MANY.search(part.get("part") or ""))
+
+
 def contains_crosscheck(source, emitted, placement, n_points, seed, skin, max_report,
-                        mirrored=False):
+                        mirrored=False, one_way=False):
     """Classify a seeded point set against both shapes; every disagreement is reported.
 
     `mirrored` says the emitted shape is the source's Z-mirrored prototype, so the point is
     reflected before it enters the emitted shape's frame -- the same composition `geom.C` performs
     through the reflecting placement.
+
+    `one_way` says the emitted shape is one body of a multi-body source, so only "inside the
+    emitted shape implies inside the source" is a statement about it. The count of points the
+    emitted shape *does* enclose is reported either way, so a one-way comparison cannot pass by
+    enclosing nothing.
     """
     from array import array
     origin, half = _bbox_of(source)
@@ -175,6 +204,7 @@ def contains_crosscheck(source, emitted, placement, n_points, seed, skin, max_re
     scored = 0
     skipped = 0
     n_mismatches = 0
+    n_inside_emitted = 0
     examples = []
     local = array("d", [0.0, 0.0, 0.0])
     probe = array("d", [0.0, 0.0, 0.0])
@@ -193,7 +223,11 @@ def contains_crosscheck(source, emitted, placement, n_points, seed, skin, max_re
             skipped += 1
             continue
         scored += 1
+        if inside_emitted:
+            n_inside_emitted += 1
         if inside_source != inside_emitted:
+            if one_way and inside_source and not inside_emitted:
+                continue                       # a sibling body of the same label carries it
             # Counted in full; only the first `max_report` are kept for printing, so a part with
             # thousands of disagreements does not report five.
             n_mismatches += 1
@@ -202,17 +236,18 @@ def contains_crosscheck(source, emitted, placement, n_points, seed, skin, max_re
                                  "local": [float(c) for c in moved],
                                  "source": inside_source, "emitted": inside_emitted})
     return {"points": scored, "skipped": skipped, "mismatches": n_mismatches,
-            "examples": examples}
+            "insideEmitted": n_inside_emitted, "oneWay": bool(one_way), "examples": examples}
 
 
 def check_part(part, row, source_shape, emitted_shape, placement, n_points, seed, skin,
                capacity_tolerance, profile_tolerance, max_report):
     """Compare one converted part against its source shape. Returns a record."""
     mirrored = bool(row.get("mirrored"))
+    one_body = part_is_one_body_of_many(part)
     source_class = row.get("shapeClass") or source_shape.ClassName()
     scale = max(shape_scale(source_shape), 1.0)
     record = {"part": part.get("part"), "volume": part.get("volume"),
-              "source": row.get("name"), "mirrored": mirrored,
+              "source": row.get("name"), "mirrored": mirrored, "oneBodyOfMany": one_body,
               "sourceClass": source_class, "emittedClass": emitted_shape.ClassName(),
               "placementIsIdentity": placement_is_identity(placement),
               "classComparable": False, "classMatches": None,
@@ -228,16 +263,21 @@ def check_part(part, row, source_shape, emitted_shape, placement, n_points, seed
     # back as a two-section TGeoPcon, which is the same solid stated more generally -- so it is
     # flagged and the metric checks below carry the verdict.
     same_class = source_class == emitted_shape.ClassName()
-    record["classComparable"] = True
-    record["classMatches"] = same_class
-    if not same_class:
+    record["classComparable"] = not one_body
+    record["classMatches"] = None if one_body else same_class
+    if one_body:
+        record["flags"].append(
+            "one body of a multi-body CAD label: the source is the whole label, so the class "
+            "and the capacity are not comparable and containment is scored one-way")
+    elif not same_class:
         record["flags"].append(
             f"class {emitted_shape.ClassName()} is not the source's {source_class}")
 
     # Under a non-identity placement the emitted profile is stated in the shape's own frame and
     # its z array is legitimately a different set of numbers; capacity and containment carry the
     # verdict there, and containment is the sharper of the two anyway.
-    if same_class and source_class == "TGeoPcon" and record["placementIsIdentity"]:
+    if (same_class and not one_body and source_class == "TGeoPcon"
+            and record["placementIsIdentity"]):
         record["phiDeviationDeg"] = _phi_deviation(source_shape, emitted_shape)
         deviation = pcon_profile_deviation(pcon_sections(source_shape, mirrored),
                                            pcon_sections(emitted_shape),
@@ -258,7 +298,7 @@ def check_part(part, row, source_shape, emitted_shape, placement, n_points, seed
         capacity_source = float(source_shape.Capacity())
     record["capacitySource"] = capacity_source
     record["capacityEmitted"] = float(emitted_shape.Capacity())
-    comparable = (capacity_source is not None and capacity_source > 0.0
+    comparable = (capacity_source is not None and capacity_source > 0.0 and not one_body
                   and source_class not in _SAMPLED_CAPACITY_CLASSES
                   and emitted_shape.ClassName() not in _SAMPLED_CAPACITY_CLASSES)
     if comparable:
@@ -271,13 +311,18 @@ def check_part(part, row, source_shape, emitted_shape, placement, n_points, seed
                 f"{capacity_source:.9g} cm^3 by {rel:.3g} relative")
 
     record["contains"] = contains_crosscheck(source_shape, emitted_shape, placement, n_points,
-                                             seed, skin, max_report, mirrored)
+                                             seed, skin, max_report, mirrored, one_body)
     if record["contains"]["mismatches"]:
         record["failures"].append(
             f"{record['contains']['mismatches']} containment disagreement(s) over "
             f"{record['contains']['points']} scored point(s)")
     if record["contains"]["points"] == 0:
         record["failures"].append("no point was scored: the comparison is empty")
+    if one_body and record["contains"]["insideEmitted"] == 0:
+        # Without this a one-way comparison would be passed by a body that encloses nothing.
+        record["failures"].append(
+            f"the emitted body encloses none of the {record['contains']['points']} scored "
+            "point(s): the one-way comparison is empty")
     return record
 
 
@@ -417,6 +462,8 @@ def print_record(record):
     bits = [record["emittedClass"]]
     if record.get("mirrored"):
         bits.append("mirrored prototype")
+    if record.get("oneBodyOfMany"):
+        bits.append("one body of many, scored one-way")
     if record.get("classComparable"):
         bits.append("class matches" if record["classMatches"] else "class differs")
     if record.get("profileDeviationCm") is not None:
@@ -451,7 +498,7 @@ ROOT.gROOT.SetBatch(True)
 
 folder = Path(sys.argv[1])
 sections = [(-5.0, 1.0, 3.0), (0.0, 1.0, 3.0), (0.0, 2.0, 4.0), (5.0, 2.0, 4.0)]
-names = ("GOOD", "PLACED", "MIRRORED", "TWIN", "BAD", "WRONGCLASS")
+names = ("GOOD", "PLACED", "MIRRORED", "TWIN", "BAD", "WRONGCLASS", "TWOBODY")
 
 
 def make_pcon(name, rows, phi1=0.0, dphi=360.0):
@@ -518,6 +565,18 @@ parts.append(write_shape("BAD", make_pcon("bad_sh", wrong)))
 tube = ROOT.TGeoTube("wrongclass_sh", 1.0, 4.0, 5.0)
 ROOT.SetOwnership(tube, False)
 parts.append(write_shape("WRONGCLASS", tube))
+# One body of a CAD label that carried two. The source is the whole label; this part is the upper
+# half of its profile, which is inside the source everywhere and covers only half of it.
+upper = [(0.5, 2.0, 4.0), (5.0, 2.0, 4.0)]
+body = write_shape("TWOBODY_b2", make_pcon("twobody_sh", upper))
+body["volume"] = "TWOBODY"
+parts.append(body)
+# ... and the negative control for the one-way rule: a body that sticks OUT of its own label must
+# still fail, or the rule would pass anything.
+outside = [(0.5, 2.0, 5.0), (5.0, 2.0, 5.0)]
+spill = write_shape("TWOBODYBAD_b2", make_pcon("twobodybad_sh", outside))
+spill["volume"] = "TWOBODY"
+parts.append(spill)
 (folder / "csg_report.json").write_text(json.dumps({"parts": parts}))
 
 # Every file is on disk. Skip the interpreter's teardown: ROOT's global geometry does not survive
@@ -622,8 +681,27 @@ def self_test(verbose=True, workdir=None):
               "is not the source's" in f for f in wrongclass.get("flags", [])),
           f"flags {wrongclass.get('flags')}")
 
-    check("the run reports exactly the two deliberately wrong parts as failures",
-          n_fail == 2, f"{n_fail} failure(s) over {len(records)} part(s)")
+    two_body = next((r for r in records if r["part"] == "TWOBODY_b2"), {})
+    check("one body of a multi-body label passes on the one-way containment test",
+          not two_body.get("failures") and two_body.get("oneBodyOfMany") is True
+          and two_body.get("contains", {}).get("oneWay") is True
+          and two_body.get("contains", {}).get("mismatches") == 0
+          and two_body.get("contains", {}).get("insideEmitted", 0) > 100,
+          f"failures {two_body.get('failures')}, "
+          f"{two_body.get('contains', {}).get('insideEmitted')} point(s) inside the body")
+    check("a multi-body part's class and capacity are reported as not comparable",
+          two_body.get("capacityComparable") is False
+          and two_body.get("classComparable") is False
+          and any("multi-body" in f for f in two_body.get("flags", [])),
+          f"flags {two_body.get('flags')}")
+    spilled = next((r for r in records if r["part"] == "TWOBODYBAD_b2"), {})
+    check("the one-way rule still catches a body that sticks out of its own label",
+          bool(spilled.get("failures"))
+          and spilled.get("contains", {}).get("mismatches", 0) > 0,
+          "; ".join(spilled.get("failures", [])) or "NOT CAUGHT")
+
+    check("the run reports exactly the three deliberately wrong parts as failures",
+          n_fail == 3, f"{n_fail} failure(s) over {len(records)} part(s)")
 
     n_ok = sum(1 for _n, ok, _d in checks if ok)
     if verbose:
