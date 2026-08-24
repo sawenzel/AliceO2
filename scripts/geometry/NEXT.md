@@ -1,183 +1,122 @@
 # NEXT — session-start instruction for the CAD → TGeo work
 
 This file is the current hand-over. Whoever finishes a session should **rewrite it**.
-Last rewritten 2026-08-22, at the end of the return-to-project session (deep review,
-stack re-verification, and the three parallel presentation tracks).
+Last rewritten 2026-08-24, at the end of the recognition-programme session (all three rungs
+landed: revolved profiles, the prism family, the single-cell emitter).
 
 Branch `swenzel/bvhsurfacesolid`. Everything below is committed unless marked otherwise.
 
-## The next major step (decided 2026-08-23, for a FRESH session)
+## The next major step (queued 2026-08-23, for a FRESH session)
 
-In order, each in its own fresh session:
-1. **The recognition programme** (decided 2026-08-23): the prism-family and revolved-profile
-   recognisers, then optionally the single-cell emitter — most CSG decliners are single
-   primitives, not booleans, and the corpora carry known-right answers.
-   → [`Handoff_Recognition.md`](Handoff_Recognition.md)
-2. **The closure test**: real `o2-sim -m PIPE ITS TPC MAG` physics through the round-tripped
-   geometry in three representations, scored against the original C++ TGeo as its own oracle.
-   → [`Handoff_ClosureTest.md`](Handoff_ClosureTest.md)
+**The closure test**: real `o2-sim -m PIPE ITS TPC MAG` physics through the round-tripped
+geometry in three representations, scored against the original C++ TGeo as its own oracle.
+→ [`Handoff_ClosureTest.md`](Handoff_ClosureTest.md)
+
+The recognition programme that was queued before it is **DONE** (2026-08-24):
+→ [`Stream_AJ_Recognition.md`](Stream_AJ_Recognition.md) is the record. Headline: every native
+primitive class the writer emits is recognised at 100 % on PIPE/ITS/TPC/ABSO/TRD; 1655/1655 CSG
+parts agree with their source `TGeoShape` (zero containment disagreements); the fixtures gate now
+**exits 0** with `tube_window`, `cyl_inter_cyl` and `oblique_cut_cyl` shipped as csg — the two
+sliver distout rays are out of every shipped verdict. The closure test's "everything CSG" variant
+is now much closer to its name.
 
 ## Read this first
 
 [`Tutorial.md`](Tutorial.md) is still the map; [`Review_2026-09.md`](Review_2026-09.md) is the
-deep review of the mathematics and algorithms with the verification appendix;
-[`INDEX.md`](INDEX.md) orders every document; [`Plan_Presentation.md`](Plan_Presentation.md) is
-the plan of record for the WG talk (~1.5 weeks out from this rewrite).
+deep review with the verification appendix; [`INDEX.md`](INDEX.md) orders every document;
+[`Plan_Presentation.md`](Plan_Presentation.md) is the plan of record for the WG talk;
+[`Stream_AJ_Recognition.md`](Stream_AJ_Recognition.md) for everything about CSG recognition.
 
-## Where the branch stands (all re-verified 2026-08-22 on the rebuilt stack)
+## Where the branch stands (recognition rows re-verified 2026-08-24; the rest 2026-08-22)
 
 | | |
 | --- | --- |
-| `ctest -R BVHSurfaceSolid` | **113 cases**, green |
-| `O2_CADtoTGeo.py --self-test` | **48 checks** = four suites 18+8+10+12 — never quote the last line alone |
-| `runOracleGate.py --self-test` / `csg/emit.py --self-test` / xray `--self-test` | 17/17 · 33/33 · clean |
-| Bagger gate | **13/13, CSG 7 / surfaces 6 / tessellated 0, exit 0**, all columns clean |
-| fixtures gate | 10/10 scored; **2 `distout` sliver rays**, probed and explained (Review Appendix A) |
-| **Geant integration demo** | **works**: IRIS + Bagger as sensitive external detectors, real hits, geantinos/e/π through both representations, zero stuck tracks / nav errors / aborts (`Stream_Z_IntegrationDemo.md`) |
-| material budget, exact vs tessellated | **0.039 %** aggregate over 512 Fibonacci geantino rays, with both positive controls; the sole 8192-ray divergence is `BucketLink2`, the not-closed mesh |
+| `ctest -R BVHSurfaceSolid` / `BVHAssembly` | **113 + 22 cases**, green |
+| `O2_CADtoTGeo.py --self-test` | **54 checks** = 18+8+10+12+6 — never quote the last line alone |
+| `csg/emit.py --self-test` | **184** (11 acceptance + 173 recognise/emit, incl. three candidate-digest tables) |
+| `checkKnownSource.py --self-test` (new) | **15/15** — the third acceptance test: emitted shape vs the source `TGeoShape` |
+| `runOracleGate.py --self-test` / xray `--self-test` | 17/17 · clean |
+| Bagger gate | **13/13, CSG 7 / surfaces 6 / tessellated 0, exit 0**, bit-identical through all three rungs |
+| fixtures gate | **exit 0, 9/10 csg** (only `torus_union_cyl` declines); the two sliver rays remain only in the side-by-side surface columns, no shipped verdict carries one |
+| detector corpora (regenerated, converted, known-source-checked) | PIPE **128**/25/23 of 176 · ITS **207**/52/0 of 259 · TPC **146**/26/0 of 172 · ABSO **26**/3/0 of 29 · TRD **1148**/22/0 of 1170 — every accepted CSG at dV_sym = 0, known-source 1655/1655 |
+| **Geant integration demo** | works: IRIS + Bagger as sensitive external detectors, real hits, zero stuck tracks / nav errors (`Stream_Z_IntegrationDemo.md`) |
+| material budget, exact vs tessellated | 0.039 % aggregate over 512 Fibonacci geantino rays; sole 8192-ray divergence is `BucketLink2`, the not-closed mesh |
 | costs, exact vs tessellated | 1.94× transport, +42 s one-off build (IRIS CloseShape), +174 MB; exact is *smaller on disk* |
-| the talk visual | exact IRIS hits at exactly r = 5.460 cm; tessellated smeared 5.427–5.460 (330 µm sagitta) |
-| website (`website/`) | mesh viewer, charts, **JS exact raytracer validated bit-true against the kernel** (0 disagreements, max Δt = 0 in float32, 6 parts × 141k rays), event-display player, self-check 30/30 |
+| website (`website/`) | mesh viewer, charts, JS exact raytracer bit-true vs the kernel, event-display player, self-check 30/30; `website_data/decline_reasons.json` regenerated 2026-08-24 (Bagger + ALICE3 + fixtures) |
 | ray bridge (`tgeoRayService.py`) | the real kernel serving pixels: 10k rays in 4 ms |
-| **oTOF converts** (fixed 2026-08-22, `Stream_AC_OTOFTraversal.md`) | 20 prototypes / **62 628 placements**, 20/20 exact surfaces, **19/20 CSG `TGeoBBox` at dV_sym = 0**, 44 s / 753 MB, 3 964 `AddNode`; converter self-test now 48+6 |
-| **TGeo → STEP round trip closes** (`Stream_AD_TGeoToStep.md`, 2026-08-23) | `O2_TGeoToCAD.py`: 16/17 Run 3 shape classes, self-test 71/71; PIPE: 1.69M Contains samples, **168/169 parts zero disagreements** (1 point open), CSG-vs-source 620k/0, capacity median 1.5e-13; full geometry 21 150 solids (99.7 %) in 3 min — the STEP *writer* segfaults on the full model |
-| benchmark JSON (`website_data/`) | five hero parts complete; ram shape 141× surface on `Contains`; ALICE3 part mesh 12–62× faster than surface; timing under load flagged `timingPreliminary` |
+| oTOF converts | 20 prototypes / 62 628 placements, 20/20 exact surfaces, 19/20 CSG `TGeoBBox` at dV_sym = 0 (`Stream_AC_OTOFTraversal.md`) |
+| TGeo → STEP round trip | `O2_TGeoToCAD.py` self-test **105** (frozen through the recognition work); six-module study: ~7.4 M Contains samples, ONE disagreement (`Stream_AD/AF/AG/AH/AI`) |
+| benchmark JSON (`website_data/`) | five hero parts complete; timing under load flagged `timingPreliminary` |
 
-**Sharpened during Track 3, quote it correctly:** `cyl_inter_cyl`'s mesh is *closed as a
-triangle set* (0 odd-parity rays over 60k). The X-ray's 6 lost rays are a **navigation** loss in
-`O2Tessellated`'s stepping. "The mesh leaks" means navigation, not holes — which is the stronger
-statement for the talk.
+**Quote it correctly (unchanged):** `cyl_inter_cyl`'s mesh is closed as a triangle set; the
+X-ray's lost rays are a **navigation** loss in `O2Tessellated`'s stepping, not holes.
 
 ## Open, in the order I would take them
 
-1. **Converter: the JIT namespace bug.** `geom.C` emits `LoadSurfaceSolid` as a namespace-scoped
-   forward declaration; the JIT wrapper makes it resolve wrongly, the macro fails to compile, and
-   **the simulation continues silently without the module**. Workaround committed
-   (`integration_demo/patch_exact_macro.py`); fix the converter's macro emission and make a
-   failed module load loud.
-2. **Converter: `--csg auto` without ROOT yields CSG 0 loudly-but-recoverably; parallel runs
-   race.** The per-part WARN exists now; still open: serialize/lock the deferred emit (two
-   parallel conversions lost shapes), and score **oTOF through the oracle gate** (converts,
-   never scored).
-3. **The CSG path forward is measured** (`Stream_AA_FlatCSG.md`): Tier-0 canonicalisation → the
-   single-cell emitter (ships `tube_window`/`cyl_inter_cyl` as CSG, retires the two sliver rays)
-   → composite trees for the 16 ALICE3 solids; `TGeoBVHCSG` deferred behind §5's falsifiable
-   criteria. Decline reasons ship in the reports and `website_data/decline_reasons.json`.
-4. **Kernel-confirmed: `ST1829909_01` leaks parity through real inter-face slits** (8/15 299
-   rays, BVH ≡ Loop, no trim flags; `maxSharedEdgeDeviation` 4.70e-4 cm ≈ the declared model
-   tolerance — identity closure is gap-blind by design). Needs the per-face localiser, then
-   widened crossing acceptance near identified shared edges or trim-snapping to canonical
-   curves. Probes in scratch: `probe_parity.cxx` / `probe_dev.cxx`.
-5. **Kernel: loose bounding boxes.** `Stick` claims 40.1 cm in z around an 11.0 cm solid (3.6×,
-   verified vs OCCT). Use the cover-box union in `ComputeBBox`.
-6. **TGeo→STEP: the six-module round-trip study is in** (`Stream_AD` PIPE, `Stream_AF` ITS,
-   `Stream_AG` TPC, `Stream_AH` TRD/MAG/ABSO). Headline: **wherever the geometry reaches the
-   STEP, the round trip is exact — ~6.2 M Contains samples over six modules, ONE disagreement
-   total** (PIPE's single point), every accepted CSG at symmetric difference exactly 0, nothing
-   tessellated except one TPC part. Coincidence walks: PIPE 81 (real, checker-blind), ITS/TPC/
-   TRD/MAG/ABSO 0 — the beam pipe is so far unique. The decline histograms **converge on two
-   missing recognisers**: the sloped-prism family (`Trd1`/`Trap`/`Xtru`/`Arb8`/`Pgon`: ITS 47,
-   TRD 149, MAG 14, TPC 27) and the `TGeoPcon` revolved profile (PIPE 46, ITS 18, TPC 13,
-   ABSO 16) — building those two converts essentially every decline; `IBCYSSCone` requires the
-   revolved detector to accept mixed cone/cylinder laterals; `TGeoHalfSpace` costs exactly 5
-   composites in the whole Run 3 geometry.
-
-   **Writer defects (i)-(iii) are FIXED** (`Stream_AI_WriterFixes.md`, self-test 71 → **101**):
-   (i) the definition cache keys on volume identity/value — TRD's 277 018 wrong-solid placements
-   → 0 at `sharedDefinitionMaxRelDev` 2.7e-16, and the 24 half-plie collisions turn out to have
-   been REAL MATERIAL the name-keyed dedup was silently dropping from the STEP (PIPE now emits
-   1 166); (ii) mirrors bake through `gp_Trsf` — `TPC_CDCE` 8.9e-03 → 6.1e-15, every mirrored
-   face analytic again, with a dimensionless 1e-6 orthogonality band that snaps by polar
-   decomposition and records each snap; (iii) reflected subtrees emit as shared mirrored
-   prototypes — placement fidelity PIPE 1 166/1 166, TPC 36 583/37 315, TRD 636 566/636 567 with
-   ZERO spurious placements, TRD's STEP 140 → 33 MB, all manufactured coincidences gone. The
-   world-frame Contains instrument's `TPC_WSEG` finding is RESOLVED (2026-08-23,
-   `c3a79be619`): the TGeo shape is **legal** — the defect was ours, a zero-area face built
-   from three collinear points at the Pgon's z-step, which invalidated the shell and garbled
-   OCCT's classifier (64 % on the operand while its volume integrated exactly). Fixed by a
-   Newell-area guard in `_quad_face`; hole and composite now valid at 0/20 000 mismatches;
-   self-test 101 → **105**. Nothing to fix upstream for WSEG. **Re-run confirmed**
-   (`8014a988a0`): the 29 world-frame disagreements are 0 over 1.2 M points, volume unchanged to
-   the digit, and TPC's tier table becomes CSG 82 / surface 90 / **tessellated 0** — nothing in
-   TPC ships as mesh any more; exact-surface extraction 172/172.
-
-   **Still open on the writer**: degenerate prism sections (old iv), the bare depth-32 chain
-   constant (old v), the STEP writer segfault bracket (38 676 fine / 74 601 crash), `TGeoPara`,
-   `TGeoHalfSpace` (732 TPC placements), instruments B/C + ITS/MAG re-runs post-fix, and the
-   loud-refusal path for genuine scales (only the self-test exercises it).
-
-   **Hand-written-geometry findings on the record — refined 2026-08-23 during the fixes**: the
-   beam pipe's "81 self-coincident plies" decomposed into **57 real duplicates** (a copy-paste
-   block in the RB26/3 section never renamed from s2, filling `voRB26s2Bellow` twice — FIXED,
-   branch `fix-pipe-coincident-bellows-plies` on the sawenzel fork, cherry-picked here as
-   `4fe6b285e0`) plus **24 false positives of any name-keyed walk** (four distinct half-plie
-   `TGeoVolume`s share two names — abutting complementary halves, real material; the name
-   collision itself is a small defect, breaking `GetVolume()` lookup). The same copy-paste hides
-   the larger finding: **`RB26s3Bellow` has ZERO daughters — the RB26/3 compensator bellow
-   contains no plies, missing steel** (`voRB26s3Wiggle` built and never placed). Restoring it
-   CHANGES the material budget → its own future fix, Sandro's call. The TPC copy-paste typo at
-   `Detectors/TPC/simulation/src/Detector.cxx:1388-1389` — two prepreg strips at z = −177.925,
-   none at +177.925 — FIXED, branch `fix-tpc-prepreg-position` on the sawenzel fork, cherry-picked
-   here as `3755c83277`; verified 4/2 → 3/3 world positions. Upstream PRs: not yet opened, per
-   instruction. The ROOT `TGeoShapeAssembly` defects will be reported later or fixed ourselves.
-7. **Track 3b, the real data:** the MCStepLogger→`events.json` exporter (schema in
-   `website/README.md`; tree layout in `integration_demo/data/README`), then the website's event
+1. **The closure test** (`Handoff_ClosureTest.md`) — the queued next step, fresh session.
+2. **Converter: the JIT namespace bug.** `geom.C` emits `LoadSurfaceSolid` as a namespace-scoped
+   forward declaration; the JIT wrapper makes it resolve wrongly and **the simulation continues
+   silently without the module**. Workaround committed (`integration_demo/patch_exact_macro.py`);
+   fix the converter's macro emission and make a failed module load loud.
+3. **Converter: parallel `--csg auto` runs race** (two parallel conversions lost shapes):
+   serialize/lock the deferred emit. And score **oTOF through the oracle gate** (converts, never
+   scored).
+4. **Recognition follow-ups** (all recorded in `Stream_AJ_Recognition.md` §7): `TGeoEltu`
+   (PIPE's 22-part elliptical population — needs the face reader to learn the elliptic
+   carrier); run + score the **MAG corpus** (demand 14 prisms, never converted); the cell leaf
+   budget (8) vs ITS's two 10-halfspace connector blocks; Xtru parameter comparison in
+   `checkKnownSource.py`; a face-count cap before the cell matcher's boolean build if a corpus
+   ever makes its ~12 min/1170 parts painful.
+5. **Kernel-confirmed: `ST1829909_01` leaks parity through real inter-face slits** (8/15 299
+   rays; `maxSharedEdgeDeviation` ≈ the declared model tolerance). Needs the per-face localiser,
+   then widened crossing acceptance near identified shared edges or trim-snapping.
+6. **Kernel: loose bounding boxes.** `Stick` claims 40.1 cm in z around an 11.0 cm solid (3.6×).
+   Use the cover-box union in `ComputeBBox`.
+7. **Writer (still frozen, now with a measured customer):** degenerate prism sections block the
+   last TRD demand case (`B045cut`, a `TGeoTrd1` with `dx1 = 0` — declined as "[2, 4] distinct
+   vertices"); plus the standing items: bare depth-32 chain constant, STEP-writer segfault
+   bracket (38 676 fine / 74 601 crash), `TGeoPara`, `TGeoHalfSpace` (732 TPC placements),
+   instruments B/C + ITS/MAG re-runs post-fix, loud-refusal path for genuine scales.
+8. **Hand-written-geometry findings on the record** (unchanged, Sandro's call on upstreaming):
+   PIPE bellows duplicates FIXED on fork branch (`4fe6b285e0` here); **`RB26s3Bellow` has ZERO
+   daughters — missing steel**, restoring it changes the material budget; TPC prepreg z-typo
+   FIXED (`3755c83277` here); ROOT `TGeoShapeAssembly` defects (see item 11).
+9. **Track 3b, the real data:** MCStepLogger→`events.json` exporter, then the website's event
    tab replays the real IRIS/Bagger transports.
-8. **Materials matching:** 26/55 IRIS volumes matched, 29 on vacuum `Default`, ten of the 26 by
-   accidental string prefix. Anchored part-number matching.
-9. **Gate: credit the sliver** — relabel a distout mismatch whose candidate crossing is
-   `onTrimBoundary`-flagged within the trim band (Review Appendix A).
-10. **The face-normal gate column** (fourth hand-over in a row) and **the `auto`-mode
-    unreliable-shipping policy** (~20 lines) — both pre-corpus items.
-11. **The talk (Track 4):** assemble from Review + Stream_Z + the website; re-run the
-    `timingPreliminary` numbers on a quiet box; build the single-file website bundle for
-    publishing (the Artifact CSP allows nothing external; the bridge stays local-only).
-12. **`O2BVHAssembly` landed** (`Stream_AE_BVHAssembly.md`): derives from `TGeoShapeAssembly`,
-    BVH over daughter AABBs, `MakeBVHAssembly(vol)` after `CloseGeometry()`. Flat oTOF
-    (62 628 daughters): Contains 4.3×, Safety(out) 28.7×, transport 6.5×; **honest limit**: at
-    ≤68 daughters ROOT's voxel finder wins, and `FindNode` is untouched because
-    `TGeoNavigator::SearchNode` reads the voxel finder directly (§8 offers three hook options —
-    the pluggable daughter-search interface is also the Embree seam; Sandro to pick).
-    ctest: 113 + 22 new, green. **Two ROOT defects found by measurement, upstream-report
-    decision is Sandro's:** (i) `TGeoShapeAssembly::DistFromOutside` returns `Big()` for points
-    outside the bbox of a *voxelized* assembly — an assignment where a subtraction belongs;
-    minimal repro in scratch (3 boxes correct, 10 boxes → `Big()`), 300/300 rays lost at shape
-    level on oTOF (navigator-level impact unmeasured — measure before claiming transport loss);
-    (ii) `TGeoShapeAssembly::Safety` can exceed the true minimum over its daughters (69/2000
-    grid points) because it prunes on the Euclidean box gap while `TGeoBBox::Safety` returns the
-    axis maximum — a too-LARGE safety is the walk-through-walls failure mode. Not done: Geant4
-    transport test, thread-safety measurement.
-13. **Standing, unchanged:** free-form surfaces; the models-are-not-legal overlap finding and the
-    broken `CheckOverlaps` on our shape; `Curve2D::closestPoint` as the kernel hot spot; mesh
-    healing.
+10. **Materials matching:** 26/55 IRIS volumes matched, ten by accidental prefix. Anchored
+    part-number matching.
+11. **`O2BVHAssembly` landed** (`Stream_AE_BVHAssembly.md`): flat oTOF Contains 4.3×,
+    Safety(out) 28.7×, transport 6.5×; honest limit at ≤68 daughters; `FindNode` untouched
+    (§8's three hook options — Sandro to pick). Two measured ROOT defects
+    (`TGeoShapeAssembly::DistFromOutside` Big() outside the bbox of a voxelized assembly;
+    `Safety` exceeding the true minimum) — upstream-report decision is Sandro's.
+12. **The talk (Track 4):** assemble from Review + Stream_Z + Stream_AJ + the website; re-run
+    `timingPreliminary` numbers on a quiet box; single-file website bundle.
+13. **The face-normal gate column** and **the `auto`-mode unreliable-shipping policy** — both
+    pre-corpus items, now five hand-overs old.
+14. **Standing, unchanged:** free-form surfaces; models-are-not-legal overlaps and the broken
+    `CheckOverlaps` on our shape; `Curve2D::closestPoint` as the kernel hot spot; mesh healing;
+    composite trees (Tier 3 proper) remain deliberately not built.
 
-## Traps in the environment (changed ones first)
+## Traps in the environment (all still current)
 
-- **The stack was rebuilt 2026-08-22 and the names changed**: env is
-  `O2/latest-swenzel-bvhsurfacesolid-o2`, build dir
-  `B=$HOME/alisw/sw/BUILD/O2-latest-swenzel-bvhsurfacesolid/O2`.
-- **pythonOCC needs `--no-system SWIG`** when rebuilding: system SWIG 4.2.0 fails the required
-  4.2.1…4.4.1 range and the recipe's system check does not catch it.
+- Env `O2/latest-swenzel-bvhsurfacesolid-o2`, build dir
+  `B=$HOME/alisw/sw/BUILD/O2-latest-swenzel-bvhsurfacesolid/O2` (stack of 2026-08-22).
+- **pythonOCC needs `--no-system SWIG`** when rebuilding (system 4.2.0 fails the required range).
 - **Keep the converter env and the sim env separate.** The pythonOCC `PYTHONPATH` prepends make
-  `o2-sim` segfault at startup. And the converter needs O2/ROOT *in addition* for CSG emission
-  (item 2 above): the gate composes both; a bare OCC shell silently loses CSG.
-- **External-detector hits live in `o2sim.root`** (`IRISHit`, `BAGRHit` branches), not in
-  per-detector `o2sim_Hits*.root` files, under `o2-sim-serial`.
-- **Testing a rebuilt detector library needs `export O2_ROOT=$B/stage`.** Detector libs are
-  dlopened by ABSOLUTE path from `O2_ROOT`, which alienv points at the installed O2 — a rebuilt
-  stage lib is silently ignored however `LD_LIBRARY_PATH` is ordered (cost two no-op test runs
-  before being caught by `LD_DEBUG=libs`). Use `o2-sim-serial` from `$B/stage/bin`; the parallel
-  `o2-sim` driver additionally spawns worker binaries resolved from the installed PATH.
-- **Reconfiguring CMake on this branch needs Clang on the prefix path**:
-  `export CMAKE_PREFIX_PATH=$HOME/alisw/sw/ubuntu2404_aarch64/Clang/v20.1.7-local1:$CMAKE_PREFIX_PATH`
-  (alienv omits it; Gandiva's config then corrupts `CMAKE_MODULE_PATH` for every later
-  `find_package`). New `.C` macros under scripts/ must be listed in
-  `O2RootMacroExclusionList.cmake` or configure aborts.
+  `o2-sim` segfault at startup; the converter needs O2/ROOT *in addition* to OCC — a bare OCC
+  shell silently loses CSG (the deferred-emit WARN now says so per part).
+- External-detector hits live in `o2sim.root` (`IRISHit`, `BAGRHit`) under `o2-sim-serial`.
+- Testing a rebuilt detector library needs `export O2_ROOT=$B/stage`; use `o2-sim-serial` from
+  `$B/stage/bin`.
+- Reconfiguring CMake needs Clang on the prefix path
+  (`export CMAKE_PREFIX_PATH=$HOME/alisw/sw/ubuntu2404_aarch64/Clang/v20.1.7-local1:$CMAKE_PREFIX_PATH`);
+  new `.C` macros under scripts/ must be listed in `O2RootMacroExclusionList.cmake`.
 - `rm` is blocked by a repo hook (`.claude/hooks/deny-deletions.py`); move files aside instead.
 - Everything else in the 2026-08-09 list still applies: eval+command in one shell; stage lib
   first; prepend-never-replace; one ninja at a time; detach long runs to unique `--out` paths;
-  never write into `STEP_examples/`; convert ALICE3 without `--mesh` (or `--include-name` one
-  part); `manifest.json` stores absolute paths.
+  never write into `STEP_examples/` or `ALICE_3_example/`; convert ALICE3 without `--mesh`;
+  `manifest.json` stores absolute paths; run `--csg auto` conversions strictly serially.
 
 ## Commands
 
@@ -186,12 +125,24 @@ export ALIBUILD_WORK_DIR=$HOME/alisw/sw
 B=$HOME/alisw/sw/BUILD/O2-latest-swenzel-bvhsurfacesolid/O2
 cd $B && eval "$($HOME/alisw/alibuild/alienv printenv O2/latest-swenzel-bvhsurfacesolid-o2,ninja/latest,CMake/latest)"
 export LD_LIBRARY_PATH=$B/stage/lib:$B/stage/lib64:$LD_LIBRARY_PATH
-ctest -R BVHSurfaceSolid
+ctest -R 'BVHSurfaceSolid|BVHAssembly'
 
 cd $HOME/alisw/O2
 O2_BUILD_DIR=$B python3 scripts/geometry/runOracleGate.py --workdir /tmp/gate --fixtures
 O2_BUILD_DIR=$B python3 scripts/geometry/runOracleGate.py --workdir /tmp/gate2 \
     --model scripts/geometry/STEP_examples/Bagger.step
+
+# converter env additions (on top of the O2 env above):
+SW=$HOME/alisw/sw/ubuntu2404_aarch64
+export LD_LIBRARY_PATH=$SW/OCCT/latest/lib:$SW/Python/latest/lib:$LD_LIBRARY_PATH
+export PYTHONPATH=$SW/pythonOCC/latest/lib/python3.10/site-packages:$SW/Python-modules/latest/lib/python3.10/site-packages:$PYTHONPATH
+python3 scripts/geometry/csg/emit.py --self-test
+# detector corpus with ground truth (sim env first, then converter env; strictly serial):
+#   $B/stage/bin/o2-sim-serial -n 0 -g boxgen -m <MOD>   (with export O2_ROOT=$B/stage)
+#   python3 scripts/geometry/O2_TGeoToCAD.py o2sim_geometry.root <MOD>.step --report <MOD>_writer_report.json
+#   python3 scripts/geometry/O2_CADtoTGeo.py <MOD>.step -o geom.C --exact-surfaces auto --csg auto
+#   python3 scripts/geometry/checkKnownSource.py --original o2sim_geometry.root \
+#       --writer-report <MOD>_writer_report.json --converted .
 
 # the website (serve locally, then open the printed URL)
 cd scripts/geometry/website && ./fetch_testdata.sh <gate-workdir> && python3 -m http.server 8231
