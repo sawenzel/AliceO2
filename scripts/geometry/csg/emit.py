@@ -1471,6 +1471,46 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
                   refused is not None and "concentric" in refused,
                   refused or "IT PROPOSED ONE")
 
+    # --- the fillet blend that used to kill the conversion ---
+    # ALICE3 carries fillet blends whose torus has a minor radius LARGER than its major one --
+    # a self-intersecting torus, which `TGeoTorus` cannot state and the validator rightly
+    # refuses. `_cell_leaf` called `prim.leaf` without catching that, so the refusal escaped
+    # `recognise()` (which catches only `Declined`) and killed the whole ALICE3 conversion on
+    # the first blend it met. The numbers below are the ones from that crash.
+    blend_lobe = BRepAlgoAPI_Common(
+        torus_at(0.0428825434729, 0.1),
+        BRepPrimAPI_MakeBox(gp_Pnt(0.06, -1.0, -1.0), 2.0, 2.0, 2.0).Shape()).Shape()
+    blend_record = expect_declined("a lobe of a self-intersecting fillet torus", blend_lobe,
+                                   "self-intersecting torus")
+    check("the fillet blend reaches the cell path and declines there, naming the blend",
+          "as a single cell: TGeoTorus: rmax" in (blend_record["reason"] or "")
+          and "fillet blend" in (blend_record["reason"] or ""),
+          (blend_record["reason"] or "")[:150])
+    # ... and the refusal it declines on is a real one: the description layer does refuse those
+    # numbers, so the control is not passing because nothing was checked.
+    try:
+        prim.leaf("TGeoTorus", {"r": 0.0428825434729, "rmin": 0.0, "rmax": 0.1,
+                                "phi1": 0.0, "dphi": 360.0}, prim.identity_frame())
+        refused_kind = None
+    except prim.InvalidDescription:
+        refused_kind = "InvalidDescription"
+    except ValueError:
+        refused_kind = "ValueError"
+    check("the description layer refuses those numbers as an illegal solid",
+          refused_kind == "InvalidDescription", f"raised {refused_kind}")
+    # The altitude matters: an illegal SOLID declines, a bug in the matcher still raises. Without
+    # this half the wrapper could swallow a missing parameter and nobody would know.
+    for label, kind, params in (("a missing parameter", "TGeoTorus", {"r": 1.0}),
+                                ("an unknown leaf type", "TGeoNotAShape", {})):
+        try:
+            recognise._leaf(kind, params, prim.identity_frame())
+            outcome = "returned a leaf"
+        except recognise.Declined:
+            outcome = "declined"
+        except ValueError:
+            outcome = "raised"
+        check(f"{label} still raises rather than declining", outcome == "raised", outcome)
+
     # --- flat-CSG R2: the elliptic cylinder ---
     def elliptic_cylinder(a, b, dz, ref=None):
         axis = gp_Ax2(gp_Pnt(0, 0, -dz), gp_Dir(0, 0, 1),

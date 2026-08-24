@@ -55,6 +55,33 @@ class Declined(Exception):
     """Raised internally with the reason; recognise() turns it into a report entry."""
 
 
+def _leaf(kind, params, frame, outside=False):
+    """`primitives.leaf`, with an illegal *solid* turned into a decline.
+
+    Every proposal in this module goes through here. A description the validators refuse is a
+    statement about the part, not a bug in the matcher: ALICE3's fillet blends carry tori whose
+    minor radius exceeds their major one, which is a self-intersecting torus and is not a
+    `TGeoTorus` at all. Before this wrapper existed that `ValueError` escaped `recognise()` --
+    which catches only `Declined` -- and killed the whole conversion on the first blend it met.
+
+    A missing parameter or an unknown leaf type is a bug *here*, stays a plain `ValueError`, and
+    is deliberately left to escape: wrapping at this altitude keeps a bad proposal quiet and a
+    bad matcher loud.
+    """
+    try:
+        return prim.leaf(kind, params, frame, outside)
+    except prim.InvalidDescription as illegal:
+        raise Declined(str(illegal)) from None
+
+
+def _candidate(op, leaves, recogniser, notes=None):
+    """`primitives.candidate`, with an illegal description turned into a decline."""
+    try:
+        return prim.candidate(op, leaves, recogniser, notes)
+    except prim.InvalidDescription as illegal:
+        raise Declined(str(illegal)) from None
+
+
 # ------------------------------------------------------------------------------------------
 # face analysis
 # ------------------------------------------------------------------------------------------
@@ -329,7 +356,7 @@ def _match_box(records, tol):
     for k, axis in enumerate((x, y, z)):
         origin = _add(origin, _scale(axis, axes[k][1]))
     frame = {"origin": [float(c) for c in origin], "x": list(x), "y": list(y), "z": list(z)}
-    return prim.candidate("primitive", [prim.leaf(
+    return _candidate("primitive", [_leaf(
         "TGeoBBox", {"dx": halves[0], "dy": halves[1], "dz": halves[2]}, frame)], "tier1-box")
 
 
@@ -361,10 +388,10 @@ def _match_axial_primitive(records, clusters, caps, wedges, tol):
         frame = prim.frame_from_axis(centre, cl["dir"], outer[0]["x"])
         if wedge:
             phi1, phi2 = _phi_range(outer, frame)
-            return prim.candidate("primitive", [prim.leaf(
+            return _candidate("primitive", [_leaf(
                 "TGeoTubeSeg", {"rmin": rmin, "rmax": rmax, "dz": dz, "phi1": phi1,
                                 "phi2": phi2}, frame)], "tier1-tubeseg")
-        return prim.candidate("primitive", [prim.leaf(
+        return _candidate("primitive", [_leaf(
             "TGeoTube", {"rmin": rmin, "rmax": rmax, "dz": dz}, frame)], "tier1-tube")
 
     if cl["kinds"] == ["cone"]:
@@ -382,7 +409,7 @@ def _match_axial_primitive(records, clusters, caps, wedges, tol):
             (rmax1, rmax2), = radii_at
             rmin1 = rmin2 = 0.0
         frame = prim.frame_from_axis(centre, cl["dir"], cl["members"][0]["x"])
-        return prim.candidate("primitive", [prim.leaf(
+        return _candidate("primitive", [_leaf(
             "TGeoCone", {"dz": dz, "rmin1": rmin1, "rmax1": rmax1, "rmin2": rmin2,
                          "rmax2": rmax2}, frame)], "tier1-cone")
 
@@ -429,7 +456,7 @@ def _match_sphere(records, tol):
             raise Declined("spherical faces are not concentric")
     if len(radii) != 1:
         raise Declined(f"{len(radii)} distinct concentric sphere radii, expected 1")
-    return prim.candidate("primitive", [prim.leaf(
+    return _candidate("primitive", [_leaf(
         "TGeoSphere", {"rmin": 0.0, "rmax": radii[0]},
         prim.identity_frame(centre))], "tier1-sphere")
 
@@ -571,10 +598,10 @@ def _canonical_revolved_leaf(lf, origin, axis, tol):
     frame["origin"] = [float(c) for c in _add(origin, _scale(axis, 0.5 * (z[0] + z[1])))]
     dz = 0.5 * (z[1] - z[0])
     if abs(rmin[0] - rmin[1]) <= tol and abs(rmax[0] - rmax[1]) <= tol:
-        return prim.leaf("TGeoTube", {"rmin": 0.5 * (rmin[0] + rmin[1]),
+        return _leaf("TGeoTube", {"rmin": 0.5 * (rmin[0] + rmin[1]),
                                       "rmax": 0.5 * (rmax[0] + rmax[1]), "dz": dz},
                          frame), "revolved-tube"
-    return prim.leaf("TGeoCone", {"dz": dz, "rmin1": rmin[0], "rmax1": rmax[0],
+    return _leaf("TGeoCone", {"dz": dz, "rmin1": rmin[0], "rmax1": rmax[0],
                                   "rmin2": rmin[1], "rmax2": rmax[1]},
                      frame), "revolved-cone"
 
@@ -677,10 +704,10 @@ def _match_revolved(solid, records, clusters, caps, wedges, tol, diag):
     rmin = [s[1] for s in sections]
     rmax = [s[2] for s in sections]
     try:
-        lf = prim.leaf("TGeoPcon", {"phi1": phi1, "dphi": dphi, "z": z, "rmin": rmin,
+        lf = _leaf("TGeoPcon", {"phi1": phi1, "dphi": dphi, "z": z, "rmin": rmin,
                                     "rmax": rmax}, frame)
-    except ValueError as bad:
-        raise Declined(f"the reconstructed profile is not a legal TGeoPcon: {bad}") from bad
+    except Declined as bad:
+        raise Declined(f"the reconstructed profile is not a legal TGeoPcon: {bad}") from None
 
     # The one measured quantity. It is taken on the reconstructed *profile*, before the leaf is
     # canonicalised below, because the gap is a property of the reconstruction and not of the
@@ -707,8 +734,8 @@ def _match_revolved(solid, records, clusters, caps, wedges, tol, diag):
                        f"over {REL_TOL:.0e})")
 
     lf, tag = _canonical_revolved_leaf(lf, origin, axis, tol)
-    return prim.candidate("primitive", [lf], tag,
-                          notes={"nz": len(z), "nCaps": len(cap), "nWedges": len(wedge),
+    return _candidate("primitive", [lf], tag,
+                      notes={"nz": len(z), "nCaps": len(cap), "nWedges": len(wedge),
                                  "nLaterals": len(cl["members"]),
                                  "profileGapCm": gap, "profileGapRelative": gap / scale})
 
@@ -1226,15 +1253,15 @@ def _match_prism(solid, records, tol, diag):
                                                 if item[0].endswith(template)]
             for tag, kind, params, frame in proposals[(template, index)]:
                 try:
-                    leaf = prim.leaf(kind, params, frame)
-                except ValueError as bad:
+                    leaf = _leaf(kind, params, frame)
+                except Declined as bad:
                     reasons.append(f"as a {template}: not a legal {kind}: {bad}")
                     continue
                 gap = _prism_leaf_gap(leaf, samples)
                 if best_gap is None or gap < best_gap:
                     best_gap, best_tag = gap, tag
                 if gap <= REL_TOL * scale:
-                    return prim.candidate(
+                    return _candidate(
                         "primitive", [leaf], tag,
                         notes={"nSections": len(levels), "nWires": len(rings[0]),
                                "nCorners": sum(len(r) for r in rings[0]),
@@ -1274,10 +1301,10 @@ def _match_two_cluster_union(records, clusters, caps, wedges, tol):
         centre = _add(cl["loc"], _scale(cl["dir"], (t0 + t1) / 2.0))
         outer = [m for m in cl["members"] if abs(m["r"] - rmax) <= tol]
         frame = prim.frame_from_axis(centre, cl["dir"], outer[0]["x"])
-        leaves.append(prim.leaf("TGeoTube", {"rmin": rmin, "rmax": rmax,
+        leaves.append(_leaf("TGeoTube", {"rmin": rmin, "rmax": rmax,
                                              "dz": (t1 - t0) / 2.0}, frame))
-    return prim.candidate("union", leaves, "tier2-tube-union",
-                          notes={"nCaps": [len(caps[i]) for i in range(len(clusters))]})
+    return _candidate("union", leaves, "tier2-tube-union",
+                      notes={"nCaps": [len(caps[i]) for i in range(len(clusters))]})
 
 
 # ------------------------------------------------------------------------------------------
@@ -1374,7 +1401,13 @@ def _boundary_gap(a, b, most=_CELL_GAP_SAMPLES):
     worst = 0.0
     for shape, other in ((a, b), (b, a)):
         for point in _stride(_solid_samples(shape), most):
-            worst = max(worst, _point_to_shape_distance(point, other))
+            distance = _point_to_shape_distance(point, other)
+            if not math.isfinite(distance):
+                # `BRepExtrema_DistShapeShape` gave up. That is a measurement that did not
+                # happen, not a measurement of zero, so it declines and says which.
+                raise Declined("OCCT could not measure a boundary sample against the "
+                               "proposal, so the gap is unknown")
+            worst = max(worst, distance)
     return worst
 
 
@@ -1516,17 +1549,17 @@ def _cell_leaf(carrier, box):
                     + box.margin, box.margin) for axis in ("x", "y")]
         frame = dict(oriented)
         frame["origin"] = [float(v) for v in _add(foot, _scale(into, 0.5 * depth))]
-        return prim.leaf("TGeoBBox", {"dx": half[0], "dy": half[1], "dz": 0.5 * depth},
+        return _leaf("TGeoBBox", {"dx": half[0], "dy": half[1], "dz": 0.5 * depth},
                          frame, outside)
     if carrier["kind"] == "sphere":
         # Already bounded: the halfspace is the ball itself, at its true radius.
-        return prim.leaf("TGeoSphere", {"rmin": 0.0, "rmax": carrier["r"]},
+        return _leaf("TGeoSphere", {"rmin": 0.0, "rmax": carrier["r"]},
                          prim.identity_frame(carrier["p"]), outside)
     if carrier["kind"] == "torus":
         # Bounded for the same reason as the sphere, and needing no extension: the halfspace
         # "within `rt` of the circle of radius R" *is* the solid torus. A ply's bore is the same
         # carrier with the `outside` flag.
-        return prim.leaf("TGeoTorus", {"r": carrier["r"], "rmin": 0.0, "rmax": carrier["rt"],
+        return _leaf("TGeoTorus", {"r": carrier["r"], "rmin": 0.0, "rmax": carrier["rt"],
                                        "phi1": 0.0, "dphi": 360.0},
                          prim.frame_from_axis(carrier["p"], carrier["d"], carrier["x"]), outside)
     lo, hi = box.window(carrier["p"], carrier["d"])
@@ -1534,7 +1567,7 @@ def _cell_leaf(carrier, box):
         frame = prim.frame_from_axis(
             _add(carrier["p"], _scale(carrier["d"], 0.5 * (lo + hi))), carrier["d"],
             carrier["x"])
-        return prim.leaf("TGeoTube", {"rmin": 0.0, "rmax": carrier["r"],
+        return _leaf("TGeoTube", {"rmin": 0.0, "rmax": carrier["r"],
                                       "dz": 0.5 * (hi - lo)}, frame, outside)
     # A cone's halfspace is r <= rref + u tan(a), which is empty beyond the apex, so clipping the
     # window there loses nothing and keeps the second nappe out of the leaf.
@@ -1547,7 +1580,7 @@ def _cell_leaf(carrier, box):
         raise Declined("a conical carrier whose halfspace does not reach the part")
     frame = prim.frame_from_axis(_add(carrier["p"], _scale(carrier["d"], 0.5 * (lo + hi))),
                                  carrier["d"], carrier["x"])
-    return prim.leaf("TGeoCone", {"dz": 0.5 * (hi - lo), "rmin1": 0.0, "rmin2": 0.0,
+    return _leaf("TGeoCone", {"dz": 0.5 * (hi - lo), "rmin1": 0.0, "rmin2": 0.0,
                                   "rmax1": max(carrier["r"] + lo * slope, 0.0),
                                   "rmax2": max(carrier["r"] + hi * slope, 0.0)},
                      frame, outside)
@@ -1626,13 +1659,13 @@ def _capped_axial_leaf(carrier, lo, hi):
                                  carrier["d"], carrier["x"])
     dz = 0.5 * (hi - lo)
     if carrier["kind"] == "cylinder":
-        return prim.leaf("TGeoTube", {"rmin": 0.0, "rmax": carrier["r"], "dz": dz}, frame)
+        return _leaf("TGeoTube", {"rmin": 0.0, "rmax": carrier["r"], "dz": dz}, frame)
     slope = math.tan(carrier["a"])
     rmax1 = carrier["r"] + lo * slope
     rmax2 = carrier["r"] + hi * slope
     if min(rmax1, rmax2) < 0.0:
         return None                     # the apex is between the caps: not one frustum
-    return prim.leaf("TGeoCone", {"dz": dz, "rmin1": 0.0, "rmin2": 0.0,
+    return _leaf("TGeoCone", {"dz": dz, "rmin1": 0.0, "rmin2": 0.0,
                                   "rmax1": rmax1, "rmax2": rmax2}, frame)
 
 
@@ -1690,7 +1723,7 @@ def _match_single_cell(solid, records, tol, diag):
         raise Declined(f"the cell is {len(leaves)} halfspaces wide, over the budget of "
                        f"{_CELL_MAX_LEAVES}: it would ship as a boolean tree that deep")
     op = "primitive" if len(leaves) == 1 else "intersection"
-    cand = prim.candidate(op, leaves,
+    cand = _candidate(op, leaves,
                           "cell-primitive" if op == "primitive" else "cell-intersection",
                           notes={"nCarriers": len(carriers),
                                  "nOutside": len(outside_leaves),
@@ -1774,11 +1807,11 @@ def _match_eltu(solid, records, tol, diag):
     frame, a, b = _eltu_frame(centre, axis, laterals[0]["x"], laterals[0]["y"],
                               laterals[0]["a"], laterals[0]["b"])
     try:
-        lf = prim.leaf("TGeoEltu", {"a": a, "b": b, "dz": 0.5 * (caps[1] - caps[0])}, frame)
-    except ValueError as bad:
-        raise Declined(f"the elliptic cylinder is not a legal TGeoEltu: {bad}") from bad
-    cand = prim.candidate("primitive", [lf], "tier1-eltu",
-                          notes={"semiAxisRatio": min(a, b) / max(a, b)})
+        lf = _leaf("TGeoEltu", {"a": a, "b": b, "dz": 0.5 * (caps[1] - caps[0])}, frame)
+    except Declined as bad:
+        raise Declined(f"the elliptic cylinder is not a legal TGeoEltu: {bad}") from None
+    cand = _candidate("primitive", [lf], "tier1-eltu",
+                      notes={"semiAxisRatio": min(a, b) / max(a, b)})
     gap = _measured_gap(solid, cand, diag, "the elliptic cylinder")
     cand["notes"]["eltuGapCm"] = gap
     cand["notes"]["eltuGapRelative"] = gap / max(diag, 1.0)
@@ -1856,13 +1889,13 @@ def _match_torus(solid, records, tol, diag):
         phi1, dphi = 0.0, 360.0
 
     try:
-        lf = prim.leaf("TGeoTorus", {"r": tori[0]["r"], "rmin": rmin, "rmax": rmax,
+        lf = _leaf("TGeoTorus", {"r": tori[0]["r"], "rmin": rmin, "rmax": rmax,
                                      "phi1": phi1, "dphi": dphi}, frame)
-    except ValueError as bad:
-        raise Declined(f"the torus is not a legal TGeoTorus: {bad}") from bad
+    except Declined as bad:
+        raise Declined(f"the torus is not a legal TGeoTorus: {bad}") from None
 
-    cand = prim.candidate("primitive", [lf], "tier1-torus",
-                          notes={"nTori": len(tori), "nWedges": len(planes)})
+    cand = _candidate("primitive", [lf], "tier1-torus",
+                      notes={"nTori": len(tori), "nWedges": len(planes)})
     gap = _measured_gap(solid, cand, diag, "the torus")
     cand["notes"]["torusGapCm"] = gap
     cand["notes"]["torusGapRelative"] = gap / max(diag, 1.0)

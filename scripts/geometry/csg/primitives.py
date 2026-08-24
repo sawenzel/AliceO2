@@ -184,94 +184,111 @@ _ARRAY_LENGTH_GROUPS = {
 }
 
 
+class InvalidDescription(ValueError):
+    """The numbers do not describe a legal solid of that class.
+
+    Distinct from a plain `ValueError` on purpose. This one is a statement about the *part* -- a
+    fillet blend whose torus has a minor radius larger than its major one is a self-intersecting
+    torus and is not a `TGeoTorus`, and a recogniser that runs into that must decline readably.
+    A missing parameter, an unknown leaf type or a leaf count that does not fit the op is a bug in
+    the caller instead, stays a plain `ValueError`, and is left to escape.
+    """
+
+
 def _validate_eltu(p):
     for key in ("a", "b", "dz"):
         if p[key] <= 0.0:
-            raise ValueError(f"TGeoEltu: {key} = {p[key]} is not positive")
+            raise InvalidDescription(f"TGeoEltu: {key} = {p[key]} is not positive")
 
 
 def _validate_torus(p):
     if p["r"] <= 0.0:
-        raise ValueError(f"TGeoTorus: the major radius {p['r']} is not positive")
+        raise InvalidDescription(f"TGeoTorus: the major radius {p['r']} is not positive")
     if p["rmax"] <= 0.0:
-        raise ValueError(f"TGeoTorus: rmax {p['rmax']} is not positive")
+        raise InvalidDescription(f"TGeoTorus: rmax {p['rmax']} is not positive")
     if p["rmin"] < 0.0:
-        raise ValueError(f"TGeoTorus: rmin {p['rmin']} is negative")
+        raise InvalidDescription(f"TGeoTorus: rmin {p['rmin']} is negative")
     if p["rmin"] >= p["rmax"]:
-        raise ValueError(f"TGeoTorus: rmin {p['rmin']} is not below rmax {p['rmax']}")
+        raise InvalidDescription(f"TGeoTorus: rmin {p['rmin']} is not below rmax {p['rmax']}")
     if p["rmax"] > p["r"]:
         # A tube radius over the major radius is a self-intersecting torus: ROOT accepts the
         # numbers and the two representations then disagree about the overlap, so it is refused
-        # here rather than measured later.
-        raise ValueError(f"TGeoTorus: rmax {p['rmax']} exceeds the major radius {p['r']}")
+        # here rather than measured later. CAD fillet blends produce these routinely -- ALICE3
+        # carries them on small-radius features -- so the message says what the part is, not just
+        # which inequality failed.
+        raise InvalidDescription(
+            f"TGeoTorus: rmax {p['rmax']} exceeds the major radius {p['r']}, so this is a "
+            "self-intersecting torus (a fillet blend) that TGeoTorus cannot state")
     if not 0.0 < p["dphi"] <= 360.0 + 1.0e-9:
-        raise ValueError(f"TGeoTorus: dphi {p['dphi']} is not in (0, 360]")
+        raise InvalidDescription(f"TGeoTorus: dphi {p['dphi']} is not in (0, 360]")
 
 
 def _validate_pcon(p):
     if not 0.0 < p["dphi"] <= 360.0 + 1.0e-9:
-        raise ValueError(f"TGeoPcon: dphi {p['dphi']} is not in (0, 360]")
+        raise InvalidDescription(f"TGeoPcon: dphi {p['dphi']} is not in (0, 360]")
     z, rmin, rmax = p["z"], p["rmin"], p["rmax"]
     for i in range(len(z)):
         if rmin[i] < 0.0:
-            raise ValueError(f"TGeoPcon: rmin[{i}] = {rmin[i]} is negative")
+            raise InvalidDescription(f"TGeoPcon: rmin[{i}] = {rmin[i]} is negative")
         if rmin[i] > rmax[i]:
-            raise ValueError(f"TGeoPcon: rmin[{i}] = {rmin[i]} exceeds rmax[{i}] = {rmax[i]}")
+            raise InvalidDescription(
+                f"TGeoPcon: rmin[{i}] = {rmin[i]} exceeds rmax[{i}] = {rmax[i]}")
     for i in range(1, len(z)):
         if z[i] < z[i - 1]:
-            raise ValueError(f"TGeoPcon: z is not non-decreasing at section {i} "
+            raise InvalidDescription(f"TGeoPcon: z is not non-decreasing at section {i} "
                              f"({z[i]} < {z[i - 1]})")
     if z[-1] <= z[0]:
-        raise ValueError("TGeoPcon: the profile has no axial extent")
+        raise InvalidDescription("TGeoPcon: the profile has no axial extent")
     for i in range(2, len(z)):
         if z[i] == z[i - 1] == z[i - 2]:
-            raise ValueError(f"TGeoPcon: three sections share z = {z[i]}")
+            raise InvalidDescription(f"TGeoPcon: three sections share z = {z[i]}")
 
 
 def _validate_pgon(p):
     _validate_pcon(p)
     if p["nedges"] < 1 or abs(p["nedges"] - round(p["nedges"])) > 1.0e-9:
-        raise ValueError(f"TGeoPgon: nedges {p['nedges']} is not a positive whole number")
+        raise InvalidDescription(f"TGeoPgon: nedges {p['nedges']} is not a positive whole number")
 
 
 def _validate_trd1(p):
     if p["dy"] <= 0.0 or p["dz"] <= 0.0:
-        raise ValueError(f"TGeoTrd1: dy {p['dy']} and dz {p['dz']} must both be positive")
+        raise InvalidDescription(f"TGeoTrd1: dy {p['dy']} and dz {p['dz']} must both be positive")
     if min(p["dx1"], p["dx2"]) < 0.0 or max(p["dx1"], p["dx2"]) <= 0.0:
-        raise ValueError(f"TGeoTrd1: dx1 {p['dx1']}, dx2 {p['dx2']} do not bound a solid")
+        raise InvalidDescription(f"TGeoTrd1: dx1 {p['dx1']}, dx2 {p['dx2']} do not bound a solid")
 
 
 def _validate_trd2(p):
     if p["dz"] <= 0.0:
-        raise ValueError(f"TGeoTrd2: dz {p['dz']} must be positive")
+        raise InvalidDescription(f"TGeoTrd2: dz {p['dz']} must be positive")
     for a, b in (("dx1", "dx2"), ("dy1", "dy2")):
         if min(p[a], p[b]) < 0.0 or max(p[a], p[b]) <= 0.0:
-            raise ValueError(f"TGeoTrd2: {a} {p[a]}, {b} {p[b]} do not bound a solid")
+            raise InvalidDescription(f"TGeoTrd2: {a} {p[a]}, {b} {p[b]} do not bound a solid")
 
 
 def _validate_arb8(p):
     if p["dz"] <= 0.0:
-        raise ValueError(f"TGeoArb8: dz {p['dz']} must be positive")
+        raise InvalidDescription(f"TGeoArb8: dz {p['dz']} must be positive")
     if len(p["vertices"]) != 16:
-        raise ValueError(f"TGeoArb8: needs 16 vertex coordinates, got {len(p['vertices'])}")
+        raise InvalidDescription(f"TGeoArb8: needs 16 vertex coordinates, got {len(p['vertices'])}")
     for half, name in ((p["vertices"][:8], "-dz"), (p["vertices"][8:], "+dz")):
         corners = [(half[2 * i], half[2 * i + 1]) for i in range(4)]
         if len({(round(c[0], 12), round(c[1], 12)) for c in corners}) < 3:
-            raise ValueError(f"TGeoArb8: the {name} face has fewer than three distinct corners")
+            raise InvalidDescription(
+                f"TGeoArb8: the {name} face has fewer than three distinct corners")
 
 
 def _validate_xtru(p):
     z, scale = p["z"], p["scale"]
     for i in range(1, len(z)):
         if z[i] <= z[i - 1]:
-            raise ValueError(f"TGeoXtru: z is not strictly increasing at section {i} "
+            raise InvalidDescription(f"TGeoXtru: z is not strictly increasing at section {i} "
                              f"({z[i]} <= {z[i - 1]})")
     for i, s in enumerate(scale):
         if s <= 0.0:
-            raise ValueError(f"TGeoXtru: scale[{i}] = {s} is not positive")
+            raise InvalidDescription(f"TGeoXtru: scale[{i}] = {s} is not positive")
     corners = {(round(a, 12), round(b, 12)) for a, b in zip(p["x"], p["y"])}
     if len(corners) != len(p["x"]):
-        raise ValueError("TGeoXtru: the polygon repeats a corner")
+        raise InvalidDescription("TGeoXtru: the polygon repeats a corner")
 
 
 _LEAF_VALIDATORS = {
@@ -308,11 +325,13 @@ def leaf(kind, params, frame, outside=False):
         for names, want in groups:
             lengths = {len(out[k]) for k in names}
             if len(lengths) != 1:
-                raise ValueError(f"{kind}: array parameters {list(names)} have unequal lengths "
-                                 + ", ".join(f"{k}={len(out[k])}" for k in names))
+                raise InvalidDescription(
+                    f"{kind}: array parameters {list(names)} have unequal lengths "
+                    + ", ".join(f"{k}={len(out[k])}" for k in names))
             n = lengths.pop()
             if n < want:
-                raise ValueError(f"{kind}: needs at least {want} of {list(names)}, got {n}")
+                raise InvalidDescription(
+                    f"{kind}: needs at least {want} of {list(names)}, got {n}")
     validator = _LEAF_VALIDATORS.get(kind)
     if validator is not None:
         validator(out)
