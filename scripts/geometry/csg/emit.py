@@ -398,6 +398,26 @@ _CANDIDATE_DIGESTS_BEFORE_THE_REVOLVED_MATCHER = {
 }
 
 
+# The flat-CSG programme's R1 and R2 emissions, frozen the same way: the torus carrier and the
+# elliptic cylinder. `torus shell (a bellows ply)` and `half a bellows ply` are the two shapes
+# PIPE's sixteen plies reduce to, so what they emit is worth being unable to change by accident.
+_TORUS_ELTU_CANDIDATE_DIGESTS = {
+    "solid torus":
+        "d72f862e7d29c9775d0ba20669f6495d9b2670fe863b80cb4a855ec0339b737e",
+    "torus shell (a bellows ply)":
+        "9bf469b23b0f8de4db091924473463e893c29662cf28703259e903934648ff78",
+    "hollow torus wedge":
+        "ce6dbc08dbb1df8613edf26c12f1f9ae6a67b7ba4b484d404ea218f981c63355",
+    "half a bellows ply":
+        "4a4a8485968902fcf1d1c99672d46090d140bf2c4118da4b6aa500b0a8e33471",
+    "elliptic cylinder, a > b":
+        "ca335cfe52684bd5d7e4680d0ebb50783cef954de2c7fd3e884d4a757f32a36a",
+    "elliptic cylinder, a < b":
+        "dfae936208a9a94b23286472b24be3c0b91ef9021b6f0ab83069db2eb50fbab1",
+    "elliptic cylinder with equal semi-axes":
+        "cbe32ffd7120066ee6b01803e29966ddc46294bdc8b7a5a9dfa2239a171bcd48",
+}
+
 # The single cell's candidates, frozen the same way. `tube_window` and `cyl_inter_cyl` are the
 # two parts `Stream_AA_FlatCSG.md` §5 step 2 exists to retire, so what they emit is worth being
 # unable to change by accident.
@@ -486,15 +506,19 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
     from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Common, BRepAlgoAPI_Cut, BRepAlgoAPI_Fuse
     from OCC.Core.BRepBuilderAPI import (BRepBuilderAPI_MakeEdge, BRepBuilderAPI_MakeFace,
                                          BRepBuilderAPI_MakePolygon, BRepBuilderAPI_MakeSolid,
-                                         BRepBuilderAPI_Sewing, BRepBuilderAPI_Transform)
+                                         BRepBuilderAPI_MakeWire, BRepBuilderAPI_Sewing,
+                                         BRepBuilderAPI_Transform)
     from OCC.Core.BRepFill import brepfill
     from OCC.Core.BRepGProp import brepgprop
     from OCC.Core.BRepPrimAPI import (BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCone,
                                       BRepPrimAPI_MakeCylinder, BRepPrimAPI_MakePrism,
-                                      BRepPrimAPI_MakeRevol, BRepPrimAPI_MakeSphere)
+                                      BRepPrimAPI_MakeRevol, BRepPrimAPI_MakeSphere,
+                                      BRepPrimAPI_MakeTorus)
     from OCC.Core.GProp import GProp_GProps
     from OCC.Core.TopoDS import topods
-    from OCC.Core.gp import gp_Ax1, gp_Ax2, gp_Dir, gp_Pnt, gp_Trsf, gp_Vec
+    from OCC.Core.GeomAPI import GeomAPI_Interpolate
+    from OCC.Core.TColgp import TColgp_HArray1OfPnt
+    from OCC.Core.gp import gp_Ax1, gp_Ax2, gp_Dir, gp_Elips, gp_Pnt, gp_Trsf, gp_Vec
 
     checks = []
 
@@ -650,9 +674,10 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
     ell = BRepAlgoAPI_Cut(BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 4.0, 4.0, 1.0).Shape(),
                           BRepPrimAPI_MakeBox(gp_Pnt(2, 2, -1), 4.0, 4.0, 3.0).Shape()).Shape()
     expect("L-shaped plate", ell, "rung2-xtru")
-    # 3. a torus: in scope for the surface solid, out of scope here, and it must say so.
+    # 3. a torus. It used to end the cascade at `_face_records`; the torus carrier landed with
+    #    the flat-CSG programme's R1, so the expectation moved and the shape did not.
     from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeTorus
-    expect_declined("torus", BRepPrimAPI_MakeTorus(5.0, 1.0).Shape(), "toroidal")
+    expect("torus", BRepPrimAPI_MakeTorus(5.0, 1.0).Shape(), "tier1-torus")
     # 4. a cylinder with a flat milled off it: one cluster, but a plane that is neither cap nor
     #    wedge. The recogniser must decline rather than emit the round tube.
     flatted = BRepAlgoAPI_Cut(cyl, BRepPrimAPI_MakeBox(
@@ -1330,6 +1355,231 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
             refused = True
         check(f"a candidate with {label} is refused", refused)
 
+    # --- flat-CSG R1: the torus carrier ---
+    def torus_at(major, minor, angle=None, origin=(0.0, 0.0, 0.0), direction=(0.0, 0.0, 1.0),
+                 ref=(1.0, 0.0, 0.0)):
+        axis = gp_Ax2(gp_Pnt(*origin), gp_Dir(*direction), gp_Dir(*ref))
+        maker = (BRepPrimAPI_MakeTorus(axis, major, minor) if angle is None
+                 else BRepPrimAPI_MakeTorus(axis, major, minor, angle))
+        maker.Build()
+        return maker.Shape()
+
+    def expect_torus(name, solid, r, rmin, rmax, phi1=0.0, dphi=360.0):
+        record = expect(name, solid, "tier1-torus")
+        if not record["accepted"]:
+            return record
+        p = record["candidate"]["leaves"][0]["params"]
+        want = {"r": r, "rmin": rmin, "rmax": rmax, "phi1": phi1, "dphi": dphi}
+        worst = max(abs(p[k] - v) for k, v in want.items())
+        check(f"{name} reconstructs the source TGeoTorus parameters", worst < 1.0e-9,
+              f"worst parameter deviation {worst:.3g}")
+        return record
+
+    solid_torus = torus_at(4.0, 1.0)
+    solid_torus_record = expect_torus("solid torus", solid_torus, 4.0, 0.0, 1.0)
+    # A shell: two concentric tori of the same major radius, which is a bellows ply's section.
+    ply = BRepAlgoAPI_Cut(torus_at(5.0, 0.30), torus_at(5.0, 0.28)).Shape()
+    ply_record = expect_torus("torus shell (a bellows ply)", ply, 5.0, 0.28, 0.30)
+    # A phi wedge, hollow, whose two cut planes pass through the axis.
+    wedge_torus = BRepAlgoAPI_Cut(
+        torus_at(4.0, 1.0, math.radians(120.0), ref=(math.cos(math.radians(20.0)),
+                                                     math.sin(math.radians(20.0)), 0.0)),
+        torus_at(4.0, 0.8, math.radians(120.0) + 1.0e-4,
+                 ref=(math.cos(math.radians(20.0)), math.sin(math.radians(20.0)), 0.0))).Shape()
+    wedge_torus_record = expect_torus("hollow torus wedge", wedge_torus,
+                                      4.0, 0.8, 1.0, 20.0, 120.0)
+    # Placed, so the frame machinery is exercised on a torus too.
+    torus_spin = gp_Trsf()
+    torus_spin.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(1, 1, 0)), 0.7)
+    torus_shift = gp_Trsf()
+    torus_shift.SetTranslation(gp_Vec(3.0, -4.0, 5.0))
+    placed_torus = BRepBuilderAPI_Transform(solid_torus,
+                                            torus_shift.Multiplied(torus_spin), True).Shape()
+    placed_torus_record = expect("placed torus", placed_torus, "tier1-torus")
+    check("a placed torus travels as one leaf plus a rigid placement",
+          placed_torus_record["accepted"]
+          and prim.placement_for_candidate(placed_torus_record["candidate"]) is not None,
+          "placement present" if placed_torus_record["accepted"] else "not accepted")
+
+    # The torus as a cell-emitter carrier: a ply cut by a plane is a cell of two toroidal
+    # halfspaces, the bore's one complemented, and one box.
+    half_ply = BRepAlgoAPI_Common(
+        ply, BRepPrimAPI_MakeBox(gp_Pnt(-10, -10, 0), 20.0, 20.0, 20.0).Shape()).Shape()
+    half_ply_record = expect("half a bellows ply", half_ply, "cell-intersection", want_leaves=3)
+    check("the ply's bore enters the cell as a complemented TGeoTorus",
+          half_ply_record["accepted"]
+          and sum(1 for lf in half_ply_record["candidate"]["leaves"]
+                  if lf["type"] == "TGeoTorus") == 2
+          and any(lf.get("outside") and lf["type"] == "TGeoTorus"
+                  for lf in half_ply_record["candidate"]["leaves"]),
+          half_ply_record["description"])
+
+    # --- R1 negative controls ---
+    # A torus fused with a cylinder through it: two trusted concave edges, genuinely two cells,
+    # and the fixture ladder's `torus_union_cyl`. It must decline, and say which of the two it
+    # failed on.
+    # `torus_union_cyl` from the fixture ladder, in cm: the cylinder radius sits inside the
+    # tube band so the junction really exists, and it is concave on both circles. Two cells,
+    # and the emitter must say so rather than propose the torus it partly is.
+    torus_cyl = BRepAlgoAPI_Fuse(
+        torus_at(2.5, 0.8),
+        BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, -2.0), gp_Dir(0, 0, 1)),
+                                 2.0, 4.0).Shape()).Shape()
+    torus_cyl_record = expect_declined("torus fused with a coaxial cylinder through it",
+                                       torus_cyl, "trusted concave edge")
+    check("the torus template says what it found before the cell test refuses it",
+          "is not a whole torus" in (torus_cyl_record["reason"] or ""),
+          (torus_cyl_record["reason"] or "")[:120])
+    # A shell whose bore is displaced off the barrel's axis, as a ladder, because the answer
+    # changes with the displacement and only a ladder says where. `tol` here is the recogniser's
+    # declared resolution, REL_TOL times the part's 16.2 cm diagonal, i.e. 1.6e-05 cm.
+    #
+    #   below tol : the template merges the two carriers and proposes ONE coaxial torus. That is
+    #               safe rather than lucky -- a rigid shift of the bore is volume-preserving, and
+    #               the measured symmetric difference of the merged proposal is 7.1e-15 cm^3
+    #               against a band of 1.1e-05, so the two are the same solid to every resolution
+    #               the pipeline declares. Refusing here would be the wrong answer.
+    #   above tol : the carriers separate, the template refuses on concentricity, and the cell
+    #               emitter represents the part exactly as two toroidal halfspaces.
+    #
+    # So this shape has no misrepresenting displacement, and that is the claim being asserted --
+    # not "a near-miss declines", which would be false.
+    for displacement, want in ((1.0e-6, "tier1-torus"), (1.0e-5, "tier1-torus"),
+                               (3.0e-5, "cell-intersection"), (1.0e-3, "cell-intersection")):
+        skewed = BRepAlgoAPI_Cut(
+            torus_at(5.0, 0.30),
+            torus_at(5.0, 0.28, origin=(displacement, 0.0, 0.0))).Shape()
+        skewed_record = process_solid(skewed, f"shell, bore {displacement:g} cm off axis")
+        acceptance = skewed_record.get("acceptance") or {}
+        check(f"a shell whose bore is {displacement:g} cm off the axis converts as {want}, "
+              "within the band",
+              skewed_record["accepted"] and skewed_record["recogniser"] == want
+              and acceptance.get("symmetricDifference", 1.0) <= acceptance.get("band", 0.0),
+              f"{skewed_record['recogniser']}: dV="
+              f"{acceptance.get('symmetricDifference')} band={acceptance.get('band')}")
+        if want == "cell-intersection":
+            # And it is the concentricity test that hands it over, not an accident further on.
+            records, _reason = recognise._face_records(skewed)
+            skewed_diag = recognise._bbox_diagonal(skewed)
+            try:
+                recognise._match_torus(skewed, records,
+                                       recognise.REL_TOL * max(skewed_diag, 1.0), skewed_diag)
+                refused = None
+            except recognise.Declined as declined:
+                refused = str(declined)
+            check(f"and the torus template is what refuses it at {displacement:g} cm",
+                  refused is not None and "concentric" in refused,
+                  refused or "IT PROPOSED ONE")
+
+    # --- flat-CSG R2: the elliptic cylinder ---
+    def elliptic_cylinder(a, b, dz, ref=None):
+        axis = gp_Ax2(gp_Pnt(0, 0, -dz), gp_Dir(0, 0, 1),
+                      gp_Dir(*(ref if ref is not None else (1.0, 0.0, 0.0))))
+        major, minor = max(a, b), min(a, b)
+        edge = BRepBuilderAPI_MakeEdge(gp_Elips(axis, major, minor)).Edge()
+        face = BRepBuilderAPI_MakeFace(BRepBuilderAPI_MakeWire(edge).Wire()).Face()
+        prism = BRepPrimAPI_MakePrism(face, gp_Vec(0, 0, 2 * dz))
+        prism.Build()
+        return prism.Shape()
+
+    def expect_eltu(name, solid, a, b, dz):
+        record = expect(name, solid, "tier1-eltu")
+        if not record["accepted"]:
+            return record
+        p = record["candidate"]["leaves"][0]["params"]
+        worst = max(abs(p["a"] - a), abs(p["b"] - b), abs(p["dz"] - dz))
+        check(f"{name} reconstructs the source TGeoEltu parameters", worst < 1.0e-9,
+              f"a={p['a']:.6g} b={p['b']:.6g} dz={p['dz']:.6g}, worst {worst:.3g}")
+        return record
+
+    # `conv_eltu` puts the major axis on y when the source had a < b, so both orders are built
+    # the way the writer builds them and both must come back as the source's own two numbers.
+    eltu_solid = elliptic_cylinder(3.0, 1.5, 5.0)
+    eltu_record = expect_eltu("elliptic cylinder, a > b", eltu_solid, 3.0, 1.5, 5.0)
+    expect_eltu("elliptic cylinder, a < b",
+                elliptic_cylinder(1.5, 3.0, 5.0, ref=(0.0, 1.0, 0.0)), 1.5, 3.0, 5.0)
+    # a == b is a circle, and it is still a TGeoEltu: the carrier is an extrusion, never a
+    # cylinder, so nothing can confuse the two. Asserted rather than left to chance.
+    circle_eltu = expect_eltu("elliptic cylinder with equal semi-axes",
+                              elliptic_cylinder(2.0, 2.0, 5.0), 2.0, 2.0, 5.0)
+    check("an ellipse with equal semi-axes stays a TGeoEltu and is not read as a tube",
+          circle_eltu["accepted"]
+          and circle_eltu["candidate"]["leaves"][0]["type"] == "TGeoEltu",
+          circle_eltu["description"])
+    placed_eltu = BRepBuilderAPI_Transform(elliptic_cylinder(3.0, 1.5, 5.0),
+                                           torus_shift.Multiplied(torus_spin), True).Shape()
+    placed_eltu_record = expect("placed elliptic cylinder", placed_eltu, "tier1-eltu")
+    check("a placed elliptic cylinder travels as one leaf plus a rigid placement",
+          placed_eltu_record["accepted"]
+          and prim.placement_for_candidate(placed_eltu_record["candidate"]) is not None,
+          "placement present" if placed_eltu_record["accepted"] else "not accepted")
+
+    # --- R2 negative controls ---
+    # An extruded oval that is NOT an ellipse: a B-spline racetrack. Its basis curve is not a
+    # GeomAbs_Ellipse, so it stays free-form and says so.
+    racetrack = []
+    for i in range(24):
+        ang = 2.0 * math.pi * i / 24.0
+        racetrack.append(gp_Pnt(3.0 * math.cos(ang),
+                                1.5 * math.sin(ang) * (1.0 + 0.15 * math.cos(2 * ang)), -5.0))
+    spline_pts = TColgp_HArray1OfPnt(1, len(racetrack))
+    for i, pnt in enumerate(racetrack, start=1):
+        spline_pts.SetValue(i, pnt)
+    interp = GeomAPI_Interpolate(spline_pts, True, 1.0e-7)
+    interp.Perform()
+    oval_edge = BRepBuilderAPI_MakeEdge(interp.Curve()).Edge()
+    oval_face = BRepBuilderAPI_MakeFace(BRepBuilderAPI_MakeWire(oval_edge).Wire()).Face()
+    oval_prism = BRepPrimAPI_MakePrism(oval_face, gp_Vec(0, 0, 10.0))
+    oval_prism.Build()
+    expect_declined("extruded B-spline racetrack (not an ellipse)", oval_prism.Shape(),
+                    "free-form faces")
+
+    # --- both new templates' instruments must be able to say "no" ---
+    # Ten model tolerances on one semi-axis, reported at their true size by the same measurement
+    # that gates the proposal.
+    true_eltu = prim.candidate("primitive", [prim.leaf(
+        "TGeoEltu", {"a": 3.0, "b": 1.5, "dz": 5.0}, prim.identity_frame())], "self-test")
+    nudged_eltu = prim.candidate("primitive", [prim.leaf(
+        "TGeoEltu", {"a": 3.0 + 1.0e-6, "b": 1.5, "dz": 5.0},
+        prim.identity_frame())], "self-test")
+    eltu_gap = recognise._boundary_gap(prim.build_occ(true_eltu), prim.build_occ(nudged_eltu))
+    check("the gap reports a semi-axis displaced by ten model tolerances",
+          abs(eltu_gap - 1.0e-6) < 1.0e-9, f"gap {eltu_gap:.3g} cm, expected 1e-06 cm")
+    true_torus = prim.candidate("primitive", [prim.leaf(
+        "TGeoTorus", {"r": 4.0, "rmin": 0.0, "rmax": 1.0, "phi1": 0.0, "dphi": 360.0},
+        prim.identity_frame())], "self-test")
+    nudged_torus = prim.candidate("primitive", [prim.leaf(
+        "TGeoTorus", {"r": 4.0, "rmin": 0.0, "rmax": 1.0 + 1.0e-6, "phi1": 0.0, "dphi": 360.0},
+        prim.identity_frame())], "self-test")
+    torus_gap = recognise._boundary_gap(prim.build_occ(true_torus), prim.build_occ(nudged_torus))
+    check("the gap reports a tube radius displaced by ten model tolerances",
+          abs(torus_gap - 1.0e-6) < 1.0e-9, f"gap {torus_gap:.3g} cm, expected 1e-06 cm")
+
+    # --- the descriptions must refuse illegal parameters ---
+    for label, kind, params in (
+            ("a torus whose tube is wider than its major radius", "TGeoTorus",
+             {"r": 1.0, "rmin": 0.0, "rmax": 2.0, "phi1": 0.0, "dphi": 360.0}),
+            ("a torus with rmin above rmax", "TGeoTorus",
+             {"r": 4.0, "rmin": 1.0, "rmax": 0.5, "phi1": 0.0, "dphi": 360.0}),
+            ("a torus with dphi zero", "TGeoTorus",
+             {"r": 4.0, "rmin": 0.0, "rmax": 1.0, "phi1": 0.0, "dphi": 0.0}),
+            ("an elliptic cylinder with a zero semi-axis", "TGeoEltu",
+             {"a": 0.0, "b": 1.5, "dz": 5.0})):
+        try:
+            prim.leaf(kind, params, prim.identity_frame())
+            refused = False
+        except ValueError:
+            refused = True
+        check(f"a description of {label} is refused", refused)
+
+    check("every torus and elliptic-cylinder candidate is byte-identical to its recorded digest",
+          all(seen_digests.get(name) == digest for name, digest
+              in _TORUS_ELTU_CANDIDATE_DIGESTS.items()),
+          "; ".join(f"{name}: {seen_digests.get(name)} != {digest}" for name, digest
+                    in _TORUS_ELTU_CANDIDATE_DIGESTS.items()
+                    if seen_digests.get(name) != digest)
+          or f"{len(_TORUS_ELTU_CANDIDATE_DIGESTS)} candidates unchanged")
+
     # --- the ROOT half: the emitted TGeoShape must answer like the closed form ---
     if with_root:
         import ROOT
@@ -1639,6 +1889,73 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
               and back_cell.GetBoolNode().ClassName() == "TGeoSubtraction",
               f"read {back_cell.ClassName() if back_cell else 'nothing'}")
         fcell.Close()
+
+        # --- the ROOT half of the two new leaf types ---
+        # The bounding box is asserted against the CLOSED FORM, not against OCCT's, for the two
+        # tori: OCCT's `Bnd_Box` of a toroidal face is conservative -- it reports +-5.412 where
+        # the body ends at +-5.000 -- while `TGeoTorus::ComputeBBox` is exact at (R + rmax,
+        # R + rmax, rmax). Comparing the two would report 0.41 cm of OCCT's slack as if it were
+        # this recogniser's error. The elliptic cylinder has no such slack and is compared both
+        # ways.
+        for label, record, solid_of, want_class, want_capacity, want_half in (
+                ("the solid torus", solid_torus_record, solid_torus, "TGeoTorus",
+                 2.0 * math.pi ** 2 * 4.0 * 1.0 ** 2, (5.0, 5.0, 1.0)),
+                ("the torus shell", ply_record, ply, "TGeoTorus",
+                 2.0 * math.pi ** 2 * 5.0 * (0.30 ** 2 - 0.28 ** 2), (5.3, 5.3, 0.3)),
+                ("the elliptic cylinder", eltu_record, eltu_solid, "TGeoEltu",
+                 math.pi * 3.0 * 1.5 * 10.0, (3.0, 1.5, 5.0))):
+            shape, placement = prim.build_root(record["candidate"], f"probe_{want_class}")
+            rel = abs(shape.Capacity() - want_capacity) / want_capacity
+            check(f"{label} emits a bare {want_class} with the closed-form Capacity()",
+                  shape.ClassName() == want_class and placement is None and rel < 1.0e-12,
+                  f"{shape.ClassName()}, capacity {shape.Capacity():.9f} vs "
+                  f"{want_capacity:.9f} (rel {rel:.2e}), placement "
+                  f"{'present' if placement else 'absent'}")
+            cc = crosscheck_contains(record["candidate"], solid_of, n_points=20000)
+            check(f"the ROOT {want_class} and the CAD solid agree on Contains for {label}",
+                  cc["disagreements"] == 0,
+                  f"{cc['disagreements']} disagreement(s) over {cc['points']} points")
+            half = (shape.GetDX(), shape.GetDY(), shape.GetDZ())
+            worst = max(abs(h - w) for h, w in zip(half, want_half))
+            check(f"the emitted {want_class}'s bounding box is the closed form for {label}",
+                  worst < 1.0e-12,
+                  f"{tuple(round(h, 9) for h in half)} vs {want_half}, worst {worst:.3g} cm")
+        # A phi wedge is where a torus's own frame convention could be mirrored without any
+        # volume noticing, so it gets the placement-composing check of its own.
+        wedge_shape, wedge_placement = prim.build_root(wedge_torus_record["candidate"],
+                                                       "probe_toruswedge")
+        cc = crosscheck_contains(wedge_torus_record["candidate"], wedge_torus, n_points=20000)
+        check("the ROOT TGeoTorus and the CAD solid agree on Contains for the hollow wedge",
+              wedge_shape.ClassName() == "TGeoTorus" and cc["disagreements"] == 0,
+              f"{wedge_shape.ClassName()}, {cc['disagreements']} disagreement(s) over "
+              f"{cc['points']} points")
+        placed_torus_shape, placed_torus_placement = prim.build_root(
+            placed_torus_record["candidate"], "probe_placedtorus")
+        cc = crosscheck_contains(placed_torus_record["candidate"], placed_torus, n_points=20000)
+        check("a placed torus is a bare TGeoTorus plus a placement that composes correctly",
+              placed_torus_shape.ClassName() == "TGeoTorus"
+              and placed_torus_placement is not None and cc["disagreements"] == 0,
+              f"{placed_torus_shape.ClassName()}, {cc['disagreements']} disagreement(s) over "
+              f"{cc['points']} points")
+        placed_eltu_shape, placed_eltu_placement = prim.build_root(
+            placed_eltu_record["candidate"], "probe_placedeltu")
+        cc = crosscheck_contains(placed_eltu_record["candidate"], placed_eltu, n_points=20000)
+        check("a placed elliptic cylinder is a bare TGeoEltu plus a placement",
+              placed_eltu_shape.ClassName() == "TGeoEltu"
+              and placed_eltu_placement is not None and cc["disagreements"] == 0,
+              f"{placed_eltu_shape.ClassName()}, {cc['disagreements']} disagreement(s) over "
+              f"{cc['points']} points")
+        for label, record in (("a TGeoTorus", solid_torus_record),
+                              ("a TGeoEltu", eltu_record)):
+            target = Path(f"/tmp/csg_selftest_{record['candidate']['leaves'][0]['type']}.root")
+            write_shape_root(record["candidate"], target)
+            handle = ROOT.TFile.Open(str(target))
+            back = handle.Get("shape")
+            check(f"shape_<part>.root round-trips {label}",
+                  back is not None
+                  and back.ClassName() == record["candidate"]["leaves"][0]["type"],
+                  f"read {back.ClassName() if back else 'nothing'}")
+            handle.Close()
 
     n_ok = sum(1 for _n, ok, _d in checks if ok)
     if verbose:

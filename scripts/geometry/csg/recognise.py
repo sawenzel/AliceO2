@@ -70,7 +70,6 @@ def _face_records(solid):
     from OCC.Core.TopoDS import topods
 
     records = []
-    n_torus = 0
     n_freeform = 0
     n_faces = 0
     exp = TopExp_Explorer(solid, TopAbs_FACE)
@@ -103,27 +102,49 @@ def _face_records(solid):
             sp = ad.Sphere()
             rec.update(kind="sphere", p=_xyz(sp.Location()), r=sp.Radius())
         elif t == GeomAbs_Torus:
-            # Counted rather than reported at first sight, so the decline says how far out of
-            # scope the part is ("2 of 97 faces") instead of naming one face.
-            n_torus += 1
-            continue
+            to = ad.Torus()
+            rec.update(kind="torus", d=_xyz(to.Axis().Direction()),
+                       p=_xyz(to.Position().Location()), x=_xyz(to.Position().XDirection()),
+                       r=to.MajorRadius(), rt=to.MinorRadius())
         else:
-            n_freeform += 1
-            continue
+            ellipse = _extruded_ellipse(ad)
+            if ellipse is None:
+                n_freeform += 1
+                continue
+            rec.update(kind="eltu", **ellipse)
         records.append(rec)
-    if n_torus or n_freeform:
-        found = []
-        if n_freeform:
-            found.append(f"free-form faces: {n_freeform} of {n_faces} "
-                         "(surface kind outside plane/cylinder/cone/sphere; a twisted "
-                         "TGeoArb8 side is one of these and is out of scope)")
-        if n_torus:
-            found.append(f"toroidal faces: {n_torus} of {n_faces} "
-                         "(out of the recogniser's scope)")
-        return None, "; ".join(found)
+    if n_freeform:
+        return None, (f"free-form faces: {n_freeform} of {n_faces} "
+                      "(surface kind outside plane/cylinder/cone/sphere/torus; a twisted "
+                      "TGeoArb8 side is one of these and is out of scope)")
     if not records:
         return None, "no faces"
     return records, None
+
+
+def _extruded_ellipse(ad):
+    """`{d, p, x, y, a, b}` if this surface is a linear extrusion of an exact ellipse, else None.
+
+    `O2_TGeoToCAD.conv_eltu` builds a `TGeoEltu` as a prism over a `gp_Elips`, so its lateral
+    arrives as `GeomAbs_SurfaceOfExtrusion` whose basis curve is `GeomAbs_Ellipse` -- measured, not
+    assumed. The writer also swaps the major axis onto y when `a < b`, so what comes back is
+    always major >= minor with the major direction saying which of the two the source called `a`;
+    reconstructing that is `_eltu_frame`'s job, not this one's. Any other extrusion -- a swept
+    B-spline racetrack, for instance -- returns None and stays free-form.
+    """
+    from OCC.Core.GeomAbs import GeomAbs_Ellipse, GeomAbs_SurfaceOfExtrusion
+    if ad.GetType() != GeomAbs_SurfaceOfExtrusion:
+        return None
+    try:
+        basis = ad.BasisCurve()
+        if basis.GetType() != GeomAbs_Ellipse:
+            return None
+        el = basis.Ellipse()
+    except Exception:                                            # noqa: BLE001
+        return None
+    return {"d": _unit(_xyz(ad.Direction())), "p": _xyz(el.Location()),
+            "x": _xyz(el.Position().XDirection()), "y": _xyz(el.Position().YDirection()),
+            "a": el.MajorRadius(), "b": el.MinorRadius()}
 
 
 def _xyz(v):
@@ -1366,6 +1387,11 @@ def _same_carrier(a, b, tol):
                 and abs(_dot(_sub(a["p"], b["p"]), a["n"])) <= tol)
     if a["kind"] == "sphere":
         return _norm(_sub(a["p"], b["p"])) <= tol and abs(a["r"] - b["r"]) <= tol
+    if a["kind"] == "torus":
+        # Pinned by its centre, its axis, and both radii; two tori of the same R on one axis but
+        # different tube radii are the barrel and the bore of a ply and must stay distinct.
+        return (_collinear(a["d"], b["d"]) and _norm(_sub(a["p"], b["p"])) <= tol
+                and abs(a["r"] - b["r"]) <= tol and abs(a["rt"] - b["rt"]) <= tol)
     if not (_collinear(a["d"], b["d"]) and _on_axis(b["p"], a["p"], a["d"], tol)):
         return False
     if a["kind"] == "cylinder":
@@ -1404,7 +1430,7 @@ def _halfspace_carriers(solid, tol):
         exp.Next()
         ad = BRepAdaptor_Surface(face, True)
         kind = census.SURFACE_TYPE_NAME.get(ad.GetType(), "other")
-        if kind not in ("plane", "cylinder", "cone", "sphere"):
+        if kind not in ("plane", "cylinder", "cone", "sphere", "torus"):
             raise Declined(f"a {kind} face is outside the single-cell emitter's carriers")
         side = census.halfspace_side(face, ad, kind)
         if side is None:
@@ -1425,9 +1451,14 @@ def _halfspace_carriers(solid, tol):
             rec.update(d=_unit(_xyz(co.Axis().Direction())), p=_xyz(co.Axis().Location()),
                        r=co.RefRadius(), a=co.SemiAngle(),
                        x=_xyz(co.Position().XDirection()))
-        else:
+        elif kind == "sphere":
             sp = ad.Sphere()
             rec.update(p=_xyz(sp.Location()), r=sp.Radius())
+        else:
+            to = ad.Torus()
+            rec.update(d=_unit(_xyz(to.Axis().Direction())), p=_xyz(to.Position().Location()),
+                       x=_xyz(to.Position().XDirection()), r=to.MajorRadius(),
+                       rt=to.MinorRadius())
         for existing in carriers:
             if _same_carrier(existing, rec, tol):
                 if existing["side"] != rec["side"]:
@@ -1491,6 +1522,13 @@ def _cell_leaf(carrier, box):
         # Already bounded: the halfspace is the ball itself, at its true radius.
         return prim.leaf("TGeoSphere", {"rmin": 0.0, "rmax": carrier["r"]},
                          prim.identity_frame(carrier["p"]), outside)
+    if carrier["kind"] == "torus":
+        # Bounded for the same reason as the sphere, and needing no extension: the halfspace
+        # "within `rt` of the circle of radius R" *is* the solid torus. A ply's bore is the same
+        # carrier with the `outside` flag.
+        return prim.leaf("TGeoTorus", {"r": carrier["r"], "rmin": 0.0, "rmax": carrier["rt"],
+                                       "phi1": 0.0, "dphi": 360.0},
+                         prim.frame_from_axis(carrier["p"], carrier["d"], carrier["x"]), outside)
     lo, hi = box.window(carrier["p"], carrier["d"])
     if carrier["kind"] == "cylinder":
         frame = prim.frame_from_axis(
@@ -1678,6 +1716,181 @@ def _match_single_cell(solid, records, tol, diag):
 
 
 # ------------------------------------------------------------------------------------------
+# Tier 1: the elliptic cylinder
+# ------------------------------------------------------------------------------------------
+
+
+def _eltu_frame(centre, axis, major_dir, minor_dir, major, minor):
+    """The frame and the `(a, b)` pair to state an elliptic cylinder in.
+
+    An ellipse is the same ellipse under four labellings -- either semi-axis may be `a`, and
+    either sense of it may be `x` -- so the choice is free and is made to match the source. The
+    writer puts the major axis on y when the source had `a < b`, so blindly pinning `x` to the
+    major axis would report a `TGeoEltu(3, 1.5)` rotated a quarter turn where the source wrote
+    `TGeoEltu(1.5, 3)`. Preferring the labelling whose frame is the identity gives the source's
+    own two numbers back whenever the part sits square in its own frame, which is the case
+    `checkKnownSource.py` compares parameters on; off-axis, the major axis takes `x` and the
+    placement carries the rest.
+    """
+    options = [(major_dir, major, minor), (_scale(major_dir, -1.0), major, minor),
+               (minor_dir, minor, major), (_scale(minor_dir, -1.0), minor, major)]
+    fallback = None
+    for ref_x, a, b in options:
+        frame = prim.frame_from_axis(centre, axis, ref_x)
+        if prim.frame_is_identity_rotation(frame):
+            return frame, a, b
+        if fallback is None:
+            fallback = (frame, a, b)
+    return fallback
+
+
+def _match_eltu(solid, records, tol, diag):
+    """One extruded-ellipse lateral between two perpendicular caps: a `TGeoEltu`."""
+    laterals = [r for r in records if r["kind"] == "eltu"]
+    planes = [r for r in records if r["kind"] == "plane"]
+    other = [r for r in records if r["kind"] not in ("eltu", "plane")]
+    if other:
+        kinds = sorted({r["kind"] for r in other})
+        raise Declined(f"an elliptic lateral together with {kinds} is not a whole TGeoEltu")
+    axis = laterals[0]["d"]
+    snapped = _snap_to_coordinate_axis(axis)
+    if snapped is not None and snapped[1] < 0.0:
+        axis = _scale(axis, -1.0)
+    for lateral in laterals[1:]:
+        if not (_collinear(lateral["d"], axis)
+                and abs(lateral["a"] - laterals[0]["a"]) <= tol
+                and abs(lateral["b"] - laterals[0]["b"]) <= tol
+                and _on_axis(lateral["p"], laterals[0]["p"], axis, tol)):
+            raise Declined(f"{len(laterals)} elliptic laterals that are not one carrier")
+    if len(planes) != 2:
+        raise Declined(f"{len(planes)} planar face(s) on an elliptic lateral, expected 2 caps")
+    for plane in planes:
+        if not _collinear(plane["n"], axis):
+            raise Declined("a planar face of an elliptic cylinder is not perpendicular to it")
+    caps = sorted(_dot(_sub(plane["p"], laterals[0]["p"]), axis) for plane in planes)
+    if caps[1] - caps[0] <= tol:
+        raise Declined("the two caps of an elliptic cylinder are coincident")
+    centre = _add(laterals[0]["p"], _scale(axis, 0.5 * (caps[0] + caps[1])))
+    frame, a, b = _eltu_frame(centre, axis, laterals[0]["x"], laterals[0]["y"],
+                              laterals[0]["a"], laterals[0]["b"])
+    try:
+        lf = prim.leaf("TGeoEltu", {"a": a, "b": b, "dz": 0.5 * (caps[1] - caps[0])}, frame)
+    except ValueError as bad:
+        raise Declined(f"the elliptic cylinder is not a legal TGeoEltu: {bad}") from bad
+    cand = prim.candidate("primitive", [lf], "tier1-eltu",
+                          notes={"semiAxisRatio": min(a, b) / max(a, b)})
+    gap = _measured_gap(solid, cand, diag, "the elliptic cylinder")
+    cand["notes"]["eltuGapCm"] = gap
+    cand["notes"]["eltuGapRelative"] = gap / max(diag, 1.0)
+    return cand
+
+
+# ------------------------------------------------------------------------------------------
+# Tier 1: the whole torus
+# ------------------------------------------------------------------------------------------
+#
+# A torus carrier used to end the cascade before it began: `_face_records` counted toroidal faces
+# and declined the part. It is now a carrier like any other, which unblocks two things at once --
+# this whole-part template, and the torus as a halfspace in `_match_single_cell`, which is what
+# converts a bellows ply (a few tori, a cylinder or two and some planes).
+#
+# Nothing that converts today has a toroidal face, so admitting the kind cannot move an accepted
+# part. What it can move is a part that declined: its reason changes, or it converts. The corpus
+# diffs say which, per part.
+
+
+def _match_torus(solid, records, tol, diag):
+    """All-toroidal laterals on one axis, optionally phi-cut: a `TGeoTorus`."""
+    tori = [r for r in records if r["kind"] == "torus"]
+    planes = [r for r in records if r["kind"] == "plane"]
+    other = [r for r in records if r["kind"] not in ("torus", "plane")]
+    if not tori:
+        raise Declined("no toroidal face to key on")
+    if other:
+        kinds = sorted({r["kind"] for r in other})
+        raise Declined(f"a torus together with {kinds} is not a whole torus")
+
+    axis = _unit(tori[0]["d"])
+    snapped = _snap_to_coordinate_axis(axis)
+    if snapped is not None and snapped[1] < 0.0:
+        axis = _scale(axis, -1.0)
+    centre = tori[0]["p"]
+    for t in tori[1:]:
+        if not _collinear(t["d"], axis):
+            raise Declined("the toroidal faces do not share one axis")
+        if _norm(_sub(t["p"], centre)) > tol:
+            raise Declined("the toroidal faces are not concentric")
+        if abs(t["r"] - tori[0]["r"]) > tol:
+            raise Declined(f"{len(tori)} toroidal faces with different major radii")
+
+    minors = _distinct_radii([t["rt"] for t in tori], tol)
+    if len(minors) > 2:
+        raise Declined(f"{len(minors)} distinct tube radii on one torus, expected 1 or 2")
+    rmin = minors[0] if len(minors) == 2 else 0.0
+    rmax = minors[-1]
+
+    for plane in planes:
+        if not (_perpendicular(plane["n"], axis)
+                and abs(_dot(_sub(plane["p"], centre), plane["n"])) <= tol):
+            raise Declined("a planar face of a torus is not a wedge through its axis")
+    if planes:
+        normals = []
+        for plane in planes:
+            if not any(_collinear(plane["n"], n) for n in normals):
+                normals.append(plane["n"])
+        if len(normals) > 2:
+            raise Declined(f"{len(normals)} distinct half-planes through the torus axis")
+
+    # phi is read only off tori whose own axis runs *with* the frame's, for the reason
+    # `_match_revolved` gives: a flipped carrier axis parametrises phi the other way round.
+    oriented = [t for t in tori if _parallel(t["d"], axis) and abs(t["rt"] - rmax) <= tol]
+    ref_x = None if _snap_to_coordinate_axis(axis) is not None else (
+        oriented[0]["x"] if oriented else None)
+    frame = prim.frame_from_axis(centre, axis, ref_x)
+    if planes:
+        if not oriented:
+            raise Declined("no toroidal face runs with the axis, so the phi wedge cannot be read")
+        lo_phi, hi_phi = _phi_range(oriented, frame)
+        phi1, dphi = lo_phi, hi_phi - lo_phi
+    else:
+        phi1, dphi = 0.0, 360.0
+
+    try:
+        lf = prim.leaf("TGeoTorus", {"r": tori[0]["r"], "rmin": rmin, "rmax": rmax,
+                                     "phi1": phi1, "dphi": dphi}, frame)
+    except ValueError as bad:
+        raise Declined(f"the torus is not a legal TGeoTorus: {bad}") from bad
+
+    cand = prim.candidate("primitive", [lf], "tier1-torus",
+                          notes={"nTori": len(tori), "nWedges": len(planes)})
+    gap = _measured_gap(solid, cand, diag, "the torus")
+    cand["notes"]["torusGapCm"] = gap
+    cand["notes"]["torusGapRelative"] = gap / max(diag, 1.0)
+    return cand
+
+
+def _measured_gap(solid, cand, diag, what):
+    """The one measured quantity for a whole-part proposal, in cm over the part's diagonal.
+
+    Same instrument as the single cell: the symmetric Hausdorff distance from either solid's
+    boundary samples to the other solid's boundary. Measured against the *realised* proposal
+    rather than against the carrier equations, so a wrong phi wedge, a swapped rmin or a
+    transposed pair of semi-axes shows up as a distance rather than as nothing at all.
+    """
+    try:
+        realised = prim.build_occ(cand)
+    except Exception as exc:                                     # noqa: BLE001
+        raise Declined(f"{what} did not build in OCCT: {exc}") from None
+    gap = _boundary_gap(solid, realised)
+    scale = max(diag, 1.0)
+    if gap > REL_TOL * scale:
+        raise Declined(f"{what}'s boundary is {gap:.3g} cm from the part's "
+                       f"({gap / scale:.3g} of the part's {diag:.6g} cm diagonal, "
+                       f"over {REL_TOL:.0e})")
+    return gap
+
+
+# ------------------------------------------------------------------------------------------
 # entry point
 # ------------------------------------------------------------------------------------------
 
@@ -1689,6 +1902,16 @@ def recognise(solid):
     diag = _bbox_diagonal(solid)
     tol = REL_TOL * max(diag, 1.0)
     try:
+        if any(r["kind"] == "eltu" for r in records):
+            # Same reasoning as the torus below: an extruded ellipse was a free-form decline
+            # before this rung, so no matcher underneath ever saw one.
+            return _match_eltu(solid, records, tol, diag), None
+        if any(r["kind"] == "torus" for r in records):
+            # A part with a toroidal face reached none of the matchers below before this rung,
+            # so routing it straight to the torus template and, on a decline, to the cell
+            # emitter cannot change any decision they ever made -- and it keeps them from
+            # proposing a tube for a body whose torus they cannot see.
+            return _match_torus(solid, records, tol, diag), None
         try:
             cand = _match_box(records, tol)
         except Declined as box_declined:

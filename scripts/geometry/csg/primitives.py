@@ -141,7 +141,7 @@ def _unit(a):
 # ------------------------------------------------------------------------------------------
 
 LEAF_TYPES = ("TGeoBBox", "TGeoTube", "TGeoTubeSeg", "TGeoCone", "TGeoSphere", "TGeoPcon",
-              "TGeoTrd1", "TGeoTrd2", "TGeoArb8", "TGeoXtru", "TGeoPgon")
+              "TGeoTrd1", "TGeoTrd2", "TGeoArb8", "TGeoXtru", "TGeoPgon", "TGeoTorus", "TGeoEltu")
 
 _REQUIRED_PARAMS = {
     "TGeoBBox": ("dx", "dy", "dz"),
@@ -150,6 +150,8 @@ _REQUIRED_PARAMS = {
     "TGeoCone": ("dz", "rmin1", "rmax1", "rmin2", "rmax2"),
     "TGeoSphere": ("rmin", "rmax"),
     "TGeoPcon": ("phi1", "dphi"),
+    "TGeoTorus": ("r", "rmin", "rmax", "phi1", "dphi"),
+    "TGeoEltu": ("a", "b", "dz"),
     "TGeoTrd1": ("dx1", "dx2", "dy", "dz"),
     "TGeoTrd2": ("dx1", "dx2", "dy1", "dy2", "dz"),
     "TGeoArb8": ("dz",),
@@ -180,6 +182,30 @@ _MIN_ARRAY_LENGTH = {
 _ARRAY_LENGTH_GROUPS = {
     "TGeoXtru": ((("x", "y"), 3), (("z", "xoff", "yoff", "scale"), 2)),
 }
+
+
+def _validate_eltu(p):
+    for key in ("a", "b", "dz"):
+        if p[key] <= 0.0:
+            raise ValueError(f"TGeoEltu: {key} = {p[key]} is not positive")
+
+
+def _validate_torus(p):
+    if p["r"] <= 0.0:
+        raise ValueError(f"TGeoTorus: the major radius {p['r']} is not positive")
+    if p["rmax"] <= 0.0:
+        raise ValueError(f"TGeoTorus: rmax {p['rmax']} is not positive")
+    if p["rmin"] < 0.0:
+        raise ValueError(f"TGeoTorus: rmin {p['rmin']} is negative")
+    if p["rmin"] >= p["rmax"]:
+        raise ValueError(f"TGeoTorus: rmin {p['rmin']} is not below rmax {p['rmax']}")
+    if p["rmax"] > p["r"]:
+        # A tube radius over the major radius is a self-intersecting torus: ROOT accepts the
+        # numbers and the two representations then disagree about the overlap, so it is refused
+        # here rather than measured later.
+        raise ValueError(f"TGeoTorus: rmax {p['rmax']} exceeds the major radius {p['r']}")
+    if not 0.0 < p["dphi"] <= 360.0 + 1.0e-9:
+        raise ValueError(f"TGeoTorus: dphi {p['dphi']} is not in (0, 360]")
 
 
 def _validate_pcon(p):
@@ -249,6 +275,8 @@ def _validate_xtru(p):
 
 
 _LEAF_VALIDATORS = {
+    "TGeoEltu": _validate_eltu,
+    "TGeoTorus": _validate_torus,
     "TGeoPcon": _validate_pcon,
     "TGeoPgon": _validate_pgon,
     "TGeoTrd1": _validate_trd1,
@@ -406,6 +434,11 @@ def describe(cand):
                          f"z {p['z'][0]:.4g}..{p['z'][-1]:.4g}, "
                          f"rmin {min(p['rmin']):.4g}..{max(p['rmin']):.4g}, "
                          f"rmax {min(p['rmax']):.4g}..{max(p['rmax']):.4g})")
+        elif lf["type"] == "TGeoEltu":
+            parts.append(f"TGeoEltu(a={p['a']:.4g}, b={p['b']:.4g}, dz={p['dz']:.4g})")
+        elif lf["type"] == "TGeoTorus":
+            parts.append(f"TGeoTorus(r={p['r']:.4g}, rmin={p['rmin']:.4g}, "
+                         f"rmax={p['rmax']:.4g}, phi1={p['phi1']:.4g}, dphi={p['dphi']:.4g})")
         elif lf["type"] == "TGeoPcon":
             parts.append(f"TGeoPcon(nz={len(p['z'])}, phi1={p['phi1']:.4g}, "
                          f"dphi={p['dphi']:.4g}, z {p['z'][0]:.4g}..{p['z'][-1]:.4g}, "
@@ -773,11 +806,77 @@ def _occ_prism(lf):
     return solid
 
 
+def _occ_eltu(lf):
+    """An elliptic cylinder, built exactly as `O2_TGeoToCAD.conv_eltu` builds it.
+
+    An ellipse wire, a planar face on it, and a prism along the axis -- so the acceptance test
+    measures an extruded exact ellipse against an extruded exact ellipse, with no tessellation
+    anywhere. OCCT's `gp_Elips` wants its major radius first, which is why the frame's x is not
+    assumed to be the major axis here even though the recogniser prefers to put it there.
+    """
+    from OCC.Core.BRepBuilderAPI import (BRepBuilderAPI_MakeEdge, BRepBuilderAPI_MakeFace,
+                                         BRepBuilderAPI_MakeWire)
+    from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakePrism
+    from OCC.Core.gp import gp_Ax2, gp_Dir, gp_Elips, gp_Pnt, gp_Vec
+    p, frame = lf["params"], lf["frame"]
+    base = _sub(tuple(frame["origin"]), _scale(tuple(frame["z"]), p["dz"]))
+    if p["a"] >= p["b"]:
+        major_dir, major, minor = frame["x"], p["a"], p["b"]
+    else:
+        major_dir, major, minor = frame["y"], p["b"], p["a"]
+    axis = gp_Ax2(gp_Pnt(*base), gp_Dir(*frame["z"]), gp_Dir(*major_dir))
+    edge = BRepBuilderAPI_MakeEdge(gp_Elips(axis, major, minor)).Edge()
+    face = BRepBuilderAPI_MakeFace(BRepBuilderAPI_MakeWire(edge).Wire())
+    if not face.IsDone():
+        raise RuntimeError("TGeoEltu: the ellipse wire is not a valid planar face")
+    prism = BRepPrimAPI_MakePrism(face.Face(),
+                                  gp_Vec(*_scale(tuple(frame["z"]), 2.0 * p["dz"])))
+    prism.Build()
+    if not prism.IsDone():
+        raise RuntimeError("TGeoEltu: the prism failed")
+    return prism.Shape()
+
+
+def _occ_torus(lf):
+    """The torus OCCT already has, built exactly as `O2_TGeoToCAD.conv_torus` builds it.
+
+    Analytic on both sides, so the symmetric difference measures a torus against a torus. The
+    hollow case is a Cut of the inner torus, which shares the outer's two wedge planes exactly;
+    that is OCCT's fragile coincident-face case, so the inner one is swept a hair further in phi
+    when there is a wedge to share. It changes nothing about the solid, because the material
+    between the two wedge planes is removed either way.
+    """
+    from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeTorus
+    p, frame = lf["params"], lf["frame"]
+    phi1, dphi = math.radians(p["phi1"]), math.radians(p["dphi"])
+    xr = _add(_scale(tuple(frame["x"]), math.cos(phi1)),
+              _scale(tuple(frame["y"]), math.sin(phi1)))
+    rotated = {"origin": frame["origin"], "x": list(xr), "y": frame["y"], "z": frame["z"]}
+
+    def make(minor, sweep):
+        maker = BRepPrimAPI_MakeTorus(_occ_ax2(rotated), p["r"], minor, sweep)
+        maker.Build()
+        if not maker.IsDone():
+            raise RuntimeError("BRepPrimAPI_MakeTorus failed while building the candidate")
+        return maker.Shape()
+
+    outer = make(p["rmax"], dphi)
+    if p["rmin"] > 0.0:
+        full = dphi >= 2.0 * math.pi - 1.0e-12
+        inner = make(p["rmin"], dphi if full else min(dphi + 1.0e-4, 2.0 * math.pi))
+        outer = _occ_cut(outer, inner)
+    return outer
+
+
 def _occ_leaf(lf):
     from OCC.Core.BRepPrimAPI import (BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCylinder,
                                       BRepPrimAPI_MakeSphere)
     from OCC.Core.gp import gp_Pnt
     kind, p, frame = lf["type"], lf["params"], lf["frame"]
+    if kind == "TGeoTorus":
+        return _occ_torus(lf)
+    if kind == "TGeoEltu":
+        return _occ_eltu(lf)
     if kind == "TGeoPcon":
         return _occ_pcon(lf)
     if kind in _PRISM_TYPES:
@@ -1003,6 +1102,10 @@ def _root_leaf(lf, name):
         return ROOT.TGeoCone(name, p["dz"], p["rmin1"], p["rmax1"], p["rmin2"], p["rmax2"])
     if kind == "TGeoSphere":
         return ROOT.TGeoSphere(name, p["rmin"], p["rmax"])
+    if kind == "TGeoTorus":
+        return ROOT.TGeoTorus(name, p["r"], p["rmin"], p["rmax"], p["phi1"], p["dphi"])
+    if kind == "TGeoEltu":
+        return ROOT.TGeoEltu(name, p["a"], p["b"], p["dz"])
     if kind == "TGeoPcon":
         shape = ROOT.TGeoPcon(name, p["phi1"], p["dphi"], len(p["z"]))
         for i, (zz, r0, r1) in enumerate(zip(p["z"], p["rmin"], p["rmax"])):
