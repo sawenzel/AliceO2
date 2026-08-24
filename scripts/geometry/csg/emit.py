@@ -69,6 +69,13 @@ def model_tolerance_cm(shape):
     return worst
 
 
+# What `process_solid` tries, in order, when the cascade's own candidate is REJECTED by the
+# acceptance test rather than declined by a matcher. Each entry answers about the whole solid and
+# skips every earlier matcher, so the order here is the order of increasing generality.
+_RETRIES = (("a revolved profile", recognise.recognise_revolved),
+            ("a single cell", recognise.recognise_single_cell))
+
+
 def _build_and_accept(solid, cand, tol, band_factor):
     """`(acceptance|None, reason|None)` for one candidate. Never raises on a bad candidate."""
     try:
@@ -108,27 +115,31 @@ def process_solid(solid, name, tolerance=None, band_factor=1.0):
         return record
     record["reason"] = why_not
 
-    alternative, alt_declined = recognise.recognise_revolved(solid)
-    if alternative is None or alternative["recogniser"] == cand["recogniser"]:
-        # Either the solid is not a revolved profile at all, or the revolved matcher is what
-        # produced the candidate that was just refused; there is nothing else to try.
-        if alternative is not None:
+    notes = []
+    for label, propose in _RETRIES:
+        alternative, alt_declined = propose(solid)
+        if alternative is None:
+            notes.append(f"as {label}: {alt_declined}")
+            continue
+        if alternative["recogniser"] == cand["recogniser"]:
+            # This matcher is what produced the candidate that was just refused; retrying it
+            # would refuse it again.
+            notes.append(f"as {label}: the same proposal that was just rejected")
+            continue
+        alt_result, alt_why_not = _build_and_accept(solid, alternative, tol, band_factor)
+        if alt_result is not None and alt_result.get("accepted"):
+            record["retriedAfter"] = {"recogniser": cand["recogniser"],
+                                      "description": record["description"], "reason": why_not}
+            record["recogniser"] = alternative["recogniser"]
+            record["description"] = prim.describe(alternative)
+            record["acceptance"] = alt_result
+            record["accepted"] = True
+            record["candidate"] = alternative
+            record["reason"] = None
             return record
-        record["reason"] = f"{why_not}; as a revolved profile: {alt_declined}"
-        return record
-    alt_result, alt_why_not = _build_and_accept(solid, alternative, tol, band_factor)
-    if alt_result is not None and alt_result.get("accepted"):
-        record["retriedAfter"] = {"recogniser": cand["recogniser"],
-                                  "description": record["description"], "reason": why_not}
-        record["recogniser"] = alternative["recogniser"]
-        record["description"] = prim.describe(alternative)
-        record["acceptance"] = alt_result
-        record["accepted"] = True
-        record["candidate"] = alternative
-        record["reason"] = None
-        return record
-    record["reason"] = (f"{why_not}; retried as {alternative['recogniser']} "
-                        f"({prim.describe(alternative)}): {alt_why_not}")
+        notes.append(f"retried as {alternative['recogniser']} "
+                     f"({prim.describe(alternative)}): {alt_why_not}")
+    record["reason"] = "; ".join([why_not] + notes)
     return record
 
 
@@ -387,6 +398,22 @@ _CANDIDATE_DIGESTS_BEFORE_THE_REVOLVED_MATCHER = {
 }
 
 
+# The single cell's candidates, frozen the same way. `tube_window` and `cyl_inter_cyl` are the
+# two parts `Stream_AA_FlatCSG.md` §5 step 2 exists to retire, so what they emit is worth being
+# unable to change by accident.
+_CELL_CANDIDATE_DIGESTS = {
+    "Steinmetz solid (two cylinders intersected)":
+        "9f87b85a40ae93b2fe3e94c582974225d0954fa4c39337358fdd9bf7fee8db57",
+    "tube with a transverse window":
+        "e85097015a53ee1ff72b99a842a1f97a319a44e27e407beaa11c974f83c2660c",
+    "cylinder cut by an oblique plane":
+        "77388f8d14e7e706e3fce4efb3b7ef2b7347c185278fc97c209c679d43f5b6ec",
+    "cube with an axial through-hole":
+        "506948171bc7ae669699ccc49013126000b4cb6f4b5327f00293959de4b7e56f",
+    "cylinder with a milled flat":
+        "21b1e7406b7f17dca37349d160742135c17af3b6865673225fdb07d61459018b",
+}
+
 # The same floor for rung 2's own emissions: SHA-256 of `json.dumps(candidate, sort_keys=True)`
 # for every prism-family fixture, recorded when the matcher landed. A row here may be updated only
 # together with a measured statement about which artefacts moved.
@@ -456,7 +483,7 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
     """
     import hashlib
     import math
-    from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Cut, BRepAlgoAPI_Fuse
+    from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Common, BRepAlgoAPI_Cut, BRepAlgoAPI_Fuse
     from OCC.Core.BRepBuilderAPI import (BRepBuilderAPI_MakeEdge, BRepBuilderAPI_MakeFace,
                                          BRepBuilderAPI_MakePolygon, BRepBuilderAPI_MakeSolid,
                                          BRepBuilderAPI_Sewing, BRepBuilderAPI_Transform)
@@ -477,9 +504,11 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
             print(f"  [{'ok ' if condition else 'FAIL'}] {name}" + (f"  {detail}" if detail else ""))
 
     seen_digests = {}
+    seen_recognisers = {}
 
     def expect(name, solid, want_recogniser, want_leaves=1):
         record = process_solid(solid, name)
+        seen_recognisers[name] = record["recogniser"] if record["accepted"] else None
         if record["accepted"]:
             seen_digests[name] = hashlib.sha256(
                 json.dumps(record["candidate"], sort_keys=True).encode()).hexdigest()
@@ -628,7 +657,11 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
     #    wedge. The recogniser must decline rather than emit the round tube.
     flatted = BRepAlgoAPI_Cut(cyl, BRepPrimAPI_MakeBox(
         gp_Pnt(1.5, -3, -6), 3.0, 6.0, 12.0).Shape()).Shape()
-    expect_declined("cylinder with a milled flat", flatted)
+    # A milled flat is a cylinder, its two caps and one plane: four halfspaces, no concave edge,
+    # one cell. The single-cell emitter converts it exactly, so the expectation moved and the
+    # shape did not -- the same flip the blind bore made when the revolved matcher landed.
+    flat_record = expect("cylinder with a milled flat", flatted, "cell-intersection",
+                         want_leaves=2)
 
     # --- negative controls for the revolved matcher ---
     # 5. a TGeoPgon. `conv_pgon` writes its laterals as PLANES at the apothem radius, so a
@@ -1148,6 +1181,155 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
                     if seen_digests.get(name) != digest)
           or f"{len(_CANDIDATE_DIGESTS_BEFORE_THE_REVOLVED_MATCHER)} candidates unchanged")
 
+    # --- rung 3: the single cell, the three fixtures Stream_AA §5 step 2 names ---
+    # `BRepPrimAPI` builds these the way `make_boolean_fixtures.py` does, in cm rather than mm,
+    # so the ladder's own solids and these are the same constructions.
+    def cyl_along(radius, length, origin, direction):
+        return BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(*origin), gp_Dir(*direction)),
+                                        radius, length).Shape()
+
+    # Two orthogonal r = 1 cylinders intersected: the Steinmetz solid, whose whole boundary is
+    # the transcendental cylinder-cylinder curve and which has no planar face at all.
+    steinmetz = BRepAlgoAPI_Common(cyl_along(1.0, 6.0, (0, 0, -3), (0, 0, 1)),
+                                   cyl_along(1.0, 6.0, (-3, 0, 0), (1, 0, 0))).Shape()
+    steinmetz_record = expect("Steinmetz solid (two cylinders intersected)", steinmetz,
+                              "cell-intersection", want_leaves=2)
+    check("the Steinmetz solid reaches the cell emitter only after a rejection",
+          (steinmetz_record.get("retriedAfter") or {}).get("recogniser") == "tier2-tube-union",
+          f"retried after {(steinmetz_record.get('retriedAfter') or {}).get('recogniser')}")
+    # A tube with a transverse hole: four halfspaces, one of them the hole wall, whose material
+    # is OUTSIDE its own carrier and which therefore enters as a subtraction.
+    window = BRepAlgoAPI_Cut(cyl_along(1.5, 6.0, (0, 0, -3), (0, 0, 1)),
+                             cyl_along(0.8, 6.0, (-3, 0, 0), (1, 0, 0))).Shape()
+    window_record = expect("tube with a transverse window", window, "cell-intersection",
+                           want_leaves=2)
+    check("the window's hole wall is a complemented leaf and its barrel is not",
+          window_record["accepted"]
+          and not window_record["candidate"]["leaves"][0].get("outside")
+          and window_record["candidate"]["leaves"][1].get("outside") is True,
+          window_record["description"])
+    check("the barrel and its two caps folded into one TGeoTube",
+          window_record["accepted"]
+          and window_record["candidate"]["leaves"][0]["type"] == "TGeoTube"
+          and abs(window_record["candidate"]["leaves"][0]["params"]["dz"] - 3.0) < 1e-12
+          and window_record["candidate"]["notes"]["nCarriers"] == 4,
+          f"{window_record['candidate']['notes'] if window_record['accepted'] else 'n/a'}")
+    # A cylinder cut by an oblique plane: the cut face is an exact ellipse, and the remaining
+    # cap plane folds into the tube while the oblique one stays a halfspace.
+    oblique_knife = BRepPrimAPI_MakeBox(gp_Pnt(-20, -20, 0), 40.0, 40.0, 40.0).Shape()
+    oblique_spin = gp_Trsf()
+    oblique_spin.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(1, 0, 0)), math.radians(60.0))
+    oblique_lift = gp_Trsf()
+    oblique_lift.SetTranslation(gp_Vec(0.0, 0.0, 2.5))
+    oblique = BRepAlgoAPI_Cut(
+        cyl_along(1.2, 5.0, (0, 0, 0), (0, 0, 1)),
+        BRepBuilderAPI_Transform(oblique_knife, oblique_lift.Multiplied(oblique_spin),
+                                 True).Shape()).Shape()
+    expect("cylinder cut by an oblique plane", oblique, "cell-intersection", want_leaves=2)
+    # A cube with an axial through-hole: six planes that are a TGeoBBox, and a hole wall.
+    drilled = BRepAlgoAPI_Cut(BRepPrimAPI_MakeBox(gp_Pnt(-2, -2, -2), 4.0, 4.0, 4.0).Shape(),
+                              cyl_along(0.8, 6.0, (0, 0, -3), (0, 0, 1))).Shape()
+    drilled_record = expect("cube with an axial through-hole", drilled, "cell-intersection",
+                            want_leaves=2)
+    check("the cube's six plane carriers folded into one TGeoBBox",
+          drilled_record["accepted"]
+          and drilled_record["candidate"]["leaves"][0]["type"] == "TGeoBBox"
+          and drilled_record["candidate"]["notes"]["nCarriers"] == 7,
+          drilled_record["description"])
+
+    # --- rung 3 negative controls: the ladder of near-misses, and which test catches each ---
+    # A shallow V notch cut into a cylinder is genuinely TWO cells -- the solid is the union of
+    # two halfspaces' complements, not their intersection -- and the notch angle decides which of
+    # the three tests notices. Every rung of this ladder must refuse; the last must accept,
+    # because at that angle the part IS the cell to the resolution the pipeline declares.
+    def notched_cylinder(angle):
+        def knife(sign):
+            slab = BRepPrimAPI_MakeBox(gp_Pnt(1.5, -10.0, -10.0), 20.0, 20.0, 20.0).Shape()
+            spin = gp_Trsf()
+            spin.SetRotation(gp_Ax1(gp_Pnt(1.5, 0.0, 0.0), gp_Dir(0, 0, 1)), sign * angle)
+            return BRepBuilderAPI_Transform(slab, spin, True).Shape()
+        return BRepAlgoAPI_Cut(cyl, BRepAlgoAPI_Common(knife(1.0), knife(-1.0)).Shape()).Shape()
+
+    notch_trusted = expect_declined("cylinder with a 2e-03 rad notch (a trusted concave edge)",
+                                    notched_cylinder(2.0e-3), "trusted concave edge")
+    check("the concave decline names how many edges it counted",
+          "1 trusted concave edge(s) of 9" in (notch_trusted["reason"] or ""),
+          (notch_trusted["reason"] or "")[:120])
+    notch_gap = expect_declined("cylinder with a 1e-05 rad notch (below the trust filter)",
+                                notched_cylinder(1.0e-5), "the cell's boundary is")
+    check("the gap is what refuses the notch the trust filter let through",
+          "the cell's boundary is" in (notch_gap["reason"] or "")
+          and notch_gap["recogniser"] is None,
+          (notch_gap["reason"] or "")[-140:])
+    notch_volume = expect_declined("cylinder with a 1e-06 rad notch (ten model tolerances deep)",
+                                   notched_cylinder(1.0e-6), "symmetric difference")
+    check("the volume is what refuses a notch too shallow for the gap to see",
+          notch_volume["recogniser"] == "cell-intersection"
+          and not notch_volume["accepted"],
+          (notch_volume["reason"] or "")[:140])
+    # ... and the other edge of the same knife: one model tolerance deep is inside every
+    # declared resolution and must be accepted, or the ladder above would prove nothing.
+    expect("cylinder with a 1e-07 rad notch (one model tolerance deep)",
+           notched_cylinder(1.0e-7), "cell-intersection", want_leaves=2)
+
+    # A genuine two-cell body, asked of the cell emitter directly, because the cascade answers it
+    # correctly as a union long before the emitter would see it.
+    crossed = BRepAlgoAPI_Fuse(cyl_along(1.0, 6.0, (0, 0, -3), (0, 0, 1)),
+                               cyl_along(1.0, 6.0, (-3, 0, 0), (1, 0, 0))).Shape()
+    crossed_cand, crossed_why = recognise.recognise_single_cell(crossed)
+    check("two fused cylinders are refused by the cell emitter, naming the concave edges",
+          crossed_cand is None and "trusted concave edge(s)" in (crossed_why or ""),
+          (crossed_why or "")[:120])
+    # An all-planar body is the prism family's. Asked with a chamfered box -- convex, seven
+    # planes, no concave edge at all, so the cell test itself would say yes.
+    chamfer = BRepPrimAPI_MakeBox(gp_Pnt(1.2, -9.0, -9.0), 20.0, 20.0, 20.0).Shape()
+    chamfer_spin = gp_Trsf()
+    chamfer_spin.SetRotation(gp_Ax1(gp_Pnt(1.2, 0.0, 0.0), gp_Dir(0, 1, 0)),
+                             math.radians(35.0))
+    chamfered = BRepAlgoAPI_Cut(
+        BRepPrimAPI_MakeBox(gp_Pnt(-2, -2, -2), 4.0, 4.0, 4.0).Shape(),
+        BRepBuilderAPI_Transform(chamfer, chamfer_spin, True).Shape()).Shape()
+    planar_cand, planar_why = recognise.recognise_single_cell(chamfered)
+    check("an all-planar solid is handed to the prism family, not read as halfspaces",
+          planar_cand is None and "belongs to the prism family" in (planar_why or ""),
+          (planar_why or "")[:120])
+    # The L-plate has a concave edge, so the cell emitter refuses it on that count instead.
+    ell_cand, ell_why = recognise.recognise_single_cell(ell)
+    check("the L-plate is refused by the cell emitter on its concave edge",
+          ell_cand is None and "trusted concave edge(s)" in (ell_why or ""),
+          (ell_why or "")[:120])
+
+    # --- the floor: the parts the earlier rungs own are not intercepted ---
+    for name, want in (("L-shaped plate", "rung2-xtru"),
+                       ("placed Xtru (non-convex L section)", "rung2-xtru"),
+                       ("stepped polycone (duplicate z planes)", "revolved-pcon"),
+                       ("box", "tier1-box"), ("tube", "tier1-tube"),
+                       ("rod-and-eye (two-cluster union)", "tier2-tube-union")):
+        check(f"{name} is still recognised as {want}", seen_recognisers.get(name) == want,
+              f"{seen_recognisers.get(name)}")
+
+    check("every single-cell candidate is byte-identical to its recorded digest",
+          all(seen_digests.get(name) == digest for name, digest
+              in _CELL_CANDIDATE_DIGESTS.items()),
+          "; ".join(f"{name}: {seen_digests.get(name)} != {digest}" for name, digest
+                    in _CELL_CANDIDATE_DIGESTS.items()
+                    if seen_digests.get(name) != digest)
+          or f"{len(_CELL_CANDIDATE_DIGESTS)} candidates unchanged")
+
+    # --- the description must refuse an ill-formed intersection ---
+    unit_box = prim.leaf("TGeoBBox", {"dx": 1.0, "dy": 1.0, "dz": 1.0}, prim.identity_frame())
+    hole = prim.leaf("TGeoTube", {"rmin": 0.0, "rmax": 0.5, "dz": 2.0},
+                     prim.identity_frame(), True)
+    for label, op, leaves in (("a single leaf", "intersection", [unit_box]),
+                              ("a complement first", "intersection", [hole, unit_box]),
+                              ("a complement in a union", "union", [unit_box, hole])):
+        try:
+            prim.candidate(op, leaves, "self-test")
+            refused = False
+        except ValueError:
+            refused = True
+        check(f"a candidate with {label} is refused", refused)
+
     # --- the ROOT half: the emitted TGeoShape must answer like the closed form ---
     if with_root:
         import ROOT
@@ -1412,6 +1594,51 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
                        f"nvert {back_xtru.GetNvert() if back_xtru else 0}, "
                        f"nz {back_xtru.GetNz() if back_xtru else 0}")
         fxtru.Close()
+
+        # --- the ROOT half of the single cell ---
+        window_shape, window_placement = prim.build_root(window_record["candidate"],
+                                                         "cellwindowprobe")
+        node = window_shape.GetBoolNode()
+        check("a single cell emits an unplaced TGeoCompositeShape over a TGeoSubtraction node",
+              window_shape.ClassName() == "TGeoCompositeShape" and window_placement is None
+              and node.ClassName() == "TGeoSubtraction"
+              and node.GetLeftShape().ClassName() == "TGeoTube"
+              and node.GetRightShape().ClassName() == "TGeoTube",
+              f"{window_shape.ClassName()} over {node.ClassName()}"
+              f"({node.GetLeftShape().ClassName()}, {node.GetRightShape().ClassName()}), "
+              f"placement {'present' if window_placement else 'absent'}")
+        steinmetz_shape, _pl = prim.build_root(steinmetz_record["candidate"], "cellsteinprobe")
+        check("an intersection cell emits a TGeoIntersection node",
+              steinmetz_shape.GetBoolNode().ClassName() == "TGeoIntersection",
+              steinmetz_shape.GetBoolNode().ClassName())
+        for label, record, solid_of in (("the window", window_record, window),
+                                        ("the Steinmetz solid", steinmetz_record, steinmetz),
+                                        ("the drilled cube", drilled_record, drilled)):
+            cc = crosscheck_contains(record["candidate"], solid_of, n_points=20000)
+            check(f"the ROOT cell and the CAD solid agree on Contains for {label}",
+                  cc["disagreements"] == 0,
+                  f"{cc['disagreements']} disagreement(s) over {cc['points']} points")
+            dev = crosscheck_bbox(record["candidate"])
+            check(f"the OCCT and ROOT realisations agree on the bounding box for {label}",
+                  dev < 1.0e-9, f"max deviation {dev:.3g} cm")
+        # 16/3 r^3 is the Steinmetz volume in closed form. `TGeoCompositeShape::Capacity()` is a
+        # Monte-Carlo estimate, which is exactly why `checkKnownSource.py` marks a composite's
+        # capacity not comparable -- the band here is that sampling noise, not a tolerance.
+        want_steinmetz = 16.0 / 3.0
+        rel_steinmetz = abs(steinmetz_shape.Capacity() - want_steinmetz) / want_steinmetz
+        check("the emitted Steinmetz composite has the closed-form volume, to sampling noise",
+              rel_steinmetz < 0.02,
+              f"{steinmetz_shape.Capacity():.6f} vs {want_steinmetz:.6f} "
+              f"(rel {rel_steinmetz:.2e}, Monte-Carlo)")
+        cell_target = Path("/tmp/csg_selftest_cell.root")
+        write_shape_root(window_record["candidate"], cell_target)
+        fcell = ROOT.TFile.Open(str(cell_target))
+        back_cell = fcell.Get("shape")
+        check("shape_<part>.root round-trips a single cell as a TGeoCompositeShape",
+              back_cell is not None and back_cell.ClassName() == "TGeoCompositeShape"
+              and back_cell.GetBoolNode().ClassName() == "TGeoSubtraction",
+              f"read {back_cell.ClassName() if back_cell else 'nothing'}")
+        fcell.Close()
 
     n_ok = sum(1 for _n, ok, _d in checks if ok)
     if verbose:

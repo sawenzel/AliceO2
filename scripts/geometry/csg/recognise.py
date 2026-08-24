@@ -789,9 +789,12 @@ def _solid_samples(solid):
     while exp.More():
         edge = topods.Edge(exp.Current())
         exp.Next()
-        curve, first, last = BRep_Tool.Curve(edge)
-        if curve is None:
+        # A degenerate edge -- a cone's apex, a sphere's pole -- has no 3D curve, and PyROOT's
+        # binding then returns a 2-tuple rather than the usual (curve, first, last).
+        span = BRep_Tool.Curve(edge)
+        if span is None or len(span) < 3 or span[0] is None:
             continue
+        curve, first, last = span[0], span[1], span[2]
         pnt = curve.Value(0.5 * (first + last))
         key = (round(pnt.X(), 9), round(pnt.Y(), 9), round(pnt.Z(), 9))
         if key in seen:
@@ -1257,6 +1260,422 @@ def _match_two_cluster_union(records, clusters, caps, wedges, tol):
 
 
 # ------------------------------------------------------------------------------------------
+# The single cell: one intersection of the part's own halfspaces -> TGeoCompositeShape
+# ------------------------------------------------------------------------------------------
+#
+# `Stream_AA_FlatCSG.md` §5 step 2. A part with **no trusted concave edge** is one cell of the
+# arrangement of its own faces' carriers: the intersection of one oriented halfspace per distinct
+# carrier, and nothing else. That is not the same as convex -- a tube's bore and a drilled hole
+# are halfspaces whose material lies *outside* the carrier, which is why `tube_window` (4
+# halfspaces, one of them a hole wall) is one cell while looking nothing like a convex body.
+#
+# What is emitted, and why it is exact
+# ------------------------------------
+# One bounded native leaf per carrier, folded into a `TGeoCompositeShape` of intersections and
+# subtractions. OCCT cannot build an unbounded halfspace and ROOT's `TGeoHalfSpace` has no OCCT
+# counterpart, so a halfspace is realised on BOTH sides as a bounded primitive sized to cover the
+# part's bounding box inflated by a generous margin. That is exact, not an approximation, and the
+# argument is short:
+#
+#   * write `B` for the inflated box, `H_i` for the halfspaces and `L_i` for the leaves;
+#   * every leaf satisfies `H_i n B  ==  L_i n B` -- an interior leaf is `H_i` clipped to
+#     something containing `B`, an exterior leaf's primitive covers all of `H_i`'s complement
+#     within `B`;
+#   * the fold is `L_0 n L_1 n ... `, and `L_0` is bounded by construction, so the whole fold
+#     lies inside `B` and equals `(n H_i) n B`;
+#   * the cell is inside the part's own bounding box, hence inside `B`, so the fold is the cell.
+#
+# The artificial faces therefore never touch the part's neighbourhood, which is the only place
+# the symmetric difference looks. Where the single-cell hypothesis is *false* the fold is strictly
+# larger than the part and `dV_sym` says so by exactly that much -- which is the falsifier
+# `Stream_AA` §5.2 names, and it is left to the volume rather than guessed at here.
+#
+# The one quantity that decides
+# -----------------------------
+# `Stream_K_Tier0.md` §3: `_boundary_gap`, the symmetric Hausdorff distance in cm from each
+# solid's boundary samples to the *other solid's boundary*, over the bounding-box diagonal. It is
+# the same kind of measurement `_profile_gap` and `_point_set_gap` make for the earlier rungs, and
+# it is a length over a length. No per-class criterion, no angle. It is load-bearing rather than
+# decorative: a V notch shallower than the census's trust filter can see is refused by this
+# number and by nothing else (see the notch ladder in `emit.self_test`).
+
+# How far past the part's own bounding box a halfspace leaf is built. A quarter of the diagonal
+# puts every artificial face clear of the material while keeping the leaf near the part's size:
+# `TGeoIntersection::ComputeBBox` is the running overlap of the operands' boxes, so a leaf sized
+# to a sphere of one and a half diagonals -- the first version here -- handed ROOT a composite
+# whose box was twice the solid on `oblique_cut_cyl`, and ROOT rejects rays against that box.
+_CELL_MARGIN = 0.25
+
+# A cell wider than this ships as a boolean tree of that many leaves, and `Stream_AA_FlatCSG.md`
+# §3.3 measures a composite's node entry at about 7x a primitive's. The budget is the AND-length
+# of the cell, the same quantity §2 tabulates as `max cell`, and a part over it is declined
+# rather than shipped expensive. Measured on the five detector corpora, nothing is refused by it.
+_CELL_MAX_LEAVES = 8
+
+# At most this many boundary samples per side feed the gap. The samples are strided rather than
+# truncated so a part with many edges is still sampled all over.
+_CELL_GAP_SAMPLES = 200
+
+
+def _stride(items, most):
+    if len(items) <= most:
+        return items
+    step = len(items) / float(most)
+    return [items[int(i * step)] for i in range(most)]
+
+
+def _point_to_shape_distance(point, shape):
+    from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeVertex
+    from OCC.Core.BRepExtrema import BRepExtrema_DistShapeShape
+    from OCC.Core.gp import gp_Pnt
+    probe = BRepBuilderAPI_MakeVertex(gp_Pnt(*point)).Vertex()
+    dist = BRepExtrema_DistShapeShape(probe, shape)
+    dist.Perform()
+    if not dist.IsDone():
+        return float("inf")
+    return dist.Value()
+
+
+def _boundary_gap(a, b, most=_CELL_GAP_SAMPLES):
+    """Symmetric Hausdorff distance, in cm, from each solid's boundary samples to the OTHER's
+    boundary.
+
+    Deliberately not `_point_set_gap`, which compares one sample *set* against the other. That is
+    right for a prism, whose edges are straight and whose midpoints are therefore canonical, and
+    wrong here: `tube_window`'s window rim is the transcendental cylinder-cylinder curve, and two
+    constructions of the *same* rim parametrise it differently, so their midpoints differ by
+    1.6e-03 cm on a curve where the two solids coincide exactly. Measuring a point against the
+    other shape rather than against its samples removes that artefact without weakening anything
+    -- a sample that is genuinely off the other boundary still reports its true distance.
+    """
+    worst = 0.0
+    for shape, other in ((a, b), (b, a)):
+        for point in _stride(_solid_samples(shape), most):
+            worst = max(worst, _point_to_shape_distance(point, other))
+    return worst
+
+
+def _same_carrier(a, b, tol):
+    """Do two faces sit on the same oriented carrier surface?"""
+    if a["kind"] != b["kind"]:
+        return False
+    if a["kind"] == "plane":
+        return (_collinear(a["n"], b["n"]) and _dot(a["n"], b["n"]) > 0.0
+                and abs(_dot(_sub(a["p"], b["p"]), a["n"])) <= tol)
+    if a["kind"] == "sphere":
+        return _norm(_sub(a["p"], b["p"])) <= tol and abs(a["r"] - b["r"]) <= tol
+    if not (_collinear(a["d"], b["d"]) and _on_axis(b["p"], a["p"], a["d"], tol)):
+        return False
+    if a["kind"] == "cylinder":
+        return abs(a["r"] - b["r"]) <= tol
+    # A cone is pinned by its apex and its half-angle; the reference radius is chart-dependent.
+    return (abs(abs(a["a"]) - abs(b["a"])) <= ANG_TOL
+            and _norm(_sub(_cone_apex(a), _cone_apex(b))) <= tol)
+
+
+def _cone_apex(carrier):
+    slope = math.tan(carrier["a"])
+    if abs(slope) < 1.0e-30:
+        return carrier["p"]
+    return _add(carrier["p"], _scale(carrier["d"], -carrier["r"] / slope))
+
+
+def _halfspace_carriers(solid, tol):
+    """The distinct oriented halfspaces of a solid's faces, with the material side of each.
+
+    `census.halfspace_side` is the authority on which side the material is on, and it is reused
+    rather than reimplemented: it reads the face's own normal field at the patch centre and
+    compares it against the carrier's outward radial direction, and the census cross-checks that
+    verdict against `TopAbs_REVERSED` in its own self-test. A rule keyed on the orientation flag
+    alone has already been measured to be wrong on revolved solids (see `_match_revolved`).
+    """
+    from csg import census
+    from OCC.Core.BRepAdaptor import BRepAdaptor_Surface
+    from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_REVERSED
+    from OCC.Core.TopExp import TopExp_Explorer
+    from OCC.Core.TopoDS import topods
+
+    carriers = []
+    exp = TopExp_Explorer(solid, TopAbs_FACE)
+    while exp.More():
+        face = topods.Face(exp.Current())
+        exp.Next()
+        ad = BRepAdaptor_Surface(face, True)
+        kind = census.SURFACE_TYPE_NAME.get(ad.GetType(), "other")
+        if kind not in ("plane", "cylinder", "cone", "sphere"):
+            raise Declined(f"a {kind} face is outside the single-cell emitter's carriers")
+        side = census.halfspace_side(face, ad, kind)
+        if side is None:
+            raise Declined(f"a {kind} face's material side could not be decided")
+        rec = {"kind": kind, "side": side}
+        if kind == "plane":
+            axis = ad.Plane().Axis()
+            normal = _xyz(axis.Direction())
+            if face.Orientation() == TopAbs_REVERSED:
+                normal = _scale(normal, -1.0)
+            rec.update(n=_unit(normal), p=_xyz(axis.Location()))
+        elif kind == "cylinder":
+            cy = ad.Cylinder()
+            rec.update(d=_unit(_xyz(cy.Axis().Direction())), p=_xyz(cy.Axis().Location()),
+                       r=cy.Radius(), x=_xyz(cy.Position().XDirection()))
+        elif kind == "cone":
+            co = ad.Cone()
+            rec.update(d=_unit(_xyz(co.Axis().Direction())), p=_xyz(co.Axis().Location()),
+                       r=co.RefRadius(), a=co.SemiAngle(),
+                       x=_xyz(co.Position().XDirection()))
+        else:
+            sp = ad.Sphere()
+            rec.update(p=_xyz(sp.Location()), r=sp.Radius())
+        for existing in carriers:
+            if _same_carrier(existing, rec, tol):
+                if existing["side"] != rec["side"]:
+                    raise Declined("one carrier bounds material on both sides: not one cell")
+                break
+        else:
+            carriers.append(rec)
+    if not carriers:
+        raise Declined("no faces to read halfspaces from")
+    return carriers
+
+
+def _bbox_of(shape):
+    from OCC.Core.Bnd import Bnd_Box
+    from OCC.Core.BRepBndLib import brepbndlib
+    box = Bnd_Box()
+    brepbndlib.Add(shape, box)
+    box.SetGap(0.0)
+    return box.Get()
+
+
+class _CellBox:
+    """The part's bounding box, and the extent every halfspace leaf has to cover.
+
+    Write `B` for this box grown by `margin`. Every leaf is built so that `H_i n B == L_i n B`,
+    which is what makes the fold of the leaves equal to the intersection of the halfspaces on the
+    part's neighbourhood, and hence equal to the cell.
+    """
+
+    def __init__(self, solid, diag):
+        xmin, ymin, zmin, xmax, ymax, zmax = _bbox_of(solid)
+        self.centre = (0.5 * (xmin + xmax), 0.5 * (ymin + ymax), 0.5 * (zmin + zmax))
+        self.corners = [(x, y, z) for x in (xmin, xmax)
+                        for y in (ymin, ymax) for z in (zmin, zmax)]
+        self.margin = _CELL_MARGIN * max(diag, 1.0)
+
+    def window(self, origin, direction):
+        """`[lo, hi]`, measured from `origin` along `direction`, that a leaf must span."""
+        reach = [_dot(_sub(corner, origin), direction) for corner in self.corners]
+        return min(reach) - self.margin, max(reach) + self.margin
+
+
+def _cell_leaf(carrier, box):
+    """One bounded native leaf covering this halfspace over the part's neighbourhood."""
+    outside = carrier["side"] == "exterior"
+    if carrier["kind"] == "plane":
+        # A box whose +z face lies exactly on the carrier plane and whose body fills the material
+        # side. The frame's z points into the material, i.e. against the outward normal.
+        normal = carrier["n"]
+        into = _scale(normal, -1.0)
+        foot = _sub(box.centre, _scale(normal, _dot(_sub(box.centre, carrier["p"]), normal)))
+        oriented = prim.frame_from_axis(foot, into)
+        depth = max(box.window(foot, into)[1], box.margin)
+        half = [max(max(abs(_dot(_sub(c, foot), tuple(oriented[axis]))) for c in box.corners)
+                    + box.margin, box.margin) for axis in ("x", "y")]
+        frame = dict(oriented)
+        frame["origin"] = [float(v) for v in _add(foot, _scale(into, 0.5 * depth))]
+        return prim.leaf("TGeoBBox", {"dx": half[0], "dy": half[1], "dz": 0.5 * depth},
+                         frame, outside)
+    if carrier["kind"] == "sphere":
+        # Already bounded: the halfspace is the ball itself, at its true radius.
+        return prim.leaf("TGeoSphere", {"rmin": 0.0, "rmax": carrier["r"]},
+                         prim.identity_frame(carrier["p"]), outside)
+    lo, hi = box.window(carrier["p"], carrier["d"])
+    if carrier["kind"] == "cylinder":
+        frame = prim.frame_from_axis(
+            _add(carrier["p"], _scale(carrier["d"], 0.5 * (lo + hi))), carrier["d"],
+            carrier["x"])
+        return prim.leaf("TGeoTube", {"rmin": 0.0, "rmax": carrier["r"],
+                                      "dz": 0.5 * (hi - lo)}, frame, outside)
+    # A cone's halfspace is r <= rref + u tan(a), which is empty beyond the apex, so clipping the
+    # window there loses nothing and keeps the second nappe out of the leaf.
+    slope = math.tan(carrier["a"])
+    if abs(slope) < 1.0e-30:
+        raise Declined("a conical carrier with a zero half-angle")
+    apex = -carrier["r"] / slope
+    lo, hi = (max(lo, apex), hi) if slope > 0.0 else (lo, min(hi, apex))
+    if hi - lo <= 0.0:
+        raise Declined("a conical carrier whose halfspace does not reach the part")
+    frame = prim.frame_from_axis(_add(carrier["p"], _scale(carrier["d"], 0.5 * (lo + hi))),
+                                 carrier["d"], carrier["x"])
+    return prim.leaf("TGeoCone", {"dz": 0.5 * (hi - lo), "rmin1": 0.0, "rmin2": 0.0,
+                                  "rmax1": max(carrier["r"] + lo * slope, 0.0),
+                                  "rmax2": max(carrier["r"] + hi * slope, 0.0)},
+                     frame, outside)
+
+
+def _fold_cell_leaves(carriers, box, tol):
+    """One leaf per carrier, except where several carriers already ARE a native primitive.
+
+    Two exact groupings are worth taking, and they are the only two taken here:
+
+      * an interior cylinder or cone capped by two planes perpendicular to its axis is a
+        `TGeoTube` / `TGeoCone` with a real `dz`, not three halfspaces;
+      * six interior planes in three mutually perpendicular opposite pairs are a `TGeoBBox`, and
+        that test is `_match_box` itself rather than a second copy of it.
+
+    Both are equalities, not approximations: `{r <= R} n {z <= z1} n {z >= z0}` *is* the tube.
+    The point is the shipped representation -- `tube_window` folds from four halfspaces to
+    `TGeoTube - TGeoTube` and `box_minus_cyl` from seven to `TGeoBBox - TGeoTube`, which is one
+    boolean node instead of six on parts whose whole reason for existing is query cost
+    (`Stream_P` measures a composite's node entry at about 7x a primitive's).
+    """
+    planes = [c for c in carriers if c["kind"] == "plane"]
+    axials = [c for c in carriers if c["kind"] in ("cylinder", "cone")]
+    consumed = set()
+    leaves = []
+
+    for carrier in axials:
+        if carrier["side"] != "interior":
+            continue
+        open_lo, open_hi = box.window(carrier["p"], carrier["d"])
+        ends, span = {}, {}
+        for sign, key, opened in ((1.0, "hi", open_hi), (-1.0, "lo", open_lo)):
+            here = [pl for pl in planes if id(pl) not in consumed
+                    and _collinear(pl["n"], carrier["d"])
+                    and sign * _dot(pl["n"], carrier["d"]) > 0.0]
+            ends[key] = here[0] if len(here) == 1 else None
+            # An end with no cap of its own is left open at the same extent an unfolded
+            # halfspace leaf would use, so folding one cap in is still exact.
+            span[key] = (_dot(_sub(ends[key]["p"], carrier["p"]), carrier["d"])
+                         if ends[key] is not None else opened)
+        if ends["hi"] is None and ends["lo"] is None:
+            continue
+        if span["hi"] - span["lo"] <= tol:
+            continue
+        folded = _capped_axial_leaf(carrier, span["lo"], span["hi"])
+        if folded is None:
+            continue
+        for key in ("hi", "lo"):
+            if ends[key] is not None:
+                consumed.add(id(ends[key]))
+        consumed.add(id(carrier))
+        leaves.append(folded)
+
+    loose = [pl for pl in planes if id(pl) not in consumed]
+    if len(loose) == 6:
+        try:
+            as_box = _match_box(loose, tol)
+        except Declined:
+            as_box = None
+        if as_box is not None:
+            leaves.append(as_box["leaves"][0])
+            consumed.update(id(pl) for pl in loose)
+
+    for carrier in carriers:
+        if id(carrier) in consumed:
+            continue
+        leaves.append(_cell_leaf(carrier, box))
+    if not leaves:
+        raise Declined("no halfspace leaf could be built")
+    return leaves
+
+
+def _capped_axial_leaf(carrier, lo, hi):
+    """The bounded primitive an interior cylinder or cone plus its two caps already is."""
+    frame = prim.frame_from_axis(_add(carrier["p"], _scale(carrier["d"], 0.5 * (lo + hi))),
+                                 carrier["d"], carrier["x"])
+    dz = 0.5 * (hi - lo)
+    if carrier["kind"] == "cylinder":
+        return prim.leaf("TGeoTube", {"rmin": 0.0, "rmax": carrier["r"], "dz": dz}, frame)
+    slope = math.tan(carrier["a"])
+    rmax1 = carrier["r"] + lo * slope
+    rmax2 = carrier["r"] + hi * slope
+    if min(rmax1, rmax2) < 0.0:
+        return None                     # the apex is between the caps: not one frustum
+    return prim.leaf("TGeoCone", {"dz": dz, "rmin1": 0.0, "rmin2": 0.0,
+                                  "rmax1": rmax1, "rmax2": rmax2}, frame)
+
+
+def _leaf_bbox_volume(lf):
+    """A ranking key only: the leaf's own box, used to fold the tightest operand first."""
+    p = lf["params"]
+    if lf["type"] == "TGeoBBox":
+        return 8.0 * p["dx"] * p["dy"] * p["dz"]
+    if lf["type"] == "TGeoTube":
+        return 8.0 * p["rmax"] ** 2 * p["dz"]
+    if lf["type"] == "TGeoCone":
+        return 8.0 * max(p["rmax1"], p["rmax2"]) ** 2 * p["dz"]
+    return 8.0 * p["rmax"] ** 3
+
+
+def _match_single_cell(solid, records, tol, diag):
+    """One intersection cell of the part's own halfspaces: a `TGeoCompositeShape`."""
+    from csg import census
+    counts = census.edge_census(solid)
+    trusted = (counts["concave"] + counts["mixed"]
+               - counts["concaveNearTangential"] - counts["mixedNearTangential"])
+    if trusted:
+        raise Declined(f"{trusted} trusted concave edge(s) of {counts['edges']}: the part is "
+                       "more than one cell, and decomposition is deliberately not built")
+    if counts["nonManifold"] or counts["error"]:
+        raise Declined(f"{counts['nonManifold']} non-manifold and {counts['error']} undecidable "
+                       "edge(s): the cell test cannot be trusted here")
+
+    carriers = _halfspace_carriers(solid, tol)
+    if len(carriers) < 2:
+        raise Declined(f"{len(carriers)} distinct carrier(s): not a composite")
+    if all(c["kind"] == "plane" for c in carriers):
+        # An all-planar body is the prism family's, and rung 2 has real templates for it. Read as
+        # halfspaces it would ship as a pile of boolean nodes where a TGeoXtru or a TGeoArb8 says
+        # the same solid in one -- so the boundary between the two matchers is drawn here rather
+        # than left to whichever runs first.
+        raise Declined(f"{len(carriers)} planar carriers and nothing else: an all-planar solid "
+                       "belongs to the prism family, not to the cell emitter")
+    box = _CellBox(solid, diag)
+
+    inside_leaves, outside_leaves = [], []
+    for lf in _fold_cell_leaves(carriers, box, tol):
+        (outside_leaves if lf.get("outside") else inside_leaves).append(lf)
+    if not inside_leaves:
+        raise Declined("every carrier's material lies outside it: the cell is unbounded")
+    # Tightest first, so `TGeoIntersection::ComputeBBox`'s running overlap starts small and the
+    # emitted composite reports a bounding box of the part's own size.
+    inside_leaves.sort(key=_leaf_bbox_volume)
+    leaves = inside_leaves + outside_leaves
+    # The fold can collapse the whole cell into one native primitive -- six coplanar-face
+    # carriers that are a box, one cylinder and its two caps that are a tube. That is not an
+    # intersection of anything and is described as the primitive it is; the tag says which of the
+    # two happened, because the two answer differently to the query cost this stream exists for.
+    if len(leaves) > _CELL_MAX_LEAVES:
+        raise Declined(f"the cell is {len(leaves)} halfspaces wide, over the budget of "
+                       f"{_CELL_MAX_LEAVES}: it would ship as a boolean tree that deep")
+    op = "primitive" if len(leaves) == 1 else "intersection"
+    cand = prim.candidate(op, leaves,
+                          "cell-primitive" if op == "primitive" else "cell-intersection",
+                          notes={"nCarriers": len(carriers),
+                                 "nOutside": len(outside_leaves),
+                                 "concaveEdgesTrusted": trusted,
+                                 "nLeaves": len(leaves),
+                                 "marginDiagonals": _CELL_MARGIN})
+
+    # The one measured quantity. Built here rather than left to the acceptance test because a
+    # proposal that does not even build is a decline, not a rejection.
+    try:
+        realised = prim.build_occ(cand)
+    except Exception as exc:                                     # noqa: BLE001
+        raise Declined(f"the cell did not build in OCCT: {exc}") from None
+    gap = _boundary_gap(solid, realised)
+    scale = max(diag, 1.0)
+    if gap > REL_TOL * scale:
+        raise Declined(f"the cell's boundary is {gap:.3g} cm from the part's "
+                       f"({gap / scale:.3g} of the part's {diag:.6g} cm diagonal, "
+                       f"over {REL_TOL:.0e})")
+    cand["notes"]["cellGapCm"] = gap
+    cand["notes"]["cellGapRelative"] = gap / scale
+    return cand
+
+
+# ------------------------------------------------------------------------------------------
 # entry point
 # ------------------------------------------------------------------------------------------
 
@@ -1306,6 +1725,34 @@ def recognise(solid):
                     raise Declined(f"{primitive_declined}; as a revolved profile: "
                                    f"{revolved_declined}") from None
         return _match_two_cluster_union(records, clusters, caps, wedges, tol), None
+    except Declined as declined:
+        # Everything above has declined, which is exactly the condition the single-cell emitter
+        # runs under: no part recognised by any earlier matcher can reach it.
+        try:
+            return _match_single_cell(solid, records, tol, diag), None
+        except Declined as cell_declined:
+            return None, (f"{declined}; as a single cell: {cell_declined} "
+                          f"[{_structure(records, tol)}]")
+
+
+def recognise_single_cell(solid):
+    """Propose one intersection cell for a solid, skipping every earlier matcher.
+
+    The counterpart of `recognise_revolved`: `recognise()` reaches `_match_single_cell` only where
+    everything above it *declines*, and a proposal that is instead **rejected by the acceptance
+    test** never gets there. `cyl_inter_cyl` and `tube_window` are exactly that case -- two axis
+    clusters read as a two-tube union, which is a superset of the part and is refused by a volume.
+    `emit.process_solid` calls this after such a rejection.
+
+    Returns `(candidate|None, reason)`, and never raises on a mere mismatch.
+    """
+    records, reason = _face_records(solid)
+    if records is None:
+        return None, reason
+    diag = _bbox_diagonal(solid)
+    tol = REL_TOL * max(diag, 1.0)
+    try:
+        return _match_single_cell(solid, records, tol, diag), None
     except Declined as declined:
         return None, f"{declined} [{_structure(records, tol)}]"
 

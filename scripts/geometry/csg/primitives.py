@@ -258,7 +258,13 @@ _LEAF_VALIDATORS = {
 }
 
 
-def leaf(kind, params, frame):
+def leaf(kind, params, frame, outside=False):
+    """One placed primitive. `outside` marks a halfspace whose material is *outside* it.
+
+    An intersection of halfspaces (`op: "intersection"`) may include a halfspace stated as the
+    complement of a bounded primitive -- the bore of a tube, the wall of a drilled hole. ROOT
+    writes that as a `TGeoSubtraction` node and OCCT as a `BRepAlgoAPI_Cut`, from this one flag.
+    """
     if kind not in LEAF_TYPES:
         raise ValueError(f"unknown leaf type {kind!r}")
     arrays = _REQUIRED_ARRAY_PARAMS.get(kind, ())
@@ -282,7 +288,12 @@ def leaf(kind, params, frame):
     validator = _LEAF_VALIDATORS.get(kind)
     if validator is not None:
         validator(out)
-    return {"type": kind, "params": out, "frame": frame}
+    described = {"type": kind, "params": out, "frame": frame}
+    if outside:
+        # Only written when true, so every leaf recorded before halfspaces existed keeps its
+        # bytes and the frozen digests of the self-test stay meaningful.
+        described["outside"] = True
+    return described
 
 
 def placement_from_frame(frame):
@@ -338,12 +349,27 @@ def placement_for_candidate(cand):
 
 
 def candidate(op, leaves, recogniser, notes=None):
-    if op not in ("primitive", "union"):
+    """A described solid: `primitive`, `union`, or `intersection` (of halfspaces).
+
+    `intersection` is the single-cell form. Its leaves are folded left to right; a leaf marked
+    `outside` contributes the complement of its primitive, so the fold is a chain of
+    intersections and subtractions and not a separate op. The first leaf sets the region the
+    others cut down, so it cannot be a complement -- an intersection of complements alone is
+    unbounded and is not a cell of anything.
+    """
+    if op not in ("primitive", "union", "intersection"):
         raise ValueError(f"unknown op {op!r}")
     if op == "primitive" and len(leaves) != 1:
         raise ValueError("op 'primitive' takes exactly one leaf")
     if op == "union" and len(leaves) < 2:
         raise ValueError("op 'union' takes at least two leaves")
+    if op == "intersection":
+        if len(leaves) < 2:
+            raise ValueError("op 'intersection' takes at least two leaves")
+        if leaves[0].get("outside"):
+            raise ValueError("op 'intersection': the first leaf cannot be a complement")
+    if op != "intersection" and any(lf.get("outside") for lf in leaves):
+        raise ValueError(f"op {op!r} has no meaning for a complemented leaf")
     return {"op": op, "leaves": leaves, "recogniser": recogniser, "notes": notes or {}}
 
 
@@ -387,7 +413,14 @@ def describe(cand):
                          f"rmax {min(p['rmax']):.4g}..{max(p['rmax']):.4g})")
         else:
             parts.append(f"TGeoSphere(rmin={p['rmin']:.4g}, rmax={p['rmax']:.4g})")
-    return (" u ".join(parts)) if cand["op"] == "union" else parts[0]
+    if cand["op"] == "union":
+        return " u ".join(parts)
+    if cand["op"] == "intersection":
+        out = [parts[0]]
+        for lf, text in zip(cand["leaves"][1:], parts[1:]):
+            out.append((" - " if lf.get("outside") else " ^ ") + text)
+        return "".join(out)
+    return parts[0]
 
 
 # ------------------------------------------------------------------------------------------
@@ -396,14 +429,21 @@ def describe(cand):
 
 def build_occ(cand):
     """Realise the description as a `TopoDS_Shape` in OCCT. Requires pythonOCC."""
-    from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Fuse
-    shapes = [_occ_leaf(lf) for lf in cand["leaves"]]
-    out = shapes[0]
-    for nxt in shapes[1:]:
-        op = BRepAlgoAPI_Fuse(out, nxt)
+    from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Common, BRepAlgoAPI_Cut, BRepAlgoAPI_Fuse
+    leaves = cand["leaves"]
+    out = _occ_leaf(leaves[0])
+    for lf in leaves[1:]:
+        nxt = _occ_leaf(lf)
+        if cand["op"] == "union":
+            maker, what = BRepAlgoAPI_Fuse, "BRepAlgoAPI_Fuse"
+        elif lf.get("outside"):
+            maker, what = BRepAlgoAPI_Cut, "BRepAlgoAPI_Cut"
+        else:
+            maker, what = BRepAlgoAPI_Common, "BRepAlgoAPI_Common"
+        op = maker(out, nxt)
         op.Build()
         if not op.IsDone():
-            raise RuntimeError("BRepAlgoAPI_Fuse failed while building the candidate")
+            raise RuntimeError(f"{what} failed while building the candidate")
         out = op.Shape()
     return out
 
@@ -849,7 +889,8 @@ def build_root(cand, name="shape"):
         return shape, placement
     shapes = [(_root_leaf(lf, f"{name}_l{i}"), lf["frame"])
               for i, lf in enumerate(cand["leaves"])]
-    return _root_composite(name, shapes, cand["op"]), placement
+    outside = [bool(lf.get("outside")) for lf in cand["leaves"]]
+    return _root_composite(name, shapes, cand["op"], outside), placement
 
 
 def root_placement_matrix(placement, name="placement"):
@@ -904,27 +945,44 @@ def _root_matrix(frame, name):
     return combi
 
 
-def _root_composite(name, shapes_and_frames, op):
-    """Left-fold the leaves into nested `TGeoUnion`s.
+def _root_node_class(op, outside):
+    import ROOT
+    if op == "union":
+        return ROOT.TGeoUnion
+    if op == "intersection":
+        return ROOT.TGeoSubtraction if outside else ROOT.TGeoIntersection
+    raise ValueError(f"unhandled composite op {op!r}")
+
+
+def _root_composite(name, shapes_and_frames, op, outside=None):
+    """Left-fold the leaves into nested boolean nodes.
 
     The accumulated composite is already expressed in the part frame, so it enters the next node
     with a null matrix; only the fresh leaf carries one. `SetOwnership(.., False)` everywhere is
     not decoration: `TGeoBoolNode` deletes both its operands and both its matrices, so anything
     PyROOT still believes it owns would be freed twice.
+
+    `op` is `union` or `intersection`; under `intersection` a leaf flagged in `outside` enters
+    as a `TGeoSubtraction` instead, which is how a halfspace whose material lies outside its own
+    primitive is written. The fold order is the leaves' order and nothing here reorders it: the
+    composite's bounding box is `TGeoIntersection::ComputeBBox`'s running overlap, so a caller
+    that puts its tightest leaf first gets a tight box, and one that does not still gets the
+    right solid.
     """
     import ROOT
-    if op != "union":
-        raise ValueError(f"unhandled composite op {op!r}")
+    flags = list(outside or [False] * len(shapes_and_frames))
     (s0, f0), (s1, f1) = shapes_and_frames[0], shapes_and_frames[1]
     ROOT.SetOwnership(s0, False)
     ROOT.SetOwnership(s1, False)
-    node = ROOT.TGeoUnion(s0, s1, _root_matrix(f0, f"{name}_m0"), _root_matrix(f1, f"{name}_m1"))
+    node = _root_node_class(op, flags[1])(s0, s1, _root_matrix(f0, f"{name}_m0"),
+                                          _root_matrix(f1, f"{name}_m1"))
     ROOT.SetOwnership(node, False)
     comp = ROOT.TGeoCompositeShape(f"{name}_c1", node)
     ROOT.SetOwnership(comp, False)
     for i, (shape, frame) in enumerate(shapes_and_frames[2:], start=2):
         ROOT.SetOwnership(shape, False)
-        node = ROOT.TGeoUnion(comp, shape, ROOT.nullptr, _root_matrix(frame, f"{name}_m{i}"))
+        node = _root_node_class(op, flags[i])(comp, shape, ROOT.nullptr,
+                                              _root_matrix(frame, f"{name}_m{i}"))
         ROOT.SetOwnership(node, False)
         comp = ROOT.TGeoCompositeShape(f"{name}_c{i}", node)
         ROOT.SetOwnership(comp, False)
