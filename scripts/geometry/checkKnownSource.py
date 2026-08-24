@@ -350,28 +350,65 @@ def _writer_index(writer_report):
     return index
 
 
-def resolve_source_volume(candidates, row):
+def _placed_box(placement, shape):
+    """A shape's axis-aligned box in the part frame: `(origin, half)`."""
+    origin = [shape.GetOrigin()[i] for i in range(3)]
+    half = [shape.GetDX(), shape.GetDY(), shape.GetDZ()]
+    if placement is None:
+        return origin, half
+    lo = [float("inf")] * 3
+    hi = [float("-inf")] * 3
+    for sx in (-1.0, 1.0):
+        for sy in (-1.0, 1.0):
+            for sz in (-1.0, 1.0):
+                local = (origin[0] + sx * half[0], origin[1] + sy * half[1],
+                         origin[2] + sz * half[2])
+                for i in range(3):
+                    v = sum(placement[i][c] * local[c] for c in range(3)) + placement[i][3]
+                    lo[i] = min(lo[i], v)
+                    hi[i] = max(hi[i], v)
+    return [0.5 * (lo[i] + hi[i]) for i in range(3)], [0.5 * (hi[i] - lo[i]) for i in range(3)]
+
+
+def resolve_source_volume(candidates, row, emitted_shape=None, placement=None):
     """Which of several volumes sharing one name the writer's row refers to.
 
-    A ROOT geometry may hold distinct volumes under the same name -- ITS has 21 of them -- and the
-    writer disambiguates the *emitted* names (`name#2`) without recording an address. The row
-    carries the class and the capacity of the shape it emitted, so the volume is picked by those
-    two rather than by position in a list whose order is not the writer's traversal order.
+    A ROOT geometry may hold distinct volumes under the same name -- ITS has 21 of them, and PIPE
+    has two `bellows2LowerPlie` -- and the writer disambiguates the *emitted* names (`name#2`)
+    without recording an address, so the volume has to be identified by what it looks like.
+
+    The **bounding box** decides, not the capacity. `TGeoCompositeShape::Capacity()` is a
+    Monte-Carlo estimate, and PIPE's two `bellows2LowerPlie` are two halves of one bellows whose
+    capacities differ by 0.09 % -- well inside that sampling noise, and the writer's own two rows
+    for them differ from the geometry's by more than they differ from each other. Ranking on that
+    number picked the wrong half, and the containment check then reported 601 disagreements with
+    zero points inside the emitted shape, which is what a comparison against the mirror-image
+    sibling looks like. A bounding box is exact for every `TGeoShape`, composites included, so it
+    separates the two cleanly; capacity is kept only as a tie-break, and only where it is analytic.
     """
     if len(candidates) == 1:
         return candidates[0]
     wanted_class = row.get("shapeClass")
     wanted_capacity = row.get("capacity_cm3")
-    best, best_score = None, None
+    sampled = wanted_class in _SAMPLED_CAPACITY_CLASSES
+    want_box = (_placed_box(placement, emitted_shape)
+                if emitted_shape is not None else None)
+    best, best_key = None, None
     for volume in candidates:
         shape = volume.GetShape()
         if wanted_class and shape.ClassName() != wanted_class:
             continue
-        if wanted_capacity is None:
-            return volume
-        score = abs(shape.Capacity() - wanted_capacity) / max(abs(wanted_capacity), 1.0e-30)
-        if best_score is None or score < best_score:
-            best, best_score = volume, score
+        box_score = 0.0
+        if want_box is not None:
+            here = _placed_box(None, shape)
+            box_score = max(max(abs(here[0][i] - want_box[0][i]) for i in range(3)),
+                            max(abs(here[1][i] - want_box[1][i]) for i in range(3)))
+        capacity_score = (0.0 if (wanted_capacity is None or sampled)
+                          else abs(shape.Capacity() - wanted_capacity)
+                          / max(abs(wanted_capacity), 1.0e-30))
+        key = (box_score, capacity_score)
+        if best_key is None or key < best_key:
+            best, best_key = volume, key
     return best
 
 
@@ -408,14 +445,6 @@ def check_run(original, writer_report_path, converted, n_points=DEFAULT_POINTS,
             stub["failures"].append(f"no writer-report row for emittedName {emitted_name!r}")
             records.append(stub)
             continue
-        candidates = by_name.get(row.get("name")) or []
-        source_volume = resolve_source_volume(candidates, row) if candidates else None
-        if source_volume is None:
-            stub["failures"].append(
-                f"the original geometry has no volume named {row.get('name')!r} whose shape "
-                "matches the writer's record")
-            records.append(stub)
-            continue
         shape_file = part.get("shapeFile")
         if not shape_file or not Path(shape_file).exists():
             stub["failures"].append(f"shapeFile {shape_file!r} does not exist")
@@ -426,6 +455,18 @@ def check_run(original, writer_report_path, converted, n_points=DEFAULT_POINTS,
         emitted_shape = handle.Get("shape")
         if not emitted_shape:
             stub["failures"].append(f"{shape_file} carries no object under the key \"shape\"")
+            records.append(stub)
+            continue
+        # The emitted shape is read *before* the source volume is resolved, because where several
+        # volumes share a name its bounding box is what tells them apart.
+        candidates = by_name.get(row.get("name")) or []
+        source_volume = (resolve_source_volume(candidates, row, emitted_shape,
+                                               part.get("shapePlacement"))
+                         if candidates else None)
+        if source_volume is None:
+            stub["failures"].append(
+                f"the original geometry has no volume named {row.get('name')!r} whose shape "
+                "matches the writer's record")
             records.append(stub)
             continue
         record = check_part(part, row, source_volume.GetShape(), emitted_shape,
@@ -501,6 +542,21 @@ sections = [(-5.0, 1.0, 3.0), (0.0, 1.0, 3.0), (0.0, 2.0, 4.0), (5.0, 2.0, 4.0)]
 names = ("GOOD", "PLACED", "MIRRORED", "TWIN", "BAD", "WRONGCLASS", "TWOBODY")
 
 
+def halves_shape(zlow):
+    # One half of a tube, as a composite, so its Capacity() is a Monte-Carlo estimate.
+    tag = "lo" if zlow < 0.0 else "hi"
+    tube = ROOT.TGeoTube("halves_t_" + tag, 0.0, 2.0, 1.0)
+    slab = ROOT.TGeoBBox("halves_b_" + tag, 3.0, 3.0, 0.5)
+    shift = ROOT.TGeoTranslation("halves_m_" + tag, 0.0, 0.0, zlow + 0.5)
+    for obj in (tube, slab, shift):
+        ROOT.SetOwnership(obj, False)
+    node = ROOT.TGeoIntersection(tube, slab, ROOT.nullptr, shift)
+    ROOT.SetOwnership(node, False)
+    comp = ROOT.TGeoCompositeShape("halves_c_" + tag, node)
+    ROOT.SetOwnership(comp, False)
+    return comp
+
+
 def make_pcon(name, rows, phi1=0.0, dphi=360.0):
     shape = ROOT.TGeoPcon(name, phi1, dphi, len(rows))
     for i, (z, rmin, rmax) in enumerate(rows):
@@ -524,6 +580,12 @@ twin = [(z, rmin, rmax + 1.0) for z, rmin, rmax in sections]
 second = ROOT.TGeoVolume("TWIN", make_pcon("twin2_sh", twin), medium)
 ROOT.SetOwnership(second, False)
 top.AddNode(second, 1)
+# Two COMPOSITES of one name, the two halves of a tube. Their Capacity() is Monte-Carlo and the
+# two draws land within noise of each other, so only a bounding box can tell them apart.
+for zlow in (-1.0, 0.0):
+    half = ROOT.TGeoVolume("HALVES", halves_shape(zlow), medium)
+    ROOT.SetOwnership(half, False)
+    top.AddNode(half, 1)
 geometry.CloseGeometry()
 geometry.Export(str(folder / "source_geometry.root"))
 
@@ -536,6 +598,10 @@ rows = [{"name": n, "emittedName": n, "shapeClass": "TGeoPcon", "mirrored": n ==
          "capacity_cm3": capacity(sections)} for n in names]
 rows.append({"name": "TWIN", "emittedName": "TWIN#2", "shapeClass": "TGeoPcon",
              "mirrored": False, "capacity_cm3": capacity(twin)})
+# The writer records a capacity for a composite too, and it is a different Monte-Carlo draw from
+# the geometry's own -- which is exactly why the checker must not rank on it.
+rows.append({"name": "HALVES", "emittedName": "HALVES", "shapeClass": "TGeoCompositeShape",
+             "mirrored": False, "capacity_cm3": halves_shape(0.0).Capacity()})
 (folder / "writer_report.json").write_text(json.dumps({"volumes": rows}))
 
 
@@ -559,6 +625,8 @@ mirrored = [(-z, rmin, rmax) for z, rmin, rmax in reversed(sections)]
 parts.append(write_shape("MIRRORED", make_pcon("mirrored_sh", mirrored)))
 parts.append(write_shape("TWIN", make_pcon("twin_sh", sections)))
 parts.append(write_shape("TWIN#2", make_pcon("twin2_out_sh", twin)))
+# The emitted body is the LOWER half; the checker must resolve to the lower source volume.
+parts.append(write_shape("HALVES", halves_shape(-1.0)))
 wrong = [(z, rmin, rmax + (0.05 if i == 3 else 0.0))
          for i, (z, rmin, rmax) in enumerate(sections)]
 parts.append(write_shape("BAD", make_pcon("bad_sh", wrong)))
@@ -660,6 +728,17 @@ def self_test(verbose=True, workdir=None):
           f"failures {twin2.get('failures')}, capacity rel "
           f"{twin2.get('capacityRelativeDeviation')}")
 
+    halves = by_name.get("HALVES", {})
+    check("two same-named composites are told apart by their box, not by a sampled capacity",
+          not halves.get("failures")
+          and halves.get("contains", {}).get("mismatches") == 0,
+          f"failures {halves.get('failures')}, Contains "
+          f"{halves.get('contains', {}).get('mismatches')}/"
+          f"{halves.get('contains', {}).get('points')}")
+    check("and their capacities really could not have decided it",
+          _halves_capacities_are_indistinguishable(folder),
+          "the two halves' Capacity() draws are within Monte-Carlo noise of each other")
+
     bad = by_name.get("BAD", {})
     check("the negative control is caught", bool(bad.get("failures")),
           "; ".join(bad.get("failures", [])) or "NOT CAUGHT")
@@ -707,6 +786,24 @@ def self_test(verbose=True, workdir=None):
     if verbose:
         print(f"  {n_ok}/{len(checks)} known-source self-checks passed (fixtures in {folder})")
     return n_ok, len(checks)
+
+
+def _halves_capacities_are_indistinguishable(folder):
+    """Are the two same-named composites' capacities within Monte-Carlo noise of each other?
+
+    Without this the check above would prove nothing: if the two halves' capacities were far
+    apart, ranking on them would have worked and the bounding-box rule would be untested. On
+    PIPE's two `bellows2LowerPlie` the gap is 0.09 %, which is what this asserts in miniature.
+    """
+    import ROOT
+    manager = ROOT.gGeoManager
+    if not manager:
+        return False
+    capacities = [volume.GetShape().Capacity() for volume in manager.GetListOfVolumes()
+                  if volume.GetName() == "HALVES"]
+    if len(capacities) != 2:
+        return False
+    return abs(capacities[0] - capacities[1]) / max(capacities) < 0.02
 
 
 def _placed_without_its_placement(folder):
