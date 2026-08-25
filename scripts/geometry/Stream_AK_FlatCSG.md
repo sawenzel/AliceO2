@@ -92,6 +92,22 @@ factor between 1.0 and 2.5 on this corpus, so they are not interchangeable predi
 
 Per-cell halfspace counts run 5 to 16; the largest is `IBCYSSFlangeC`'s three 16-halfspace cells.
 
+### Ten, not the twenty-one the demand table names
+
+`Design_FlatCSGSolid.md` §9 item 1 asks for "the 21 parts". That table spans the five detector
+corpora **plus ALICE3 and Bagger**, and this rung converted the five corpora. All eleven
+non-shipping parts, in one place:
+
+| part(s) | why it did not ship |
+| --- | --- |
+| ALICE3 `ST1782525_01`, `ST1A38495_01`, `ST1A38526_01`, `ST0923290_01#b11`, `ST1829909_01` ×4 (**8**) | not in the five detector corpora. ALICE3 was converted separately for the decline catalogue and **none of the eight ships there either** — all eight still decline, and none produces a `flatCells` candidate. |
+| Bagger `Bucket` (**1**) | not in the five corpora; Bagger is the gate model. It is also in the boundary-gap class §11 puts out of scope — 4.11 cm, 0.211 of its diagonal. |
+| ITS `BPSupportLowerCollar` (**1**) | refused by the cell-box containment probe: cell 6 of 21 still holds 0.67 cm past the CAD piece's own box. §9.7. |
+| ITS `IBCYSSFlangeA` (**1**) | refused by `decompose.PART_MAX_CELLS = 64`, which design §8 froze for this rung. §9.12 prices the raise, and finds it lands in the boundary-gap class too. |
+
+So: **10 shipped, 9 out of corpus scope, 2 refused by acceptance working as designed.** Nothing was
+waived, and design §2 and §9 now carry the same reconciliation.
+
 ## 4. Measurement 1 — the crossover
 
 Every one of the ten was emitted **both ways** and X-ray-benched against itself. The composite
@@ -140,6 +156,10 @@ Regressing `log(ratio)` on `log(count)` over the ten parts:
 | `DistFromInside` | r +0.43, R² 0.18 | r +0.32, R² 0.11 | r +0.54, R² 0.29 |
 | `Safety` | **r +0.91, R² 0.82** | r +0.84, R² 0.70 | r +0.91, R² 0.82 |
 | transport | r +0.33, R² 0.11 | r +0.29, R² 0.08 | **r +0.65, R² 0.43** |
+
+**Read the R² column before the crossover column.** For transport it is 0.11 against cells and
+0.08 against halfspaces: the fitted crossovers below summarise ten points, they do not establish a
+law, and R6's census is what would turn them into one.
 
 **Of the two counts the design named, the cell count is the better predictor** — it beats the
 halfspace count on every one of the five kernels, because a cell is what the BVH indexes and a
@@ -209,6 +229,9 @@ This is design §11 risk 3 arriving from the opposite direction: not "the bound 
 the box count grows", but "the box count grows and buys nothing".
 
 **The chosen defaults are `fSplitDepth = 4` (was 6) and `fMinBoxFraction = 0.05` (was 0.01).**
+Two reservations belong with that choice and are recorded in full at **§9.10a** (the size
+floor is a fraction of the *part's* diagonal, not the cell's) and **§9.10b** (the cost curve
+was monotone to the edge of the swept range, so I stopped on an argument, not on the data).
 
 `0.05` rather than `0.1` or `0.2`, which measured better still: at 0.2 the subdivision produces
 2 to 3 boxes per cell, which is a BVH over the cell AABBs with rounding — the arrangement design
@@ -254,8 +277,9 @@ each, at the previous defaults (depth 6, minfrac 0.01):
 | sphere r5 | 64 | 8 | **76.2 %** | 0.029 | 0.104 |
 | plate 10×10×4 with an r1.5 hole | 256 | 40 | **83.2 %** | 0.017 | 0.087 |
 
-On the **shipped parts** it is worse, because their cells are small relative to the part and the
-size floor stops the split before any leaf detaches:
+On the **shipped parts** it is worse, because the size floor stops the split before any leaf
+detaches — their cells are small relative to the *part*, and the floor is a fraction of the part's
+diagonal, not the cell's (§9.10a):
 
 | part | boxes | empty | inside queries getting `0.` |
 | --- | ---: | ---: | ---: |
@@ -403,16 +427,30 @@ Everything below was found during the rung, checked against the code at the clos
 in place deliberately. Nothing here is a suspicion; each one is a measurement or a reading of the
 source.
 
-**9.1 A geometry exported to `geom.root` silently loses the acceleration.** `fBoxes`, `fActive`,
-`fBVH` and `fClosed` are transient by design (§7 of the spec: a stored BVH is a second thing that
-can disagree with the data it describes), so an `O2FlatCSG` read back from a ROOT geometry file has
-`IsClosed() == false` and answers every query through its `_Loop` twins. That is **correct** — the
-twins are the definition of the answer — and it is what the header's contract says, but on a part
-like `BREF1` it is a 30× slowdown with nobody told. Verified on the exported TPC geometry
-(`class=o2::base::O2FlatCSG capacity=87.6233 closed=0`). Three readers re-close explicitly
-(`checkKnownSource.py`, `harness::loadShapeFromRootFile`, and `geom.C` itself); the streamer does
-not, because making it do so means `#pragma link C++ class … -` plus a hand-written `Streamer`,
-which is a schema decision. **Worth taking before the closure test.**
+**9.1 A shape read off a file IS closed, and this was measured rather than assumed.** `fBoxes`,
+`fActive`, `fBVH` and `fClosed` are transient by design (§7 of the spec: a stored BVH is a second
+thing that can disagree with the data it describes), so the object ROOT reconstructs has no boxes
+of its own. The gap is closed by a **`#pragma read` rule** in `DetectorsBaseLinkDef.h` — not a
+hand-written `Streamer`, which would have meant `#pragma link C++ class … -` and giving up
+automatic schema evolution over the two member vectors — whose code calls `CloseShape()` on every
+object read and shouts if it refuses.
+
+**It fires.** Measured at the close of the rung on a current build, raw ROOT with no harness
+re-close, on both paths and from both languages:
+
+```
+PyROOT  TFile::Get("shape")      class=o2::base::O2FlatCSG closed=1 nboxes=129 ncells=12 capacity=87.6233
+PyROOT  TGeoManager::Import      class=o2::base::O2FlatCSG closed=1 nboxes=129 ncells=12 capacity=87.6233
+C++     TGeoManager::Import      class=o2::base::O2FlatCSG closed=1 nboxes=129 ncells=12
+C++     TFile::Get<O2FlatCSG>    class=o2::base::O2FlatCSG closed=1 nboxes=129 ncells=12
+```
+
+(`TPC_OCGEM`, written by the converter, put into a `TGeoManager`, exported, and read back in a
+fresh process.) **The `closed=0` reading this section used to quote is stale** — it predates the
+read rule, and it is withdrawn. The three explicit re-closes in `checkKnownSource.py`,
+`harness::loadShapeFromRootFile` and `geom.C` are now belt-and-braces rather than the mechanism,
+and they are kept: each is cheap, idempotent (`CloseShape` on a closed shape rebuilds the same
+boxes) and each guards a reader that must not be silently slow. **Nothing here is open work.**
 
 **9.2 `Safety`'s inside branch is a lower bound and mostly returns `0.`** — 78 % to 100 % on the
 shipped parts (§6). Sound, and a transport-speed defect no correctness test can see. The fix is the
@@ -468,6 +506,24 @@ the shipped solid. Every capacity quoted anywhere in this document carries that 
 `ComputeBBox` is the union of the retained sub-cell boxes and those reach the declared box. It is
 reported and never gated, and it is conservative in the safe direction, but a reader expecting
 ~1e-7 cm for a CSG part should know why it is ~1e-2 to ~1 cm here.
+
+**9.10a `fMinBoxFraction` is a fraction of the PART's bounding-box diagonal, not the cell's.**
+`minSize = fMinBoxFraction × diagonal`, and `diagonal` is measured over the union of every cell's
+box. For a part whose cells are scattered over a large volume — `BREF1`'s union diagonal is
+1101 cm, `B077__body`'s 1428 cm, against cells of a few cm — the same fraction is a wildly
+different constraint per cell, and it is a blunt instrument. **This directly qualifies §6's
+"their cells are small relative to the part": that is a statement about this knob's denominator as
+much as about the parts**, and it is part of why coarse settings win so uniformly in §5. Making it
+per-cell is a behaviour change beyond "pick the defaults from the data" and I did not take it.
+
+**9.10b The split defaults are the number I would most want overruled or confirmed.** §5 gives the
+structural argument for stopping at `0.05`, and I stand behind it, but I want to be plain that the
+data did not say stop: the cost curve is monotone all the way to `0.2`, the coarsest setting swept,
+and I stopped one notch earlier because beyond it the subdivision degenerates into a BVH over the
+cell AABBs with no headroom for a part whose cells are large relative to the part — the case the
+whole mechanism exists for, and one that none of these ten parts happens to be. Six parts from
+three detectors chose this default. If R6's census turns up a large-celled part, **that** part
+should choose it, not these.
 
 **9.11 The rescale test's two bounds bind in different regimes.** The relative assertion
 (`1e-13 × max(1, |twin|)`) binds below `|twin| = 10` and the aggregate absolute bound (`1e-12`)
@@ -548,8 +604,10 @@ boundary gap, at 3.56 % of its diagonal. The budget and the splitter are one cha
    just took, in a harder setting; it is the one kernel the flat solid can lose.
 3. **Split at every carrier crossing** (§11), with `decompose.PART_MAX_CELLS` raised to match
    (§9.12). This is where the remaining 24 declines are.
-4. **Decide the streamer** (§9.1) before the closure test, so a `geom.root` does not quietly run
-   30× slow.
-5. **R6, the breadth census** — MAG, TOF, MFT, MCH, MID, FT0, FV0, ZDC, EMC, PHS, CPV, HMP. The
-   crossover of §4 rests on ten parts from three detectors; R6 is what makes it a statement about
-   the geometry.
+4. **R6, the breadth census** — MAG, TOF, MFT, MCH, MID, FT0, FV0, ZDC, EMC, PHS, CPV, HMP. The
+   crossover of §4 rests on ten parts from three detectors, at transport R² 0.11 against the cell
+   count; R6 is what makes it a statement about the geometry rather than about ten parts. It is
+   also what would settle the split defaults (§9.10b) on a part the current six do not represent.
+
+**Not on this list, and it was on an earlier draft of it:** deciding the streamer. §9.1 measures
+the `#pragma read` rule firing on every read path, so there is nothing to build.

@@ -42,6 +42,16 @@ with the number the part has.
 so the 21 parts ship, the three-test acceptance on those parts, the `_Loop` twins and their
 ctest cases, and the crossover measurement against plain-composite emission.
 
+> **Corrected 2026-08-25, at the close of the rung (task 10).** "The 21 parts" was written from
+> the R4 demand table, which spans five detector corpora **plus ALICE3 and Bagger**. This rung
+> converted the five detector corpora only, so **10 of the 21 shipped** and 11 did not: eight
+> ALICE3 bodies and Bagger's `Bucket` are not in the five corpora at all (and none of the nine
+> converts even when its own model is run — `Bucket` falls in the boundary-gap class below, at
+> 0.211 of its diagonal), ITS `BPSupportLowerCollar` is refused by the cell-box containment probe
+> §4.2 requires, and ITS `IBCYSSFlangeA` is refused by `decompose.PART_MAX_CELLS = 64`, which
+> this section froze. The raised budget is in scope and did its job: the flat budgets are a
+> quarter used at worst. See `Stream_AK_FlatCSG.md` §3 for the part-by-part reconciliation.
+
 **Out, and recorded as such:**
 
 - **Geant4.** Sandro, at the design review: "Geant4 is not important to me at this moment.
@@ -438,6 +448,14 @@ What changes:
 
 1. **The 21 parts convert** at `dV_sym = 0`, pass the oracle gate, and pass
    `checkKnownSource.py` against their original `TGeoShape`.
+
+   > **Corrected 2026-08-25, at the close of the rung (task 10).** Read this as "the demand-table
+   > parts *in the five detector corpora* convert", which is what happened: **10 of the 21, every
+   > one at `dV_sym = 0`, oracle-clean, and 1785/1785 on `checkKnownSource.py`**. The other
+   > eleven are accounted for in §2's correction block and part by part in
+   > `Stream_AK_FlatCSG.md` §3 — eight ALICE3 and one Bagger part outside the five corpora, one
+   > box-probe refusal, and one `decompose.PART_MAX_CELLS` refusal. Nothing was waived: the two
+   > refusals are the acceptance working, not failing.
 2. **The crossover.** The same parts emitted both ways — flat, and as plain composites wherever
    the tree budget permits — and X-ray-benched against each other, so the crossover is a
    measurement and not `Stream_AA`'s prediction. Report it in cells and in halfspaces, since it
