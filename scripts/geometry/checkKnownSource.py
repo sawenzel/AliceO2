@@ -270,11 +270,13 @@ def reclose_flat_csg(shape):
     """Rebuild an `o2::base::O2FlatCSG`'s sub-cell boxes after it comes off a file.
 
     Its boxes and its BVH are transient by design (`Design_FlatCSGSolid.md` section 7 -- a stored
-    BVH is a second thing that can disagree with the data it describes), so a streamed shape
-    arrives un-closed and answers every query through its `_Loop` twins. Those are correct, and
-    that is deliberately not good enough here: `geom.C` closes the shape it loads, so this test
-    has to score the accelerated path the simulation actually runs. True for every other shape
-    class, which needs nothing.
+    BVH is a second thing that can disagree with the data it describes), so the object ROOT
+    reconstructs has no boxes of its own. `DetectorsBaseLinkDef.h`'s `#pragma read` rule closes it
+    on the way in and was measured doing so (`Stream_AK_FlatCSG.md` section 9.1), so in practice
+    this finds `IsClosed()` already true and does nothing. It stays because it is cheap and
+    idempotent, and because a test that scores the accelerated path must not depend on a
+    dictionary rule it does not itself assert. True for every other shape class, which needs
+    nothing.
     """
     if shape.ClassName() != "o2::base::O2FlatCSG":
         return True

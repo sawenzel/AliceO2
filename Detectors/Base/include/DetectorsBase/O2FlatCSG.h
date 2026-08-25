@@ -287,8 +287,11 @@ class O2FlatCSG : public TGeoBBox
   /// solid missing one rather than silently drop that cell -- see `CloseShape`'s implementation.
   std::vector<bool> fCellBBoxSet;
   /// Set only by a successful `CloseShape`; not streamed, since it describes `fBoxes`/`fBVH`
-  /// rather than the shape's own source data, and the caller is always expected to call
-  /// `CloseShape` again after a read (design section 7, and the loader's own contract).
+  /// rather than the shape's own source data. A shape read off a file does NOT arrive un-closed,
+  /// though: the `#pragma read` rule in `DetectorsBaseLinkDef.h` calls `CloseShape` on every
+  /// object ROOT reads back, so `TFile::Get` and `TGeoManager::Import` both hand out an
+  /// accelerated shape (measured -- `Stream_AK_FlatCSG.md` section 9.1). Only a caller that
+  /// builds a shape by hand owes it a `CloseShape` (design section 7).
   bool fClosed = false; //!
   /// Subdivision depth cap, and the minimum box size as a fraction of the part's bounding-box
   /// diagonal. Both set from the sweep in scripts/geometry/Stream_AK_FlatCSG.md section 5

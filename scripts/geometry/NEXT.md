@@ -78,14 +78,14 @@ distance, and returns `0.` for 78–100 % of interior points.
 1. **R6, the breadth census** (`Handoff_FlatCSG.md` §2) — cheap, one command per module, and it is
    what makes every claim above a claim about the geometry rather than about five detectors.
 2. **The closure test** (`Handoff_ClosureTest.md`) — fresh session.
-3. **The flat solid's four named follow-ups** (`Stream_AK_FlatCSG.md` §12), in order: the
+3. **The flat solid's three named follow-ups** (`Stream_AK_FlatCSG.md` §12), in order: the
    1-Lipschitz per-halfspace `Safety`; front-to-back ordering and early exit in
-   `DistFromOutside` (the one kernel the flat solid can lose); split at every carrier crossing
+   `DistFromOutside` (the one kernel the flat solid can lose); and split at every carrier crossing
    **together with** raising `decompose.PART_MAX_CELLS` — priced, and neither half is worth doing
    alone: `IBCYSSFlangeA` with the budget raised decomposes into 157 cells in 27 s and then
-   declines on the boundary gap instead; and **decide the `O2FlatCSG` streamer before the closure test** — a
-   shape read back from a `geom.root` arrives un-closed and answers through its `_Loop` twins,
-   which is correct and up to 30× slower, with nobody told.
+   declines on the boundary gap instead. The streamer question is **closed, not open**: the
+   `#pragma read` rule in `DetectorsBaseLinkDef.h` fires on every read path (measured,
+   `Stream_AK_FlatCSG.md` §9.1).
 4. **Converter: the JIT namespace bug.** `geom.C` emits `LoadSurfaceSolid` as a namespace-scoped
    forward declaration; the JIT wrapper makes it resolve wrongly and **the simulation continues
    silently without the module**. Workaround committed (`integration_demo/patch_exact_macro.py`);
@@ -138,9 +138,12 @@ distance, and returns `0.` for 78–100 % of interior points.
   `o2-sim` segfault at startup; the converter needs O2/ROOT *in addition* to OCC — a bare OCC
   shell silently loses CSG (the deferred-emit WARN now says so per part). `runOracleGate.py`
   handles this itself: it *prepends* OCC to the inherited environment rather than replacing it.
-- **An `O2FlatCSG` read off a ROOT file is not closed.** Its boxes and BVH are transient by
-  design; call `CloseShape()` after reading or you are timing the `_Loop` twins. Three readers
-  already do (`checkKnownSource.py`, `harness::loadShapeFromRootFile`, `geom.C`).
+- **An `O2FlatCSG` read off a ROOT file IS closed** — its boxes and BVH are transient by design,
+  but the `#pragma read` rule in `DetectorsBaseLinkDef.h` calls `CloseShape()` on every object
+  ROOT reads back, and it was measured firing on `TFile::Get` and on `TGeoManager::Import`, from
+  C++ and from PyROOT (`Stream_AK_FlatCSG.md` §9.1). Three readers re-close explicitly anyway
+  (`checkKnownSource.py`, `harness::loadShapeFromRootFile`, `geom.C`); that is belt-and-braces and
+  is idempotent. **A shape you build by hand still owes itself a `CloseShape()`.**
 - External-detector hits live in `o2sim.root` (`IRISHit`, `BAGRHit`) under `o2-sim-serial`.
 - Testing a rebuilt detector library needs `export O2_ROOT=$B/stage`; use `o2-sim-serial` from
   `$B/stage/bin`.

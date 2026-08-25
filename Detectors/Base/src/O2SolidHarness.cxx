@@ -691,11 +691,14 @@ TGeoShape* loadShapeFromRootFile(const std::string& path, std::string* error)
   }
   // An O2FlatCSG's sub-cell boxes and BVH are transient by design (a stored BVH is a second
   // thing that can disagree with the data it describes -- scripts/geometry/Design_FlatCSGSolid.md
-  // section 7), so a streamed shape arrives un-closed and answers through its _Loop twins. Those
-  // are correct, but the gate and the benchmark must score the accelerated path the simulation
-  // runs, and geom.C closes the shape it loads. Rebuild it here so every reader of the convention
-  // gets the same object. A refusal is reported rather than swallowed: CloseShape only refuses a
-  // cell bounding box that is missing, inverted or non-finite, which is a broken file.
+  // section 7), so the object ROOT reconstructs has no boxes of its own. DetectorsBaseLinkDef.h's
+  // `#pragma read` rule closes it on the way in and was measured doing so
+  // (scripts/geometry/Stream_AK_FlatCSG.md section 9.1), so in practice this finds IsClosed()
+  // already true and does nothing. It stays because it is cheap and idempotent, and because the
+  // gate and the benchmark must score the accelerated path the simulation runs rather than depend
+  // on a dictionary rule they do not themselves assert. A refusal is reported rather than
+  // swallowed: CloseShape only refuses a cell bounding box that is missing, inverted or
+  // non-finite, which is a broken file.
   if (auto* flat = dynamic_cast<O2FlatCSG*>(shape); flat != nullptr && !flat->IsClosed()) {
     flat->CloseShape();
     if (!flat->IsClosed()) {
