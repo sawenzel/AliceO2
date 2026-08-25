@@ -186,13 +186,28 @@ class O2FlatCSG : public TGeoBBox
   Double_t DistFromInside(const Double_t* point, const Double_t* dir, Int_t iact = 1,
                           Double_t step = TGeoShape::Big(), Double_t* safe = nullptr) const override;
 
-  /// task 6 replaces this; 0 is always sound
+  /// A rigorous lower bound on the distance to the boundary, from the box structure alone -- no
+  /// point-to-quadric distance formula exists in general, so this class does not try to have one.
+  /// Outside, the distance to the nearest box is a bound because every point of the solid is in
+  /// some box. Inside, only a box with an empty active list (wholly inside its cell, a hard
+  /// guarantee from Task 4) contributes: the distance to its faces is a bound. A point in an
+  /// undecided box gets the sound answer `0.`, because the box's active list says nothing about
+  /// where the boundary sits within it. Falls back to `Safety_Loop` when `!IsClosed()`, like the
+  /// other accelerated queries.
   Double_t Safety(const Double_t* point, Bool_t in = kTRUE) const override;
 
-  /// Minimal for now: the union of the retained sub-cell boxes, just enough for `CloseShape` to
-  /// compile. Task 6 writes the real one (it will want the halfspaces themselves, not only the
-  /// boxes the current split/minSize settings happened to produce).
+  /// The union of the retained sub-cell boxes -- tighter than the union of the cell AABBs, which
+  /// is the point of design section 5.5.
   void ComputeBBox() override;
+
+  /// The sum of the cells' own volumes. The cells of a decomposition are disjoint by construction
+  /// (`decompose`'s volume guard checks it), so there is no inclusion-exclusion to do.
+  Double_t Capacity() const override;
+
+  /// The outward normal (oriented with respect to `dir`, per the `TGeoShape` contract) at the
+  /// halfspace closest to being satisfied with equality at `point`: `sign * 2(Ax + b)` for a
+  /// quadric, or the gradient of the torus's signed distance, normalised and flipped along `dir`.
+  void ComputeNormal(const Double_t* point, const Double_t* dir, Double_t* norm) const override;
 
   // ---- the reference twins ---------------------------------------------------------------
   Bool_t Contains_Loop(const Double_t* point) const;
@@ -201,6 +216,11 @@ class O2FlatCSG : public TGeoBBox
                                 Double_t step = TGeoShape::Big()) const;
   Double_t DistFromInside_Loop(const Double_t* point, const Double_t* dir,
                                Double_t step = TGeoShape::Big()) const;
+  /// `Safety`'s twin: walks all boxes with no BVH. Required to equal `Safety` (proving the BVH
+  /// pruning loses no nearer box) and, independently, to be a SOUND bound -- the soundness leg is
+  /// the one that matters, since a safety merely self-consistent with its twin could still be
+  /// wrong.
+  Double_t Safety_Loop(const Double_t* point, Bool_t in = kTRUE) const;
 
  protected:
   /// True when every halfspace of cell `index` contains `point`.

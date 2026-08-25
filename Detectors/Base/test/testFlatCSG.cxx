@@ -22,6 +22,7 @@
 #include "TGeoTube.h"
 #include "TMath.h"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <vector>
@@ -1009,4 +1010,103 @@ BOOST_AUTO_TEST_CASE(a_shape_that_failed_to_close_still_answers_through_the_loop
                           solid.DistFromOutside_Loop(point, dir, TGeoShape::Big()));
     }
   }
+}
+
+BOOST_AUTO_TEST_CASE(safety_is_sound_and_matches_its_twin)
+{
+  O2FlatCSG solid("bracket_safety");
+  buildBracket(solid);
+  solid.CloseShape();
+
+  Rng rng(24680ULL);
+  for (int trial = 0; trial < 50000; ++trial) {
+    double point[3] = {rng.uniform(-16., 16.), rng.uniform(-8., 8.), rng.uniform(-6., 17.)};
+    const bool inside = solid.Contains_Loop(point);
+    const double safety = solid.Safety(point, inside);
+    BOOST_REQUIRE_GE(safety, 0.);
+    BOOST_REQUIRE_EQUAL(safety, solid.Safety_Loop(point, inside));
+
+    // SOUNDNESS: no point within `safety` of `point` may have the opposite classification
+    for (int probe = 0; probe < 40; ++probe) {
+      double dir[3];
+      double norm = 0.;
+      do {
+        for (int index = 0; index < 3; ++index) {
+          dir[index] = rng.uniform(-1., 1.);
+        }
+        norm = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+      } while (norm < 1.e-3);
+      const double reach = safety * rng.uniform(0., 0.999) / norm;
+      const double near[3] = {point[0] + reach * dir[0], point[1] + reach * dir[1],
+                              point[2] + reach * dir[2]};
+      BOOST_REQUIRE_EQUAL(static_cast<bool>(solid.Contains_Loop(near)), inside);
+    }
+  }
+}
+
+BOOST_AUTO_TEST_CASE(capacity_is_the_sum_of_the_cell_volumes)
+{
+  O2FlatCSG solid("bracket_capacity");
+  buildBracket(solid);
+  solid.CloseShape();
+  const double expected = 8. * 10. * 1. * 1. + 2. * 2. * 11. + TMath::Pi() * (9. - 1.) * 2.;
+  BOOST_CHECK_SMALL(solid.Capacity() - expected, 1.e-12);
+}
+
+BOOST_AUTO_TEST_CASE(the_bounding_box_is_tight_around_the_retained_boxes)
+{
+  // ComputeBBox is the union of the RETAINED boxes -- a subset of the union of the cell AABBs --
+  // so exact GetDX/GetDY/GetDZ/GetOrigin values depend on subdivision details rather than on the
+  // contract. Assert the two legs that matter for navigation correctness instead: the bounding
+  // box holds the whole solid, and it does not overshoot past what the cells could possibly reach.
+  O2FlatCSG solid("bracket_bbox");
+  buildBracket(solid);
+  solid.CloseShape();
+
+  // every point of the solid is inside the bounding box
+  Rng rng(13579ULL);
+  for (int trial = 0; trial < 50000; ++trial) {
+    const double point[3] = {rng.uniform(-13., 13.), rng.uniform(-5., 5.), rng.uniform(-3., 14.)};
+    if (solid.Contains_Loop(point)) {
+      BOOST_REQUIRE(solid.TGeoBBox::Contains(point));
+    }
+  }
+
+  // the bounding box is contained in the union of the cell AABBs, which buildBracket fixes:
+  // arm x in [-10, 10], y in [-1, 1], z in [-1, 1]; upright x in [8, 10], y in [-1, 1], z in
+  // [1, 12]; washer x in [-11, -5], y in [-3, 3], z in [1, 3]
+  const double cellLo[3][3] = {{-10., -1., -1.}, {8., -1., 1.}, {-11., -3., 1.}};
+  const double cellHi[3][3] = {{10., 1., 1.}, {10., 1., 12.}, {-5., 3., 3.}};
+  double unionLo[3] = {cellLo[0][0], cellLo[0][1], cellLo[0][2]};
+  double unionHi[3] = {cellHi[0][0], cellHi[0][1], cellHi[0][2]};
+  for (int cell = 1; cell < 3; ++cell) {
+    for (int index = 0; index < 3; ++index) {
+      unionLo[index] = std::min(unionLo[index], cellLo[cell][index]);
+      unionHi[index] = std::max(unionHi[index], cellHi[cell][index]);
+    }
+  }
+  const double* origin = solid.GetOrigin();
+  for (int index = 0; index < 3; ++index) {
+    const double dHalf = index == 0 ? solid.GetDX() : (index == 1 ? solid.GetDY() : solid.GetDZ());
+    BOOST_CHECK_GE(origin[index] - dHalf, unionLo[index] - 1.e-9);
+    BOOST_CHECK_LE(origin[index] + dHalf, unionHi[index] + 1.e-9);
+  }
+}
+
+BOOST_AUTO_TEST_CASE(the_normal_on_a_face_is_the_face_normal)
+{
+  O2FlatCSG solid("box_normal");
+  addBoxCell(solid, 3., 4., 5.);
+  const double lo[3] = {-3., -4., -5.};
+  const double hi[3] = {3., 4., 5.};
+  solid.SetCellBBox(0, lo, hi);
+  solid.CloseShape();
+
+  const double onFace[3] = {3., 1., 1.};
+  const double dir[3] = {1., 0., 0.};
+  double normal[3] = {0., 0., 0.};
+  solid.ComputeNormal(onFace, dir, normal);
+  BOOST_CHECK_SMALL(normal[0] - 1., 1.e-12);
+  BOOST_CHECK_SMALL(normal[1], 1.e-12);
+  BOOST_CHECK_SMALL(normal[2], 1.e-12);
 }

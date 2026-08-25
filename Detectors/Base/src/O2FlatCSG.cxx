@@ -124,6 +124,54 @@ inline bool boxHoldsPoint(const FlatCSGBox& box, const double* point)
          point[1] <= box.max[1] && point[2] >= box.min[2] && point[2] <= box.max[2];
 }
 
+/// Gradient (unnormalised) of `sign * f` at \a point, for `ComputeNormal`: `2(Ax + b)` for a
+/// quadric, scaled by `sign`; the gradient of the torus's signed distance, scaled by `sign`,
+/// otherwise. The torus derivation: with `offset = point - centre`, `along = offset . axis`,
+/// `radial = offset - along * axis`, `rho = |radial|`, `u = rho - major`, `s = hypot(u, along)`,
+/// the unsigned distance is `h = s - minor`, and the chain rule through `d(rho)/dx = radial / rho`
+/// (radial is already perpendicular to axis) and `d(along)/dx = axis` gives
+/// `grad h = (u / s) * (radial / rho) + (along / s) * axis`.
+void halfspaceGradient(const FlatCSGHalfspace& halfspace, const double* point, double grad[3])
+{
+  if (halfspace.kind == FlatCSGHalfspace::kTorus) {
+    const double* c = halfspace.c;
+    const double axis[3] = {c[3], c[4], c[5]};
+    const double major = c[6];
+    const double offset[3] = {point[0] - c[0], point[1] - c[1], point[2] - c[2]};
+    const double along = offset[0] * axis[0] + offset[1] * axis[1] + offset[2] * axis[2];
+    double radial[3];
+    for (int index = 0; index < 3; ++index) {
+      radial[index] = offset[index] - along * axis[index];
+    }
+    const double rho = std::sqrt(radial[0] * radial[0] + radial[1] * radial[1] + radial[2] * radial[2]);
+    const double u = rho - major;
+    const double s = std::hypot(u, along);
+    if (s < 1.e-300 || rho < 1.e-300) {
+      // degenerate: exactly on the revolution axis, or at the surface's own kissing point where
+      // the signed distance is not differentiable -- leave the gradient at zero and let the
+      // caller fall back
+      grad[0] = grad[1] = grad[2] = 0.;
+      return;
+    }
+    const double du = u / s;
+    const double dv = along / s;
+    for (int index = 0; index < 3; ++index) {
+      grad[index] = halfspace.sign * (du * (radial[index] / rho) + dv * axis[index]);
+    }
+    return;
+  }
+  const double* c = halfspace.c;
+  const double a[3][3] = {{c[0], c[1], c[2]}, {c[1], c[3], c[4]}, {c[2], c[4], c[5]}};
+  const double b[3] = {c[6], c[7], c[8]};
+  for (int row = 0; row < 3; ++row) {
+    double value = b[row];
+    for (int column = 0; column < 3; ++column) {
+      value += a[row][column] * point[column];
+    }
+    grad[row] = halfspace.sign * 2. * value;
+  }
+}
+
 /// Hand every leaf primitive whose node box the ray meets within `[0, tmax]` to \a visit.
 ///
 /// The node boxes are outward-rounded supersets of the sub-cell boxes, so this can only ever
@@ -1088,16 +1136,223 @@ Double_t O2FlatCSG::DistFromInside(const Double_t* point, const Double_t* dir, I
   return DistFromInsideBVH(point, dir, step);
 }
 
-Double_t O2FlatCSG::Safety(const Double_t* /*point*/, Bool_t /*in*/) const
+////////////////////////////////////////////////////////////////////////////////
+/// Safety_Loop -- the definition of the answer, from the box structure alone.
+///
+/// Outside: every point of the solid lies in some retained box, so the distance to the nearest
+/// box (over ALL of them, decided or not) is a lower bound on the distance to the solid.
+///
+/// Inside: only a box with an empty active list is a sound bound, because it is wholly inside its
+/// cell (a hard guarantee established by Task 4). An undecided box may carry boundary anywhere
+/// within it, so it contributes nothing; a point that is not covered by any solid-marked box gets
+/// the sound answer `0.`.
+
+Double_t O2FlatCSG::Safety_Loop(const Double_t* point, Bool_t in) const
 {
-  // task 6 replaces this; 0 is always sound
-  return 0.;
+  if (!in) {
+    double best = TGeoShape::Big();
+    for (const auto& box : fBoxes) {
+      double squared = 0.;
+      for (int index = 0; index < 3; ++index) {
+        const double value = point[index];
+        if (value < box.min[index]) {
+          squared += (box.min[index] - value) * (box.min[index] - value);
+        } else if (value > box.max[index]) {
+          squared += (value - box.max[index]) * (value - box.max[index]);
+        }
+      }
+      best = std::min(best, squared);
+    }
+    return best >= TGeoShape::Big() ? 0. : std::sqrt(best);
+  }
+
+  double best = 0.;
+  for (const auto& box : fBoxes) {
+    if (!boxHoldsPoint(box, point) || box.nActive != 0) {
+      continue;
+    }
+    double toFace = TGeoShape::Big();
+    for (int index = 0; index < 3; ++index) {
+      toFace = std::min(toFace, std::min(point[index] - box.min[index], box.max[index] - point[index]));
+    }
+    best = std::max(best, toFace);
+  }
+  return std::max(best, 0.);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+/// Safety -- the same box-structure computation as `Safety_Loop`, sped up with the BVH.
+///
+/// Outside, this is a branch-and-bound nearest-box search: `bvh::v2::extra::SafetySqToNode`
+/// prunes a subtree once its own box-to-point squared distance cannot beat the standing best, and
+/// a leaf is scored with the exact same double-precision box-to-point formula the twin uses, so
+/// the two compute the identical `min` over a set the pruning never shrinks past the true nearest
+/// box -- bit identity is the check that no nearer box was pruned away.
+///
+/// Inside, this is the same `Contains`-style containment descent: `bvh::v2::extra::contains` on
+/// the (outward-rounded, float) node box only ever nominates too many candidates, and each
+/// nominated box is then re-tested against its own double bounds and `nActive == 0` exactly as
+/// the twin does, so the `max` runs over the same qualifying set either way.
+
+Double_t O2FlatCSG::Safety(const Double_t* point, Bool_t in) const
+{
+  if (!fClosed || fBVH == nullptr) {
+    // no boxes to walk: see the note on Contains -- the twin is the definition of the answer.
+    return Safety_Loop(point, in);
+  }
+  const BVH& bvh = *static_cast<const BVH*>(fBVH);
+  const BVHVec3 query(static_cast<float>(point[0]), static_cast<float>(point[1]),
+                      static_cast<float>(point[2]));
+
+  thread_local std::vector<size_t> stack;
+  stack.clear();
+  stack.push_back(0); // the bvh2 root node
+
+  if (!in) {
+    // The prune test needs a genuine LOWER bound on the true (double) distance to whatever real
+    // box sits under a node, or it can throw away the nearest one -- which is exactly what
+    // happens if both the node box and the query point are rounded to float first: the query
+    // rounds by up to half a float ulp, and that alone can push a float distance above the exact
+    // double distance to the box that holds the true minimum, no matter how the box itself is
+    // padded. So this reads the node's (float, outward-rounded) box back as double -- an exact
+    // upcast, still a superset of every double box under it -- and measures it against the
+    // point's own double coordinates, with the same SafetySqToNode kernel bvh2_extra_kernels.h
+    // gives the leaf test, just instantiated at double instead of float.
+    using DVec3 = bvh::v2::Vec<double, 3>;
+    using DBBox = bvh::v2::BBox<double, 3>;
+    const DVec3 dpoint(point[0], point[1], point[2]);
+    double best = TGeoShape::Big();
+    while (!stack.empty()) {
+      const size_t current = stack.back();
+      stack.pop_back();
+      const auto& node = bvh.nodes[current];
+      const auto& fbox = node.get_bbox();
+      const DBBox dbox(DVec3(static_cast<double>(fbox.min[0]), static_cast<double>(fbox.min[1]),
+                             static_cast<double>(fbox.min[2])),
+                       DVec3(static_cast<double>(fbox.max[0]), static_cast<double>(fbox.max[1]),
+                             static_cast<double>(fbox.max[2])));
+      const double nodeSquared = bvh::v2::extra::SafetySqToNode(dbox, dpoint);
+      if (nodeSquared >= best) {
+        continue; // this subtree cannot hold anything nearer than what is already found
+      }
+      if (node.is_leaf()) {
+        const auto beginPrimitive = node.index.first_id();
+        const auto endPrimitive = beginPrimitive + node.index.prim_count();
+        for (auto primitive = beginPrimitive; primitive < endPrimitive; ++primitive) {
+          const FlatCSGBox& box = fBoxes[bvh.prim_ids[primitive]];
+          double squared = 0.;
+          for (int index = 0; index < 3; ++index) {
+            const double value = point[index];
+            if (value < box.min[index]) {
+              squared += (box.min[index] - value) * (box.min[index] - value);
+            } else if (value > box.max[index]) {
+              squared += (value - box.max[index]) * (value - box.max[index]);
+            }
+          }
+          best = std::min(best, squared);
+        }
+      } else {
+        const auto firstChild = node.index.first_id();
+        for (size_t child : {firstChild, firstChild + 1}) {
+          if (child < bvh.nodes.size()) {
+            stack.push_back(child);
+          }
+        }
+      }
+    }
+    return best >= TGeoShape::Big() ? 0. : std::sqrt(best);
+  }
+
+  double best = 0.;
+  while (!stack.empty()) {
+    const size_t current = stack.back();
+    stack.pop_back();
+    const auto& node = bvh.nodes[current];
+    if (!bvh::v2::extra::contains(node.get_bbox(), query)) {
+      continue;
+    }
+    if (node.is_leaf()) {
+      const auto beginPrimitive = node.index.first_id();
+      const auto endPrimitive = beginPrimitive + node.index.prim_count();
+      for (auto primitive = beginPrimitive; primitive < endPrimitive; ++primitive) {
+        const FlatCSGBox& box = fBoxes[bvh.prim_ids[primitive]];
+        if (!boxHoldsPoint(box, point) || box.nActive != 0) {
+          continue;
+        }
+        double toFace = TGeoShape::Big();
+        for (int index = 0; index < 3; ++index) {
+          toFace = std::min(toFace, std::min(point[index] - box.min[index], box.max[index] - point[index]));
+        }
+        best = std::max(best, toFace);
+      }
+    } else {
+      const auto firstChild = node.index.first_id();
+      for (size_t child : {firstChild, firstChild + 1}) {
+        if (child < bvh.nodes.size()) {
+          stack.push_back(child);
+        }
+      }
+    }
+  }
+  return std::max(best, 0.);
+}
+
+Double_t O2FlatCSG::Capacity() const
+{
+  // the cells of a decomposition are disjoint by construction, so their own volumes just sum
+  return std::accumulate(fCells.begin(), fCells.end(), 0.,
+                         [](double sum, const FlatCSGCell& cell) { return sum + cell.volume; });
+}
+
+////////////////////////////////////////////////////////////////////////////////
+/// ComputeNormal -- the gradient of whichever halfspace is closest to being satisfied with
+/// equality at \a point, oriented per the `TGeoShape` convention (with respect to \a dir).
+
+void O2FlatCSG::ComputeNormal(const Double_t* point, const Double_t* dir, Double_t* norm) const
+{
+  norm[0] = norm[1] = norm[2] = 0.;
+  if (fHalfspaces.empty()) {
+    return;
+  }
+  int best = 0;
+  double bestValue = std::numeric_limits<double>::infinity();
+  for (int index = 0; index < GetNhalfspaces(); ++index) {
+    const double value = std::abs(EvalHalfspace(fHalfspaces[index], point));
+    if (value < bestValue) {
+      bestValue = value;
+      best = index;
+    }
+  }
+  double grad[3];
+  halfspaceGradient(fHalfspaces[best], point, grad);
+  const double length = std::sqrt(grad[0] * grad[0] + grad[1] * grad[1] + grad[2] * grad[2]);
+  if (length < 1.e-300) {
+    // the gradient is degenerate exactly where a real boundary point should not be (see
+    // halfspaceGradient); fall back to the travel direction itself, which is at least a unit
+    // vector oriented the way the contract requires
+    const double dirLength = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+    if (dirLength > 1.e-300) {
+      for (int index = 0; index < 3; ++index) {
+        norm[index] = dir[index] / dirLength;
+      }
+    }
+    return;
+  }
+  for (int index = 0; index < 3; ++index) {
+    norm[index] = grad[index] / length;
+  }
+  const double dot = norm[0] * dir[0] + norm[1] * dir[1] + norm[2] * dir[2];
+  if (dot < 0.) {
+    for (int index = 0; index < 3; ++index) {
+      norm[index] = -norm[index];
+    }
+  }
 }
 
 void O2FlatCSG::ComputeBBox()
 {
-  // Minimal override, just enough for CloseShape to compile: the union of the retained boxes.
-  // Task 6 writes the real one.
+  // the union of the retained sub-cell boxes -- tighter than the union of the cell AABBs, which
+  // is the point of design section 5.5
   if (fBoxes.empty()) {
     return;
   }
