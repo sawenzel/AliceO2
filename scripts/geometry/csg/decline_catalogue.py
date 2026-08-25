@@ -13,7 +13,11 @@ Joins, per converter output directory, the two reports the converter already wri
 and two files in the same directory can describe the same detector with different leaf sets --
 `ALICE_3_example/CAD.stp` and `CAD_noETA.stp` differ in both leaf count and label naming, so a
 regenerated catalogue can look like a conversion change when it is only a different input. State
-it with `--source NAME=FILE` and the ambiguity cannot come back.
+it with `--source NAME=FILE` and the ambiguity cannot come back. The committed
+`website_data/decline_reasons.json` was rebuilt on `CAD_noETA.stp` on 2026-08-25 where it had been
+built from `CAD.stp` before, which is why it went from 79 entries to 78: `ST2486888_01` is not in
+`CAD_noETA.stp` at all, and the other ALICE3 rows move from `#b1`/`#b2` branch suffixes to one name
+per leaf. That is a change of input, not of conversion.
 
 Nothing is recomputed here: every reason is the converter's own record, which is what makes the
 table trustworthy (`Stream_AA_FlatCSG.md`). A row whose `whyNotCSG` or `whyNotSurface` is null

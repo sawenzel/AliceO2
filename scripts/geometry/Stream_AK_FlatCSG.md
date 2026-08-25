@@ -108,6 +108,14 @@ non-shipping parts, in one place:
 So: **10 shipped, 9 out of corpus scope, 2 refused by acceptance working as designed.** Nothing was
 waived, and design §2 and §9 now carry the same reconciliation.
 
+**One thing about that ALICE3 run a reader diffing `website_data/decline_reasons.json` will hit.**
+The catalogue was regenerated on `ALICE_3_example/CAD_noETA.stp`, the model every other document
+names, where the committed baseline had been built from `CAD.stp`; that is a deliberate switch of
+input and not a same-model regeneration, and it is why the file went from **79 entries to 78** —
+`ST2486888_01` is simply not in `CAD_noETA.stp`, and the rest of the ALICE3 rows move from
+`#b1`/`#b2` branch suffixes to one name per leaf. The file's own top-level `sourceModel` map now
+records which CAD file each run came from so the question cannot arise again.
+
 ## 4. Measurement 1 — the crossover
 
 Every one of the ten was emitted **both ways** and X-ray-benched against itself. The composite
