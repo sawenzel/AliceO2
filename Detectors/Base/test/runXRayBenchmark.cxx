@@ -52,6 +52,7 @@
 #include "DetectorsBase/O2SolidHarness.h"
 #include "DetectorsBase/O2BVHSurfaceSolid.h"
 #include "DetectorsBase/O2Tessellated.h"
+#include "DetectorsBase/O2FlatCSG.h"
 #include "DetectorsBase/O2SurfaceSolidIO.h"
 
 #include "TGeoBBox.h"
@@ -272,6 +273,12 @@ struct Options {
   std::string explicitSurfaces;
   std::string explicitFacets;
   std::string explicitShape;
+  std::string explicitFlatCSG;
+  /// `O2FlatCSG::SetSplitDepth` / `SetMinBoxFraction` for every flat subject, or < 0 / < 0 to
+  /// leave the class defaults alone. These exist so the split knobs can be swept from outside
+  /// the class, which is how their defaults were chosen (Design_FlatCSGSolid.md section 9).
+  int flatSplitDepth = -1;
+  double flatMinBoxFraction = -1.;
   std::string partsPattern;
   int raster = 48;
   std::string axesSpec = "xyz";
@@ -293,6 +300,9 @@ struct Options {
   std::string dumpRays;
   std::string refCrossings;
   std::string jsonOut;
+  /// `flatcsg` is deliberately NOT here: a flat part's `shape_*.root` already holds the same
+  /// `O2FlatCSG`, so a database run would score one solid twice. Naming `--flatcsg <file>`
+  /// adds it, and `--representations` can ask for it by name.
   std::set<std::string> representations = {"surface", "mesh", "shape"};
   bool skipNavigator = false;
   bool selfTest = false;
@@ -316,7 +326,32 @@ struct Part {
   std::string surfaces;
   std::string facets;
   std::string shape;
+  std::string flatcsg;
 };
+
+/// The file one named representation of \a part reads. One place, because four call sites
+/// used to spell the same three-way conditional and a fourth representation would have made
+/// each of them a place to forget it.
+const std::string& sourceFor(const Part& part, const std::string& name)
+{
+  if (name == "surface") {
+    return part.surfaces;
+  }
+  if (name == "mesh") {
+    return part.facets;
+  }
+  if (name == "flatcsg") {
+    return part.flatcsg;
+  }
+  return part.shape;
+}
+
+/// Every representation name, in the order the tables print them.
+const std::array<std::string, 4>& allRepresentations()
+{
+  static const std::array<std::string, 4> names{"surface", "mesh", "shape", "flatcsg"};
+  return names;
+}
 
 std::string deriveSidecarPath(const std::string& surfacesPath, const char* prefixOut,
                               const char* suffixOut)
@@ -360,7 +395,8 @@ void printUsage(const char* argv0)
     "X-ray / geantino transport benchmark -- ordered crossing lists, by stepping.\n\n"
     "Usage: " << argv0 << " --db <dir> [--parts <substring>] [--raster N] [--axes xyz]\n"
     "                          [--dump-rays D] [--ref-crossings D] [--json out.json]\n"
-    "   or: " << argv0 << " --surfaces <f> [--facets <f>] [--shape <f>] [options as above]\n"
+    "   or: " << argv0 << " --surfaces <f> [--facets <f>] [--shape <f>] [--flatcsg <f>]\n"
+    "                          [options as above]\n"
     "   or: " << argv0 << " --self-test\n\n"
     "  --raster N        N x N parallel rays per beam axis (default 48). Structured, not random:\n"
     "                    the chord integral converges as the boundary-cell count (~N) rather than\n"
@@ -377,7 +413,17 @@ void printUsage(const char* argv0)
     "  --dump-rays D     write D/xrays_<part>.json (the raster window and every ray) and exit\n"
     "  --ref-crossings D read D/crossings_<part>.json (scripts/geometry/xrayOracle.py) and score\n"
     "                    the crossing LISTS against it, per representation, per mode\n"
-    "  --representations surface,mesh,shape   which representations to run (default: all present)\n"
+    "  --flatcsg <f>     an o2::base::O2FlatCSG sidecar (flatcsg_*.bin) as its own subject.\n"
+    "                    NOT in the default set -- a flat part's shape_*.root already holds\n"
+    "                    the same solid -- so name it here, or in --representations.\n"
+    "                    This is how the flat halfspace solid is scored against the SAME part\n"
+    "                    emitted as a plain TGeoCompositeShape through --shape: two subjects,\n"
+    "                    one raster, one sample set (Design_FlatCSGSolid.md section 9).\n"
+    "  --flat-split-depth N        override O2FlatCSG::SetSplitDepth on every flat subject\n"
+    "  --flat-min-box-fraction X   override O2FlatCSG::SetMinBoxFraction likewise. The two\n"
+    "                    knobs are swept from here rather than from a test, so the defaults in\n"
+    "                    the header rest on the same instrument that reports the query cost.\n"
+    "  --representations surface,mesh,shape,flatcsg   which to run (default: all present)\n"
     "  --no-navigator    skip mode (b); mode (a) depends on nothing but the shape\n"
     "  --cost-only       load + raster + mode (a) only, and report wall clock and crossing counts.\n"
     "                    This is the scaling probe: it needs no mesh and no oracle.\n"
@@ -439,6 +485,12 @@ bool parseArgs(int argc, char** argv, Options& opt)
       opt.explicitFacets = next("--facets");
     } else if (a == "--shape") {
       opt.explicitShape = next("--shape");
+    } else if (a == "--flatcsg") {
+      opt.explicitFlatCSG = next("--flatcsg");
+    } else if (a == "--flat-split-depth") {
+      opt.flatSplitDepth = std::stoi(next("--flat-split-depth"));
+    } else if (a == "--flat-min-box-fraction") {
+      opt.flatMinBoxFraction = std::stod(next("--flat-min-box-fraction"));
     } else if (a == "--parts") {
       opt.partsPattern = next("--parts");
     } else if (a == "--raster") {
@@ -493,9 +545,14 @@ bool parseArgs(int argc, char** argv, Options& opt)
       throw std::runtime_error("unrecognized option: " + a);
     }
   }
-  if (!opt.selfTest && opt.ladderSpec.empty() && opt.db.empty() && opt.explicitSurfaces.empty()) {
-    throw std::runtime_error(
-      "either --db <dir>, --surfaces <file>, --ladder <counts> or --self-test is required");
+  if (!opt.selfTest && opt.ladderSpec.empty() && opt.db.empty() && opt.explicitSurfaces.empty() &&
+      opt.explicitShape.empty() && opt.explicitFlatCSG.empty()) {
+    throw std::runtime_error("either --db <dir>, --surfaces/--shape/--flatcsg <file>, "
+                             "--ladder <counts> or --self-test is required");
+  }
+  // Naming a sidecar means "score this", whatever the default set says.
+  if (!opt.explicitFlatCSG.empty()) {
+    opt.representations.insert("flatcsg");
   }
   return true;
 }
@@ -503,13 +560,23 @@ bool parseArgs(int argc, char** argv, Options& opt)
 std::vector<Part> collectParts(const Options& opt)
 {
   std::vector<Part> parts;
-  if (!opt.explicitSurfaces.empty()) {
-    Part part{"adhoc", "adhoc", opt.explicitSurfaces, opt.explicitFacets, opt.explicitShape};
-    if (part.facets.empty()) {
-      part.facets = deriveSidecarPath(part.surfaces, "facets_", ".bin");
-    }
-    if (part.shape.empty()) {
-      part.shape = deriveSidecarPath(part.surfaces, "shape_", ".root");
+  if (!opt.explicitSurfaces.empty() || !opt.explicitShape.empty() ||
+      !opt.explicitFlatCSG.empty()) {
+    Part part{"adhoc", "adhoc", opt.explicitSurfaces, opt.explicitFacets, opt.explicitShape,
+              opt.explicitFlatCSG};
+    // The siblings are only DERIVED from a `surfaces_*.bin` stem. Naming a shape or a sidecar
+    // directly means "score exactly this", which is how one part is emitted two ways and the two
+    // scored against each other; guessing a third subject from that name would be inventing one.
+    if (!part.surfaces.empty()) {
+      if (part.facets.empty()) {
+        part.facets = deriveSidecarPath(part.surfaces, "facets_", ".bin");
+      }
+      if (part.shape.empty()) {
+        part.shape = deriveSidecarPath(part.surfaces, "shape_", ".root");
+      }
+      if (part.flatcsg.empty()) {
+        part.flatcsg = deriveSidecarPath(part.surfaces, "flatcsg_", ".bin");
+      }
     }
     parts.push_back(std::move(part));
     return parts;
@@ -530,6 +597,10 @@ std::vector<Part> collectParts(const Options& opt)
     part.shape = p.value("shape", std::string());
     if (part.shape.empty()) {
       part.shape = deriveSidecarPath(part.surfaces, "shape_", ".root");
+    }
+    part.flatcsg = p.value("flatcsg", std::string());
+    if (part.flatcsg.empty()) {
+      part.flatcsg = deriveSidecarPath(part.surfaces, "flatcsg_", ".bin");
     }
     if (!opt.partsPattern.empty()) {
       const bool idMatch = part.id.find(opt.partsPattern) != std::string::npos;
@@ -716,8 +787,10 @@ bool resolveBoundingBox(const Part& part, const Options& opt, Point3D& lo, Point
     const char* name;
     const std::string& path;
   };
-  const Candidate candidates[3] = {
-    {"shape", part.shape}, {"mesh", part.facets}, {"surface", part.surfaces}};
+  const Candidate candidates[4] = {{"shape", part.shape},
+                                   {"flatcsg", part.flatcsg},
+                                   {"mesh", part.facets},
+                                   {"surface", part.surfaces}};
   for (const auto& candidate : candidates) {
     if (!opt.representations.count(candidate.name) || !fileExists(candidate.path)) {
       continue;
@@ -734,6 +807,12 @@ bool resolveBoundingBox(const Part& part, const Options& opt, Point3D& lo, Point
     } else if (std::string(candidate.name) == "mesh") {
       auto* solid = new O2Tessellated(part.id.c_str());
       if (LoadFacetSolid(candidate.path, *solid)) {
+        solid->CloseShape();
+        shape = solid;
+      }
+    } else if (std::string(candidate.name) == "flatcsg") {
+      auto* solid = new O2FlatCSG(part.id.c_str());
+      if (LoadFlatCSG(candidate.path, *solid)) {
         solid->CloseShape();
         shape = solid;
       }
@@ -797,6 +876,7 @@ struct LoadedRep {
   TGeoManager* manager = nullptr;
   TGeoShape* shape = nullptr;
   const O2BVHSurfaceSolid* surfaceSolid = nullptr;
+  const O2FlatCSG* flatSolid = nullptr;
   std::unique_ptr<TGeoHMatrix> placement;
   StructuralMemory structural;
   MemorySnapshot loadDelta;    ///< across the file read
@@ -812,7 +892,9 @@ struct LoadedRep {
 /// The split between `loadDelta` and `closeDelta` is deliberate and it is where the surface
 /// solid's memory actually is: `LoadSurfaceSolid` reads the sidecar, `CloseShape` builds the BVH,
 /// and lumping the two together would attribute an acceleration structure to a file format.
-LoadedRep loadRepresentation(const std::string& name, const std::string& source, const std::string& partId)
+LoadedRep loadRepresentation(const std::string& name, const std::string& source,
+                             const std::string& partId, int flatSplitDepth = -1,
+                             double flatMinBoxFraction = -1.)
 {
   LoadedRep rep;
   rep.manager = new TGeoManager(("perf_" + name).c_str(), "representation benchmark");
@@ -869,6 +951,54 @@ LoadedRep loadRepresentation(const std::string& name, const std::string& source,
       std::to_string(nV) + " vertices x " + std::to_string(sizeof(O2Tessellated::Vertex_t)) +
       " B + " + std::to_string(nF) + " facets x " + std::to_string(sizeof(TGeoFacet)) +
       " B + " + std::to_string(nF) + " normals x " + std::to_string(sizeof(O2Tessellated::Vertex_t)) + " B";
+  } else if (name == "flatcsg") {
+    auto* solid = new O2FlatCSG(partId.c_str());
+    if (!LoadFlatCSG(source, *solid)) {
+      return rep;
+    }
+    if (flatSplitDepth >= 0) {
+      solid->SetSplitDepth(flatSplitDepth);
+    }
+    if (flatMinBoxFraction >= 0.) {
+      solid->SetMinBoxFraction(flatMinBoxFraction);
+    }
+    const auto t1 = std::chrono::steady_clock::now();
+    rep.loadSeconds = std::chrono::duration<double>(t1 - t0).count();
+    rep.loadDelta = readMemory() - before;
+    const MemorySnapshot beforeClose = readMemory();
+    solid->CloseShape();
+    rep.closeSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t1).count();
+    rep.closeDelta = readMemory() - beforeClose;
+    if (!solid->IsClosed()) {
+      // A refused CloseShape leaves a shape that answers through its `_Loop` twins -- correct, and
+      // orders of magnitude slower. Timing it as if it were the accelerated path would be a
+      // measurement of the wrong thing, so the representation is dropped instead.
+      return rep;
+    }
+    rep.shape = solid;
+    rep.flatSolid = solid;
+    rep.structural.primitives = solid->GetNcells();
+    // Exact for everything this class owns: the halfspace blocks, the cell table, the sub-cell
+    // boxes with their concatenated active lists, and the BVH the class reports for itself.
+    const long long nH = solid->GetNhalfspaces();
+    const long long nC = solid->GetNcells();
+    const long long nB = solid->GetNboxes();
+    long long active = 0;
+    for (int i = 0; i < solid->GetNboxes(); ++i) {
+      active += solid->GetBox(i).nActive;
+    }
+    const long long bvh = static_cast<long long>(solid->GetBVHMemory());
+    rep.structural.bytes = nH * static_cast<long long>(sizeof(FlatCSGHalfspace)) +
+                           nC * static_cast<long long>(sizeof(FlatCSGCell)) +
+                           nC * 6 * static_cast<long long>(sizeof(double)) +
+                           nB * static_cast<long long>(sizeof(FlatCSGBox)) +
+                           active * static_cast<long long>(sizeof(int)) + bvh;
+    rep.structural.formula =
+      std::to_string(nH) + " halfspaces x " + std::to_string(sizeof(FlatCSGHalfspace)) + " B + " +
+      std::to_string(nC) + " cells x " + std::to_string(sizeof(FlatCSGCell) + 6 * sizeof(double)) +
+      " B + " + std::to_string(nB) + " boxes x " + std::to_string(sizeof(FlatCSGBox)) + " B + " +
+      std::to_string(active) + " active x " + std::to_string(sizeof(int)) + " B + BVH " +
+      std::to_string(bvh) + " B";
   } else {
     std::string error;
     rep.shape = loadShapeFromRootFile(source, &error);
@@ -1524,14 +1654,13 @@ int main(int argc, char** argv)
       // available, and it is reported either way.
       QuerySamples samples;
       std::string partitionedBy;
-      for (const auto& candidate : {std::string("surface"), std::string("mesh"), std::string("shape")}) {
-        const std::string& source = candidate == "surface" ? part.surfaces
-                                    : candidate == "mesh"  ? part.facets
-                                                           : part.shape;
+      for (const auto& candidate : allRepresentations()) {
+        const std::string& source = sourceFor(part, candidate);
         if (!opt.representations.count(candidate) || !fileExists(source)) {
           continue;
         }
-        LoadedRep rep = loadRepresentation(candidate, source, part.id);
+        LoadedRep rep = loadRepresentation(candidate, source, part.id, opt.flatSplitDepth,
+                                          opt.flatMinBoxFraction);
         if (rep.ok) {
           // Points are drawn in the PART frame; a placed shape classifies them in its own.
           QuerySamples inFrame =
@@ -1587,14 +1716,13 @@ int main(int argc, char** argv)
       partJson["bboxSource"] = bboxSource;
       json repsJson = json::array();
 
-      for (const auto& candidate : {std::string("surface"), std::string("mesh"), std::string("shape")}) {
-        const std::string& source = candidate == "surface" ? part.surfaces
-                                    : candidate == "mesh"  ? part.facets
-                                                           : part.shape;
+      for (const auto& candidate : allRepresentations()) {
+        const std::string& source = sourceFor(part, candidate);
         if (!opt.representations.count(candidate) || !fileExists(source)) {
           continue;
         }
-        LoadedRep rep = loadRepresentation(candidate, source, part.id);
+        LoadedRep rep = loadRepresentation(candidate, source, part.id, opt.flatSplitDepth,
+                                          opt.flatMinBoxFraction);
         if (!rep.ok) {
           std::printf("  [skip %s] would not load from %s\n", candidate.c_str(), source.c_str());
           delete rep.manager;
@@ -1604,7 +1732,10 @@ int main(int argc, char** argv)
         const QuerySamples local = toShapeFrame(samples, rep.placement.get());
         std::printf("  --- %-8s %-22s (%lld %s, load %.3f s + close %.3f s) ---\n", candidate.c_str(),
                     rep.shape->ClassName(), rep.structural.primitives,
-                    candidate == "mesh" ? "triangles" : (candidate == "surface" ? "patches" : "leaves"),
+                    candidate == "mesh"      ? "triangles"
+                    : candidate == "surface" ? "patches"
+                    : candidate == "flatcsg" ? "cells"
+                                             : "leaves",
                     rep.loadSeconds, rep.closeSeconds);
 
         const TimingStat contains = timeContainsPass(rep.shape, local, opt.perfWarmup, opt.perfPasses);
@@ -1700,6 +1831,30 @@ int main(int argc, char** argv)
           repJson["localise"] = localiseSurfaceSolid(rep.surfaceSolid, local, opt.perfWarmup,
                                                      opt.perfPasses);
         }
+        if (rep.flatSolid != nullptr) {
+          // The two counts the crossover is regressed against (Design_FlatCSGSolid.md section 9),
+          // plus the box structure the split knobs move.
+          long long active = 0;
+          long long worst = 0;
+          for (int i = 0; i < rep.flatSolid->GetNboxes(); ++i) {
+            const long long n = rep.flatSolid->GetBox(i).nActive;
+            active += n;
+            worst = std::max(worst, n);
+          }
+          repJson["flatCells"] = rep.flatSolid->GetNcells();
+          repJson["flatHalfspaces"] = rep.flatSolid->GetNhalfspaces();
+          repJson["flatBoxes"] = rep.flatSolid->GetNboxes();
+          repJson["flatActiveTotal"] = active;
+          repJson["flatActiveMean"] =
+            rep.flatSolid->GetNboxes() > 0
+              ? static_cast<double>(active) / static_cast<double>(rep.flatSolid->GetNboxes())
+              : 0.;
+          repJson["flatActiveMax"] = worst;
+          repJson["flatBVHBytes"] = static_cast<long long>(rep.flatSolid->GetBVHMemory());
+          repJson["flatSplitDepth"] = opt.flatSplitDepth;
+          repJson["flatMinBoxFraction"] = opt.flatMinBoxFraction;
+          repJson["flatCloseSeconds"] = rep.closeSeconds;
+        }
         repsJson.push_back(std::move(repJson));
         delete rep.manager;
         gGeoManager = nullptr;
@@ -1782,6 +1937,9 @@ int main(int argc, char** argv)
     if (opt.representations.count("shape") && fileExists(part.shape)) {
       specs.push_back({"shape", part.shape});
     }
+    if (opt.representations.count("flatcsg") && fileExists(part.flatcsg)) {
+      specs.push_back({"flatcsg", part.flatcsg});
+    }
     if (specs.empty()) {
       std::printf("  skip: no representation available\n");
       continue;
@@ -1827,6 +1985,33 @@ int main(int argc, char** argv)
         solid->CloseShape();
         primitives = solid->GetNfacets();
         primitiveKind = "triangles";
+        shape = solid;
+      } else if (spec.name == "flatcsg") {
+        auto* solid = new O2FlatCSG(part.id.c_str());
+        if (opt.flatSplitDepth >= 0) {
+          solid->SetSplitDepth(opt.flatSplitDepth);
+        }
+        if (opt.flatMinBoxFraction >= 0.) {
+          solid->SetMinBoxFraction(opt.flatMinBoxFraction);
+        }
+        if (!LoadFlatCSG(spec.source, *solid)) {
+          std::printf("  [skip %s] LoadFlatCSG failed for %s\n", spec.name.c_str(),
+                      spec.source.c_str());
+          delete manager;
+          gGeoManager = nullptr;
+          continue;
+        }
+        solid->CloseShape();
+        if (!solid->IsClosed()) {
+          std::printf("  [skip %s] CloseShape refused %s, so the shape would answer through its "
+                      "_Loop twins and the row would not be the accelerated path\n",
+                      spec.name.c_str(), spec.source.c_str());
+          delete manager;
+          gGeoManager = nullptr;
+          continue;
+        }
+        primitives = solid->GetNcells();
+        primitiveKind = "cells";
         shape = solid;
       } else {
         std::string error;
