@@ -65,9 +65,16 @@ int O2FlatCSG::AddTorus(double sign, const double* centre, const double* axis, d
   FlatCSGHalfspace halfspace;
   halfspace.kind = FlatCSGHalfspace::kTorus;
   halfspace.sign = sign < 0. ? -1. : 1.;
+  // both evaluators assume |axis| == 1; normalising here (rather than asserting it and trusting
+  // the caller) means a converter that hands in an OCCT axis with ordinary floating-point noise
+  // is corrected once, silently, instead of being wrong in every EvalHalfspace/HalfspaceRoots
+  // call for the life of the shape -- a genuinely degenerate (zero) axis is still a caller bug,
+  // so that case still asserts rather than dividing by zero
+  const double axisNorm = std::sqrt(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]);
+  assert(axisNorm > 0. && "O2FlatCSG::AddTorus: axis must not be the zero vector");
   for (int index = 0; index < 3; ++index) {
     halfspace.c[index] = centre[index];
-    halfspace.c[3 + index] = axis[index];
+    halfspace.c[3 + index] = axis[index] / axisNorm;
   }
   halfspace.c[6] = major;
   halfspace.c[7] = minor;

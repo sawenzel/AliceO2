@@ -407,4 +407,54 @@ BOOST_AUTO_TEST_CASE(a_tilted_torus_is_the_same_solid_as_an_upright_one_rotated)
     }
     BOOST_REQUIRE_EQUAL(static_cast<bool>(solid.Contains_Loop(point)), signedDistance < 0.);
   }
+
+  // Contains_Loop only exercises EvalHalfspace's frame decomposition; HalfspaceRoots has its own,
+  // separate one (the pz/dz/pPerp/dPerp block), and the upright case never gives it a non-z axis
+  // to get wrong. Compare distances against TGeoTorus by carrying a local (upright, origin-
+  // centred) point and direction alongside a world one related by the same rotation that carries
+  // the local z axis onto `axis`, so the reference and the shape describe the same solid.
+  const double s = 1. / std::sqrt(2.);
+  // rotation about the world x axis that sends local (0,0,1) to (0, s, s) == axis
+  auto rotateToWorld = [s](const double local[3], double world[3]) {
+    world[0] = local[0];
+    world[1] = s * local[1] + s * local[2];
+    world[2] = -s * local[1] + s * local[2];
+  };
+
+  TGeoTorus reference(8., 0., 2.);
+  for (int trial = 0; trial < 20000; ++trial) {
+    double localPoint[3] = {rng.uniform(-20., 20.), rng.uniform(-20., 20.), rng.uniform(-8., 8.)};
+    double localDir[3];
+    double norm = 0.;
+    do {
+      for (int index = 0; index < 3; ++index) {
+        localDir[index] = rng.uniform(-1., 1.);
+      }
+      norm = std::sqrt(localDir[0] * localDir[0] + localDir[1] * localDir[1] + localDir[2] * localDir[2]);
+    } while (norm < 1.e-3);
+    for (int index = 0; index < 3; ++index) {
+      localDir[index] /= norm;
+    }
+    double worldPoint[3];
+    double worldDir[3];
+    rotateToWorld(localPoint, worldPoint);
+    rotateToWorld(localDir, worldDir);
+    for (int index = 0; index < 3; ++index) {
+      worldPoint[index] += centre[index];
+    }
+
+    const bool inside = reference.Contains(localPoint);
+    if (inside != static_cast<bool>(solid.Contains_Loop(worldPoint))) {
+      continue;
+    }
+    const double mine = inside ? solid.DistFromInside_Loop(worldPoint, worldDir, TGeoShape::Big())
+                               : solid.DistFromOutside_Loop(worldPoint, worldDir, TGeoShape::Big());
+    const double theirs = inside ? reference.DistFromInside(localPoint, localDir, 3, TGeoShape::Big(), nullptr)
+                                 : reference.DistFromOutside(localPoint, localDir, 3, TGeoShape::Big(), nullptr);
+    if (theirs >= TGeoShape::Big()) {
+      BOOST_REQUIRE_GE(mine, TGeoShape::Big());
+    } else {
+      BOOST_REQUIRE_SMALL(mine - theirs, 1.e-6);
+    }
+  }
 }
