@@ -661,6 +661,12 @@ BOOST_AUTO_TEST_CASE(a_box_wholly_inside_a_cell_carries_no_active_halfspaces)
   const double lo[3] = {-4., -4., -4.};
   const double hi[3] = {4., 4., 4.};
   solid.SetCellBBox(0, lo, hi);
+  // Both knobs are pinned, not defaulted: this case is about what the subdivision CAN produce,
+  // and the shipped defaults are chosen for query cost (Stream_AK_FlatCSG.md section 5), which is
+  // a different question. Six levels on a cube is a 4 x 4 x 4 grid, whose innermost eight boxes
+  // touch no face.
+  solid.SetSplitDepth(6);
+  solid.SetMinBoxFraction(0.01);
   solid.CloseShape();
   // a box has six planes and is convex, so subdivision must find interior boxes with an empty list
   int solidBoxes = 0;
@@ -1073,6 +1079,9 @@ BOOST_AUTO_TEST_CASE(safety_is_sound_when_the_inside_bound_is_actually_nonzero)
   O2FlatCSG solid("bracket_safety_deep");
   buildBracket(solid);
   solid.SetSplitDepth(14);
+  // The size floor has to come down with the depth cap, or it stops the split first: at the
+  // shipped 0.05 the arm is thinner than one minimum box and no leaf ever detaches.
+  solid.SetMinBoxFraction(0.002);
   solid.CloseShape();
 
   bool sawPositiveInsideSafety = false;

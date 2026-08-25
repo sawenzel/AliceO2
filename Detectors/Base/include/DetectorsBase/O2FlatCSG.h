@@ -128,10 +128,10 @@ class O2FlatCSG : public TGeoBBox
   /// For the tests: the box structure is the thing being proved sound, so it has to be readable.
   bool CellContainsPublic(int cell, const double* point) const { return CellContains(cell, point); }
 
-  /// Subdivision depth cap. Default 6; task 10 measures where it belongs.
+  /// Subdivision depth cap. See `fSplitDepth` for where the default comes from.
   void SetSplitDepth(int depth) { fSplitDepth = depth; }
   /// Stop splitting a box narrower than this fraction of the part's bounding-box diagonal.
-  /// Default 0.01; task 10 measures where it belongs.
+  /// See `fMinBoxFraction` for where the default comes from.
   void SetMinBoxFraction(double fraction) { fMinBoxFraction = fraction; }
 
   /// `sign * f(point)`; the halfspace contains the point when this is `<= 0`.
@@ -290,8 +290,17 @@ class O2FlatCSG : public TGeoBBox
   /// rather than the shape's own source data, and the caller is always expected to call
   /// `CloseShape` again after a read (design section 7, and the loader's own contract).
   bool fClosed = false; //!
-  int fSplitDepth = 6;           ///< subdivision depth cap; task 10 measures where it belongs
-  double fMinBoxFraction = 0.01; ///< min box size as a fraction of the part's bbox diagonal
+  /// Subdivision depth cap, and the minimum box size as a fraction of the part's bounding-box
+  /// diagonal. Both set from the sweep in scripts/geometry/Stream_AK_FlatCSG.md section 5
+  /// (depth 3..10 x fraction 0.002..0.2 on six shipped parts): every kernel gets cheaper as
+  /// the boxes get coarser, because a cell of this rung carries 5 to 16 halfspaces and
+  /// evaluating the ones a coarse box leaves undecided is cheaper than the BVH descent that
+  /// would have removed them. 0.05 is the coarsest setting that still leaves a real sub-cell
+  /// structure (2.5 to 19 boxes per cell); the depth cap only binds on one of the six parts
+  /// there, and 4 costs it 15 % of one kernel to keep a level of headroom for a part whose
+  /// cells are large relative to the part, which is the case the cap exists for.
+  int fSplitDepth = 4;
+  double fMinBoxFraction = 0.05;
 
   /// The BVH over `fBoxes`, built by `CloseShape`. Never streamed and never persisted -- it is
   /// rebuilt from the boxes, which are themselves rebuilt from the halfspaces (design section 7),
