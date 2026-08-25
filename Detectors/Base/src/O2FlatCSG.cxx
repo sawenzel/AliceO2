@@ -607,10 +607,19 @@ void O2FlatCSG::CloseShape()
 #ifndef NDEBUG
   // A cell's bounding box must CONTAIN the cell, and since task 5 that is a correctness
   // precondition rather than a cost one: boxes are only ever built inside it, so a cell that
-  // spills past its own bbox is material the accelerated Contains cannot find and the accelerated
-  // distances truncate, while the twins -- which know nothing of boxes -- still see it. The
-  // converter owes this (design section 4.2); the check samples each face from just outside and
-  // requires the cell to have ended.
+  // spills past its own bbox makes this shape disagree with ITSELF -- the accelerated queries,
+  // which look only inside boxes, say there is nothing out there; the twins, which know nothing
+  // of boxes, say there is. That is a violation of the twin parity design section 6 rests on, and
+  // it fires here rather than in a test.
+  //
+  // WHICH OF THE TWO IS RIGHT IS NOT A COIN TOSS, AND THE REPAIR IS NOT TO WIDEN THE BOX.
+  // The converter (`csg/recognise.py:_flat_cell_box`) hands in the bounding box of the CAD piece
+  // the cell was read off, so a point outside the box is outside that piece and outside the part.
+  // A hit here therefore means the cell's halfspaces do not close the cell up and it is LARGER
+  // than the part: the accelerated answer is the correct one and the twin is inventing material.
+  // Growing the box would ship that phantom material instead of repairing anything. The sound
+  // response is the converter's -- refuse the part -- and `_flat_box_holds_cell` does exactly
+  // that before a sidecar is ever written.
   {
     const double reach = 1.e-6 * (diagonal > 0. ? diagonal : 1.);
     for (int cell = 0; cell < GetNcells(); ++cell) {
@@ -628,8 +637,10 @@ void O2FlatCSG::CloseShape()
               probe[second] = cellLo[second] + 0.25 * step2 * (cellHi[second] - cellLo[second]);
               assert(!CellContains(cell, probe) &&
                      "O2FlatCSG::CloseShape: a cell reaches past the bounding box SetCellBBox was "
-                     "given; the accelerated queries build boxes only inside it and would lose that "
-                     "material");
+                     "given, so this shape and its own _Loop twins answer differently out there. "
+                     "The converter's box is the CAD piece's own bbox, so the cell is larger than "
+                     "the part: close the cell's halfspaces or refuse the part -- do NOT widen "
+                     "the box, which would ship the phantom material");
             }
           }
         }

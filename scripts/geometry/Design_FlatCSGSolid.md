@@ -237,6 +237,17 @@ while the `_Loop` twins, which know nothing of boxes, still see it. The disagree
 one-sided, which is the shape of defect §4.4 and §6 exist to prevent, so the converter owes an
 **outer** bound: erring wide costs only boxes that prune to nothing, erring narrow loses material.
 
+**Which of the two answers is wrong depends on where the box came from, and for this converter it
+is the twin** (added 2026-08-25, task 9). `recognise._flat_cell_box` hands in the bounding box of
+the CAD *piece* the cell was read off, so a point outside that box is outside the piece and
+outside the part: a cell still holding out there is **larger than the part**, the accelerated
+`Contains` is right and `Contains_Loop` is inventing material. Widening the box would silence the
+twins by shipping the phantom material, so it is not a repair. The sound response is to refuse the
+part, which `recognise._flat_box_holds_cell` does before a sidecar is written — it refused ITS
+`BPSupportLowerCollar` and TPC `TPC_ORH` on the first corpus run. The obligation itself is
+discharged positively rather than by that sampler alone: `emit.crosscheck_contains` compares
+`Contains` against `Contains_Loop` on the shipped shape, and a disagreement drops the part a tier.
+
 `CloseShape` already refuses a bbox that is unset, inverted or non-finite, with an `Error` and an
 all-or-nothing build. Containment it cannot decide cheaply in general, so it carries a
 **debug-build check** instead: each face is sampled on a 5x5 grid offset outward by `1e-6` of the
@@ -372,7 +383,17 @@ anything cleverer.
 ## 8. The converter side
 
 `csg/decompose.py` is **unchanged**: the same split loop, the same connectivity-first rule, the
-same volume guard, the same `PART_MAX_CELLS = 64` (every part in the demand table is under it).
+same volume guard, the same `PART_MAX_CELLS = 64`.
+
+> **Corrected 2026-08-25, at the close of the rung (task 9).** This paragraph originally claimed
+> "every part in the demand table is under it". That is false, and it is what keeps ITS
+> `IBCYSSFlangeA` declined after the rung landed. `decompose.split_into_cells` tests
+> `len(cells) + len(pending) + len(unresolved) > max_cells` at the top of each iteration
+> (`csg/decompose.py:305`), so the bound is on the whole working set and not on the terminal cell
+> count: 59 terminal cells with a non-empty queue trips it. `PART_MAX_CELLS` — not either of the
+> flat budgets, which the largest shipped part uses 47/256 and 282/1024 of — is now what decides
+> this rung's coverage. Raising it stays out of scope here because this section freezes
+> `decompose.py`; it is a real question for §9's measurement rung.
 
 What changes:
 
@@ -388,8 +409,28 @@ What changes:
   is measured the policy is not written down, and no part that converts today changes
   representation.
 - a **single cell is admissible.** `primitives.union_of_cells` requires two or more cells, and
-  that stays true of the DNF *description*; but the C++ class accepts one, because the ITS
-  connector blocks that the 8-leaf per-cell budget refuses are one cell each and belong here.
+  that stays true of the DNF *description*; the C++ class and `primitives.flat_cells` both accept
+  one.
+
+  > **Corrected 2026-08-25 (task 9).** The named justification — "the ITS connector blocks that
+  > the 8-leaf per-cell budget refuses are one cell each and belong here" — did not survive the
+  > corpus run. Those blocks are no longer one cell: `IBConnectorBlockBodyASide` decomposes into
+  > 17 pieces and is refused because cell 3's halfspaces do not close it up (see the ownership
+  > rule below and `recognise._flat_box_holds_cell`), and `IBConnectorBlockBodyCSide` is refused
+  > on the boundary gap. The rung therefore does **not** deliver the single-cell case this bullet
+  > names; one cell stays legal in the description and in the class, and nothing in the five
+  > corpora exercises it.
+
+- **ownership is not reopened by running last.** The flat path runs only after every matcher
+  above it declines, and a *one-piece* decomposition keeps the two whole-part guards
+  `_match_single_cell` applies: an all-planar body belongs to the prism family's templates, and a
+  one-carrier body to the tier-1 ones (`_cell_leaves(..., whole_part=len(pieces) == 1)`). Running
+  last is a licence to take what nobody else can state, not a licence to overrule a matcher that
+  looked at a part and judged it not one of its own. Concretely: a three-section prism 1e-5 cm out
+  of similarity, which the prism family refuses because it is not a `TGeoXtru`, would otherwise
+  ship here as an exact ten-plane cell — a body the recogniser had already judged unlike its
+  template, accepted on a technicality. Multi-cell parts are unaffected; every part this rung
+  ships is 12 to 47 cells.
 
 ## 9. What R5 must measure to be done
 

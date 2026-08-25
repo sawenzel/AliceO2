@@ -219,6 +219,14 @@ def crosscheck_contains(cand, original, n_points=4000, seed=1234):
     realisation of the description, this measures the *ROOT* one, and it measures it against the
     CAD body rather than against the other realisation. Points within one model tolerance of the
     boundary are skipped, since neither side claims to decide those.
+
+    For a shape that has `_Loop` twins -- `o2::base::O2FlatCSG` -- the same points also carry
+    `twinDisagreements`: `Contains` against `Contains_Loop`, on the shape that actually ships.
+    That is the **definitive** discharge of the cell-bounding-box obligation of design section
+    4.2, rather than the proxy `recognise._flat_box_holds_cell`'s 216 probes per cell provide: a
+    cell that reaches past its declared box is precisely a point where the two answer
+    differently, and here it is measured on the shipped object over the part's own bounding box.
+    `None` for every shape class that has no twin, which is all of them but one.
     """
     import random
     from array import array
@@ -234,6 +242,8 @@ def crosscheck_contains(cand, original, n_points=4000, seed=1234):
     rng = random.Random(seed)
     disagreements = 0
     scored = 0
+    has_twin = hasattr(shape, "Contains_Loop")
+    twin_disagreements = 0 if has_twin else None
     for _ in range(n_points):
         p = (rng.uniform(xmin - pad, xmax + pad), rng.uniform(ymin - pad, ymax + pad),
              rng.uniform(zmin - pad, zmax + pad))
@@ -246,9 +256,14 @@ def crosscheck_contains(cand, original, n_points=4000, seed=1234):
         # here is the same composition every other consumer performs, so a wrong placement is a
         # disagreement against the CAD body rather than a silent pass.
         local = prim.placement_to_local(placement, p)
-        if bool(shape.Contains(array("d", list(local)))) != (state == TopAbs_IN):
+        probe = array("d", list(local))
+        accelerated = bool(shape.Contains(probe))
+        if accelerated != (state == TopAbs_IN):
             disagreements += 1
-    return {"points": scored, "disagreements": disagreements}
+        if has_twin and accelerated != bool(shape.Contains_Loop(probe)):
+            twin_disagreements += 1
+    return {"points": scored, "disagreements": disagreements,
+            "twinDisagreements": twin_disagreements}
 
 
 # ------------------------------------------------------------------------------------------
@@ -344,7 +359,9 @@ def _print_record(record):
         extra = ""
         if record.get("containsCrosscheck") is not None:
             cc = record["containsCrosscheck"]
-            extra = (f", ROOT-vs-CAD Contains {cc['disagreements']}/{cc['points']}"
+            twin = ("" if cc.get("twinDisagreements") is None
+                    else f", twin {cc['twinDisagreements']}/{cc['points']}")
+            extra = (f", ROOT-vs-CAD Contains {cc['disagreements']}/{cc['points']}{twin}"
                      f", bbox(ROOT vs OCCT) {record['bboxRootVsOcctCm']:.2e} cm")
         print(f"  [CSG ] {record['part']}: {record['description']}  "
               f"[{record['recogniser']}]  dV_sym={acc['symmetricDifference']:.3g} cm^3 "
@@ -2528,8 +2545,22 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
     except recognise.Declined as declined:
         escaped = str(declined)
     check("the outward probe catches a cell that is not closed up by its own halfspaces",
-          escaped is not None and "past its own bounding box" in escaped,
+          escaped is not None and "do not close the cell up" in escaped
+          and "Widening the declared box" in escaped,
           escaped or "ACCEPTED an unbounded cell")
+
+    # a corroboration that scored nothing corroborates nothing: `accept.contains_disagreements`
+    # answers (0, 0, 0.0) when it could not sample at all, and that reads exactly like a clean
+    # result. Design section 10 makes the corroboration mandatory on this path.
+    intact_disagreements = accept.contains_disagreements
+    try:
+        accept.contains_disagreements = lambda *args, **kwargs: (0, 0, 0.0)
+        empty_scored, empty_why = recognise.recognise_flat_cells(l_cone_solid)
+    finally:
+        accept.contains_disagreements = intact_disagreements
+    check("a containment corroboration that scored no point is a decline, not a pass",
+          empty_scored is None and "scored no point" in (empty_why or ""),
+          empty_why or "ACCEPTED on an empty measurement")
 
     # --- R5: the sidecar the macro loads, and the shape the gate scores, are one solid ---------
     flat_blocks, flat_sidecar_cells = prim.flat_sidecar_records(cone_record)
@@ -2995,6 +3026,17 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
         check("the shipped flat shape agrees with its own _Loop twin and with csg/flat.py",
               twin_bad == 0 and python_bad == 0,
               f"{twin_bad} twin and {python_bad} emitter disagreement(s) over 20000 points")
+        # the same twin comparison the converter now runs on every emitted part, through the
+        # function that runs it, and the field it reports it in
+        cone_cross = crosscheck_contains(cone_record, l_cone_solid)
+        plain_cross = crosscheck_contains(disjoint_record["candidate"],
+                                          disjoint_record.get("solid", disjoint))
+        check("crosscheck_contains measures the twin on a flat part and nothing on a tree part",
+              cone_cross["twinDisagreements"] == 0 and cone_cross["disagreements"] == 0
+              and cone_cross["points"] > 0 and plain_cross["twinDisagreements"] is None,
+              f"flat {cone_cross['twinDisagreements']}/{cone_cross['points']}, tree twin "
+              f"{plain_cross['twinDisagreements']}")
+
         check("the flat shape's Capacity is the sum of its cells' own volumes",
               abs(flat_shape.Capacity()
                   - sum(c["volume"] for c in cone_record["cells"])) <= 1.0e-9,

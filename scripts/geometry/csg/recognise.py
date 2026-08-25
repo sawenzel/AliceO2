@@ -2004,15 +2004,22 @@ _PART_MAX_FLAT_HALFSPACES = 1024
 # How far a cell's declared bounding box is grown past the piece's own OCCT box.
 #
 # The box is a CORRECTNESS obligation (`Design_FlatCSGSolid.md` section 4.2): `O2FlatCSG` builds
-# its sub-cell boxes strictly inside it, so a cell reaching past its box loses material from the
-# accelerated `Contains` while the `_Loop` twins keep it, and the disagreement is silent. The
-# piece's box is not by itself an outer bound of the CELL, which is the intersection of the
-# piece's halfspaces and can in principle reach further; what makes it one is the acceptance
-# below, which refuses the cell unless its realisation's boundary is within `REL_TOL * scale` of
-# the piece's everywhere and it classifies no sampled point differently. Growing by 1e-3 of the
-# part diagonal leaves three orders of magnitude over that proven agreement, and it also clears
-# `CloseShape`'s debug-build face sampler, which probes 1e-6 of the diagonal outside each face
-# and requires the cell not to contain the sample. Erring wide costs boxes that prune to nothing.
+# its sub-cell boxes strictly inside it, so a cell reaching past its box makes the shape disagree
+# with its own `_Loop` twins out there -- the accelerated queries look only inside boxes and find
+# nothing, the twins have no boxes and find material.
+#
+# **The box handed in here is the CAD piece's own bounding box**, so which of the two is right is
+# not open: a point outside it is outside the piece and outside the part, the accelerated answer
+# is the correct one, and a cell that reaches out there is LARGER than the part because its
+# halfspaces do not close it up. The repair is never to widen the box -- that ships the phantom
+# material -- it is to refuse the part, which is what `_flat_box_holds_cell` below does.
+#
+# The margin is not there to buy room for such a cell. It is there because the piece's box is a
+# measurement: the acceptance below establishes that the realised cell's boundary is within
+# `REL_TOL * scale = 1e-6 * scale` of the piece's everywhere and that it classifies no sampled
+# point differently, and 1e-3 of the part diagonal sits three orders of magnitude above that so
+# the declared box cannot clip the cell at its own surface. It also clears `CloseShape`'s
+# debug-build face sampler, which probes 1e-6 of the diagonal outside each face.
 _FLAT_BOX_MARGIN = 1.0e-3
 
 
@@ -2040,14 +2047,19 @@ def _flat_box_holds_cell(blocks, lo, hi):
 
     The converter owes `SetCellBBox` an outer bound and `CloseShape` cannot decide containment
     (`Design_FlatCSGSolid.md` section 4.2): it builds no box outside the one it is given, so a
-    cell reaching past its box loses material from the accelerated `Contains` while the `_Loop`
-    twins keep it -- a silent, one-sided disagreement between a shape and its own reference.
+    cell reaching past its box makes `O2FlatCSG` and its own `_Loop` twins answer differently out
+    there, which is what design section 6 exists to forbid.
 
-    This cannot *prove* containment either, and does not claim to. What it does is take the one
-    way this actually goes wrong -- a cell whose halfspaces do not close it up, so it runs off
-    through a face and keeps going -- and look for it where it would be: straight out of every
-    face, near and far. Everything it finds is a decline, so a positive result costs a tier and
-    never ships.
+    **A hit means the cell is bigger than the part, and the fix is never a bigger box.** `lo`/`hi`
+    is the CAD piece's own bounding box grown by `_FLAT_BOX_MARGIN`, so a probe point outside it
+    is outside the piece and outside the part. The accelerated `Contains` -- which says "no
+    material" there -- is right; `Contains_Loop` is inventing material, because the cell's
+    halfspaces do not close the cell up. Widening the box would silence the twins by *shipping*
+    the phantom material. Refusing the part is the only sound response and is what this does.
+
+    This cannot *prove* containment, and does not claim to. What it does is take the one way this
+    actually goes wrong -- an unclosed cell that runs off through a face and keeps going -- and
+    look for it where it would be: straight out of every face, near and far.
     """
     from csg import flat
     span = [hi[i] - lo[i] for i in range(3)]
@@ -2068,10 +2080,12 @@ def _flat_box_holds_cell(blocks, lo, hi):
                         point[u], point[v] = su, sv
                         if flat.flat_contains(blocks, tuple(point)):
                             raise Declined(
-                                f"the cell reaches {offset * reach:.3g} cm past its own bounding "
-                                f"box on axis {axis}: its halfspaces do not close it up, and a "
-                                "cell outside its declared box is material O2FlatCSG's "
-                                "accelerated queries cannot find")
+                                f"the cell's halfspaces still hold {offset * reach:.3g} cm past "
+                                f"the CAD piece's own bounding box on axis {axis}: they do not "
+                                "close the cell up, so the cell is LARGER than the part. Widening "
+                                "the declared box would ship that phantom material and would make "
+                                "O2FlatCSG disagree with its own _Loop twins; the part is refused "
+                                "instead")
 
 
 def _match_flat_cells(solid, records, tol, diag, max_cells=None, max_halfspaces=None, cache=None):
@@ -2160,6 +2174,13 @@ def _match_flat_cells(solid, records, tol, diag, max_cells=None, max_halfspaces=
     gap = _measured_gap(solid, cand, diag, "the flat cells")
     disagreements, scored, worst = accept_module().contains_disagreements(
         solid, prim.build_occ(cand), accept_module().model_tolerance_cm(solid))
+    if scored <= 0:
+        # `accept.contains_disagreements` answers `(0, 0, 0.0)` when it could not sample at all --
+        # a null bounding box, an unclassifiable solid -- and that reads exactly like a clean
+        # result. Design section 10 makes the corroboration mandatory on this path, so a
+        # corroboration that scored nothing is a decline rather than a pass.
+        raise Declined("the containment corroboration scored no point at all, so it corroborated "
+                       "nothing: the flat cells are not admitted on an empty measurement")
     if disagreements:
         raise Declined(f"the flat cells disagree with the part about {disagreements} of "
                        f"{scored} classified point(s), the farthest {worst:.3g} cm from the "

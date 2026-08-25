@@ -98,18 +98,35 @@ def recognise_and_emit(def_shapes, def_names, scale_to_cm, out_folder, sanitize_
              "placement": record["placement"]}, indent=1))
         if record["accepted"]:
             is_flat = record["candidate"]["op"] == "flatCells"
-            if is_flat:
-                # Written whether or not PyROOT is here: the sidecar needs neither ROOT nor the
-                # O2 dictionary, and it is the artifact the simulation actually loads.
-                record["flatSidecar"] = write_flat_sidecar(
-                    record["candidate"], out_folder, suffix)
             if root_available:
+                if is_flat:
+                    # Written inside this branch on purpose: a deferred part is not dispatched to
+                    # CSG in `geom.C`, and a report row advertising a sidecar for a part that
+                    # ships as a mesh would be a lie about what the macro builds. `emit.py
+                    # --from-json` writes it when it completes the deferred shape.
+                    record["flatSidecar"] = write_flat_sidecar(
+                        record["candidate"], out_folder, suffix)
                 target = (out_folder / f"shape_{suffix}.root").resolve()
                 emit.write_shape_root(record["candidate"], target)
                 record["shape"] = str(target)
                 record["bboxRootVsOcctCm"] = emit.crosscheck_bbox(record["candidate"])
                 record["containsCrosscheck"] = emit.crosscheck_contains(record["candidate"], solid)
-                if is_flat:
+                twin = (record["containsCrosscheck"] or {}).get("twinDisagreements")
+                if twin:
+                    # `Contains` against `Contains_Loop` on the shape that ships, over the part's
+                    # own bounding box. A disagreement means a cell reaches past the bounding box
+                    # the converter declared for it, which is the one defect `SetCellBBox` cannot
+                    # detect for itself (design section 4.2) -- so the part falls a tier instead
+                    # of shipping a solid that is not the same solid as its own reference.
+                    record["accepted"] = False
+                    record["shape"] = None
+                    record["flatSidecar"] = None
+                    record["reason"] = (
+                        f"the emitted shape disagrees with its own _Loop twin about {twin} of "
+                        f"{record['containsCrosscheck']['points']} classified point(s): a cell "
+                        "reaches past the bounding box declared for it, so the accelerated "
+                        "queries and the reference ones are not describing the same solid")
+                elif is_flat:
                     flat_files[lid] = record["flatSidecar"]
                 else:
                     csg_files[lid] = str(target)
