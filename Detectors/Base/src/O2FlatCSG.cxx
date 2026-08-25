@@ -309,9 +309,17 @@ Double_t O2FlatCSG::DistFromInside_Loop(const Double_t* point, const Double_t* d
   int count = 0;
   for (int cell = 0; cell < GetNcells(); ++cell) {
     // each call's capacity (totalCapacity - count) is at least that cell's own maxPairsForCell,
-    // so CellIntervals cannot overflow here; a negative return would mean the bound is wrong
-    count += CellIntervals(cell, nullptr, -1, point, dir, 0., step,
-                           pairBuffer.data() + 2 * count, totalCapacity - count);
+    // so this is not expected to overflow -- but a negative count must never reach the pointer
+    // arithmetic below, so check it explicitly rather than trust the bound silently
+    const int found = CellIntervals(cell, nullptr, -1, point, dir, 0., step,
+                                    pairBuffer.data() + 2 * count, totalCapacity - count);
+    if (found < 0) {
+      Error("DistFromInside_Loop",
+            "CellIntervals overflowed for cell %d: the maxPairsForCell bound no longer holds",
+            cell);
+      return TGeoShape::Big();
+    }
+    count += found;
   }
   count = mergeIntervals(pairBuffer.data(), count, TGeoShape::Tolerance());
   for (int pair = 0; pair < count; ++pair) {
