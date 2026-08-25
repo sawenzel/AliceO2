@@ -32,6 +32,15 @@ ClassImp(o2::base::O2FlatCSG);
 /// The most roots one cell can contribute to one ray: four per torus halfspace.
 constexpr int kMaxRootsPerHalfspace = 4;
 
+/// A hard ceiling on the aspect-ratio-equalising splits `SplitBox` may spend on one cell before it
+/// gives up and keeps the box as-is, however far from cubic. Fix round 1 measured that a level cap
+/// denominated purely in tree depth silently starves the actual subdivision budget on a long,
+/// thin cell (see `SplitBox`'s header doc comment); this constant is the safety net that keeps the
+/// fix from letting a pathological (near-1D) cell recurse without bound. log2(1000) ~= 10, so this
+/// leaves comfortable headroom over the 1000:1 case design section 4.2's motivating shapes cite,
+/// while still bounding the worst-case box count to a fixed multiple rather than an unbounded one.
+constexpr int kMaxCubifySplits = 16;
+
 namespace
 {
 /// A safe upper bound on the number of `[enter, exit]` pairs one cell can produce along a ray:
@@ -421,7 +430,8 @@ bool O2FlatCSG::CellContains(int index, const double* point) const
 }
 
 void O2FlatCSG::SplitBox(int cell, const double* lo, const double* hi,
-                         const std::vector<int>& active, int depth, double minSize)
+                         const std::vector<int>& active, int depth, double minSize,
+                         int cubifyBudget)
 {
   std::vector<int> stillActive;
   stillActive.reserve(active.size());
@@ -439,14 +449,24 @@ void O2FlatCSG::SplitBox(int cell, const double* lo, const double* hi,
   }
 
   double longest = 0.;
+  double shortest = TGeoShape::Big();
   int axis = 0;
   for (int index = 0; index < 3; ++index) {
-    if (hi[index] - lo[index] > longest) {
-      longest = hi[index] - lo[index];
+    const double extent = hi[index] - lo[index];
+    if (extent > longest) {
+      longest = extent;
       axis = index;
     }
+    shortest = std::min(shortest, extent);
   }
-  const bool keep = stillActive.empty() || depth <= 0 || longest <= minSize;
+  // whether THIS box, before any further split, is still far from cubic -- checked before the
+  // split it gates, per the header doc comment: a split out of a far-from-cubic box draws from
+  // `cubifyBudget` rather than `depth`, so `depth` stays untouched until aspect ratio is within a
+  // factor of two on every axis, which is exactly what keeps a near-cubic cell's boxes identical
+  // to what a depth-only budget would have produced.
+  const bool farFromCubic = longest > 2. * shortest;
+  const bool keep = stillActive.empty() || depth <= 0 || longest <= minSize ||
+                    (farFromCubic && cubifyBudget <= 0);
   if (keep) {
     FlatCSGBox box;
     for (int index = 0; index < 3; ++index) {
@@ -461,14 +481,16 @@ void O2FlatCSG::SplitBox(int cell, const double* lo, const double* hi,
     return;
   }
 
+  const int childDepth = farFromCubic ? depth : depth - 1;
+  const int childCubifyBudget = farFromCubic ? cubifyBudget - 1 : cubifyBudget;
   const double middle = 0.5 * (lo[axis] + hi[axis]);
   double childLo[3] = {lo[0], lo[1], lo[2]};
   double childHi[3] = {hi[0], hi[1], hi[2]};
   childHi[axis] = middle;
-  SplitBox(cell, childLo, childHi, stillActive, depth - 1, minSize);
+  SplitBox(cell, childLo, childHi, stillActive, childDepth, minSize, childCubifyBudget);
   childHi[axis] = hi[axis];
   childLo[axis] = middle;
-  SplitBox(cell, childLo, childHi, stillActive, depth - 1, minSize);
+  SplitBox(cell, childLo, childHi, stillActive, childDepth, minSize, childCubifyBudget);
 }
 
 void O2FlatCSG::CloseShape()
@@ -587,7 +609,8 @@ void O2FlatCSG::CloseShape()
     for (int offset = 0; offset < fCells[cell].count; ++offset) {
       active.push_back(fCells[cell].first + offset);
     }
-    SplitBox(cell, &fCellLo[3 * cell], &fCellHi[3 * cell], active, fSplitDepth, minSize);
+    SplitBox(cell, &fCellLo[3 * cell], &fCellHi[3 * cell], active, fSplitDepth, minSize,
+             kMaxCubifySplits);
   }
 
   if (!fBoxes.empty()) {
@@ -1307,6 +1330,21 @@ Double_t O2FlatCSG::Capacity() const
 ////////////////////////////////////////////////////////////////////////////////
 /// ComputeNormal -- the gradient of whichever halfspace is closest to being satisfied with
 /// equality at \a point, oriented per the `TGeoShape` convention (with respect to \a dir).
+///
+/// Two things a naive global argmin over `|EvalHalfspace|` gets wrong, both fixed here per design
+/// section 5.5:
+///
+/// 1. `|EvalHalfspace|` is an ALGEBRAIC value, not a distance, and its gain per unit distance
+///    differs per halfspace -- 1 for a unit plane, `2R` for a cylinder of radius `R`, and whatever
+///    a rescaled plane's coefficients happen to carry (design section 3.1). A point a hair off an
+///    R = 100 cylinder's wall can have `|f|` two orders of magnitude larger than a plane it is
+///    genuinely much farther from, so an unscaled argmin picks the far plane. The fix is to select
+///    on the first-order distance `|f| / |grad f|` instead, which both halves of this function
+///    already compute.
+/// 2. Comparing across EVERY halfspace of EVERY cell lets a distant cell's halfspace win at all.
+///    Restricting the scan to the active list of the box containing `point` -- design section
+///    5.5's own words -- removes that false winner as well as most of the cost: the active list
+///    is already the halfspaces still undecided there (section 4.2).
 
 void O2FlatCSG::ComputeNormal(const Double_t* point, const Double_t* dir, Double_t* norm) const
 {
@@ -1314,21 +1352,100 @@ void O2FlatCSG::ComputeNormal(const Double_t* point, const Double_t* dir, Double
   if (fHalfspaces.empty()) {
     return;
   }
-  int best = 0;
-  double bestValue = std::numeric_limits<double>::infinity();
-  for (int index = 0; index < GetNhalfspaces(); ++index) {
-    const double value = std::abs(EvalHalfspace(fHalfspaces[index], point));
-    if (value < bestValue) {
-      bestValue = value;
-      best = index;
+
+  const int* candidates = nullptr;
+  int nCandidates = 0;
+  // a full cell's halfspace run, built only when the containing box turns out to be wholly
+  // inside its cell (nActive == 0): such a box's OWN active list is empty by construction, but a
+  // point genuinely on a boundary cannot really be in one (see the reasoning at the call site
+  // below), so this is a defensive fallback rather than a path real navigation should reach
+  thread_local std::vector<int> wholeCell;
+
+  if (fClosed && fBVH != nullptr) {
+    const BVH& bvh = *static_cast<const BVH*>(fBVH);
+    const BVHVec3 query(static_cast<float>(point[0]), static_cast<float>(point[1]),
+                        static_cast<float>(point[2]));
+    thread_local std::vector<size_t> stack;
+    stack.clear();
+    stack.push_back(0); // the bvh2 root node
+    while (!stack.empty() && candidates == nullptr) {
+      const size_t current = stack.back();
+      stack.pop_back();
+      const auto& node = bvh.nodes[current];
+      if (!bvh::v2::extra::contains(node.get_bbox(), query)) {
+        continue;
+      }
+      if (node.is_leaf()) {
+        const auto beginPrimitive = node.index.first_id();
+        const auto endPrimitive = beginPrimitive + node.index.prim_count();
+        for (auto primitive = beginPrimitive; primitive < endPrimitive; ++primitive) {
+          const FlatCSGBox& box = fBoxes[bvh.prim_ids[primitive]];
+          if (!boxHoldsPoint(box, point)) {
+            continue;
+          }
+          if (box.nActive > 0) {
+            candidates = fActive.data() + box.firstActive;
+            nCandidates = box.nActive;
+          } else {
+            const FlatCSGCell& description = fCells[box.cell];
+            wholeCell.resize(description.count);
+            for (int slot = 0; slot < description.count; ++slot) {
+              wholeCell[slot] = description.first + slot;
+            }
+            candidates = wholeCell.data();
+            nCandidates = static_cast<int>(wholeCell.size());
+          }
+          break; // cells are disjoint; the first box that holds the point is the answer
+        }
+      } else {
+        const auto firstChild = node.index.first_id();
+        for (size_t child : {firstChild, firstChild + 1}) {
+          if (child < bvh.nodes.size()) {
+            stack.push_back(child);
+          }
+        }
+      }
     }
   }
-  double grad[3];
-  halfspaceGradient(fHalfspaces[best], point, grad);
-  const double length = std::sqrt(grad[0] * grad[0] + grad[1] * grad[1] + grad[2] * grad[2]);
-  if (length < 1.e-300) {
-    // the gradient is degenerate exactly where a real boundary point should not be (see
-    // halfspaceGradient); fall back to the travel direction itself, which is at least a unit
+
+  // no box claimed the point -- the shape never closed, or the point sits outside every retained
+  // box -- so fall back to every halfspace of every cell. `ComputeNormal` has no `_Loop` twin of
+  // its own to hand this off to; this scan IS that fallback.
+  thread_local std::vector<int> allHalfspaces;
+  if (candidates == nullptr) {
+    allHalfspaces.resize(GetNhalfspaces());
+    for (int index = 0; index < GetNhalfspaces(); ++index) {
+      allHalfspaces[index] = index;
+    }
+    candidates = allHalfspaces.data();
+    nCandidates = GetNhalfspaces();
+  }
+
+  int best = -1;
+  double bestValue = std::numeric_limits<double>::infinity();
+  double bestGrad[3] = {0., 0., 0.};
+  for (int slot = 0; slot < nCandidates; ++slot) {
+    const FlatCSGHalfspace& halfspace = fHalfspaces[candidates[slot]];
+    const double f = EvalHalfspace(halfspace, point);
+    double grad[3];
+    halfspaceGradient(halfspace, point, grad);
+    const double gradLength = std::sqrt(grad[0] * grad[0] + grad[1] * grad[1] + grad[2] * grad[2]);
+    if (gradLength < 1.e-300) {
+      continue; // degenerate gradient (see halfspaceGradient); this halfspace cannot win
+    }
+    const double value = std::abs(f) / gradLength; // the first-order distance to this surface
+    if (value < bestValue) {
+      bestValue = value;
+      best = candidates[slot];
+      bestGrad[0] = grad[0] / gradLength;
+      bestGrad[1] = grad[1] / gradLength;
+      bestGrad[2] = grad[2] / gradLength;
+    }
+  }
+
+  if (best < 0) {
+    // every candidate had a degenerate gradient -- only possible on a torus's own core-circle
+    // singularity or its revolution axis; fall back to the travel direction, at least a unit
     // vector oriented the way the contract requires
     const double dirLength = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
     if (dirLength > 1.e-300) {
@@ -1338,8 +1455,9 @@ void O2FlatCSG::ComputeNormal(const Double_t* point, const Double_t* dir, Double
     }
     return;
   }
+
   for (int index = 0; index < 3; ++index) {
-    norm[index] = grad[index] / length;
+    norm[index] = bestGrad[index];
   }
   const double dot = norm[0] * dir[0] + norm[1] * dir[1] + norm[2] * dir[2];
   if (dot < 0.) {

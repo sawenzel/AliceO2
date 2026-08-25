@@ -1002,13 +1002,17 @@ BOOST_AUTO_TEST_CASE(a_shape_that_failed_to_close_still_answers_through_the_loop
     for (int index = 0; index < 3; ++index) {
       dir[index] /= norm;
     }
-    if (solid.Contains_Loop(point)) {
+    const bool inside = solid.Contains_Loop(point);
+    if (inside) {
       BOOST_REQUIRE_EQUAL(solid.DistFromInside(point, dir, 3, TGeoShape::Big(), nullptr),
                           solid.DistFromInside_Loop(point, dir, TGeoShape::Big()));
     } else {
       BOOST_REQUIRE_EQUAL(solid.DistFromOutside(point, dir, 3, TGeoShape::Big(), nullptr),
                           solid.DistFromOutside_Loop(point, dir, TGeoShape::Big()));
     }
+    // Safety falls back to its twin exactly like the other three accelerated queries -- this was
+    // asserted for Contains and the distances above but never extended to Safety
+    BOOST_REQUIRE_EQUAL(solid.Safety(point, inside), solid.Safety_Loop(point, inside));
   }
 }
 
@@ -1042,6 +1046,53 @@ BOOST_AUTO_TEST_CASE(safety_is_sound_and_matches_its_twin)
       BOOST_REQUIRE_EQUAL(static_cast<bool>(solid.Contains_Loop(near)), inside);
     }
   }
+}
+
+BOOST_AUTO_TEST_CASE(safety_is_sound_when_the_inside_bound_is_actually_nonzero)
+{
+  // At the class's default split depth, buildBracket's arm is so far from cubic (20 x 2 x 2) that
+  // the depth cap fires before any leaf fully detaches from all six faces: EVERY box keeps
+  // nActive != 0, so the inside branch's `nActive == 0` selection path -- the one piece of
+  // `Safety` whose soundness rests on a structural invariant (design section 4.2's hard guarantee)
+  // rather than an exact box-distance formula -- is never taken by the test above. Its probes are
+  // then vacuous: with `safety == 0.`, `reach` is always `0.` too, so the "nearby" point IS the
+  // query point and the soundness check is trivially true. A deeper split makes solid boxes exist
+  // (see the fix-round measurement in the task report), which this case forces so the nActive == 0
+  // path is genuinely exercised end to end, not just agreed upon by two implementations at zero.
+  O2FlatCSG solid("bracket_safety_deep");
+  buildBracket(solid);
+  solid.SetSplitDepth(14);
+  solid.CloseShape();
+
+  bool sawPositiveInsideSafety = false;
+  Rng rng(11235813ULL);
+  for (int trial = 0; trial < 50000; ++trial) {
+    double point[3] = {rng.uniform(-16., 16.), rng.uniform(-8., 8.), rng.uniform(-6., 17.)};
+    const bool inside = solid.Contains_Loop(point);
+    const double safety = solid.Safety(point, inside);
+    BOOST_REQUIRE_GE(safety, 0.);
+    BOOST_REQUIRE_EQUAL(safety, solid.Safety_Loop(point, inside));
+    if (inside && safety > 0.) {
+      sawPositiveInsideSafety = true;
+    }
+
+    // the same soundness probes as above, now with genuine reach on at least some trials
+    for (int probe = 0; probe < 40; ++probe) {
+      double dir[3];
+      double norm = 0.;
+      do {
+        for (int index = 0; index < 3; ++index) {
+          dir[index] = rng.uniform(-1., 1.);
+        }
+        norm = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+      } while (norm < 1.e-3);
+      const double reach = safety * rng.uniform(0., 0.999) / norm;
+      const double near[3] = {point[0] + reach * dir[0], point[1] + reach * dir[1],
+                              point[2] + reach * dir[2]};
+      BOOST_REQUIRE_EQUAL(static_cast<bool>(solid.Contains_Loop(near)), inside);
+    }
+  }
+  BOOST_REQUIRE(sawPositiveInsideSafety);
 }
 
 BOOST_AUTO_TEST_CASE(capacity_is_the_sum_of_the_cell_volumes)
@@ -1109,4 +1160,41 @@ BOOST_AUTO_TEST_CASE(the_normal_on_a_face_is_the_face_normal)
   BOOST_CHECK_SMALL(normal[0] - 1., 1.e-12);
   BOOST_CHECK_SMALL(normal[1], 1.e-12);
   BOOST_CHECK_SMALL(normal[2], 1.e-12);
+}
+
+BOOST_AUTO_TEST_CASE(the_normal_selection_is_scale_invariant_across_cells)
+{
+  // Fix round 1: |EvalHalfspace| alone is not a distance -- its gain per unit distance is 1 for a
+  // unit plane but ~2R for a cylinder of radius R, so a naive argmin over |f| can pick a distant
+  // plane over the surface the point is actually on. Two cells make the point concrete: cell 0 is
+  // a cylinder of radius 100 about z, cell 1 a single plane at z = 0.05. The test point sits
+  // 0.0005 from the cylinder wall (radially) and 0.05 from the plane -- the cylinder is the true
+  // nearest surface by two orders of magnitude, but |f_cylinder| ~= 0.1 > |f_plane| = 0.05, so the
+  // unscaled rule would have picked the plane and returned (0, 0, 1) instead of the correct
+  // (1, 0, 0). Deliberately not closed: with CloseShape run, the box-restriction half of the fix
+  // alone would make this pass trivially (the point's own box never sees the other cell's plane),
+  // so this exercises ComputeNormal's cross-cell fallback scan, where only the |f| / |grad f|
+  // fix -- not the box restriction -- can be what saves it.
+  O2FlatCSG solid("scale_invariance");
+  double coeff[10];
+  zCylinderQuadric(100., coeff);
+  solid.AddQuadric(1., coeff);
+  solid.AddCell(0, 1, 0.);
+
+  const double planeNormal[3] = {0., 0., 1.};
+  const double planeThrough[3] = {0., 0., 0.05};
+  planeQuadric(planeNormal, planeThrough, coeff);
+  const int planeFirst = solid.GetNhalfspaces();
+  solid.AddQuadric(1., coeff);
+  solid.AddCell(planeFirst, 1, 0.);
+
+  BOOST_REQUIRE(!solid.IsClosed());
+
+  const double point[3] = {99.9995, 0., 0.};
+  const double dir[3] = {1., 0., 0.};
+  double normal[3] = {0., 0., 0.};
+  solid.ComputeNormal(point, dir, normal);
+  BOOST_CHECK_SMALL(normal[0] - 1., 1.e-9);
+  BOOST_CHECK_SMALL(normal[1], 1.e-9);
+  BOOST_CHECK_SMALL(normal[2], 1.e-9);
 }

@@ -279,9 +279,10 @@ Entirely from the box structure, with no surface-distance formula:
 - **outside:** the distance from `p` to the nearest non-empty box is a lower bound on the
   distance to the solid, because every point of the solid is in some box.
 - **inside:** if `p` is in a `solid`-marked box, the distance from `p` to that box's faces is a
-  lower bound on the distance to the boundary. If `p` is in an undecided box, fall back to the
-  distance to that box's faces, which is still a bound but a poor one — §9 measures whether
-  refining undecided boxes around a point pays, and the fallback is always the legal `0`.
+  lower bound on the distance to the boundary. If `p` is in an undecided box, that box's active
+  list may hold boundary anywhere within it, so its face distance is NOT a bound at all — the
+  sound answer there is `0`. §9 measures how often that fallback fires and whether refining
+  undecided boxes around a point would pay for itself.
 
 Box-to-point distance is exact and trivial, so this is rigorous by construction. §11 records that
 1-Lipschitz forms exist for the plane, sphere, cylinder and torus and would tighten it; that is a
