@@ -235,34 +235,42 @@ TGeoVolumeAssembly* Flex::makeElectricComponent(Double_t dx, Double_t dy, Double
   Int_t idHalfDisk = mftGeom->getDiskID(mLadderSeg->GetUniqueID());
   Int_t idLadder = mftGeom->getLadderID(mLadderSeg->GetUniqueID());
   //------------------------------------------------------
-  TGeoMedium* kmedX7R = gGeoManager->GetMedium("MFT_X7Rcapacitors$");
-  TGeoMedium* kmedX7Rw = gGeoManager->GetMedium("MFT_X7Rweld$");
-
   auto* X7R0402 = new TGeoVolumeAssembly(Form("X7R_%d_%d_%d_%d", idHalfMFT, idHalfDisk, idLadder, id));
 
-  auto* capacit = new TGeoBBox("capacitor", dx / 2, dy / 2, dz / 2);
-  auto* weld = new TGeoBBox("weld", (dx / 4) / 2, dy / 2, (dz / 2) / 2);
-  auto* capacitor =
-    new TGeoVolume(Form("capacitor_%d_%d_%d_%d", idHalfMFT, idHalfDisk, idLadder, id), capacit, kmedX7R);
-  auto* welding0 = new TGeoVolume(Form("welding0_%d_%d_%d_%d", idHalfMFT, idHalfDisk, idLadder, id), weld, kmedX7Rw);
-  auto* welding1 = new TGeoVolume(Form("welding1_%d_%d_%d_%d", idHalfMFT, idHalfDisk, idLadder, id), weld, kmedX7Rw);
-  capacitor->SetVisibility(kTRUE);
-  capacitor->SetLineColor(kRed);
-  capacitor->SetLineWidth(1);
-  capacitor->SetFillColor(capacitor->GetLineColor());
-  capacitor->SetFillStyle(4000); // 0% transparent
+  // capacitor/welding0/welding1 are geometrically identical at every call site
+  // (dx,dy,dz are always Geometry::sCapacitorDy/Dx/Dz) — build once, place many times.
+  static TGeoVolume* capacitor = nullptr;
+  static TGeoVolume* welding0 = nullptr;
+  static TGeoVolume* welding1 = nullptr;
+  if (!capacitor) {
+    TGeoMedium* kmedX7R = gGeoManager->GetMedium("MFT_X7Rcapacitors$");
+    TGeoMedium* kmedX7Rw = gGeoManager->GetMedium("MFT_X7Rweld$");
 
-  welding0->SetVisibility(kTRUE);
-  welding0->SetLineColor(kGray);
-  welding0->SetLineWidth(1);
-  welding0->SetFillColor(welding0->GetLineColor());
-  welding0->SetFillStyle(4000); // 0% transparent
+    auto* capacit = new TGeoBBox("capacitor", dx / 2, dy / 2, dz / 2);
+    auto* weld = new TGeoBBox("weld", (dx / 4) / 2, dy / 2, (dz / 2) / 2);
 
-  welding1->SetVisibility(kTRUE);
-  welding1->SetLineColor(kGray);
-  welding1->SetLineWidth(1);
-  welding1->SetFillColor(welding1->GetLineColor());
-  welding1->SetFillStyle(4000); // 0% transparent
+    capacitor = new TGeoVolume("capacitor", capacit, kmedX7R);
+    welding0 = new TGeoVolume("welding0", weld, kmedX7Rw);
+    welding1 = new TGeoVolume("welding1", weld, kmedX7Rw);
+
+    capacitor->SetVisibility(kTRUE);
+    capacitor->SetLineColor(kRed);
+    capacitor->SetLineWidth(1);
+    capacitor->SetFillColor(capacitor->GetLineColor());
+    capacitor->SetFillStyle(4000); // 0% transparent
+
+    welding0->SetVisibility(kTRUE);
+    welding0->SetLineColor(kGray);
+    welding0->SetLineWidth(1);
+    welding0->SetFillColor(welding0->GetLineColor());
+    welding0->SetFillStyle(4000); // 0% transparent
+
+    welding1->SetVisibility(kTRUE);
+    welding1->SetLineColor(kGray);
+    welding1->SetLineWidth(1);
+    welding1->SetFillColor(welding1->GetLineColor());
+    welding1->SetFillStyle(4000); // 0% transparent
+  }
 
   X7R0402->AddNode(capacitor, 1, new TGeoTranslation(0., 0., 0.));
   X7R0402->AddNode(welding0, 1, new TGeoTranslation(dx / 2 + (dx / 4) / 2, 0., (dz / 2) / 2));
