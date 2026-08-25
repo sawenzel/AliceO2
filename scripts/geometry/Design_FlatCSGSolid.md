@@ -179,10 +179,51 @@ Then, per halfspace and box:
 - otherwise it stays active and the box is undecided.
 
 A box whose active list empties is **wholly inside** the cell and is marked `solid`. Recursion
-stops on a depth cap, a minimum box size relative to the part diagonal, or an active-list length
-that has stopped shrinking (§9 measures where those go). The surviving boxes across all cells go
-into one `bvh::v2::Bvh` — the same substrate validated three times on this branch: the patch BVH,
-the sub-patch BVH (`Stream_X`), and `O2BVHAssembly` (`Stream_AE`).
+stops on a minimum box size relative to the part diagonal, an active-list length that has stopped
+shrinking (§9 measures where those go), or one of two separate level budgets running out —
+**depth** and **cubify**, split this way because a level cap denominated purely in tree depth
+charges full price for a split that only equalises aspect ratio. `SplitBox` always halves the
+current *longest* axis, so on a cell whose extents are not already close to a cube — a 20×2×2 arm
+is the motivating case — the first several levels are spent making the box roughly cubic before
+any of them can start detaching a leaf from a face, and a depth-only cap can be exhausted entirely
+by that alone.
+
+So a split is charged to **cubify** rather than **depth** whenever the box, before that split, is
+still far from cubic (`longest > 2 · shortest` over its three extents). `depth` is untouched until
+the box is within a factor of two on every axis, at which point every further split is charged to
+`depth` exactly as if there were only one budget — which is also what makes the split
+**aspect-ratio-neutral**: a cell that starts near-cubic never pays into `cubify` and its box tree
+is identical to what a depth-only rule would have produced. This follows from an invariance in the
+splitting rule itself: for extents `a ≤ b ≤ c` with `c ≤ 2a` (i.e. already within the near-cubic
+threshold), halving the longest extent `c` gives `c⁄2 ≤ a ≤ b`, so the new ratio is `2b⁄(c⁄2) ≤ 2b⁄a
+≤ 2` — ratio `≤ 2` is preserved by every longest-axis halving, so a box that starts there can never
+become far-from-cubic. A cube sits at ratio exactly 2 every second level and, since the test is a
+strict `>`, still counts as near-cubic, so the invariance holds for any cubify budget, not a
+specifically tuned one.
+
+`cubify` is a hard ceiling, not a target: a **per-path** budget (`kMaxCubifySplits` in the C++,
+currently 10) on the aspect-ratio-equalising splits one root-to-leaf branch may spend before the
+box is kept however far from cubic it still is. It only ever decreases going down the recursion, so
+it bounds one branch of a cell's tree, not the cell as a whole — the worst case for one cell is
+`2^kMaxCubifySplits` leaves along its widest branch. How far it reaches depends on the cell's
+*shape*, not only its worst ratio: a rod `(r, 1, 1)` keeps the same axis longest every split, so `N`
+splits buy the full `2^N` reduction; a plate `(r, r, 1)` alternates between its two long axes, so
+only every other split reduces either one, covering `2^(N⁄2)` — four orders of magnitude short of
+the rod case at `N = 10`. The ceiling exists purely so a pathological cell cannot recurse without
+bound; an ordinary cell resolves in a handful of splits long before it matters.
+
+One more case the arithmetic above does not fall out of automatically: a cell bbox with a genuinely
+zero (or merely tiny) extent on one axis is not something `CloseShape`'s bbox validation rejects —
+it checks only for unset, inverted or non-finite bounds — but it pins `shortest` at (near) zero on
+an axis that is never the longest and so never gets split, which would otherwise make
+`longest > 2 · shortest` permanently true and burn the entire cubify ceiling on a cell a depth-only
+rule would have resolved cheaply. The implementation floors `shortest` at `minSize` for this test
+only: once the other two axes have shrunk to the size floor there is nothing left worth cubifying
+towards, and the box falls through to the ordinary `longest ≤ minSize` stop instead.
+
+The surviving boxes across all cells go into one `bvh::v2::Bvh` — the same substrate validated
+three times on this branch: the patch BVH, the sub-patch BVH (`Stream_X`), and `O2BVHAssembly`
+(`Stream_AE`).
 
 The pruning is conservative in the only direction that is safe: an over-wide range bound loses
 pruning, never correctness.

@@ -32,14 +32,26 @@ ClassImp(o2::base::O2FlatCSG);
 /// The most roots one cell can contribute to one ray: four per torus halfspace.
 constexpr int kMaxRootsPerHalfspace = 4;
 
-/// A hard ceiling on the aspect-ratio-equalising splits `SplitBox` may spend on one cell before it
-/// gives up and keeps the box as-is, however far from cubic. Fix round 1 measured that a level cap
-/// denominated purely in tree depth silently starves the actual subdivision budget on a long,
-/// thin cell (see `SplitBox`'s header doc comment); this constant is the safety net that keeps the
-/// fix from letting a pathological (near-1D) cell recurse without bound. log2(1000) ~= 10, so this
-/// leaves comfortable headroom over the 1000:1 case design section 4.2's motivating shapes cite,
-/// while still bounding the worst-case box count to a fixed multiple rather than an unbounded one.
-constexpr int kMaxCubifySplits = 16;
+/// A hard ceiling on the aspect-ratio-equalising splits `SplitBox` may spend along one
+/// root-to-leaf PATH before it gives up and keeps that box as-is, however far from cubic --
+/// design section 4.2's two-purse split rule. It is a per-path bound, not a per-cell one:
+/// `cubifyBudget` only ever decreases going down the recursion, so the worst case for one cell is
+/// `2^kMaxCubifySplits` leaves along its widest branch, not `kMaxCubifySplits` splits in total.
+///
+/// The ceiling bites only once a cell's aspect ratio survives that many halvings of its longest
+/// axis, and how far that reaches depends on the SHAPE of the cell, not just its worst ratio: a
+/// rod `(r, 1, 1)` keeps the same axis longest every split, so N splits buy a full `2^N` reduction
+/// and this value alone covers a `2^11 = 2048:1` rod; a plate `(r, r, 1)` alternates between its
+/// two long axes, so only every other split reduces either one, covering `2^6 = 64:1` -- four
+/// orders of magnitude short of the rod case for the same budget. 10 is chosen over the fix round
+/// 1 value of 16 because 16 covers rods well past anything this class ships (`2^17 ~= 131000:1`)
+/// at a plate cost the reviewer judged not worth carrying; 10 keeps a generous margin over the
+/// 1000:1 case design section 4.2 cites (as a rod) while still leaving real cover for a plate.
+/// Either way this is a worst-case cap, not a target: an ordinary cell resolves in a handful of
+/// splits (see `SplitBox`'s header doc comment for the near-cubic invariance argument), and it is
+/// this constant, not `fSplitDepth`, that Task 10 should revisit if a shipped part's cells turn
+/// out to need more.
+constexpr int kMaxCubifySplits = 10;
 
 namespace
 {
@@ -463,8 +475,21 @@ void O2FlatCSG::SplitBox(int cell, const double* lo, const double* hi,
   // split it gates, per the header doc comment: a split out of a far-from-cubic box draws from
   // `cubifyBudget` rather than `depth`, so `depth` stays untouched until aspect ratio is within a
   // factor of two on every axis, which is exactly what keeps a near-cubic cell's boxes identical
-  // to what a depth-only budget would have produced.
-  const bool farFromCubic = longest > 2. * shortest;
+  // to what a depth-only budget would have produced (design section 4.2 states the invariance
+  // this relies on: halving the longest of three extents with `c <= 2a` keeps the new ratio
+  // `<= 2`, so a cell that starts near-cubic never becomes far-from-cubic and never touches
+  // `cubifyBudget` at all).
+  //
+  // `shortest` is floored at `minSize` for this test only, not for `keep`'s own `longest <=
+  // minSize` check below: a cell bbox with a zero (or merely tiny) extent on one axis -- valid
+  // input as far as `CloseShape`'s bbox validation is concerned, which rejects only unset,
+  // inverted or non-finite boxes, not degenerate-but-flat ones -- would otherwise leave `shortest`
+  // pinned at (near) zero on an axis that is never the longest and so never gets split, making
+  // `farFromCubic` permanently true and burning the entire `cubifyBudget` ceiling on a cell that a
+  // depth-only budget would have resolved in a handful of splits. Once the other axes have shrunk
+  // to `minSize` there is nothing left worth cubifying towards, so the floor lets the box fall
+  // through to the ordinary `longest <= minSize` stop instead of exhausting the ceiling first.
+  const bool farFromCubic = longest > 2. * std::max(shortest, minSize);
   const bool keep = stillActive.empty() || depth <= 0 || longest <= minSize ||
                     (farFromCubic && cubifyBudget <= 0);
   if (keep) {
@@ -1343,8 +1368,14 @@ Double_t O2FlatCSG::Capacity() const
 ///    already compute.
 /// 2. Comparing across EVERY halfspace of EVERY cell lets a distant cell's halfspace win at all.
 ///    Restricting the scan to the active list of the box containing `point` -- design section
-///    5.5's own words -- removes that false winner as well as most of the cost: the active list
-///    is already the halfspaces still undecided there (section 4.2).
+///    5.5's own words -- removes that false winner as well as most of the cost. This is sound for
+///    a stronger reason than "a dropped halfspace cannot be the boundary": `HalfspaceRange` pads
+///    its enclosure outward by `32 * eps * mag` (see its own doc comment), so the `rangeHi <= 0`
+///    test that drops a halfspace from a box's active list proves the true maximum of `sign * f`
+///    over the box is STRICTLY negative, not merely non-positive -- no point of the box lies on a
+///    dropped halfspace's surface at all, so the active list is not just the halfspaces still
+///    undecided there (section 4.2), it is provably every halfspace that could possibly be at
+///    equality anywhere in the box.
 
 void O2FlatCSG::ComputeNormal(const Double_t* point, const Double_t* dir, Double_t* norm) const
 {

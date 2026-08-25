@@ -1198,3 +1198,36 @@ BOOST_AUTO_TEST_CASE(the_normal_selection_is_scale_invariant_across_cells)
   BOOST_CHECK_SMALL(normal[1], 1.e-9);
   BOOST_CHECK_SMALL(normal[2], 1.e-9);
 }
+
+BOOST_AUTO_TEST_CASE(a_zero_extent_cell_bbox_does_not_burn_the_whole_cubify_budget)
+{
+  // Fix round 2: a cell bbox with a genuinely zero extent on one axis passes CloseShape's
+  // validation (it rejects only unset, inverted or non-finite boxes, not degenerate-but-flat
+  // ones). Without SplitBox's `shortest` floor at `minSize`, that axis's extent stays pinned at
+  // zero forever (it is never the longest, so never split), making `longest > 2 * shortest`
+  // permanently true and spending the ENTIRE per-path cubify ceiling on a cell a depth-only rule
+  // would have resolved in a handful of splits -- roughly `2^kMaxCubifySplits` leaves along every
+  // branch instead. A 100 x 100 x 0 slab, subdivided down to the default minSize floor, needs on
+  // the order of a dozen splits total once x and y are treated as the only axes that matter; this
+  // asserts the box count stays in that regime rather than climbing towards the ceiling.
+  O2FlatCSG solid("flat_cell");
+  double coeff[10];
+  const double planes[6][2][3] = {
+    {{1., 0., 0.}, {50., 0., 0.}}, {{-1., 0., 0.}, {-50., 0., 0.}},
+    {{0., 1., 0.}, {0., 50., 0.}}, {{0., -1., 0.}, {0., -50., 0.}},
+    {{0., 0., 1.}, {0., 0., 0.}}, {{0., 0., -1.}, {0., 0., 0.}}};
+  for (const auto& plane : planes) {
+    planeQuadric(plane[0], plane[1], coeff);
+    solid.AddQuadric(1., coeff);
+  }
+  solid.AddCell(0, 6, 0.);
+  const double lo[3] = {-50., -50., 0.};
+  const double hi[3] = {50., 50., 0.};
+  solid.SetCellBBox(0, lo, hi);
+  solid.CloseShape();
+
+  BOOST_REQUIRE(solid.IsClosed());
+  // measured 272 boxes with the guard in place; a generous margin above that, and two orders of
+  // magnitude below what hitting the per-path ceiling on every branch would produce
+  BOOST_CHECK_LT(solid.GetNboxes(), 600);
+}

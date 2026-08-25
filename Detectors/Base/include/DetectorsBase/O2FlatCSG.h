@@ -249,8 +249,9 @@ class O2FlatCSG : public TGeoBBox
   /// Recursively split `[lo, hi]` for `cell`, dropping halfspaces the range bound proves hold
   /// everywhere in the box and returning (dropping the box) when the bound proves it wholly
   /// outside one. Recursion stops -- and the box is kept -- when `active` empties, `depth`
-  /// reaches zero, `cubifyBudget` reaches zero, or the box's longest side is no longer than
-  /// `minSize`.
+  /// reaches zero, the box's longest side is no longer than `minSize`, or the box is STILL far
+  /// from cubic once `cubifyBudget` also reaches zero (a near-cubic box never checks
+  /// `cubifyBudget` at all -- see below).
   ///
   /// `depth` and `cubifyBudget` are two separate purses, because a level cap denominated purely
   /// in tree depth charges full price for a split that only equalises aspect ratio: a 20x2x2 cell
@@ -258,9 +259,12 @@ class O2FlatCSG : public TGeoBBox
   /// from six faces. So a split that leaves the box still far from cubic (`longest > 2 *
   /// shortest`, checked on the box BEFORE that split) draws from `cubifyBudget` instead of
   /// `depth` -- `depth` is untouched until the box is within a factor of two on every axis, at
-  /// which point it behaves exactly as before. `cubifyBudget` exists only as the hard ceiling
-  /// design section 4.2 requires so a pathological (near-1D) cell cannot recurse without bound: a
-  /// near-cubic cell never draws on it and is therefore unaffected by its value.
+  /// which point it behaves exactly as before. `cubifyBudget` is the hard ceiling design section
+  /// 4.2 describes, on the aspect-ratio-equalising splits one root-to-leaf PATH may spend: it only
+  /// ever decreases going down the recursion, so it bounds one branch, not the whole cell -- a
+  /// near-cubic cell never draws on it at all (design section 4.2's invariance argument: halving
+  /// the longest of three extents with `c <= 2a` keeps the new ratio `<= 2`, so a box that starts
+  /// near-cubic can never become far-from-cubic), and is therefore unaffected by its value.
   void SplitBox(int cell, const double* lo, const double* hi, const std::vector<int>& active,
                int depth, double minSize, int cubifyBudget);
 
