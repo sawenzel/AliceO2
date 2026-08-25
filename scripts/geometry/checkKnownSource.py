@@ -31,6 +31,9 @@ to 1e-9, and the flag is where that shows up. `--strict` makes flags fatal too.
 
 Points nearer the boundary than `--skin` are not scored, because neither side claims to decide
 them; the count of skipped points is reported so the number cannot quietly become the whole set.
+The band is taken on both shapes, except where the emitted shape's `Safety` is a structural lower
+bound rather than a distance (`o2::base::O2FlatCSG`), in which case it is taken on the source
+alone and `skinnedBoth` says so -- see `safety_is_a_true_distance`.
 
 One thing about the *converter's* bookkeeping it has to respect as well. An XCAF leaf label whose
 shape is a compound of several disjoint solid bodies is split by `O2_CADtoTGeo.py` into one
@@ -185,6 +188,20 @@ def part_is_one_body_of_many(part):
     return bool(_ONE_BODY_OF_MANY.search(part.get("part") or ""))
 
 
+def safety_is_a_true_distance(shape):
+    """Whether \a shape's `Safety` is a distance to its boundary, or only a lower bound on one.
+
+    `o2::base::O2FlatCSG` has no point-to-quadric distance formula and does not pretend to one:
+    its `Safety` is a bound read off the sub-cell box structure, and for an interior point in a
+    box whose halfspaces are not all decided the sound answer is `0.`
+    (`Design_FlatCSGSolid.md` section 5.4). Measured on the parts this converter ships, that is 78
+    to 100 % of interior points (`Stream_AK_FlatCSG.md` section 6). Using such a number as a skin
+    band would skip almost every interior point and quietly turn a 20 000-point comparison into a
+    few thousand, which is what it did before this function existed.
+    """
+    return shape.ClassName() != "o2::base::O2FlatCSG"
+
+
 def contains_crosscheck(source, emitted, placement, n_points, seed, skin, max_report,
                         mirrored=False, one_way=False):
     """Classify a seeded point set against both shapes; every disagreement is reported.
@@ -197,6 +214,14 @@ def contains_crosscheck(source, emitted, placement, n_points, seed, skin, max_re
     emitted shape implies inside the source" is a statement about it. The count of points the
     emitted shape *does* enclose is reported either way, so a one-way comparison cannot pass by
     enclosing nothing.
+
+    **The skin is taken on the source alone when the emitted shape's `Safety` is only a lower
+    bound.** The band exists to drop points neither side claims to decide; a structural lower
+    bound does not say a point is near the boundary, it says the shape cannot tell. Dropping it
+    makes the test STRICTER -- every point the source is confident about is scored, and a point
+    the two shapes classify differently is now a failure instead of a skip -- so this is not a
+    loosening. `skinnedBoth` records which rule ran, so the number can never be read as the
+    symmetric one when it was not.
     """
     from array import array
     origin, half = _bbox_of(source)
@@ -208,6 +233,7 @@ def contains_crosscheck(source, emitted, placement, n_points, seed, skin, max_re
     examples = []
     local = array("d", [0.0, 0.0, 0.0])
     probe = array("d", [0.0, 0.0, 0.0])
+    skin_both = safety_is_a_true_distance(emitted)
     for _ in range(n_points):
         point = tuple(origin[i] + rng.uniform(-half[i], half[i]) for i in range(3))
         probe[0], probe[1], probe[2] = point
@@ -219,7 +245,7 @@ def contains_crosscheck(source, emitted, placement, n_points, seed, skin, max_re
         moved = placement_to_local(placement, reflected)
         local[0], local[1], local[2] = moved
         inside_emitted = bool(emitted.Contains(local))
-        if emitted.Safety(local, inside_emitted) < skin:
+        if skin_both and emitted.Safety(local, inside_emitted) < skin:
             skipped += 1
             continue
         scored += 1
@@ -236,7 +262,8 @@ def contains_crosscheck(source, emitted, placement, n_points, seed, skin, max_re
                                  "local": [float(c) for c in moved],
                                  "source": inside_source, "emitted": inside_emitted})
     return {"points": scored, "skipped": skipped, "mismatches": n_mismatches,
-            "insideEmitted": n_inside_emitted, "oneWay": bool(one_way), "examples": examples}
+            "insideEmitted": n_inside_emitted, "oneWay": bool(one_way), "skinnedBoth": skin_both,
+            "examples": examples}
 
 
 def reclose_flat_csg(shape):
