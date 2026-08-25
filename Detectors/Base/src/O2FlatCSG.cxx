@@ -125,6 +125,11 @@ int O2FlatCSG::HalfspaceRoots(const FlatCSGHalfspace& halfspace, const double* o
 
   // scale-aware degeneracy: a plane has alpha exactly 0, and a ray parallel to a cylinder axis
   // has it near 0 -- both are the linear equation, not a badly conditioned quadratic
+  //
+  // NOTE: 1.e-14 is dimensionally an accident, not a derivation: alpha has units [A], beta
+  // [A*L], gamma [A*L^2], so this comparison depends on the length unit. It assumes coordinates
+  // in cm (ALICE's native unit) -- a root this branch discards sits at |t| >= ~1e6 cm, outside
+  // any ALICE geometry. Task 3's torus branch must not copy this constant blind.
   const double reference = std::abs(beta) + std::abs(gamma) + 1.e-300;
   if (std::abs(alpha) <= 1.e-14 * reference) {
     if (std::abs(beta) <= 1.e-300) {
@@ -140,6 +145,13 @@ int O2FlatCSG::HalfspaceRoots(const FlatCSGHalfspace& halfspace, const double* o
   const double root = std::sqrt(disc);
   // the numerically stable pair, so a grazing ray does not lose the near root to cancellation
   const double q = -(beta + (beta >= 0. ? root : -root));
+  if (q == 0.) {
+    // q == 0 happens only when beta == 0 and gamma == 0 together (origin exactly on the
+    // surface, direction exactly tangential): disc == 0 too, so the quadratic has one double
+    // root at t = -beta/alpha = 0. The general second-root formula would divide 0./0. here.
+    roots[0] = 0.;
+    return 1;
+  }
   roots[0] = q / alpha;
   roots[1] = gamma / q;
   return 2;
@@ -156,12 +168,15 @@ int O2FlatCSG::CellIntervals(int cell, const int* active, int nActive, const dou
   }
 
   // every root of every active halfspace, clipped to the window; the buffer is sized from this
-  // cell's own halfspace count, worst case, so no root is ever silently dropped
+  // cell's own halfspace count, worst case, so no root is ever silently dropped. thread_local so
+  // that a std::vector resize on one thread can never race a data() held by another -- TGeo
+  // shares one shape object across every navigator under TGeoManager::SetMaxThreads.
+  thread_local std::vector<double> breakBuffer;
   const std::size_t needed = 2 + static_cast<std::size_t>(kMaxRootsPerHalfspace) * static_cast<std::size_t>(count);
-  if (fBreakBuffer.size() < needed) {
-    fBreakBuffer.resize(needed);
+  if (breakBuffer.size() < needed) {
+    breakBuffer.resize(needed);
   }
-  double* breaks = fBreakBuffer.data();
+  double* breaks = breakBuffer.data();
   int nBreaks = 0;
   breaks[nBreaks++] = tlo;
   breaks[nBreaks++] = thi;
@@ -180,6 +195,7 @@ int O2FlatCSG::CellIntervals(int cell, const int* active, int nActive, const dou
   // classify the midpoint of each sub-interval and merge the runs that are inside
   int pairs = 0;
   bool open = false;
+  bool overflow = false;
   for (int index = 0; index + 1 < nBreaks; ++index) {
     const double lo = breaks[index];
     const double hi = breaks[index + 1];
@@ -202,12 +218,17 @@ int O2FlatCSG::CellIntervals(int cell, const int* active, int nActive, const dou
         out[2 * pairs + 1] = hi;
         ++pairs;
         open = true;
+      } else {
+        // maxOut was too small for this cell along this ray: fail loudly (a negative count)
+        // rather than hand the caller a silently truncated list that reads as a valid answer
+        overflow = true;
+        open = false;
       }
     } else {
       open = false;
     }
   }
-  return pairs;
+  return overflow ? -1 : pairs;
 }
 
 namespace
@@ -248,20 +269,23 @@ int mergeIntervals(double* pairs, int count, double glue)
 Double_t O2FlatCSG::DistFromOutside_Loop(const Double_t* point, const Double_t* dir,
                                          Double_t step) const
 {
+  // thread_local: see the comment on the scratch-buffer members it replaced in the header
+  thread_local std::vector<double> pairBuffer;
   double best = TGeoShape::Big();
   for (int cell = 0; cell < GetNcells(); ++cell) {
     // sized from this cell's own halfspace count, so a busy cell's intervals are never truncated
     const int capacity = maxPairsForCell(fCells[cell].count);
-    if (static_cast<int>(fOutsidePairBuffer.size()) < 2 * capacity) {
-      fOutsidePairBuffer.resize(2 * capacity);
+    if (static_cast<int>(pairBuffer.size()) < 2 * capacity) {
+      pairBuffer.resize(2 * capacity);
     }
     const int found = CellIntervals(cell, nullptr, -1, point, dir, 0., step,
-                                    fOutsidePairBuffer.data(), capacity);
+                                    pairBuffer.data(), capacity);
+    // capacity is provably sufficient (maxPairsForCell), so CellIntervals cannot overflow here;
+    // a negative found would mean that bound itself is wrong, which is a bug, not live data
     for (int pair = 0; pair < found; ++pair) {
       // a point exactly on the boundary is already inside; only a real entry counts
-      if (fOutsidePairBuffer[2 * pair + 1] > TGeoShape::Tolerance() &&
-          fOutsidePairBuffer[2 * pair] < best) {
-        best = std::max(fOutsidePairBuffer[2 * pair], 0.);
+      if (pairBuffer[2 * pair + 1] > TGeoShape::Tolerance() && pairBuffer[2 * pair] < best) {
+        best = std::max(pairBuffer[2 * pair], 0.);
       }
     }
   }
@@ -272,23 +296,27 @@ Double_t O2FlatCSG::DistFromInside_Loop(const Double_t* point, const Double_t* d
                                         Double_t step) const
 {
   // the union's occupancy, so a ray that leaves one cell into a touching one keeps going; the
-  // buffer is sized to fit every cell's worst case at once, so nothing gathered here is ever lost
+  // buffer is sized to fit every cell's worst case at once, so nothing gathered here is ever
+  // lost. thread_local: see the comment on the scratch-buffer members it replaced in the header
+  thread_local std::vector<double> pairBuffer;
   int totalCapacity = 0;
   for (int cell = 0; cell < GetNcells(); ++cell) {
     totalCapacity += maxPairsForCell(fCells[cell].count);
   }
-  if (static_cast<int>(fInsidePairBuffer.size()) < 2 * totalCapacity) {
-    fInsidePairBuffer.resize(2 * totalCapacity);
+  if (static_cast<int>(pairBuffer.size()) < 2 * totalCapacity) {
+    pairBuffer.resize(2 * totalCapacity);
   }
   int count = 0;
   for (int cell = 0; cell < GetNcells(); ++cell) {
+    // each call's capacity (totalCapacity - count) is at least that cell's own maxPairsForCell,
+    // so CellIntervals cannot overflow here; a negative return would mean the bound is wrong
     count += CellIntervals(cell, nullptr, -1, point, dir, 0., step,
-                           fInsidePairBuffer.data() + 2 * count, totalCapacity - count);
+                           pairBuffer.data() + 2 * count, totalCapacity - count);
   }
-  count = mergeIntervals(fInsidePairBuffer.data(), count, TGeoShape::Tolerance());
+  count = mergeIntervals(pairBuffer.data(), count, TGeoShape::Tolerance());
   for (int pair = 0; pair < count; ++pair) {
-    if (fInsidePairBuffer[2 * pair] <= TGeoShape::Tolerance()) {
-      return fInsidePairBuffer[2 * pair + 1];
+    if (pairBuffer[2 * pair] <= TGeoShape::Tolerance()) {
+      return pairBuffer[2 * pair + 1];
     }
   }
   return 0.;

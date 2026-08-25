@@ -93,7 +93,10 @@ class O2FlatCSG : public TGeoBBox
   ///
   /// \a active lists which of the cell's halfspaces are still undecided; pass `nullptr` with
   /// \a nActive `< 0` to use all of them, which is what the twins do. Writes `[enter, exit]`
-  /// pairs into \a out and returns the pair count.
+  /// pairs into \a out and returns the pair count -- or a negative value if \a maxOut was too
+  /// small to hold every pair this cell produced along this ray. A mis-sized caller must not
+  /// silently receive a truncated list, so overflow fails loudly instead of returning a short
+  /// count that looks like a valid answer.
   ///
   /// No convexity is assumed anywhere: a complemented halfspace makes a cell non-convex and the
   /// occupancy several intervals, which is exactly what every part with a hole in it looks like.
@@ -126,13 +129,11 @@ class O2FlatCSG : public TGeoBBox
   std::vector<FlatCSGHalfspace> fHalfspaces; ///< the flat halfspace array
   std::vector<FlatCSGCell> fCells;           ///< the DNF's cells, indexing into it
 
-  /// Scratch buffer for `CellIntervals`'s root breaks, grown on demand; not thread-safe (same
-  /// property as `O2BVHAssembly::fLastNode`).
-  mutable std::vector<double> fBreakBuffer; //!
-  /// Scratch buffer for `DistFromOutside_Loop`'s gathered `[enter, exit]` pairs.
-  mutable std::vector<double> fOutsidePairBuffer; //!
-  /// Scratch buffer for `DistFromInside_Loop`'s gathered `[enter, exit]` pairs.
-  mutable std::vector<double> fInsidePairBuffer; //!
+  // `CellIntervals`, `DistFromOutside_Loop` and `DistFromInside_Loop` each grow a scratch buffer
+  // on demand; those live as `thread_local` function-local statics in the .cxx, not as members --
+  // TGeo shares one shape object across every navigator under `TGeoManager::SetMaxThreads`, and a
+  // `std::vector` resized on one thread while another holds its `data()` is undefined behaviour,
+  // not merely a stale read.
 
   ClassDefOverride(O2FlatCSG, 1) // flat-DNF halfspace shape class
 };

@@ -297,3 +297,30 @@ BOOST_AUTO_TEST_CASE(a_ray_leaving_one_cell_into_a_touching_one_does_not_stop_be
   const double dir[3] = {1., 0., 0.};
   BOOST_CHECK_SMALL(solid.DistFromInside_Loop(origin, dir, TGeoShape::Big()) - 3., 1.e-12);
 }
+
+BOOST_AUTO_TEST_CASE(tangential_ray_on_a_cylinder_from_a_point_on_its_surface_has_no_nan_root)
+{
+  // a ray tangential to a cylinder, starting exactly on its surface, has beta == 0 and gamma == 0
+  // together in HalfspaceRoots' quadratic -- the q == 0 case that used to divide 0./0. into a
+  // NaN second root instead of recognising the single double root at t = 0
+  O2FlatCSG solid("tangent_ray");
+  double coeff[10];
+  zCylinderQuadric(5., coeff);
+  solid.AddQuadric(1., coeff);
+  const auto& cylinder = solid.GetHalfspace(0);
+
+  const double origin[3] = {5., 0., 0.};
+  const double dir[3] = {0., 1., 0.};
+  double roots[4];
+  const int found = O2FlatCSG::HalfspaceRoots(cylinder, origin, dir, roots);
+
+  BOOST_REQUIRE_EQUAL(found, 1);
+  BOOST_CHECK(std::isfinite(roots[0]));
+  BOOST_CHECK_SMALL(roots[0], 1.e-12);
+
+  // the twin: an independent check that the reported root really is one, by plugging it back
+  // into the surface equation directly rather than trusting the root-finder's own algebra
+  const double hit[3] = {origin[0] + roots[0] * dir[0], origin[1] + roots[0] * dir[1],
+                         origin[2] + roots[0] * dir[2]};
+  BOOST_CHECK_SMALL(O2FlatCSG::EvalHalfspace(cylinder, hit), 1.e-9);
+}
