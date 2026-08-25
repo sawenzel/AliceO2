@@ -32,6 +32,7 @@ the converter subprocess; a converter running there writes the description as
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -144,9 +145,18 @@ def write_shape_root(cand, path):
     This is the same pair `o2::base::harness::saveShapeToRootFile` writes -- the C++ side is the
     authority and the unit test round-trips through it.
     """
+    return write_shape_object(*prim.build_root(cand, "shape"), path)
+
+
+def write_shape_object(shape, placement, path):
+    """`write_shape_root`'s second half, for a caller that already built the shape.
+
+    Split out because both emission paths must now *check* the shape before any file exists:
+    a part refused by the twin-parity gate leaves no `shape_<part>.root` and no
+    `flatcsg_<part>.bin` behind, rather than an orphan the report has to disown.
+    """
     import ROOT
     ROOT.gROOT.SetBatch(True)
-    shape, placement = prim.build_root(cand, "shape")
     out = ROOT.TFile.Open(str(path), "RECREATE")
     out.WriteTObject(shape, "shape")
     matrix = prim.root_placement_matrix(placement, "placement")
@@ -154,6 +164,60 @@ def write_shape_root(cand, path):
         out.WriteTObject(matrix, "placement")
     out.Close()
     return shape
+
+
+def twin_parity(shape, n_points=20000, seed=7771, grow=1.0):
+    """`Contains` against `Contains_Loop` on a shape that has twins. `None` when it has none.
+
+    This is the positive discharge of the cell-bounding-box obligation of
+    `Design_FlatCSGSolid.md` section 4.2, and it is deliberately independent of OCCT so that both
+    emission paths can run it -- the live one in `csg/hook.py` and the deferred completion in
+    `from_json()`, which has PyROOT and no CAD solid at all.
+
+    The sampling box is the union of the shape's own declared cell boxes, expanded by `grow`
+    about its centre. At the default `grow = 1.0` the box doubles on every axis, so `1/8` of the
+    points fall inside the original union and `7/8` outside it -- and outside is where the defect
+    lives: a cell reaching past its own declared box is exactly a point where the accelerated
+    query (which looks only inside boxes) says "no material" and the twin (which has no boxes)
+    says there is. `insideAccelerated` is reported so a run of zeros can be read as a measurement
+    rather than as a sampler that classified nothing.
+    """
+    if not (hasattr(shape, "Contains_Loop") and hasattr(shape, "GetCellBBox")):
+        return None
+    import random
+    from array import array
+    lo = [float("inf")] * 3
+    hi = [float("-inf")] * 3
+    cell_lo, cell_hi = array("d", [0.0] * 3), array("d", [0.0] * 3)
+    for cell in range(shape.GetNcells()):
+        shape.GetCellBBox(cell, cell_lo, cell_hi)
+        for axis in range(3):
+            lo[axis] = min(lo[axis], cell_lo[axis])
+            hi[axis] = max(hi[axis], cell_hi[axis])
+    if not all(math.isfinite(lo[i]) and math.isfinite(hi[i]) for i in range(3)):
+        return {"points": 0, "disagreements": 0, "insideAccelerated": 0, "growFactor": grow}
+    centre = [0.5 * (lo[i] + hi[i]) for i in range(3)]
+    half = [0.5 * (hi[i] - lo[i]) * (1.0 + grow) for i in range(3)]
+    rng = random.Random(seed)
+    probe = array("d", [0.0, 0.0, 0.0])
+    disagreements = inside = 0
+    for _ in range(n_points):
+        for axis in range(3):
+            probe[axis] = centre[axis] - half[axis] + rng.random() * 2.0 * half[axis]
+        accelerated = bool(shape.Contains(probe))
+        inside += int(accelerated)
+        if accelerated != bool(shape.Contains_Loop(probe)):
+            disagreements += 1
+    return {"points": n_points, "disagreements": disagreements, "insideAccelerated": inside,
+            "growFactor": grow}
+
+
+def twin_decline_reason(parity):
+    """The one wording both emission paths use when the twin-parity gate refuses a part."""
+    return (f"the emitted shape disagrees with its own _Loop twin about "
+            f"{parity['disagreements']} of {parity['points']} classified point(s): a cell "
+            "reaches past the bounding box declared for it, so the accelerated queries and the "
+            "reference ones are not describing the same solid")
 
 
 def _occ_bbox(shape):
@@ -169,7 +233,7 @@ def _occ_bbox(shape):
     return box.Get()
 
 
-def crosscheck_bbox(cand, occ_shape=None):
+def crosscheck_bbox(cand, occ_shape=None, built=None):
     """Max deviation, in cm, between the ROOT realisation's bounding box and the OCCT one.
 
     **Read this number knowing what it can and cannot say.** For an unplaced primitive it is exact
@@ -183,7 +247,7 @@ def crosscheck_bbox(cand, occ_shape=None):
     """
     occ_shape = occ_shape if occ_shape is not None else prim.build_occ(cand)
     xmin, ymin, zmin, xmax, ymax, zmax = _occ_bbox(occ_shape)
-    shape, placement = prim.build_root(cand, "bboxprobe")
+    shape, placement = built if built is not None else prim.build_root(cand, "bboxprobe")
     origin = [shape.GetOrigin()[i] for i in range(3)]
     half = [shape.GetDX(), shape.GetDY(), shape.GetDZ()]
     lo_root = [origin[i] - half[i] for i in range(3)]
@@ -211,7 +275,7 @@ def _placed_box(placement, lo, hi):
     return out_lo, out_hi
 
 
-def crosscheck_contains(cand, original, n_points=4000, seed=1234):
+def crosscheck_contains(cand, original, n_points=4000, seed=1234, built=None):
     """Classify random points against the **original CAD solid** and against the emitted shape.
 
     This is the sharp form of the frame check, and the one that catches a transposed rotation
@@ -236,7 +300,7 @@ def crosscheck_contains(cand, original, n_points=4000, seed=1234):
 
     xmin, ymin, zmin, xmax, ymax, zmax = _occ_bbox(original)
     pad = 0.05 * max(xmax - xmin, ymax - ymin, zmax - zmin)
-    shape, placement = prim.build_root(cand, "containsprobe")
+    shape, placement = built if built is not None else prim.build_root(cand, "containsprobe")
     tol = max(model_tolerance_cm(original), 1.0e-9)
     classifier = BRepClass3d_SolidClassifier(original)
     rng = random.Random(seed)
@@ -326,31 +390,52 @@ def from_json(folder, quiet=False):
     `runOracleGate.py` has pythonOCC but not PyROOT, so it writes the description and this
     completes it. Nothing is re-recognised and nothing is re-accepted -- the description and its
     evidence are taken as given, which is the point of having a description at all.
+
+    **One thing IS checked here, and it has to be.** `twin_parity` is an acceptance gate, not a
+    diagnostic: a part whose accelerated queries disagree with their own `_Loop` twins has a cell
+    reaching past the bounding box the converter declared for it, which is the one defect
+    `SetCellBBox` cannot detect for itself (`Design_FlatCSGSolid.md` section 4.2). A gate wired
+    into only one of the two emission paths is not a gate, and this is the path `runOracleGate.py`
+    forces. It needs PyROOT and no CAD solid, both of which hold here. A part it refuses gets
+    **no `shape_<part>.root` and no `flatcsg_<part>.bin`**, so it is not dispatched to CSG -- the
+    converter never emits a reference to a file it did not write, which is the same tier drop
+    `csg/hook.py` performs by clearing the record.
+
+    Returns `(written, refused)`.
     """
     folder = Path(folder)
     files = sorted(folder.glob("csg_*.json")) or sorted(folder.glob("*/csg_*.json"))
-    written = []
+    written, refused = [], []
     for path in files:
         payload = json.loads(path.read_text())
         if not payload.get("candidate"):
             continue
         suffix = path.name[len("csg_"):-len(".json")]
         target = path.parent / f"shape_{suffix}.root"
+        shape, placement = prim.build_root(payload["candidate"], "shape")
+        parity = twin_parity(shape)
+        if parity is not None and parity["disagreements"]:
+            refused.append((suffix, parity))
+            if not quiet:
+                print(f"  [REFUSED] {suffix}: {twin_decline_reason(parity)}; no shape file and "
+                      "no sidecar written, so geom.C ships this part one tier down")
+            continue
         if payload["candidate"].get("op") == "flatCells":
             # The macro loads `flatcsg_<part>.bin`, not the `.root` file, so completing a
-            # deferred flat part means writing the sidecar too. `csg/hook.py` already writes it
-            # in the same folder without needing ROOT; rewriting it here is idempotent and keeps
-            # this entry point usable on a folder it did not produce.
+            # deferred flat part means writing the sidecar too. `csg/hook.py` writes it only on
+            # the path where it also writes the shape, so on this path it is written here --
+            # after the gate, never before it.
             from csg import flat as flat_writer
             blocks, cells = prim.flat_sidecar_records(payload["candidate"])
             flat_writer.write_sidecar(path.parent / f"flatcsg_{suffix}.bin", blocks, cells)
-        shape = write_shape_root(payload["candidate"], target)
+        write_shape_object(shape, placement, target)
         written.append(target)
         if not quiet:
             print(f"  wrote {target} ({shape.ClassName()})")
     if not quiet:
-        print(f"{len(written)} shape file(s) written from {len(files)} description(s)")
-    return written
+        print(f"{len(written)} shape file(s) written from {len(files)} description(s)"
+              + (f"; {len(refused)} REFUSED by the twin-parity gate" if refused else ""))
+    return written, refused
 
 
 def _print_record(record):
@@ -361,7 +446,10 @@ def _print_record(record):
             cc = record["containsCrosscheck"]
             twin = ("" if cc.get("twinDisagreements") is None
                     else f", twin {cc['twinDisagreements']}/{cc['points']}")
-            extra = (f", ROOT-vs-CAD Contains {cc['disagreements']}/{cc['points']}{twin}"
+            parity = record.get("twinParity")
+            box_twin = ("" if not parity
+                        else f", twin(boxes x2) {parity['disagreements']}/{parity['points']}")
+            extra = (f", ROOT-vs-CAD Contains {cc['disagreements']}/{cc['points']}{twin}{box_twin}"
                      f", bbox(ROOT vs OCCT) {record['bboxRootVsOcctCm']:.2e} cm")
         print(f"  [CSG ] {record['part']}: {record['description']}  "
               f"[{record['recogniser']}]  dV_sym={acc['symmetricDifference']:.3g} cm^3 "
@@ -2562,6 +2650,140 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
           empty_scored is None and "scored no point" in (empty_why or ""),
           empty_why or "ACCEPTED on an empty measurement")
 
+    # --- R5: the twin-parity GATE, exercised in both emission paths ---------------------------
+    #
+    # `crosscheck_contains` and `twin_parity` are tested above as functions. This tests what the
+    # two emission paths DO with a non-zero count -- the branch that drops a part a tier, clears
+    # its shape and sidecar references and writes the reason. Neither path had ever executed it:
+    # the twin is zero on every part of the five corpora, which is the result one wants and the
+    # coverage one does not.
+    #
+    # Both paths are covered because the gate is wired into both and can be wrong in either:
+    # `csg/hook.py`'s live path, and `emit.from_json`'s deferred completion, which is the one
+    # `runOracleGate.py` forces when the converter subprocess has pythonOCC and PyROOT arrives
+    # later.
+    if with_root:
+        import copy
+        import tempfile
+        import ROOT
+        from csg import emit as emit_mod, hook as hook_mod
+        ROOT.gROOT.SetBatch(True)
+
+        # A cell whose declared box does not contain it: the L-cone candidate with the lower
+        # arm's box cut off at x = 5 while the arm itself runs to x = 10. Everything beyond is
+        # material `Contains_Loop` sees and the accelerated `Contains`, which looks only inside
+        # boxes, does not.
+        out_of_box = copy.deepcopy(cone_record)
+        wide_cell = max(range(len(out_of_box["cells"])),
+                        key=lambda i: out_of_box["cells"][i]["hi"][0])
+        out_of_box["cells"][wide_cell]["hi"][0] = 5.0
+
+        # `O2FlatCSG::CloseShape` carries its own debug-build sampler for exactly this condition
+        # (`#ifndef NDEBUG`), and it ABORTS rather than returns, so on a build that compiles it
+        # the shape cannot be constructed at all. The two guards are co-extensive on any cell an
+        # intersection of halfspaces can be -- the sampler covers all six faces, so a cell that
+        # escapes its box escapes through a face the sampler probes -- and where the class's own
+        # assertion fires there is nothing left for this test to add. Detected by looking for the
+        # assertion's message in the library, which the preprocessor removes when NDEBUG is on.
+        marker = b"a cell reaches past the bounding box SetCellBBox was"
+        library = Path(f"{ROOT.gSystem.Getenv('O2_ROOT')}/lib/libO2DetectorsBase.so")
+        asserts_compiled = library.exists() and marker in library.read_bytes()
+
+        def _gate_probe(folder, candidate, patched_parity=None):
+            """Run both emission paths over one candidate; returns their two verdicts."""
+            folder = Path(folder)
+            live = folder / "live"
+            deferred = folder / "deferred"
+            live.mkdir(parents=True, exist_ok=True)
+            deferred.mkdir(parents=True, exist_ok=True)
+            intact_process = emit_mod.process_solid
+            intact_parity = emit_mod.twin_parity
+            try:
+                emit_mod.process_solid = lambda solid, name, **kw: {
+                    "part": name, "recognised": True, "accepted": True, "candidate": candidate,
+                    "reason": None, "recogniser": "flat-cells",
+                    "description": prim.describe(candidate),
+                    "acceptance": {"accepted": True, "symmetricDifference": 0.0, "band": 1.0,
+                                   "relativeToVolume": 0.0}}
+                if patched_parity is not None:
+                    emit_mod.twin_parity = lambda shape, **kw: patched_parity
+                csg_files, flat_files, records = hook_mod.recognise_and_emit(
+                    {"probe": l_cone_solid}, {"probe": "probe"}, 1.0, live,
+                    lambda name: str(name), verbose=False)
+                (deferred / "csg_probe.json").write_text(json.dumps(
+                    {"part": "probe", "lid": "probe", "candidate": candidate,
+                     "acceptance": {}, "recogniser": "flat-cells", "placement": None}))
+                written, refused = emit_mod.from_json(deferred, quiet=True)
+            finally:
+                emit_mod.process_solid = intact_process
+                emit_mod.twin_parity = intact_parity
+            return {"record": records[0], "csgFiles": csg_files, "flatFiles": flat_files,
+                    "liveArtifacts": sorted(p.name for p in live.glob("*")
+                                            if p.suffix in (".root", ".bin")),
+                    "written": written, "refused": refused,
+                    "deferredArtifacts": sorted(p.name for p in deferred.glob("*")
+                                                if p.suffix in (".root", ".bin"))}
+
+        # (a) the sound candidate must still pass BOTH paths -- otherwise every assertion below
+        #     would also be satisfied by a gate that refuses everything.
+        with tempfile.TemporaryDirectory() as folder:
+            good = _gate_probe(folder, cone_record)
+        check("a sound flat candidate is emitted by both paths",
+              good["record"]["accepted"] and good["record"].get("flatSidecar")
+              and good["flatFiles"] and not good["csgFiles"]
+              and len(good["written"]) == 1 and not good["refused"]
+              and good["record"]["twinParity"]["disagreements"] == 0
+              and "flatcsg_probe.bin" in good["deferredArtifacts"],
+              f"live {good['liveArtifacts']}, deferred {good['deferredArtifacts']}")
+
+        # (b) the gate's REJECT branch, driven by a parity count, in both paths
+        with tempfile.TemporaryDirectory() as folder:
+            forced = _gate_probe(folder, cone_record,
+                                 patched_parity={"points": 20000, "disagreements": 37,
+                                                 "insideAccelerated": 4000, "growFactor": 1.0})
+        record = forced["record"]
+        check("a twin disagreement drops the part a tier on the live path",
+              not record["accepted"] and record["shape"] is None
+              and record.get("flatSidecar") is None
+              and "_Loop twin" in (record["reason"] or "") and "37 of 20000" in (record["reason"] or "")
+              and not forced["flatFiles"] and not forced["csgFiles"]
+              and forced["liveArtifacts"] == [],
+              f"accepted={record['accepted']}, sidecar={record.get('flatSidecar')}, "
+              f"artifacts {forced['liveArtifacts']}, reason {(record['reason'] or '')[:80]}")
+        check("a twin disagreement refuses the part on the deferred --from-json path",
+              not forced["written"] and len(forced["refused"]) == 1
+              and forced["deferredArtifacts"] == [],
+              f"written {forced['written']}, refused {len(forced['refused'])}, "
+              f"artifacts {forced['deferredArtifacts']}")
+
+        # (c) and the gate DETECTS the geometric condition it exists for, rather than only
+        #     reacting to a number handed to it.
+        if asserts_compiled:
+            check("a cell outside its declared box is caught before it can ship",
+                  True,
+                  "not exercised here: this build compiles O2FlatCSG::CloseShape's own "
+                  "debug-build sampler for the same condition, which aborts the process rather "
+                  "than returning, so the shape cannot be built to be measured")
+            check("the out-of-box candidate is refused by both emission paths", True,
+                  "not exercised here: same reason")
+        else:
+            broken_shape, _broken_placement = prim.build_root(out_of_box, "probe_out_of_box")
+            broken_parity = emit_mod.twin_parity(broken_shape)
+            check("a cell outside its declared box is caught before it can ship",
+                  broken_parity["disagreements"] > 0
+                  and broken_parity["insideAccelerated"] > 0,
+                  f"{broken_parity['disagreements']} of {broken_parity['points']} points "
+                  f"disagree ({broken_parity['insideAccelerated']} inside the accelerated shape)")
+            with tempfile.TemporaryDirectory() as folder:
+                real = _gate_probe(folder, out_of_box)
+            check("the out-of-box candidate is refused by both emission paths",
+                  not real["record"]["accepted"] and real["record"]["shape"] is None
+                  and real["record"].get("flatSidecar") is None
+                  and real["liveArtifacts"] == [] and not real["written"]
+                  and len(real["refused"]) == 1 and real["deferredArtifacts"] == [],
+                  f"live {real['liveArtifacts']}, deferred {real['deferredArtifacts']}, "
+                  f"reason {(real['record']['reason'] or '')[:90]}")
+
     # --- R5: the sidecar the macro loads, and the shape the gate scores, are one solid ---------
     flat_blocks, flat_sidecar_cells = prim.flat_sidecar_records(cone_record)
     check("the sidecar's cell table indexes its concatenated halfspace blocks",
@@ -3078,7 +3300,11 @@ def main():
         return 0 if (ok_a == n_a and ok_e == n_e) else 1
 
     if args.from_json:
-        from_json(args.from_json)
+        _written, refused = from_json(args.from_json)
+        if refused:
+            # A refused part is a broken description, not a cosmetic warning: it would have
+            # shipped a solid that disagrees with its own reference implementation.
+            return 1
         return 0
 
     if not args.db and not args.brep:

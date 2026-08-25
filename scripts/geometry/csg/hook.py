@@ -99,37 +99,52 @@ def recognise_and_emit(def_shapes, def_names, scale_to_cm, out_folder, sanitize_
         if record["accepted"]:
             is_flat = record["candidate"]["op"] == "flatCells"
             if root_available:
-                if is_flat:
-                    # Written inside this branch on purpose: a deferred part is not dispatched to
-                    # CSG in `geom.C`, and a report row advertising a sidecar for a part that
-                    # ships as a mesh would be a lie about what the macro builds. `emit.py
-                    # --from-json` writes it when it completes the deferred shape.
-                    record["flatSidecar"] = write_flat_sidecar(
-                        record["candidate"], out_folder, suffix)
-                target = (out_folder / f"shape_{suffix}.root").resolve()
-                emit.write_shape_root(record["candidate"], target)
-                record["shape"] = str(target)
-                record["bboxRootVsOcctCm"] = emit.crosscheck_bbox(record["candidate"])
-                record["containsCrosscheck"] = emit.crosscheck_contains(record["candidate"], solid)
-                twin = (record["containsCrosscheck"] or {}).get("twinDisagreements")
-                if twin:
-                    # `Contains` against `Contains_Loop` on the shape that ships, over the part's
-                    # own bounding box. A disagreement means a cell reaches past the bounding box
-                    # the converter declared for it, which is the one defect `SetCellBBox` cannot
-                    # detect for itself (design section 4.2) -- so the part falls a tier instead
-                    # of shipping a solid that is not the same solid as its own reference.
+                # Built ONCE, measured, and only then written. Every check below runs before any
+                # file exists, so a part the twin-parity gate refuses leaves neither a
+                # `shape_<part>.root` nor a `flatcsg_<part>.bin` behind for a later reader to
+                # find and wonder about.
+                built = prim.build_root(record["candidate"], "shape")
+                record["twinParity"] = emit.twin_parity(built[0])
+                record["bboxRootVsOcctCm"] = emit.crosscheck_bbox(record["candidate"], built=built)
+                record["containsCrosscheck"] = emit.crosscheck_contains(
+                    record["candidate"], solid, built=built)
+                # Two independent samplings of the same property, and either one refuses the
+                # part. `twinParity` walks the shape's own declared cell boxes doubled, so 7/8 of
+                # its points are OUTSIDE every box -- which is where a cell that reaches past its
+                # box lives. `containsCrosscheck`'s twin column walks the CAD solid's bounding
+                # box plus 5 %, which is where the part is. A disagreement in either means a cell
+                # reaches past the bounding box the converter declared for it, the one defect
+                # `SetCellBBox` cannot detect for itself (design section 4.2), so the part falls
+                # a tier rather than ship a solid that is not the same solid as its own reference.
+                parity = record["twinParity"]
+                cross_twin = (record["containsCrosscheck"] or {}).get("twinDisagreements")
+                if parity is not None and parity["disagreements"]:
                     record["accepted"] = False
+                    record["reason"] = emit.twin_decline_reason(parity)
+                elif cross_twin:
+                    record["accepted"] = False
+                    record["reason"] = emit.twin_decline_reason(
+                        {"disagreements": cross_twin,
+                         "points": record["containsCrosscheck"]["points"]})
+                if not record["accepted"]:
                     record["shape"] = None
                     record["flatSidecar"] = None
-                    record["reason"] = (
-                        f"the emitted shape disagrees with its own _Loop twin about {twin} of "
-                        f"{record['containsCrosscheck']['points']} classified point(s): a cell "
-                        "reaches past the bounding box declared for it, so the accelerated "
-                        "queries and the reference ones are not describing the same solid")
-                elif is_flat:
-                    flat_files[lid] = record["flatSidecar"]
                 else:
-                    csg_files[lid] = str(target)
+                    if is_flat:
+                        # Written inside this branch on purpose: a deferred part is not
+                        # dispatched to CSG in `geom.C`, and a report row advertising a sidecar
+                        # for a part that ships as a mesh would be a lie about what the macro
+                        # builds. `emit.py --from-json` writes it when it completes the deferred
+                        # shape, behind the same gate.
+                        record["flatSidecar"] = write_flat_sidecar(
+                            record["candidate"], out_folder, suffix)
+                    target = (out_folder / f"shape_{suffix}.root").resolve()
+                    emit.write_shape_object(built[0], built[1], target)
+                    record["shape"] = str(target)
+                    if is_flat:
+                        flat_files[lid] = record["flatSidecar"]
+                    else:
+                        csg_files[lid] = str(target)
             else:
                 record["shape"] = None
                 record["shapeDeferred"] = True
