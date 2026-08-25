@@ -392,6 +392,16 @@ survives being written to a `.root` geometry file without the sidecar. The blob 
 60-cell part at ~10 halfspaces per cell is under 50 kB — so there is no reason for it to be
 anything cleverer.
 
+> **Added 2026-08-25, at the close of the rung (task 10).** The streamer is the automatic one
+> (`#pragma link C++ class … +`), and the sub-cell boxes and BVH are not in it, so what ROOT
+> reconstructs has no boxes. That gap is closed by a **`#pragma read` rule** in
+> `DetectorsBaseLinkDef.h` whose code calls `CloseShape()` on every object read and shouts if it
+> refuses — a rule rather than a hand-written `Streamer`, which would have meant giving up
+> automatic schema evolution over the two member vectors for a format that is still settling. It
+> was measured firing on `TFile::Get` and on `TGeoManager::Import`, from C++ and from PyROOT
+> (`Stream_AK_FlatCSG.md` §9.1). **A shape read off a file is therefore closed; only a shape built
+> by hand owes itself a `CloseShape()`.**
+
 ## 8. The converter side
 
 `csg/decompose.py` is **unchanged**: the same split loop, the same connectivity-first rule, the
