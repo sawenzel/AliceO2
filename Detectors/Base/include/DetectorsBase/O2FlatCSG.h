@@ -51,6 +51,22 @@ struct FlatCSGCell {
   double volume = 0.;
 };
 
+/// One axis-aligned box of the sub-cell subdivision.
+///
+/// `nActive == 0` means every halfspace of `cell` holds everywhere in the box, so the box is
+/// wholly inside the solid. A box is only ever created when the cell might intersect it: a box
+/// the range bound proves wholly outside is dropped.
+///
+/// An active list is a correct description of the cell ONLY INSIDE ITS BOX. Every ray query must
+/// clip to the box's slab before using it; see scripts/geometry/Design_FlatCSGSolid.md 4.4.
+struct FlatCSGBox {
+  double min[3] = {};
+  double max[3] = {};
+  int cell = -1;
+  int firstActive = 0;
+  int nActive = 0;
+};
+
 /// A solid stored as a union of intersection-cells over signed implicit halfspaces.
 ///
 /// This is the flat two-level DNF of scripts/geometry/Stream_AA_FlatCSG.md section 5 -- depth is
@@ -86,8 +102,39 @@ class O2FlatCSG : public TGeoBBox
   const FlatCSGHalfspace& GetHalfspace(int index) const { return fHalfspaces[index]; }
   const FlatCSGCell& GetCell(int index) const { return fCells[index]; }
 
+  /// The AABB of cell \a cell. The halfspaces alone do not bound a cell -- an intersection of
+  /// halfspaces can be unbounded -- so the converter supplies the box the decomposition measured.
+  void SetCellBBox(int cell, const double* lo, const double* hi);
+
+  /// Build the sub-cell boxes (and, from task 5, the BVH). Call once, after the last AddCell.
+  void CloseShape();
+  bool IsClosed() const { return fClosed; }
+
+  int GetNboxes() const { return static_cast<int>(fBoxes.size()); }
+  const FlatCSGBox& GetBox(int index) const { return fBoxes[index]; }
+  /// For the tests: the box structure is the thing being proved sound, so it has to be readable.
+  int GetActive(int index) const { return fActive[index]; }
+  /// For the tests: the box structure is the thing being proved sound, so it has to be readable.
+  bool CellContainsPublic(int cell, const double* point) const { return CellContains(cell, point); }
+
+  /// Subdivision depth cap. Default 6; task 10 measures where it belongs.
+  void SetSplitDepth(int depth) { fSplitDepth = depth; }
+  /// Stop splitting a box narrower than this fraction of the part's bounding-box diagonal.
+  /// Default 0.01; task 10 measures where it belongs.
+  void SetMinBoxFraction(double fraction) { fMinBoxFraction = fraction; }
+
   /// `sign * f(point)`; the halfspace contains the point when this is `<= 0`.
   static double EvalHalfspace(const FlatCSGHalfspace& halfspace, const double* point);
+
+  /// A rigorous enclosure `[rangeLo, rangeHi]` of `sign * f` over the box `[lo, hi]`.
+  ///
+  /// Conservative in the only safe direction: an over-wide enclosure loses pruning, never
+  /// correctness. For a quadric it is the centred form -- with `m` the centre, `h` the
+  /// half-extents and `g = A m + b`, `|Q(x) - Q(m)| <= 2 sum|g_i| h_i + sum |A_ij| h_i h_j` --
+  /// which tightens quadratically as the boxes shrink. For a torus it is the 1-Lipschitz signed
+  /// distance, so the enclosure is `f(m) +/- |h|`.
+  static void HalfspaceRange(const FlatCSGHalfspace& halfspace, const double* lo, const double* hi,
+                             double& rangeLo, double& rangeHi);
 
   /// Real roots of `sign * f(origin + t*dir) = 0`, unsorted, at most four; returns the count.
   static int HalfspaceRoots(const FlatCSGHalfspace& halfspace, const double* origin,
@@ -118,6 +165,11 @@ class O2FlatCSG : public TGeoBBox
   /// task 6 replaces this; 0 is always sound
   Double_t Safety(const Double_t* point, Bool_t in = kTRUE) const override;
 
+  /// Minimal for now: the union of the retained sub-cell boxes, just enough for `CloseShape` to
+  /// compile. Task 6 writes the real one (it will want the halfspaces themselves, not only the
+  /// boxes the current split/minSize settings happened to produce).
+  void ComputeBBox() override;
+
   // ---- the reference twins ---------------------------------------------------------------
   Bool_t Contains_Loop(const Double_t* point) const;
 
@@ -130,8 +182,26 @@ class O2FlatCSG : public TGeoBBox
   /// True when every halfspace of cell `index` contains `point`.
   bool CellContains(int index, const double* point) const;
 
+  /// Recursively split `[lo, hi]` for `cell`, dropping halfspaces the range bound proves hold
+  /// everywhere in the box and returning (dropping the box) when the bound proves it wholly
+  /// outside one. Recursion stops -- and the box is kept -- when `active` empties, `depth`
+  /// reaches zero, or the box's longest side is no longer than `minSize`.
+  void SplitBox(int cell, const double* lo, const double* hi, const std::vector<int>& active,
+               int depth, double minSize);
+
   std::vector<FlatCSGHalfspace> fHalfspaces; ///< the flat halfspace array
   std::vector<FlatCSGCell> fCells;           ///< the DNF's cells, indexing into it
+
+  std::vector<FlatCSGBox> fBoxes; ///< the sub-cell boxes produced by `CloseShape`
+  std::vector<int> fActive;       ///< the boxes' active-halfspace lists, concatenated
+  std::vector<double> fCellLo;    ///< each cell's AABB low corner, 3 doubles per cell
+  std::vector<double> fCellHi;    ///< each cell's AABB high corner, 3 doubles per cell
+  /// Whether `SetCellBBox` was ever called for a given cell; `CloseShape` refuses to build a
+  /// solid missing one rather than silently drop that cell -- see `CloseShape`'s implementation.
+  std::vector<bool> fCellBBoxSet;
+  bool fClosed = false;
+  int fSplitDepth = 6;           ///< subdivision depth cap; task 10 measures where it belongs
+  double fMinBoxFraction = 0.01; ///< min box size as a fraction of the part's bbox diagonal
 
   // `CellIntervals`, `DistFromOutside_Loop` and `DistFromInside_Loop` each grow a scratch buffer
   // on demand; those live as `thread_local` function-local statics in the .cxx, not as members --

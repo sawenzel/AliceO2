@@ -458,3 +458,153 @@ BOOST_AUTO_TEST_CASE(a_tilted_torus_is_the_same_solid_as_an_upright_one_rotated)
     }
   }
 }
+
+BOOST_AUTO_TEST_CASE(the_range_bound_encloses_the_sampled_range)
+{
+  // the bound must be an ENCLOSURE: over-wide is safe, under-wide is a wrong solid
+  O2FlatCSG solid("range");
+  double coeff[10];
+  zCylinderQuadric(5., coeff);
+  const int cylinder = solid.AddQuadric(1., coeff);
+  const double normal[3] = {0., 0., 1.};
+  const double through[3] = {0., 0., 2.};
+  planeQuadric(normal, through, coeff);
+  const int plane = solid.AddQuadric(-1., coeff);
+  const double centre[3] = {1., 0., 0.};
+  const double axis[3] = {0., 0., 1.};
+  const int torus = solid.AddTorus(1., centre, axis, 7., 2.);
+
+  Rng rng(555ULL);
+  for (int trial = 0; trial < 3000; ++trial) {
+    double lo[3];
+    double hi[3];
+    for (int index = 0; index < 3; ++index) {
+      const double a = rng.uniform(-12., 12.);
+      const double b = a + rng.uniform(0.01, 6.);
+      lo[index] = a;
+      hi[index] = b;
+    }
+    for (int which : {cylinder, plane, torus}) {
+      double rangeLo = 0.;
+      double rangeHi = 0.;
+      O2FlatCSG::HalfspaceRange(solid.GetHalfspace(which), lo, hi, rangeLo, rangeHi);
+      BOOST_REQUIRE_LE(rangeLo, rangeHi);
+      for (int sample = 0; sample < 200; ++sample) {
+        const double point[3] = {rng.uniform(lo[0], hi[0]), rng.uniform(lo[1], hi[1]),
+                                 rng.uniform(lo[2], hi[2])};
+        const double value = O2FlatCSG::EvalHalfspace(solid.GetHalfspace(which), point);
+        BOOST_REQUIRE_GE(value, rangeLo - 1.e-9);
+        BOOST_REQUIRE_LE(value, rangeHi + 1.e-9);
+      }
+    }
+  }
+}
+
+BOOST_AUTO_TEST_CASE(the_boxes_cover_the_solid_and_their_active_lists_are_sound)
+{
+  // rmin = 2, rmax = 5, dz = 7 again, so there is a bore for the boxes to carve around
+  O2FlatCSG solid("boxes");
+  double coeff[10];
+  zCylinderQuadric(5., coeff);
+  solid.AddQuadric(1., coeff);
+  zCylinderQuadric(2., coeff);
+  solid.AddQuadric(-1., coeff);
+  const double up[3] = {0., 0., 1.};
+  const double down[3] = {0., 0., -1.};
+  const double top[3] = {0., 0., 7.};
+  const double bottom[3] = {0., 0., -7.};
+  planeQuadric(up, top, coeff);
+  solid.AddQuadric(1., coeff);
+  planeQuadric(down, bottom, coeff);
+  solid.AddQuadric(1., coeff);
+  solid.AddCell(0, 4, 0.);
+  const double lo[3] = {-5., -5., -7.};
+  const double hi[3] = {5., 5., 7.};
+  solid.SetCellBBox(0, lo, hi);
+  solid.CloseShape();
+
+  BOOST_CHECK_GT(solid.GetNboxes(), 1);
+
+  Rng rng(8080ULL);
+  int insideSamples = 0;
+  for (int trial = 0; trial < 50000; ++trial) {
+    const double point[3] = {rng.uniform(-6., 6.), rng.uniform(-6., 6.), rng.uniform(-8., 8.)};
+    if (!solid.Contains_Loop(point)) {
+      continue;
+    }
+    ++insideSamples;
+    // COVERAGE: every point of the solid is in some box
+    bool covered = false;
+    for (int index = 0; index < solid.GetNboxes() && !covered; ++index) {
+      const auto& box = solid.GetBox(index);
+      covered = point[0] >= box.min[0] && point[0] <= box.max[0] && point[1] >= box.min[1] &&
+                point[1] <= box.max[1] && point[2] >= box.min[2] && point[2] <= box.max[2];
+    }
+    BOOST_REQUIRE(covered);
+  }
+  BOOST_CHECK_GT(insideSamples, 5000);
+
+  // SOUNDNESS of the active lists: in every box, the active list alone decides membership
+  for (int index = 0; index < solid.GetNboxes(); ++index) {
+    const auto& box = solid.GetBox(index);
+    for (int sample = 0; sample < 200; ++sample) {
+      const double point[3] = {rng.uniform(box.min[0], box.max[0]),
+                               rng.uniform(box.min[1], box.max[1]),
+                               rng.uniform(box.min[2], box.max[2])};
+      bool byActive = true;
+      for (int slot = 0; slot < box.nActive && byActive; ++slot) {
+        byActive = O2FlatCSG::EvalHalfspace(
+                     solid.GetHalfspace(solid.GetActive(box.firstActive + slot)), point) <= 0.;
+      }
+      BOOST_REQUIRE_EQUAL(byActive, solid.CellContainsPublic(box.cell, point));
+    }
+  }
+}
+
+BOOST_AUTO_TEST_CASE(a_box_wholly_inside_a_cell_carries_no_active_halfspaces)
+{
+  O2FlatCSG solid("solid_boxes");
+  addBoxCell(solid, 4., 4., 4.);
+  const double lo[3] = {-4., -4., -4.};
+  const double hi[3] = {4., 4., 4.};
+  solid.SetCellBBox(0, lo, hi);
+  solid.CloseShape();
+  // a box has six planes and is convex, so subdivision must find interior boxes with an empty list
+  int solidBoxes = 0;
+  for (int index = 0; index < solid.GetNboxes(); ++index) {
+    if (solid.GetBox(index).nActive == 0) {
+      ++solidBoxes;
+    }
+  }
+  BOOST_CHECK_GT(solidBoxes, 0);
+}
+
+BOOST_AUTO_TEST_CASE(a_cell_without_a_bbox_fails_loudly_instead_of_vanishing)
+{
+  // cell 0 gets a box; cell 1 (a second, disjoint box) never does -- CloseShape must refuse to
+  // build a partial, silently-wrong solid rather than just drop cell 1
+  O2FlatCSG solid("missing_bbox");
+  addBoxCell(solid, 1., 1., 1.);
+  const int first = solid.GetNhalfspaces();
+  const double centre[3] = {10., 0., 0.};
+  for (int axis = 0; axis < 3; ++axis) {
+    for (int sense = -1; sense <= 1; sense += 2) {
+      double normal[3] = {0., 0., 0.};
+      double through[3] = {centre[0], centre[1], centre[2]};
+      normal[axis] = static_cast<double>(sense);
+      through[axis] += sense * 1.;
+      double coeff[10];
+      planeQuadric(normal, through, coeff);
+      solid.AddQuadric(1., coeff);
+    }
+  }
+  solid.AddCell(first, 6, 8.);
+
+  const double lo[3] = {-1., -1., -1.};
+  const double hi[3] = {1., 1., 1.};
+  solid.SetCellBBox(0, lo, hi); // cell 1's box is never set
+
+  solid.CloseShape();
+  BOOST_CHECK(!solid.IsClosed());
+  BOOST_CHECK_EQUAL(solid.GetNboxes(), 0);
+}

@@ -92,6 +92,20 @@ int O2FlatCSG::AddCell(int first, int count, double volume)
   return static_cast<int>(fCells.size()) - 1;
 }
 
+void O2FlatCSG::SetCellBBox(int cell, const double* lo, const double* hi)
+{
+  if (static_cast<int>(fCellBBoxSet.size()) < GetNcells()) {
+    fCellLo.resize(3 * GetNcells(), 0.);
+    fCellHi.resize(3 * GetNcells(), 0.);
+    fCellBBoxSet.resize(GetNcells(), false);
+  }
+  for (int index = 0; index < 3; ++index) {
+    fCellLo[3 * cell + index] = lo[index];
+    fCellHi[3 * cell + index] = hi[index];
+  }
+  fCellBBoxSet[cell] = true;
+}
+
 double O2FlatCSG::EvalHalfspace(const FlatCSGHalfspace& halfspace, const double* point)
 {
   if (halfspace.kind == FlatCSGHalfspace::kTorus) {
@@ -115,6 +129,47 @@ double O2FlatCSG::EvalHalfspace(const FlatCSGHalfspace& halfspace, const double*
   return halfspace.sign * (quadratic + linear + c[9]);
 }
 
+void O2FlatCSG::HalfspaceRange(const FlatCSGHalfspace& halfspace, const double* lo,
+                               const double* hi, double& rangeLo, double& rangeHi)
+{
+  double centre[3];
+  double half[3];
+  for (int index = 0; index < 3; ++index) {
+    centre[index] = 0.5 * (lo[index] + hi[index]);
+    half[index] = 0.5 * (hi[index] - lo[index]);
+  }
+  const double middle = EvalHalfspace(halfspace, centre);
+
+  if (halfspace.kind == FlatCSGHalfspace::kTorus) {
+    // f is the torus's exact signed distance, proved 1-Lipschitz in task 3: |f(x) - f(m)| <=
+    // |x - m|, and the farthest point of the box from its own centre is the corner, at distance
+    // |h|. sign only flips the sign of the deviation, never its magnitude (|sign| == 1), so the
+    // same reach bounds sign*f - sign*f(m) too.
+    const double reach = std::sqrt(half[0] * half[0] + half[1] * half[1] + half[2] * half[2]);
+    rangeLo = middle - reach;
+    rangeHi = middle + reach;
+    return;
+  }
+
+  const double* c = halfspace.c;
+  const double a[3][3] = {{c[0], c[1], c[2]}, {c[1], c[3], c[4]}, {c[2], c[4], c[5]}};
+  const double b[3] = {c[6], c[7], c[8]};
+  double slack = 0.;
+  for (int row = 0; row < 3; ++row) {
+    double gradient = b[row];
+    for (int column = 0; column < 3; ++column) {
+      gradient += a[row][column] * centre[column];
+      slack += std::abs(a[row][column]) * half[row] * half[column];
+    }
+    slack += 2. * std::abs(gradient) * half[row];
+  }
+  // slack bounds |Q(x) - Q(m)| (the unsigned Q, built from the unsigned A/b above). middle is
+  // sign*Q(m), and sign*Q(x) - sign*Q(m) = sign*(Q(x) - Q(m)), whose magnitude is |Q(x) - Q(m)|
+  // because |sign| == 1 -- so the same slack bounds the signed deviation too, on either sign.
+  rangeLo = middle - slack;
+  rangeHi = middle + slack;
+}
+
 bool O2FlatCSG::CellContains(int index, const double* point) const
 {
   const FlatCSGCell& cell = fCells[index];
@@ -124,6 +179,111 @@ bool O2FlatCSG::CellContains(int index, const double* point) const
     }
   }
   return true;
+}
+
+void O2FlatCSG::SplitBox(int cell, const double* lo, const double* hi,
+                         const std::vector<int>& active, int depth, double minSize)
+{
+  std::vector<int> stillActive;
+  stillActive.reserve(active.size());
+  for (int halfspace : active) {
+    double rangeLo = 0.;
+    double rangeHi = 0.;
+    HalfspaceRange(fHalfspaces[halfspace], lo, hi, rangeLo, rangeHi);
+    if (rangeLo > 0.) {
+      return; // the box is wholly outside this halfspace, hence wholly outside the cell
+    }
+    if (rangeHi > 0.) {
+      stillActive.push_back(halfspace); // undecided; it stays
+    }
+    // rangeHi <= 0: the halfspace holds everywhere in the box, so it is dropped
+  }
+
+  double longest = 0.;
+  int axis = 0;
+  for (int index = 0; index < 3; ++index) {
+    if (hi[index] - lo[index] > longest) {
+      longest = hi[index] - lo[index];
+      axis = index;
+    }
+  }
+  const bool keep = stillActive.empty() || depth <= 0 || longest <= minSize;
+  if (keep) {
+    FlatCSGBox box;
+    for (int index = 0; index < 3; ++index) {
+      box.min[index] = lo[index];
+      box.max[index] = hi[index];
+    }
+    box.cell = cell;
+    box.firstActive = static_cast<int>(fActive.size());
+    box.nActive = static_cast<int>(stillActive.size());
+    fActive.insert(fActive.end(), stillActive.begin(), stillActive.end());
+    fBoxes.push_back(box);
+    return;
+  }
+
+  const double middle = 0.5 * (lo[axis] + hi[axis]);
+  double childLo[3] = {lo[0], lo[1], lo[2]};
+  double childHi[3] = {hi[0], hi[1], hi[2]};
+  childHi[axis] = middle;
+  SplitBox(cell, childLo, childHi, stillActive, depth - 1, minSize);
+  childHi[axis] = hi[axis];
+  childLo[axis] = middle;
+  SplitBox(cell, childLo, childHi, stillActive, depth - 1, minSize);
+}
+
+void O2FlatCSG::CloseShape()
+{
+  fBoxes.clear();
+  fActive.clear();
+  fClosed = false;
+
+  if (static_cast<int>(fCellBBoxSet.size()) < GetNcells()) {
+    fCellLo.resize(3 * GetNcells(), 0.);
+    fCellHi.resize(3 * GetNcells(), 0.);
+    fCellBBoxSet.resize(GetNcells(), false);
+  }
+  // A cell an intersection of halfspaces does not bound itself, so a cell whose bbox was never
+  // handed in by SetCellBBox has no box built for it: it would silently vanish from the solid,
+  // Contains() returning false inside real material with nothing to signal it. Fail loudly and
+  // build nothing rather than emit a partial, silently-wrong solid.
+  bool anyMissing = false;
+  for (int cell = 0; cell < GetNcells(); ++cell) {
+    if (!fCellBBoxSet[cell]) {
+      Error("CloseShape",
+            "Shape %s cell %d has no bounding box (SetCellBBox was never called for it); it would "
+            "silently vanish from the solid. Not building any boxes -- IsClosed() stays false.",
+            GetName(), cell);
+      anyMissing = true;
+    }
+  }
+  if (anyMissing) {
+    return;
+  }
+
+  double partLo[3] = {TGeoShape::Big(), TGeoShape::Big(), TGeoShape::Big()};
+  double partHi[3] = {-TGeoShape::Big(), -TGeoShape::Big(), -TGeoShape::Big()};
+  for (int cell = 0; cell < GetNcells(); ++cell) {
+    for (int index = 0; index < 3; ++index) {
+      partLo[index] = std::min(partLo[index], fCellLo[3 * cell + index]);
+      partHi[index] = std::max(partHi[index], fCellHi[3 * cell + index]);
+    }
+  }
+  const double diagonal = std::sqrt((partHi[0] - partLo[0]) * (partHi[0] - partLo[0]) +
+                                    (partHi[1] - partLo[1]) * (partHi[1] - partLo[1]) +
+                                    (partHi[2] - partLo[2]) * (partHi[2] - partLo[2]));
+  const double minSize = fMinBoxFraction * diagonal;
+
+  for (int cell = 0; cell < GetNcells(); ++cell) {
+    std::vector<int> active;
+    active.reserve(fCells[cell].count);
+    for (int offset = 0; offset < fCells[cell].count; ++offset) {
+      active.push_back(fCells[cell].first + offset);
+    }
+    SplitBox(cell, &fCellLo[3 * cell], &fCellHi[3 * cell], active, fSplitDepth, minSize);
+  }
+  fClosed = true;
+  ComputeBBox();
 }
 
 Bool_t O2FlatCSG::Contains_Loop(const Double_t* point) const
@@ -441,6 +601,29 @@ Double_t O2FlatCSG::Safety(const Double_t* /*point*/, Bool_t /*in*/) const
 {
   // task 6 replaces this; 0 is always sound
   return 0.;
+}
+
+void O2FlatCSG::ComputeBBox()
+{
+  // Minimal override, just enough for CloseShape to compile: the union of the retained boxes.
+  // Task 6 writes the real one.
+  if (fBoxes.empty()) {
+    return;
+  }
+  double lo[3] = {TGeoShape::Big(), TGeoShape::Big(), TGeoShape::Big()};
+  double hi[3] = {-TGeoShape::Big(), -TGeoShape::Big(), -TGeoShape::Big()};
+  for (const FlatCSGBox& box : fBoxes) {
+    for (int index = 0; index < 3; ++index) {
+      lo[index] = std::min(lo[index], box.min[index]);
+      hi[index] = std::max(hi[index], box.max[index]);
+    }
+  }
+  for (int index = 0; index < 3; ++index) {
+    fOrigin[index] = 0.5 * (lo[index] + hi[index]);
+  }
+  fDX = 0.5 * (hi[0] - lo[0]);
+  fDY = 0.5 * (hi[1] - lo[1]);
+  fDZ = 0.5 * (hi[2] - lo[2]);
 }
 
 } // namespace base
