@@ -732,3 +732,195 @@ BOOST_AUTO_TEST_CASE(a_nan_cell_bbox_fails_loudly_instead_of_defeating_the_inver
   BOOST_CHECK(!solid.IsClosed());
   BOOST_CHECK_EQUAL(solid.GetNboxes(), 0);
 }
+
+namespace
+{
+/// An L-shaped bracket with a bore: three cells, a complemented cylinder, a long diagonal extent.
+/// Deliberately the shape a cell-level BVH would handle badly.
+void buildBracket(O2FlatCSG& solid)
+{
+  double coeff[10];
+  // cell 0: the long arm, x in [-10, 10], y in [-1, 1], z in [-1, 1]
+  const double arm[6][2][3] = {{{1., 0., 0.}, {10., 0., 0.}},
+                               {{-1., 0., 0.}, {-10., 0., 0.}},
+                               {{0., 1., 0.}, {0., 1., 0.}},
+                               {{0., -1., 0.}, {0., -1., 0.}},
+                               {{0., 0., 1.}, {0., 0., 1.}},
+                               {{0., 0., -1.}, {0., 0., -1.}}};
+  int first = solid.GetNhalfspaces();
+  for (const auto& plane : arm) {
+    planeQuadric(plane[0], plane[1], coeff);
+    solid.AddQuadric(1., coeff);
+  }
+  solid.AddCell(first, 6, 8. * 10. * 1. * 1.);
+  const double armLo[3] = {-10., -1., -1.};
+  const double armHi[3] = {10., 1., 1.};
+  solid.SetCellBBox(0, armLo, armHi);
+
+  // cell 1: the upright, x in [8, 10], y in [-1, 1], z in [1, 12]
+  const double upright[6][2][3] = {{{1., 0., 0.}, {10., 0., 0.}},
+                                   {{-1., 0., 0.}, {8., 0., 0.}},
+                                   {{0., 1., 0.}, {0., 1., 0.}},
+                                   {{0., -1., 0.}, {0., -1., 0.}},
+                                   {{0., 0., 1.}, {0., 0., 12.}},
+                                   {{0., 0., -1.}, {0., 0., 1.}}};
+  first = solid.GetNhalfspaces();
+  for (const auto& plane : upright) {
+    planeQuadric(plane[0], plane[1], coeff);
+    solid.AddQuadric(1., coeff);
+  }
+  solid.AddCell(first, 6, 2. * 2. * 11.);
+  const double uprightLo[3] = {8., -1., 1.};
+  const double uprightHi[3] = {10., 1., 12.};
+  solid.SetCellBBox(1, uprightLo, uprightHi);
+
+  // cell 2: a washer around z at x = -8, with a bore -- a complemented cylinder, so non-convex
+  first = solid.GetNhalfspaces();
+  const double centreShift = -8.;
+  // outer cylinder about the axis through (-8, 0, *): translate by completing the square
+  const double outer[10] = {1., 0., 0., 1., 0., 0., -centreShift, 0., 0.,
+                            centreShift * centreShift - 9.};
+  solid.AddQuadric(1., outer);
+  const double inner[10] = {1., 0., 0., 1., 0., 0., -centreShift, 0., 0.,
+                            centreShift * centreShift - 1.};
+  solid.AddQuadric(-1., inner);
+  const double washer[2][2][3] = {{{0., 0., 1.}, {0., 0., 1.}}, {{0., 0., -1.}, {0., 0., -1.}}};
+  for (const auto& plane : washer) {
+    planeQuadric(plane[0], plane[1], coeff);
+    solid.AddQuadric(1., coeff);
+  }
+  solid.AddCell(first, 4, TMath::Pi() * (9. - 1.) * 2.);
+  const double washerLo[3] = {-11., -3., -1.};
+  const double washerHi[3] = {-5., 3., 1.};
+  solid.SetCellBBox(2, washerLo, washerHi);
+}
+} // namespace
+
+BOOST_AUTO_TEST_CASE(the_accelerated_contains_is_bit_identical_to_its_twin)
+{
+  O2FlatCSG solid("bracket");
+  buildBracket(solid);
+  solid.CloseShape();
+  BOOST_CHECK_GT(solid.GetNboxes(), 3);
+  BOOST_CHECK_GT(solid.GetBVHMemory(), 0u);
+
+  Rng rng(123456ULL);
+  for (int trial = 0; trial < 200000; ++trial) {
+    const double point[3] = {rng.uniform(-13., 13.), rng.uniform(-5., 5.), rng.uniform(-3., 14.)};
+    BOOST_REQUIRE_EQUAL(solid.Contains(point), solid.Contains_Loop(point));
+  }
+}
+
+BOOST_AUTO_TEST_CASE(the_accelerated_distances_are_bit_identical_to_their_twins)
+{
+  O2FlatCSG solid("bracket_dist");
+  buildBracket(solid);
+  solid.CloseShape();
+
+  Rng rng(654321ULL);
+  for (int trial = 0; trial < 200000; ++trial) {
+    double point[3] = {rng.uniform(-16., 16.), rng.uniform(-8., 8.), rng.uniform(-6., 17.)};
+    double dir[3];
+    double norm = 0.;
+    do {
+      for (int index = 0; index < 3; ++index) {
+        dir[index] = rng.uniform(-1., 1.);
+      }
+      norm = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+    } while (norm < 1.e-3);
+    for (int index = 0; index < 3; ++index) {
+      dir[index] /= norm;
+    }
+    if (solid.Contains_Loop(point)) {
+      BOOST_REQUIRE_EQUAL(solid.DistFromInside(point, dir, 3, TGeoShape::Big(), nullptr),
+                          solid.DistFromInside_Loop(point, dir, TGeoShape::Big()));
+    } else {
+      BOOST_REQUIRE_EQUAL(solid.DistFromOutside(point, dir, 3, TGeoShape::Big(), nullptr),
+                          solid.DistFromOutside_Loop(point, dir, TGeoShape::Big()));
+    }
+  }
+}
+
+BOOST_AUTO_TEST_CASE(a_ray_along_the_long_arm_crosses_every_cell_it_should)
+{
+  // the case a per-box clip gets wrong if it forgets to clip: a ray running the length of the
+  // bracket passes through many boxes of the same cell, and must see ONE interval, not many
+  O2FlatCSG solid("bracket_long");
+  buildBracket(solid);
+  solid.CloseShape();
+  const double origin[3] = {-20., 0., 0.};
+  const double dir[3] = {1., 0., 0.};
+  BOOST_CHECK_SMALL(solid.DistFromOutside(origin, dir, 3, TGeoShape::Big(), nullptr) - 9., 1.e-12);
+  const double inArm[3] = {0., 0., 0.};
+  // inside the arm at the origin, the exit is x = 10 (the arm and the upright touch at x = 8..10
+  // only for z > 1, so along z = 0 the arm alone decides)
+  BOOST_CHECK_SMALL(solid.DistFromInside(inArm, dir, 3, TGeoShape::Big(), nullptr) - 10., 1.e-12);
+}
+
+BOOST_AUTO_TEST_CASE(a_shape_that_failed_to_close_still_answers_through_the_loop_twins)
+{
+  // CloseShape refuses an unset cell bbox and builds nothing, so there is no box array and no BVH.
+  // An accelerated query that walked the empty array would answer "no material anywhere" -- the
+  // silent vanishing the refusal exists to prevent -- so all three must fall back to the twins.
+  O2FlatCSG solid("bracket_unclosed");
+  buildBracket(solid);
+  // a fourth cell, a box at x in [12, 14], deliberately left without a bounding box
+  const double extra[6][2][3] = {{{1., 0., 0.}, {14., 0., 0.}},
+                                 {{-1., 0., 0.}, {12., 0., 0.}},
+                                 {{0., 1., 0.}, {0., 1., 0.}},
+                                 {{0., -1., 0.}, {0., -1., 0.}},
+                                 {{0., 0., 1.}, {0., 0., 1.}},
+                                 {{0., 0., -1.}, {0., 0., -1.}}};
+  double coeff[10];
+  const int first = solid.GetNhalfspaces();
+  for (const auto& plane : extra) {
+    planeQuadric(plane[0], plane[1], coeff);
+    solid.AddQuadric(1., coeff);
+  }
+  solid.AddCell(first, 6, 2. * 2. * 2.);
+
+  solid.CloseShape();
+  BOOST_REQUIRE(!solid.IsClosed());
+  BOOST_CHECK_EQUAL(solid.GetNboxes(), 0);
+  BOOST_CHECK_EQUAL(solid.GetBVHMemory(), 0u);
+
+  // material inside every one of the four cells is still found, and empty space is still empty
+  const double inArm[3] = {0., 0., 0.};
+  const double inUpright[3] = {9., 0., 6.};
+  const double inWasher[3] = {-10.5, 0., 0.};
+  const double inExtra[3] = {13., 0., 0.};
+  // the washer's bore is covered by the arm, so the empty spot is the gap between the arm and the
+  // extra cell instead
+  const double betweenCells[3] = {11., 0., 0.};
+  const double outside[3] = {0., 0., 20.};
+  BOOST_CHECK(solid.Contains(inArm));
+  BOOST_CHECK(solid.Contains(inUpright));
+  BOOST_CHECK(solid.Contains(inWasher));
+  BOOST_CHECK(solid.Contains(inExtra));
+  BOOST_CHECK(!solid.Contains(betweenCells));
+  BOOST_CHECK(!solid.Contains(outside));
+
+  Rng rng(24680ULL);
+  for (int trial = 0; trial < 20000; ++trial) {
+    const double point[3] = {rng.uniform(-16., 16.), rng.uniform(-5., 5.), rng.uniform(-3., 14.)};
+    BOOST_REQUIRE_EQUAL(solid.Contains(point), solid.Contains_Loop(point));
+    double dir[3];
+    double norm = 0.;
+    do {
+      for (int index = 0; index < 3; ++index) {
+        dir[index] = rng.uniform(-1., 1.);
+      }
+      norm = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+    } while (norm < 1.e-3);
+    for (int index = 0; index < 3; ++index) {
+      dir[index] /= norm;
+    }
+    if (solid.Contains_Loop(point)) {
+      BOOST_REQUIRE_EQUAL(solid.DistFromInside(point, dir, 3, TGeoShape::Big(), nullptr),
+                          solid.DistFromInside_Loop(point, dir, TGeoShape::Big()));
+    } else {
+      BOOST_REQUIRE_EQUAL(solid.DistFromOutside(point, dir, 3, TGeoShape::Big(), nullptr),
+                          solid.DistFromOutside_Loop(point, dir, TGeoShape::Big()));
+    }
+  }
+}

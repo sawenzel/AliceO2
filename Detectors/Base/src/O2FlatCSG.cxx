@@ -13,6 +13,10 @@
 
 #include "BoundedSurface.h"
 
+// the same third-party BVH2 entry point O2Tessellated, O2BVHSurfaceSolid and O2BVHAssembly use
+#include "bvh2_third_party.h"
+#include "bvh2_extra_kernels.h"
+
 #include "TGeoShape.h"
 
 #include <algorithm>
@@ -20,6 +24,8 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <numeric>
+#include <vector>
 
 ClassImp(o2::base::O2FlatCSG);
 
@@ -42,11 +48,139 @@ namespace o2
 namespace base
 {
 
+namespace
+{
+// float BVH types, following the O2BVHAssembly / O2Tessellated pattern. Float is enough here
+// because the BVH only ever *nominates* candidates: every box a leaf hands over is then clipped
+// and evaluated against its own double `FlatCSGBox` bounds, so a node box has to be a superset of
+// the geometry and nothing more. roundOutward is what makes it one.
+using BVHScalar = float;
+using BVHBBox = bvh::v2::BBox<BVHScalar, 3>;
+using BVHVec3 = bvh::v2::Vec<BVHScalar, 3>;
+using BVHNode = bvh::v2::Node<BVHScalar, 3>;
+using BVH = bvh::v2::Bvh<BVHNode>;
+
+/// Round a double outward into float, away from the interval the box encloses.
+inline float roundOutward(double value, bool up)
+{
+  return std::nextafterf(static_cast<float>(value), up ? std::numeric_limits<float>::infinity()
+                                                       : -std::numeric_limits<float>::infinity());
+}
+
+/// Narrow `[tlo, thi]` to the ray's parameter window inside the axis-aligned box
+/// `[boxMin, boxMax]`; returns false when nothing survives.
+///
+/// This is the clip design section 4.4 is about. An active list describes its cell only inside its
+/// own box, so this window -- computed per box, and never pooled across boxes -- is what bounds
+/// the `CellIntervals` call that uses that list.
+///
+/// It divides by `dir[i]` rather than multiplying by a precomputed `1/dir[i]`, and that is not a
+/// stylistic choice. A cell's bounding box routinely has a face lying exactly on one of that
+/// cell's own axis-aligned plane halfspaces -- the arm of an L-bracket is six such faces -- and
+/// there the box face and the halfspace surface are the same plane, crossed at the same parameter.
+/// `HalfspaceRoots` reaches it as `-0.5*gamma/beta`, whose exact powers of two cancel, so it is
+/// `(v - o_k) / d_k`; `(v - o_k) * (1/d_k)` rounds twice and can land an ulp away, which is enough
+/// to make an accelerated exit distance differ from the twin's in the last bit. One division is
+/// also simply the more accurate of the two.
+bool slabWindow(const double* boxMin, const double* boxMax, const double* origin, const double* dir,
+                double& tlo, double& thi)
+{
+  for (int index = 0; index < 3; ++index) {
+    if (std::abs(dir[index]) < 1.e-300) {
+      // parallel to this pair of faces: the ray is either inside the slab for every t or outside
+      // it for every t
+      if (origin[index] < boxMin[index] || origin[index] > boxMax[index]) {
+        return false;
+      }
+      continue;
+    }
+    double low = (boxMin[index] - origin[index]) / dir[index];
+    double high = (boxMax[index] - origin[index]) / dir[index];
+    if (low > high) {
+      std::swap(low, high);
+    }
+    tlo = std::max(tlo, low);
+    thi = std::min(thi, high);
+    if (tlo > thi) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/// The same clip against a BVH node's (float, outward-rounded) box.
+inline bool nodeWindow(const BVHBBox& box, const double* origin, const double* dir, double& tlo,
+                       double& thi)
+{
+  const double lo[3] = {box.min[0], box.min[1], box.min[2]};
+  const double hi[3] = {box.max[0], box.max[1], box.max[2]};
+  return slabWindow(lo, hi, origin, dir, tlo, thi);
+}
+
+/// Whether \a point is in the box's own double bounds, closed on every face.
+inline bool boxHoldsPoint(const FlatCSGBox& box, const double* point)
+{
+  return point[0] >= box.min[0] && point[0] <= box.max[0] && point[1] >= box.min[1] &&
+         point[1] <= box.max[1] && point[2] >= box.min[2] && point[2] <= box.max[2];
+}
+
+/// Hand every leaf primitive whose node box the ray meets within `[0, tmax]` to \a visit.
+///
+/// The node boxes are outward-rounded supersets of the sub-cell boxes, so this can only ever
+/// nominate too many; the caller decides with the box's own double bounds.
+template <typename Visit>
+void traverseRay(const BVH& bvh, const double* origin, const double* dir, double tmax, Visit&& visit)
+{
+  // thread_local rather than a member or a fresh vector per call: TGeo shares one shape object
+  // across every navigator under TGeoManager::SetMaxThreads, and this is not re-entered
+  thread_local std::vector<size_t> stack;
+  stack.clear();
+  stack.push_back(0); // the bvh2 root node
+  while (!stack.empty()) {
+    const size_t current = stack.back();
+    stack.pop_back();
+    const auto& node = bvh.nodes[current];
+    double tlo = 0.;
+    double thi = tmax;
+    if (!nodeWindow(node.get_bbox(), origin, dir, tlo, thi)) {
+      continue;
+    }
+    if (node.is_leaf()) {
+      const auto beginPrimitive = node.index.first_id();
+      const auto endPrimitive = beginPrimitive + node.index.prim_count();
+      for (auto primitive = beginPrimitive; primitive < endPrimitive; ++primitive) {
+        visit(static_cast<int>(bvh.prim_ids[primitive]));
+      }
+    } else {
+      const auto firstChild = node.index.first_id();
+      for (size_t child : {firstChild, firstChild + 1}) {
+        if (child < bvh.nodes.size()) {
+          stack.push_back(child);
+        }
+      }
+    }
+  }
+}
+} // namespace
+
 O2FlatCSG::O2FlatCSG() : TGeoBBox(0., 0., 0.) {}
 
 O2FlatCSG::O2FlatCSG(const char* name) : TGeoBBox(name, 0., 0., 0.) {}
 
-O2FlatCSG::~O2FlatCSG() = default;
+O2FlatCSG::~O2FlatCSG()
+{
+  delete static_cast<BVH*>(fBVH);
+  fBVH = nullptr;
+}
+
+size_t O2FlatCSG::GetBVHMemory() const
+{
+  const auto* bvh = static_cast<const BVH*>(fBVH);
+  if (bvh == nullptr) {
+    return 0;
+  }
+  return bvh->nodes.size() * sizeof(BVHNode) + bvh->prim_ids.size() * sizeof(size_t);
+}
 
 int O2FlatCSG::AddQuadric(double sign, const double coeff[10])
 {
@@ -294,6 +428,10 @@ void O2FlatCSG::CloseShape()
   fBoxes.clear();
   fActive.clear();
   fClosed = false;
+  // dropped before the validation below can return: a BVH left over from an earlier CloseShape
+  // would describe boxes that no longer exist, and the queries key off `fBVH != nullptr`
+  delete static_cast<BVH*>(fBVH);
+  fBVH = nullptr;
 
   if (static_cast<int>(fCellBBoxSet.size()) < GetNcells()) {
     fCellLo.resize(3 * GetNcells(), 0.);
@@ -369,6 +507,35 @@ void O2FlatCSG::CloseShape()
     }
     SplitBox(cell, &fCellLo[3 * cell], &fCellHi[3 * cell], active, fSplitDepth, minSize);
   }
+
+  if (!fBoxes.empty()) {
+    std::vector<BVHBBox> boxes;
+    std::vector<BVHVec3> centers;
+    boxes.reserve(fBoxes.size());
+    centers.reserve(fBoxes.size());
+    for (const auto& box : fBoxes) {
+      BVHBBox bounds;
+      for (int index = 0; index < 3; ++index) {
+        // outward, so a float node box is a superset of the double box it stands for and the
+        // traversal can only ever nominate too many candidates -- never drop one
+        bounds.min[index] = roundOutward(box.min[index], false);
+        bounds.max[index] = roundOutward(box.max[index], true);
+      }
+      boxes.push_back(bounds);
+      centers.emplace_back(bounds.get_center());
+    }
+    typename bvh::v2::DefaultBuilder<BVHNode>::Config config;
+    config.quality = bvh::v2::DefaultBuilder<BVHNode>::Quality::High;
+    // One box per leaf, as in O2BVHAssembly: resolving a box costs a slab clip plus an interval
+    // scan over its active list, far more than a node box test, and the bvh2 traversal enters a
+    // leaf's start node without testing its box -- so a multi-box leaf would pay several clips
+    // for one box test. It also means a box lives in exactly one leaf and is visited at most once
+    // per traversal, which is what lets the per-cell merge below assume no duplicate pieces.
+    config.max_leaf_size = 1;
+    fBVH = static_cast<void*>(
+      new BVH(bvh::v2::DefaultBuilder<BVHNode>::build(boxes, centers, config)));
+  }
+
   fClosed = true;
   ComputeBBox();
 }
@@ -383,10 +550,68 @@ Bool_t O2FlatCSG::Contains_Loop(const Double_t* point) const
   return kFALSE;
 }
 
+////////////////////////////////////////////////////////////////////////////////
+/// Contains -- a BVH point query.
+///
+/// Inside a box, the box's active list IS the cell: every halfspace the split dropped holds
+/// everywhere in that box, so testing the survivors is testing all of them. That is why the point
+/// has to be in the box's own double bounds before its list is consulted -- the float node box the
+/// traversal descends is a deliberate superset and proves nothing.
+///
+/// Cells are disjoint by construction, so the first box that accepts is the answer and the visit
+/// order does not matter.
+
 Bool_t O2FlatCSG::Contains(const Double_t* point) const
 {
-  // no acceleration until task 5; the twin is the answer
-  return Contains_Loop(point);
+  if (!fClosed || fBVH == nullptr) {
+    // CloseShape refused (or was never called), so there are no boxes to walk. An empty box array
+    // in an accelerated path reads as "no material anywhere", which is exactly the silent
+    // vanishing CloseShape's validation exists to prevent -- so answer from the twin instead.
+    return Contains_Loop(point);
+  }
+  const BVH& bvh = *static_cast<const BVH*>(fBVH);
+  const BVHVec3 query(static_cast<float>(point[0]), static_cast<float>(point[1]),
+                      static_cast<float>(point[2]));
+
+  thread_local std::vector<size_t> stack;
+  stack.clear();
+  stack.push_back(0); // the bvh2 root node
+  while (!stack.empty()) {
+    const size_t current = stack.back();
+    stack.pop_back();
+    const auto& node = bvh.nodes[current];
+    if (!bvh::v2::extra::contains(node.get_bbox(), query)) {
+      continue;
+    }
+    if (node.is_leaf()) {
+      const auto beginPrimitive = node.index.first_id();
+      const auto endPrimitive = beginPrimitive + node.index.prim_count();
+      for (auto primitive = beginPrimitive; primitive < endPrimitive; ++primitive) {
+        const FlatCSGBox& box = fBoxes[bvh.prim_ids[primitive]];
+        if (!boxHoldsPoint(box, point)) {
+          continue;
+        }
+        if (box.nActive == 0) {
+          return kTRUE; // wholly inside its cell: nothing left to test
+        }
+        bool inside = true;
+        for (int slot = 0; slot < box.nActive && inside; ++slot) {
+          inside = EvalHalfspace(fHalfspaces[fActive[box.firstActive + slot]], point) <= 0.;
+        }
+        if (inside) {
+          return kTRUE;
+        }
+      }
+    } else {
+      const auto firstChild = node.index.first_id();
+      for (size_t child : {firstChild, firstChild + 1}) {
+        if (child < bvh.nodes.size()) {
+          stack.push_back(child);
+        }
+      }
+    }
+  }
+  return kFALSE;
 }
 
 int O2FlatCSG::HalfspaceRoots(const FlatCSGHalfspace& halfspace, const double* origin,
@@ -654,6 +879,143 @@ Double_t O2FlatCSG::DistFromInside_Loop(const Double_t* point, const Double_t* d
   return 0.;
 }
 
+////////////////////////////////////////////////////////////////////////////////
+/// GatherRayPieces -- the clip-inside-the-box invariant, in one place.
+///
+/// Every path into the accelerated distances comes through here, and here the window handed to
+/// `CellIntervals` is always this box's own slab intersected with `[0, step]`. No active list is
+/// ever used outside the box it was computed for, and no window is ever pooled across boxes.
+
+bool O2FlatCSG::GatherRayPieces(const Double_t* point, const Double_t* dir, Double_t step,
+                                std::vector<double>& pairs, std::vector<int>& cells) const
+{
+  pairs.clear();
+  cells.clear();
+  const BVH& bvh = *static_cast<const BVH*>(fBVH);
+
+  // one box's intervals; thread_local for the reason the header's scratch-buffer comment gives
+  thread_local std::vector<double> boxPairs;
+  bool overflowed = false;
+  traverseRay(bvh, point, dir, step, [&](int index) {
+    const FlatCSGBox& box = fBoxes[index];
+    double tlo = 0.;
+    double thi = step;
+    if (!slabWindow(box.min, box.max, point, dir, tlo, thi) || thi <= tlo) {
+      return;
+    }
+    // sized from THIS box's active-list length, which is the count CellIntervals will walk, so
+    // the bound it is asked to respect is the one it was given
+    const int capacity = maxPairsForCell(box.nActive);
+    if (static_cast<int>(boxPairs.size()) < 2 * capacity) {
+      boxPairs.resize(2 * capacity);
+    }
+    // nActive == 0 means the box is wholly inside its cell; CellIntervals then has no halfspace
+    // to break on and returns the whole window, which is exactly the right answer
+    const int* active = box.nActive > 0 ? fActive.data() + box.firstActive : nullptr;
+    const int found = CellIntervals(box.cell, active, box.nActive, point, dir, tlo, thi,
+                                    boxPairs.data(), capacity);
+    if (found < 0) {
+      overflowed = true;
+      return;
+    }
+    for (int pair = 0; pair < found; ++pair) {
+      pairs.push_back(boxPairs[2 * pair]);
+      pairs.push_back(boxPairs[2 * pair + 1]);
+      cells.push_back(box.cell);
+    }
+  });
+  return !overflowed;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+/// DistFromOutsideBVH
+///
+/// The twin's rule is "the smallest entry over the per-CELL occupancy intervals whose exit clears
+/// the tolerance", so the pieces are rejoined per cell before it is applied. Boxes of one cell
+/// tile it, so a piece that a box boundary cut short abuts the next piece exactly -- the slab
+/// bound of one box and of its neighbour are the same expression on the same shared face
+/// coordinate -- and the run merge below closes them back into the interval the twin computes.
+///
+/// Merging across cells would NOT be the twin: two cells that touch within the tolerance are one
+/// interval after a merge but two intervals to the twin, and the exit-clears-tolerance test can
+/// then pick a different entry.
+
+Double_t O2FlatCSG::DistFromOutsideBVH(const Double_t* point, const Double_t* dir,
+                                       Double_t step) const
+{
+  thread_local std::vector<double> pairs;
+  thread_local std::vector<int> cells;
+  if (!GatherRayPieces(point, dir, step, pairs, cells)) {
+    Error("DistFromOutside",
+          "Shape %s: CellIntervals overflowed a per-box buffer sized from that box's own active "
+          "list; the maxPairsForCell bound no longer holds. Answering from the loop twin.",
+          GetName());
+    return DistFromOutside_Loop(point, dir, step);
+  }
+
+  // sort the pieces by (cell, entry) through a permutation, so the run merge below sees each
+  // cell's pieces contiguously and in order
+  const int count = static_cast<int>(cells.size());
+  thread_local std::vector<int> order;
+  order.resize(count);
+  std::iota(order.begin(), order.end(), 0);
+  std::sort(order.begin(), order.end(), [&](int left, int right) {
+    if (cells[left] != cells[right]) {
+      return cells[left] < cells[right];
+    }
+    return pairs[2 * left] < pairs[2 * right];
+  });
+
+  double best = TGeoShape::Big();
+  int index = 0;
+  while (index < count) {
+    const int cell = cells[order[index]];
+    const double enter = pairs[2 * order[index]];
+    double exit = pairs[2 * order[index] + 1];
+    ++index;
+    // join what is only one interval of this cell, cut into pieces by the boxes that tile it
+    while (index < count && cells[order[index]] == cell && pairs[2 * order[index]] <= exit) {
+      exit = std::max(exit, pairs[2 * order[index] + 1]);
+      ++index;
+    }
+    // DistFromOutside_Loop's rule, unchanged: a point exactly on the boundary is already inside,
+    // so only an interval that really extends past the tolerance counts as an entry
+    if (exit > TGeoShape::Tolerance() && enter < best) {
+      best = std::max(enter, 0.);
+    }
+  }
+  return best;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+/// DistFromInsideBVH
+///
+/// The far end of the UNION's occupancy interval containing t = 0: a point can leave one cell into
+/// an adjacent one, and the part ends where the union does. So unlike DistFromOutside this one
+/// merges everything the ray met, cells included, with the same glue tolerance the twin uses.
+
+Double_t O2FlatCSG::DistFromInsideBVH(const Double_t* point, const Double_t* dir,
+                                      Double_t step) const
+{
+  thread_local std::vector<double> pairs;
+  thread_local std::vector<int> cells;
+  if (!GatherRayPieces(point, dir, step, pairs, cells)) {
+    Error("DistFromInside",
+          "Shape %s: CellIntervals overflowed a per-box buffer sized from that box's own active "
+          "list; the maxPairsForCell bound no longer holds. Answering from the loop twin.",
+          GetName());
+    return DistFromInside_Loop(point, dir, step);
+  }
+  const int count = mergeIntervals(pairs.data(), static_cast<int>(cells.size()),
+                                   TGeoShape::Tolerance());
+  for (int pair = 0; pair < count; ++pair) {
+    if (pairs[2 * pair] <= TGeoShape::Tolerance()) {
+      return pairs[2 * pair + 1];
+    }
+  }
+  return 0.;
+}
+
 Double_t O2FlatCSG::DistFromOutside(const Double_t* point, const Double_t* dir, Int_t iact,
                                     Double_t step, Double_t* safe) const
 {
@@ -666,7 +1028,12 @@ Double_t O2FlatCSG::DistFromOutside(const Double_t* point, const Double_t* dir, 
       return TGeoShape::Big();
     }
   }
-  return DistFromOutside_Loop(point, dir, step); // accelerated in task 5
+  if (!fClosed || fBVH == nullptr) {
+    // no boxes to walk: see the note on Contains. The twin is the definition of the answer, and
+    // an empty box array in the accelerated path would silently report empty space.
+    return DistFromOutside_Loop(point, dir, step);
+  }
+  return DistFromOutsideBVH(point, dir, step);
 }
 
 Double_t O2FlatCSG::DistFromInside(const Double_t* point, const Double_t* dir, Int_t iact,
@@ -681,7 +1048,10 @@ Double_t O2FlatCSG::DistFromInside(const Double_t* point, const Double_t* dir, I
       return TGeoShape::Big();
     }
   }
-  return DistFromInside_Loop(point, dir, step); // accelerated in task 5
+  if (!fClosed || fBVH == nullptr) {
+    return DistFromInside_Loop(point, dir, step);
+  }
+  return DistFromInsideBVH(point, dir, step);
 }
 
 Double_t O2FlatCSG::Safety(const Double_t* /*point*/, Bool_t /*in*/) const

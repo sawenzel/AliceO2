@@ -87,6 +87,11 @@ class O2FlatCSG : public TGeoBBox
   explicit O2FlatCSG(const char* name);
   ~O2FlatCSG() override;
 
+  // The shape owns a raw `bvh::v2::Bvh` behind `fBVH`, so a compiler-written copy would hand two
+  // shapes the same BVH and then free it twice; same treatment as O2BVHAssembly.
+  O2FlatCSG(const O2FlatCSG&) = delete;
+  O2FlatCSG& operator=(const O2FlatCSG&) = delete;
+
   // ---- building -------------------------------------------------------------------------
   /// Append a quadric halfspace; returns its index. `sign` is +1 or -1, inside is `sign*Q <= 0`.
   int AddQuadric(double sign, const double coeff[10]);
@@ -109,6 +114,9 @@ class O2FlatCSG : public TGeoBBox
   /// Build the sub-cell boxes (and, from task 5, the BVH). Call once, after the last AddCell.
   void CloseShape();
   bool IsClosed() const { return fClosed; }
+
+  /// Bytes held by the BVH nodes and the primitive-index permutation.
+  size_t GetBVHMemory() const;
 
   int GetNboxes() const { return static_cast<int>(fBoxes.size()); }
   const FlatCSGBox& GetBox(int index) const { return fBoxes[index]; }
@@ -166,6 +174,11 @@ class O2FlatCSG : public TGeoBBox
                     const double* dir, double tlo, double thi, double* out, int maxOut) const;
 
   // ---- the TGeoShape contract ------------------------------------------------------------
+  //
+  // All three accelerated queries fall back to their `_Loop` twin when `IsClosed()` is false.
+  // `CloseShape` refuses, and builds nothing, when a cell's bounding box is missing, inverted or
+  // non-finite; an accelerated query that then walked an empty box array would answer "no material
+  // anywhere", which is the silent vanishing that refusal exists to prevent.
   Bool_t Contains(const Double_t* point) const override;
 
   Double_t DistFromOutside(const Double_t* point, const Double_t* dir, Int_t iact = 1,
@@ -193,6 +206,26 @@ class O2FlatCSG : public TGeoBBox
   /// True when every halfspace of cell `index` contains `point`.
   bool CellContains(int index, const double* point) const;
 
+  /// The accelerated bodies of `DistFromOutside`/`DistFromInside`, called once the BVH is there.
+  /// Both walk the boxes and, per box, clip the ray to that box's slab BEFORE running the interval
+  /// clipping over that box's active list; see scripts/geometry/Design_FlatCSGSolid.md 4.4.
+  Double_t DistFromOutsideBVH(const Double_t* point, const Double_t* dir, Double_t step) const;
+  Double_t DistFromInsideBVH(const Double_t* point, const Double_t* dir, Double_t step) const;
+
+  /// For every sub-cell box the ray meets within `[0, step]`, that box's own occupancy over that
+  /// box's own clipped window: \a pairs gets `[enter, exit]` per piece and \a cells the cell each
+  /// piece came from, one entry per pair. Both are cleared first.
+  ///
+  /// The pieces are deliberately NOT merged here. Boxes of one cell tile a region, so a cell's
+  /// occupancy arrives in several adjacent pieces, and how they are rejoined differs between the
+  /// two callers: `DistFromOutside` needs the per-cell intervals its twin computes, while
+  /// `DistFromInside` needs the union across cells.
+  ///
+  /// Returns false when a `CellIntervals` call overflowed its output buffer. That is a bug in the
+  /// buffer sizing rather than live data, so it must not be accumulated into an answer.
+  bool GatherRayPieces(const Double_t* point, const Double_t* dir, Double_t step,
+                       std::vector<double>& pairs, std::vector<int>& cells) const;
+
   /// Recursively split `[lo, hi]` for `cell`, dropping halfspaces the range bound proves hold
   /// everywhere in the box and returning (dropping the box) when the bound proves it wholly
   /// outside one. Recursion stops -- and the box is kept -- when `active` empties, `depth`
@@ -213,6 +246,11 @@ class O2FlatCSG : public TGeoBBox
   bool fClosed = false;
   int fSplitDepth = 6;           ///< subdivision depth cap; task 10 measures where it belongs
   double fMinBoxFraction = 0.01; ///< min box size as a fraction of the part's bbox diagonal
+
+  /// The BVH over `fBoxes`, built by `CloseShape`. Never streamed and never persisted -- it is
+  /// rebuilt from the boxes, which are themselves rebuilt from the halfspaces (design section 7),
+  /// so a stored BVH would only be a second thing that can disagree with the data it describes.
+  void* fBVH = nullptr; //! bvh::v2::Bvh over the sub-cell boxes
 
   // `CellIntervals`, `DistFromOutside_Loop` and `DistFromInside_Loop` each grow a scratch buffer
   // on demand; those live as `thread_local` function-local statics in the .cxx, not as members --
