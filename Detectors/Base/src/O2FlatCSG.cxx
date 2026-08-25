@@ -42,11 +42,12 @@ constexpr int kMaxRootsPerHalfspace = 4;
 /// axis, and how far that reaches depends on the SHAPE of the cell, not just its worst ratio: a
 /// rod `(r, 1, 1)` keeps the same axis longest every split, so N splits buy a full `2^N` reduction
 /// and this value alone covers a `2^11 = 2048:1` rod; a plate `(r, r, 1)` alternates between its
-/// two long axes, so only every other split reduces either one, covering `2^6 = 64:1` -- four
-/// orders of magnitude short of the rod case for the same budget. 10 is chosen over the fix round
-/// 1 value of 16 because 16 covers rods well past anything this class ships (`2^17 ~= 131000:1`)
-/// at a plate cost the reviewer judged not worth carrying; 10 keeps a generous margin over the
-/// 1000:1 case design section 4.2 cites (as a rod) while still leaving real cover for a plate.
+/// two long axes, so only every other split reduces either one, covering `2^6 = 64:1` -- a factor
+/// of 32, about one and a half orders of magnitude, short of the rod case for the same budget (at
+/// 16 the gap would be 256, about two and a half). 10 is chosen over the fix round 1 value of 16
+/// because 16 covers rods well past anything this class ships (`2^17 ~= 131000:1`) at a plate cost
+/// the reviewer judged not worth carrying; 10 keeps a generous margin over the 1000:1 case design
+/// section 4.2 cites (as a rod) while still leaving real cover for a plate.
 /// Either way this is a worst-case cap, not a target: an ordinary cell resolves in a handful of
 /// splits (see `SplitBox`'s header doc comment for the near-cubic invariance argument), and it is
 /// this constant, not `fSplitDepth`, that Task 10 should revisit if a shipped part's cells turn

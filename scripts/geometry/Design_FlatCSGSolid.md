@@ -208,8 +208,10 @@ it bounds one branch of a cell's tree, not the cell as a whole — the worst cas
 `2^kMaxCubifySplits` leaves along its widest branch. How far it reaches depends on the cell's
 *shape*, not only its worst ratio: a rod `(r, 1, 1)` keeps the same axis longest every split, so `N`
 splits buy the full `2^N` reduction; a plate `(r, r, 1)` alternates between its two long axes, so
-only every other split reduces either one, covering `2^(N⁄2)` — four orders of magnitude short of
-the rod case at `N = 10`. The ceiling exists purely so a pathological cell cannot recurse without
+only every other split reduces either one, covering `2^(N⁄2)` — a factor of `2^(N⁄2)` short of the
+rod case, which at `N = 10` is 2048:1 against 64:1, a factor of 32 (about one and a half orders of
+magnitude), and at `N = 16` a factor of 256 (about two and a half). The ceiling bounds a
+root-to-leaf **path**, never a cell. The ceiling exists purely so a pathological cell cannot recurse without
 bound; an ordinary cell resolves in a handful of splits long before it matters.
 
 One more case the arithmetic above does not fall out of automatically: a cell bbox with a genuinely
