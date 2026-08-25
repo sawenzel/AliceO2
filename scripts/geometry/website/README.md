@@ -118,7 +118,9 @@ placement of its own, the acceptance verdict with `dV_sym` against its band, and
 the raytracer's CSG view traces. A part the recogniser declined shows why in the same place — the
 acceptance test's own sentence where there is one, and otherwise the `whyNotCSG` line from
 `website_data/decline_reasons.json`, which is loaded optionally and simply says less when it is
-absent. It heads with a badge **per representation the part
+absent. That file's top-level `sourceModel` map records which CAD file each run was converted
+from, so a regenerated catalogue built from a different input cannot be mistaken for a conversion
+change; only `parts` is read by the page. It heads with a badge **per representation the part
 carries at full quality** -- CSG, SURFACE or TESSELLATED. The cascade's own choice comes first and
 solid, taken from `website_data/summary.json`'s own verdict where it has one and otherwise from
 what the converter wrote into `testdata/`; anything else the part has stands next to it, dashed.

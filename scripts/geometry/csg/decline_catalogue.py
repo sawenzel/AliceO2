@@ -6,7 +6,14 @@ Joins, per converter output directory, the two reports the converter already wri
 `surface_report.json` (the per-part `why_not_surface`) -- into one table, and writes it as
 `decline_reasons.json` for the website:
 
-    {"parts": [{"name": ..., "model": ..., "shipsAs": ..., "whyNotCSG": ..., "whyNotSurface": ...}]}
+    {"sourceModel": {"<run>": "<the CAD file it was converted from>"},
+     "parts": [{"name": ..., "model": ..., "shipsAs": ..., "whyNotCSG": ..., "whyNotSurface": ...}]}
+
+`sourceModel` exists because a converter output directory does not say which CAD file produced it,
+and two files in the same directory can describe the same detector with different leaf sets --
+`ALICE_3_example/CAD.stp` and `CAD_noETA.stp` differ in both leaf count and label naming, so a
+regenerated catalogue can look like a conversion change when it is only a different input. State
+it with `--source NAME=FILE` and the ambiguity cannot come back.
 
 Nothing is recomputed here: every reason is the converter's own record, which is what makes the
 table trustworthy (`Stream_AA_FlatCSG.md`). A row whose `whyNotCSG` or `whyNotSurface` is null
@@ -16,6 +23,7 @@ Usage
 -----
   decline_catalogue.py --run Bagger=/path/to/converted/Bagger \
                        --run ALICE3=/path/to/converted/ALICE3 \
+                       [--source ALICE3=scripts/geometry/ALICE_3_example/CAD_noETA.stp] \
                        [--gate-db /path/to/gate/workdir/db] \
                        --out website_data/decline_reasons.json [--markdown]
 
@@ -92,6 +100,9 @@ def main():
     ap.add_argument("--run", action="append", default=[], metavar="NAME=DIR",
                     help="a converter output directory holding csg_report.json and "
                          "surface_report.json; repeatable")
+    ap.add_argument("--source", action="append", default=[], metavar="NAME=FILE",
+                    help="the CAD file a run was converted from, recorded in the output's "
+                         "sourceModel map; repeatable")
     ap.add_argument("--gate-db", type=Path,
                     help="a gate workdir's db/ directory: every model subdirectory becomes a run")
     ap.add_argument("--out", type=Path, help="write decline_reasons.json here")
@@ -104,12 +115,21 @@ def main():
         if not folder:
             ap.error(f"--run wants NAME=DIR, got {spec!r}")
         runs.append((name, folder))
+    sources = {}
+    for spec in args.source:
+        name, _, path = spec.partition("=")
+        if not path:
+            ap.error(f"--source wants NAME=FILE, got {spec!r}")
+        sources[name] = path
     if args.gate_db:
         for sub in sorted(args.gate_db.iterdir()):
             if sub.is_dir() and (sub / "csg_report.json").exists():
                 runs.append((sub.name, sub))
     if not runs:
         ap.error("give --run and/or --gate-db")
+    unknown = sorted(set(sources) - {name for name, _ in runs})
+    if unknown:
+        ap.error(f"--source names no such run: {', '.join(unknown)}")
 
     rows = []
     for name, folder in runs:
@@ -130,7 +150,9 @@ def main():
 
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
-        args.out.write_text(json.dumps({"parts": rows}, indent=1))
+        # `null` for a run nobody named a source for: an absent statement, never a guess.
+        source_map = {name: sources.get(name) for name, _ in runs}
+        args.out.write_text(json.dumps({"sourceModel": source_map, "parts": rows}, indent=1))
         print(f"Wrote {args.out}")
     if args.markdown:
         print(markdown(rows))
