@@ -10,6 +10,7 @@
 // or submit itself to any jurisdiction.
 
 #include "DetectorsBase/O2SolidHarness.h"
+#include "DetectorsBase/O2FlatCSG.h"
 
 #include "TClass.h"
 #include "TFile.h"
@@ -687,6 +688,21 @@ TGeoShape* loadShapeFromRootFile(const std::string& path, std::string* error)
     delete object;
     return fail(path + ": key \"" + kShapeKeyName + "\" holds a " + className +
                 ", which does not inherit from TGeoShape");
+  }
+  // An O2FlatCSG's sub-cell boxes and BVH are transient by design (a stored BVH is a second
+  // thing that can disagree with the data it describes -- scripts/geometry/Design_FlatCSGSolid.md
+  // section 7), so a streamed shape arrives un-closed and answers through its _Loop twins. Those
+  // are correct, but the gate and the benchmark must score the accelerated path the simulation
+  // runs, and geom.C closes the shape it loads. Rebuild it here so every reader of the convention
+  // gets the same object. A refusal is reported rather than swallowed: CloseShape only refuses a
+  // cell bounding box that is missing, inverted or non-finite, which is a broken file.
+  if (auto* flat = dynamic_cast<O2FlatCSG*>(shape); flat != nullptr && !flat->IsClosed()) {
+    flat->CloseShape();
+    if (!flat->IsClosed()) {
+      delete shape;
+      return fail(path + ": the O2FlatCSG it holds refused to close, so its sub-cell boxes could "
+                         "not be rebuilt (see the Error above)");
+    }
   }
   // The object was read out of a TDirectory but is not a TDirectory-owned type (TGeoShape is not
   // a histogram/tree), so we own it and it stays valid past the file's destruction.

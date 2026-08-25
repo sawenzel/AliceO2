@@ -239,6 +239,23 @@ def contains_crosscheck(source, emitted, placement, n_points, seed, skin, max_re
             "insideEmitted": n_inside_emitted, "oneWay": bool(one_way), "examples": examples}
 
 
+def reclose_flat_csg(shape):
+    """Rebuild an `o2::base::O2FlatCSG`'s sub-cell boxes after it comes off a file.
+
+    Its boxes and its BVH are transient by design (`Design_FlatCSGSolid.md` section 7 -- a stored
+    BVH is a second thing that can disagree with the data it describes), so a streamed shape
+    arrives un-closed and answers every query through its `_Loop` twins. Those are correct, and
+    that is deliberately not good enough here: `geom.C` closes the shape it loads, so this test
+    has to score the accelerated path the simulation actually runs. True for every other shape
+    class, which needs nothing.
+    """
+    if shape.ClassName() != "o2::base::O2FlatCSG":
+        return True
+    if not shape.IsClosed():
+        shape.CloseShape()
+    return bool(shape.IsClosed())
+
+
 def check_part(part, row, source_shape, emitted_shape, placement, n_points, seed, skin,
                capacity_tolerance, profile_tolerance, max_report):
     """Compare one converted part against its source shape. Returns a record."""
@@ -455,6 +472,12 @@ def check_run(original, writer_report_path, converted, n_points=DEFAULT_POINTS,
         emitted_shape = handle.Get("shape")
         if not emitted_shape:
             stub["failures"].append(f"{shape_file} carries no object under the key \"shape\"")
+            records.append(stub)
+            continue
+        if not reclose_flat_csg(emitted_shape):
+            stub["failures"].append(
+                f"{shape_file}: O2FlatCSG::CloseShape refused the shape after reading it, so "
+                "its sub-cell boxes could not be rebuilt")
             records.append(stub)
             continue
         # The emitted shape is read *before* the source volume is resolved, because where several

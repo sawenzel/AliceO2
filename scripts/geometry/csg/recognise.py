@@ -1849,7 +1849,38 @@ def _match_single_cell(solid, records, tol, diag):
 # The union of cells: the flat two-level DNF
 # ------------------------------------------------------------------------------------------
 
-def _match_union_of_cells(solid, records, tol, diag, max_cells=None, max_leaves=None):
+def _cell_decomposition(solid, scale, max_cells, cache=None):
+    """`csg.decompose.split_into_cells` plus the four guards both cell matchers share.
+
+    Computed once per part and memoised on `cache`, because the flat path runs on exactly what
+    the tree path declined and re-splitting a body that took a dozen booleans to split is the
+    most expensive thing either matcher does. The guards are unchanged and their wording is
+    unchanged: a decline a corpus report already carries must keep reading the same.
+    """
+    from csg import decompose as decomp
+    key = ("split", max_cells)
+    if cache is not None and key in cache:
+        report = cache[key]
+    else:
+        report = decomp.split_into_cells(solid, max_cells=max_cells, scale=scale)
+        if cache is not None:
+            cache[key] = report
+    if report["stop"]:
+        raise Declined(f"the decomposition stopped: {report['stop']} after {report['splits']} "
+                       f"split(s) into {len(report['pieces'])} cell(s)")
+    if report["unresolved"]:
+        raise Declined(f"{len(report['unresolved'])} piece(s) of {len(report['pieces']) + len(report['unresolved'])} "
+                       "could not be cut at their own witness edge, so the decomposition is "
+                       "incomplete")
+    if not report["volumeConserved"]:
+        raise Declined(f"the split moved {report['volumeDrift']:.3g} of the part's volume, over "
+                       f"{decomp.VOLUME_REL_TOL:.0e}: OCCT's splitter did not conserve it and "
+                       "the decomposition is not the part")
+    return report
+
+
+def _match_union_of_cells(solid, records, tol, diag, max_cells=None, max_leaves=None,
+                          cache=None):
     """The part decomposed into cells and emitted as their union.
 
     `Stream_AA_FlatCSG.md` §5 step 3, and the last rung before a flat solid would be built for
@@ -1880,18 +1911,7 @@ def _match_union_of_cells(solid, records, tol, diag, max_cells=None, max_leaves=
     scale = max(diag, 1.0)
     max_cells = decomp.PART_MAX_CELLS if max_cells is None else max_cells
     max_leaves = _PART_MAX_LEAVES if max_leaves is None else max_leaves
-    report = decomp.split_into_cells(solid, max_cells=max_cells, scale=scale)
-    if report["stop"]:
-        raise Declined(f"the decomposition stopped: {report['stop']} after {report['splits']} "
-                       f"split(s) into {len(report['pieces'])} cell(s)")
-    if report["unresolved"]:
-        raise Declined(f"{len(report['unresolved'])} piece(s) of {len(report['pieces']) + len(report['unresolved'])} "
-                       "could not be cut at their own witness edge, so the decomposition is "
-                       "incomplete")
-    if not report["volumeConserved"]:
-        raise Declined(f"the split moved {report['volumeDrift']:.3g} of the part's volume, over "
-                       f"{decomp.VOLUME_REL_TOL:.0e}: OCCT's splitter did not conserve it and "
-                       "the decomposition is not the part")
+    report = _cell_decomposition(solid, scale, max_cells, cache)
     pieces = report["pieces"]
     if len(pieces) < 2:
         raise Declined(f"the decomposition is {len(pieces)} piece(s): not a union of cells")
@@ -1964,6 +1984,208 @@ def _union_of_cells(cells, recogniser, notes=None):
     """`primitives.union_of_cells`, with an illegal description turned into a decline."""
     try:
         return prim.union_of_cells(cells, recogniser, notes)
+    except prim.InvalidDescription as illegal:
+        raise Declined(str(illegal)) from None
+    except ValueError as illegal:
+        raise Declined(str(illegal)) from None
+
+
+# ------------------------------------------------------------------------------------------
+# The flat DNF: the same cells, shipped as halfspaces in `o2::base::O2FlatCSG`
+# ------------------------------------------------------------------------------------------
+
+# The flat path's budgets. Not the tree's: `_PART_MAX_LEAVES` bounds how wide a
+# `TGeoCompositeShape` may be, and `O2FlatCSG` is not one. These bound the sidecar and the box
+# build instead, and are set an order of magnitude above the measured demand -- the worst part in
+# `Handoff_FlatCSG.md`'s R5 table is `IBCYSSFlangeA` at about 59 cells.
+_PART_MAX_FLAT_CELLS = 256
+_PART_MAX_FLAT_HALFSPACES = 1024
+
+# How far a cell's declared bounding box is grown past the piece's own OCCT box.
+#
+# The box is a CORRECTNESS obligation (`Design_FlatCSGSolid.md` section 4.2): `O2FlatCSG` builds
+# its sub-cell boxes strictly inside it, so a cell reaching past its box loses material from the
+# accelerated `Contains` while the `_Loop` twins keep it, and the disagreement is silent. The
+# piece's box is not by itself an outer bound of the CELL, which is the intersection of the
+# piece's halfspaces and can in principle reach further; what makes it one is the acceptance
+# below, which refuses the cell unless its realisation's boundary is within `REL_TOL * scale` of
+# the piece's everywhere and it classifies no sampled point differently. Growing by 1e-3 of the
+# part diagonal leaves three orders of magnitude over that proven agreement, and it also clears
+# `CloseShape`'s debug-build face sampler, which probes 1e-6 of the diagonal outside each face
+# and requires the cell not to contain the sample. Erring wide costs boxes that prune to nothing.
+_FLAT_BOX_MARGIN = 1.0e-3
+
+
+def _flat_cell_box(piece, margin):
+    """The outer bound of one cell: the piece's own OCCT box, grown by `margin` on every axis."""
+    xmin, ymin, zmin, xmax, ymax, zmax = _bbox_of(piece)
+    lo = [xmin - margin, ymin - margin, zmin - margin]
+    hi = [xmax + margin, ymax + margin, zmax + margin]
+    if not all(math.isfinite(v) for v in lo + hi):
+        raise Declined("the cell's bounding box is not finite, so nothing can say where the "
+                       "cell ends")
+    return lo, hi
+
+
+# The outward probe that checks the box actually holds the cell. A 3x3 grid on each of the six
+# faces, pushed out by each of these multiples of the box's own diagonal -- the small one is
+# `CloseShape`'s debug sampler moved onto the release path, the large ones follow a cell that
+# leaves through a face and only widens (a cone's mirror nappe, a cylinder's far end).
+_FLAT_BOX_PROBE_GRID = 3
+_FLAT_BOX_PROBE_OFFSETS = (1.0e-6, 0.25, 1.0, 4.0)
+
+
+def _flat_box_holds_cell(blocks, lo, hi):
+    """`Declined` when a sampled point OUTSIDE the declared box is still inside the cell.
+
+    The converter owes `SetCellBBox` an outer bound and `CloseShape` cannot decide containment
+    (`Design_FlatCSGSolid.md` section 4.2): it builds no box outside the one it is given, so a
+    cell reaching past its box loses material from the accelerated `Contains` while the `_Loop`
+    twins keep it -- a silent, one-sided disagreement between a shape and its own reference.
+
+    This cannot *prove* containment either, and does not claim to. What it does is take the one
+    way this actually goes wrong -- a cell whose halfspaces do not close it up, so it runs off
+    through a face and keeps going -- and look for it where it would be: straight out of every
+    face, near and far. Everything it finds is a decline, so a positive result costs a tier and
+    never ships.
+    """
+    from csg import flat
+    span = [hi[i] - lo[i] for i in range(3)]
+    reach = math.sqrt(sum(v * v for v in span))
+    if not (reach > 0.0):
+        raise Declined("the cell's bounding box has no extent, so no box can hold the cell")
+    steps = [[lo[i] + span[i] * (k + 0.5) / _FLAT_BOX_PROBE_GRID
+              for k in range(_FLAT_BOX_PROBE_GRID)] for i in range(3)]
+    for axis in range(3):
+        u, v = (axis + 1) % 3, (axis + 2) % 3
+        for face, base in ((0, lo[axis]), (1, hi[axis])):
+            direction = -1.0 if face == 0 else 1.0
+            for offset in _FLAT_BOX_PROBE_OFFSETS:
+                for su in steps[u]:
+                    for sv in steps[v]:
+                        point = [0.0, 0.0, 0.0]
+                        point[axis] = base + direction * offset * reach
+                        point[u], point[v] = su, sv
+                        if flat.flat_contains(blocks, tuple(point)):
+                            raise Declined(
+                                f"the cell reaches {offset * reach:.3g} cm past its own bounding "
+                                f"box on axis {axis}: its halfspaces do not close it up, and a "
+                                "cell outside its declared box is material O2FlatCSG's "
+                                "accelerated queries cannot find")
+
+
+def _match_flat_cells(solid, records, tol, diag, max_cells=None, max_halfspaces=None, cache=None):
+    """The same decomposition, emitted as signed implicit halfspaces for `o2::base::O2FlatCSG`.
+
+    Rung R5 of `Handoff_FlatCSG.md`, and the reason the rung exists: a part whose cells are
+    perfectly good cells and whose *tree* would be 66 `TGeoBoolNode`s wide declines on the union
+    path and ships one tier down today. Nothing about the decomposition or about how a cell is
+    read changes here -- `decompose.split_into_cells` and `_cell_leaves` are the same calls the
+    union path makes -- only what the cells are turned into: `csg/flat.py`'s halfspace blocks
+    instead of `_cell_leaf`'s padded native primitives.
+
+    Three things are this matcher's own and none of them is optional:
+
+      * **the cell bounding box.** An intersection of halfspaces does not bound itself, so the
+        converter is the only thing that can say where a cell ends, and `SetCellBBox` believing a
+        box that does not contain its cell is a silent one-sided loss of material. See
+        `_FLAT_BOX_MARGIN`.
+      * **`flat.check_cell_box`, per cell, with the box that is written.** An exterior cone
+        carrier's stored quadric is the DOUBLE cone, and beyond the apex its mirror nappe carves
+        out material that is really there. An interior cone is repaired exactly by
+        `blocks_from_carriers`'s apex plane; an exterior one cannot be, because the complement of
+        one nappe is a union, so the part is refused. The refusal needs the box, which is why it
+        lives here and not in the emitter.
+      * **the containment corroboration**, exactly as on the union path. `Stream_AA` measured
+        `BRepAlgoAPI_Cut` reporting `IsDone()` with zero solids in BOTH directions on
+        `ST0923290_01#b19`, so the symmetric difference read 0.0 against a band of 6.7e-04. The
+        flat path builds its OCCT candidate the same way and inherits the defect (design
+        section 10).
+    """
+    from csg import decompose as decomp, flat
+    scale = max(diag, 1.0)
+    max_cells = _PART_MAX_FLAT_CELLS if max_cells is None else max_cells
+    max_halfspaces = _PART_MAX_FLAT_HALFSPACES if max_halfspaces is None else max_halfspaces
+    report = _cell_decomposition(solid, scale, decomp.PART_MAX_CELLS, cache)
+    pieces = report["pieces"]
+    if len(pieces) > max_cells:
+        raise Declined(f"{len(pieces)} cells, over the flat part budget of {max_cells} cells: "
+                       "the sidecar and the sub-cell box build are sized to what a part is, not "
+                       "to what OCCT can split")
+    margin = _FLAT_BOX_MARGIN * scale
+
+    cells, occ_cells, total_blocks, n_carriers, n_outside = [], [], 0, 0, 0
+    # A one-piece decomposition IS the whole part, so it keeps the whole-part guards
+    # `_match_single_cell` applies -- an all-planar body belongs to the prism family's templates
+    # and a one-carrier body to the tier-1 ones, and which matcher owns a part is not a question
+    # the flat path is entitled to reopen just by running last. Without this, a near-miss prism
+    # that the prism family correctly refuses would ship here instead of declining, and
+    # `csg/emit.py --self-test`'s negative control for exactly that says so.
+    whole_part = len(pieces) == 1
+    for index, piece in enumerate(pieces):
+        piece_diag = decomp.bbox_diagonal(piece)
+        try:
+            leaves, carriers, outside = _cell_leaves(piece, tol, piece_diag,
+                                                     whole_part=whole_part)
+            lo, hi = _flat_cell_box(piece, margin)
+            # The obligation, discharged with the SAME box that is written to the sidecar and
+            # handed to `SetCellBBox`. `flat.check_cell_box` raises `Declined`; it is caught here
+            # only to say which cell, exactly as every other per-cell decline is.
+            flat.check_cell_box(carriers, lo, hi)
+            blocks = flat.blocks_from_carriers(carriers)
+            _flat_box_holds_cell(blocks, lo, hi)
+        except Declined as declined:
+            raise Declined(f"cell {index + 1} of {len(pieces)}: {declined}") from None
+        total_blocks += len(blocks)
+        n_carriers += len(carriers)
+        n_outside += len(outside)
+        if total_blocks > max_halfspaces:
+            raise Declined(f"{len(pieces)} cells of {total_blocks}+ halfspaces in total, over "
+                           f"the flat part budget of {max_halfspaces} halfspaces")
+        cells.append({"blocks": blocks, "volume": decomp_volume(piece),
+                      "lo": lo, "hi": hi})
+        occ_cells.append(_cell(len(leaves), leaves, index, len(pieces)))
+
+    cand = _flat_cells(cells, "flat-cells",
+                       notes={"nCells": len(cells),
+                              "nComponents": report["components"],
+                              "nSplits": report["splits"],
+                              "nHalfspaces": total_blocks,
+                              "nCarriers": n_carriers,
+                              "nOutside": n_outside,
+                              "cellHalfspaces": [len(c["blocks"]) for c in cells],
+                              "cellBoxMarginCm": margin,
+                              "volumeDriftRelative": report["volumeDrift"],
+                              "occCells": occ_cells})
+    gap = _measured_gap(solid, cand, diag, "the flat cells")
+    disagreements, scored, worst = accept_module().contains_disagreements(
+        solid, prim.build_occ(cand), accept_module().model_tolerance_cm(solid))
+    if disagreements:
+        raise Declined(f"the flat cells disagree with the part about {disagreements} of "
+                       f"{scored} classified point(s), the farthest {worst:.3g} cm from the "
+                       "part's boundary: the decomposition is not the part, whatever the "
+                       "symmetric difference says")
+    cand["notes"]["cellGapCm"] = gap
+    cand["notes"]["cellGapRelative"] = gap / scale
+    cand["notes"]["containsScored"] = scored
+    return cand
+
+
+def decomp_volume(piece):
+    """The cell's own volume, from OCCT's `GProp` on the piece it came from.
+
+    `O2FlatCSG::Capacity()` is the sum of these, which is exact because the decomposition's
+    volume guard has already established that the pieces are disjoint and sum to the part. The
+    number is OCCT's, and design section 11 item 4 says to say so wherever it is quoted.
+    """
+    from csg.census import volume_of
+    return abs(volume_of(piece))
+
+
+def _flat_cells(cells, recogniser, notes=None):
+    """`primitives.flat_cells`, with an illegal description turned into a decline."""
+    try:
+        return prim.flat_cells(cells, recogniser, notes)
     except prim.InvalidDescription as illegal:
         raise Declined(str(illegal)) from None
     except ValueError as illegal:
@@ -2240,11 +2462,21 @@ def _cascade(solid, records, tol, diag):
             # And the decomposition runs only on what the single cell declines, so it cannot
             # change a decision any matcher above it ever made. It is the last rung: a part that
             # reaches it has been refused by every whole-part template and by the one-cell read.
+            cache = {}
             try:
-                return _match_union_of_cells(solid, records, tol, diag), None
+                return _match_union_of_cells(solid, records, tol, diag, cache=cache), None
             except Declined as union_declined:
-                return None, (f"{declined}; as a single cell: {cell_declined}; as a union of "
-                              f"cells: {union_declined} [{_structure(records, tol)}]")
+                # THE FLAT PATH IS TRIED ONLY HERE, after the tree path has declined, so no part
+                # that converts today changes representation: everything above has already
+                # refused this part and the alternative to a flat solid is a surface solid or a
+                # mesh. The decomposition itself is shared through `cache`, so the flat attempt
+                # costs the halfspace emission and the acceptance, not a second split.
+                try:
+                    return _match_flat_cells(solid, records, tol, diag, cache=cache), None
+                except Declined as flat_declined:
+                    return None, (f"{declined}; as a single cell: {cell_declined}; as a union of "
+                                  f"cells: {union_declined}; as flat cells: {flat_declined} "
+                                  f"[{_structure(records, tol)}]")
 
 
 def recognise_single_cell(solid):
@@ -2288,6 +2520,29 @@ def recognise_union_of_cells(solid, max_cells=None, max_leaves=None):
     try:
         return _with_tier0_notes(
             _match_union_of_cells(solid, records, tol, diag, max_cells, max_leaves),
+            records), None
+    except Declined as declined:
+        return None, f"{declined} [{_structure(records, tol)}]"
+
+
+def recognise_flat_cells(solid, max_cells=None, max_halfspaces=None):
+    """Propose a flat halfspace DNF for a solid, skipping every matcher above it.
+
+    The counterpart of `recognise_union_of_cells`, and it is reached the same two ways: from
+    `recognise()`'s cascade, strictly after the union path declines, and from
+    `emit.process_solid`'s retry chain after a whole-part proposal is *rejected* by the
+    acceptance test rather than declined by a matcher.
+
+    Returns `(candidate|None, reason)`, and never raises on a mere mismatch.
+    """
+    records, reason = _face_records(solid)
+    if records is None:
+        return None, reason
+    diag = _bbox_diagonal(solid)
+    tol = REL_TOL * max(diag, 1.0)
+    try:
+        return _with_tier0_notes(
+            _match_flat_cells(solid, records, tol, diag, max_cells, max_halfspaces),
             records), None
     except Declined as declined:
         return None, f"{declined} [{_structure(records, tol)}]"

@@ -57,7 +57,11 @@ model_tolerance_cm = accept.model_tolerance_cm
 # skips every earlier matcher, so the order here is the order of increasing generality.
 _RETRIES = (("a revolved profile", recognise.recognise_revolved),
             ("a single cell", recognise.recognise_single_cell),
-            ("a union of cells", recognise.recognise_union_of_cells))
+            ("a union of cells", recognise.recognise_union_of_cells),
+            # Last, and only after the union of cells has been tried and refused, for the same
+            # reason the cascade orders them that way: no part that converts today changes
+            # representation.
+            ("flat cells", recognise.recognise_flat_cells))
 
 
 def _build_and_accept(solid, cand, tol, band_factor):
@@ -317,6 +321,14 @@ def from_json(folder, quiet=False):
             continue
         suffix = path.name[len("csg_"):-len(".json")]
         target = path.parent / f"shape_{suffix}.root"
+        if payload["candidate"].get("op") == "flatCells":
+            # The macro loads `flatcsg_<part>.bin`, not the `.root` file, so completing a
+            # deferred flat part means writing the sidecar too. `csg/hook.py` already writes it
+            # in the same folder without needing ROOT; rewriting it here is idempotent and keeps
+            # this entry point usable on a folder it did not produce.
+            from csg import flat as flat_writer
+            blocks, cells = prim.flat_sidecar_records(payload["candidate"])
+            flat_writer.write_sidecar(path.parent / f"flatcsg_{suffix}.bin", blocks, cells)
         shape = write_shape_root(payload["candidate"], target)
         written.append(target)
         if not quiet:
@@ -2359,6 +2371,178 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
                              -2.0, -2.0, -5.0, 2.0, 2.0, 5.0),
           f"{flat_cell_read}")
 
+    # --- R5: the flat path takes what the TREE budget refuses, and nothing else --------------
+    #
+    # `Design_FlatCSGSolid.md` section 8. The two paths read the same decomposition and the same
+    # cells; what separates them is the budget, and the budget is the whole point -- a 66-leaf
+    # boolean tree costs 66 virtual calls per `Contains` and `O2FlatCSG` is not a tree.
+    #
+    # The brief for this task names `make_boolean_fixtures.many_celled_solid()`, which does not
+    # exist (that module exposes `build_*` fixture entries, and none of them is over any budget).
+    # `hex_collar` is used instead: it is the self-test's own two-cell, nine-leaf body from the
+    # rung-4 block above, so the budgets below are stated against a shape whose cell and leaf
+    # counts are already asserted there rather than against a new one.
+    import itertools
+    import random as flat_random
+    tree_declined, tree_why = recognise.recognise_union_of_cells(hex_collar, max_leaves=8)
+    check("a part over the tree's leaf budget still declines on the tree path",
+          tree_declined is None and "part budget of 8" in (tree_why or ""),
+          tree_why or "ACCEPTED")
+    flat_record, flat_why = recognise.recognise_flat_cells(hex_collar)
+    check("the same part is accepted on the flat path",
+          flat_record is not None and flat_record["recogniser"] == "flat-cells", flat_why)
+    check("the flat record carries a bounding box per cell",
+          flat_record is not None
+          and all(len(c["lo"]) == 3 and len(c["hi"]) == 3 for c in flat_record["cells"]),
+          "a cell is missing its box")
+    check("the flat description carries no leaves and no op on a cell",
+          flat_record is not None and "leaves" not in flat_record
+          and all(set(c) == set(prim.FLAT_CELL_KEYS) for c in flat_record["cells"]),
+          f"{sorted(flat_record) if flat_record else None}")
+
+    over_cells, over_why = recognise.recognise_flat_cells(hex_collar, max_cells=1)
+    check("a part over the FLAT cell budget declines naming the bound",
+          over_cells is None and "flat part budget of 1 cells" in (over_why or ""),
+          over_why or "ACCEPTED")
+    over_halfspaces, over_hs_why = recognise.recognise_flat_cells(hex_collar, max_halfspaces=3)
+    check("a part over the FLAT halfspace budget declines naming the bound",
+          over_halfspaces is None and "flat part budget of 3 halfspaces" in (over_hs_why or ""),
+          over_hs_why or "ACCEPTED")
+
+    # the false-accept guard must run here too: OCCT Cut can report IsDone with zero solids both
+    # ways, which is how ST0923290_01#b19 got through the symmetric difference in rung 4
+    check("the flat path runs the containment corroboration",
+          "containsScored" in (flat_record or {}).get("notes", {})
+          and (flat_record or {})["notes"].get("containsScored", 0) > 0,
+          "no containment corroboration on the flat record")
+
+    # ROUTING: the flat path runs only on what the tree path declines. `hex_collar` converts as
+    # a union of cells today and must go on doing so -- if the flat branch were reached before
+    # the union one, this is the check that would say so.
+    routed, _routed_why = recognise.recognise(hex_collar)
+    check("a part the tree path accepts is NOT intercepted by the flat path",
+          routed is not None and routed["recogniser"] == "cells-union",
+          routed["recogniser"] if routed else "declined")
+
+    # --- R5: the multi-cell exterior cone, which is where the CELL box and the PART box differ --
+    #
+    # Task 8 left `flat.check_cell_box` an obligation on this task's call site and tested it only
+    # on a single cell equal to the whole part, where the two boxes are the same box. This is the
+    # interaction that was untested: an L whose lower arm carries a conical through-hole, and
+    # whose cone apex sits ABOVE that arm -- outside the arm's own cell box, inside the part's.
+    # Handing `check_cell_box` the part's box would refuse a part that is perfectly sound.
+    l_cone_solid = BRepAlgoAPI_Cut(
+        BRepAlgoAPI_Fuse(BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 10.0, 4.0, 4.0).Shape(),
+                         BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 4), 4.0, 4.0, 6.0).Shape()).Shape(),
+        BRepPrimAPI_MakeCone(gp_Ax2(gp_Pnt(7, 2, 0), gp_Dir(0, 0, 1)),
+                             1.5, 0.0, 8.0).Shape()).Shape()
+    cone_record, cone_why = recognise.recognise_flat_cells(l_cone_solid)
+    check("a multi-cell part with an exterior cone converts on the flat path",
+          cone_record is not None and cone_record["notes"]["nCells"] == 2
+          and cone_record["notes"]["cellGapCm"] <= 1.0e-9,
+          cone_why or f"{cone_record['notes']['nCells']} cells, gap "
+                      f"{cone_record['notes']['cellGapCm']:.3g} cm")
+
+    # the discrimination itself, on the same carriers: the cell's own box accepts, the part's
+    # box refuses. Without it the check above would pass on a part where the distinction is moot.
+    l_cone_diag = recognise._bbox_diagonal(l_cone_solid)
+    l_cone_tol = recognise.REL_TOL * max(l_cone_diag, 1.0)
+    l_cone_report = decomp.split_into_cells(l_cone_solid, scale=max(l_cone_diag, 1.0))
+    l_cone_part_box = recognise._bbox_of(l_cone_solid)
+    cone_own, cone_part = [], []
+    for piece in l_cone_report["pieces"]:
+        _lv, piece_carriers, _out = recognise._cell_leaves(
+            piece, l_cone_tol, decomp.bbox_diagonal(piece), whole_part=False)
+        if not any(c["kind"] == "cone" and c["side"] == "exterior" for c in piece_carriers):
+            continue
+        piece_lo, piece_hi = recognise._flat_cell_box(
+            piece, recognise._FLAT_BOX_MARGIN * max(l_cone_diag, 1.0))
+        for label, box_lo, box_hi in (("own", piece_lo, piece_hi),
+                                      ("part", list(l_cone_part_box[:3]),
+                                       list(l_cone_part_box[3:]))):
+            try:
+                flatmod.check_cell_box(piece_carriers, box_lo, box_hi)
+                (cone_own if label == "own" else cone_part).append("accepted")
+            except recognise.Declined:
+                (cone_own if label == "own" else cone_part).append("declined")
+    check("the exterior cone is judged against its CELL's box, which the PART's box would fail",
+          cone_own == ["accepted"] and cone_part == ["declined"],
+          f"own box {cone_own}, part box {cone_part}")
+
+    # and the call site really does hand `check_cell_box` the boxes it writes, per cell
+    seen_boxes = []
+    intact_check = flatmod.check_cell_box
+    try:
+        def _recording_check(carriers, lo, hi):
+            seen_boxes.append(([float(v) for v in lo], [float(v) for v in hi]))
+            return intact_check(carriers, lo, hi)
+        flatmod.check_cell_box = _recording_check
+        boxed_record, _boxed_why = recognise.recognise_flat_cells(l_cone_solid)
+    finally:
+        flatmod.check_cell_box = intact_check
+    check("check_cell_box is called once per cell with exactly the box the sidecar carries",
+          boxed_record is not None
+          and len(seen_boxes) == len(boxed_record["cells"])
+          and all(seen == ([float(v) for v in c["lo"]], [float(v) for v in c["hi"]])
+                  for seen, c in zip(seen_boxes, boxed_record["cells"])),
+          f"{len(seen_boxes)} call(s) for "
+          f"{len(boxed_record['cells']) if boxed_record else '?'} cell(s)")
+
+    # a Declined out of `check_cell_box` must reach the converter as a decline reason naming the
+    # cell, not as an exception that kills the conversion
+    try:
+        def _refusing_check(carriers, lo, hi):
+            raise recognise.Declined("a self-test refusal from check_cell_box")
+        flatmod.check_cell_box = _refusing_check
+        refused, refused_why = recognise.recognise_flat_cells(l_cone_solid)
+    finally:
+        flatmod.check_cell_box = intact_check
+    check("a check_cell_box refusal becomes a decline naming the cell it came from",
+          refused is None and "a self-test refusal from check_cell_box" in (refused_why or "")
+          and "cell 1 of 2" in (refused_why or ""), refused_why or "ACCEPTED")
+
+    # --- R5: the cell bounding box is an OUTER bound, checked rather than assumed --------------
+    # `Design_FlatCSGSolid.md` section 4.2 makes this a correctness obligation on the converter:
+    # O2FlatCSG builds no sub-cell box outside the declared one, so a cell reaching past its box
+    # is material the accelerated `Contains` cannot find while `Contains_Loop` still can.
+    box_escapes = []
+    for record_label, record_cand in (("hex collar", flat_record), ("L with a cone", cone_record)):
+        for index, c in enumerate(record_cand["cells"]):
+            span = [c["hi"][i] - c["lo"][i] for i in range(3)]
+            rng = flat_random.Random(90210 + index)
+            for _ in range(3000):
+                point = tuple(c["lo"][i] - span[i] + rng.random() * 3.0 * span[i]
+                              for i in range(3))
+                inside_box = all(c["lo"][i] <= point[i] <= c["hi"][i] for i in range(3))
+                if not inside_box and flatmod.flat_contains(c["blocks"], point):
+                    box_escapes.append(f"{record_label} cell {index}")
+                    break
+    check("no cell reaches outside the bounding box its record declares",
+          not box_escapes, "; ".join(box_escapes) or "2 records, 4 cells, 12000 points sampled")
+    escaped = None
+    try:
+        # one plane, `x <= 0`: an unbounded cell, and the box cannot hold it
+        recognise._flat_box_holds_cell(
+            [{"kind": "quadric", "sign": 1.0, "c": [0.0] * 6 + [0.5, 0.0, 0.0, 0.0] + [0.0]}],
+            [-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])
+    except recognise.Declined as declined:
+        escaped = str(declined)
+    check("the outward probe catches a cell that is not closed up by its own halfspaces",
+          escaped is not None and "past its own bounding box" in escaped,
+          escaped or "ACCEPTED an unbounded cell")
+
+    # --- R5: the sidecar the macro loads, and the shape the gate scores, are one solid ---------
+    flat_blocks, flat_sidecar_cells = prim.flat_sidecar_records(cone_record)
+    check("the sidecar's cell table indexes its concatenated halfspace blocks",
+          len(flat_blocks) == cone_record["notes"]["nHalfspaces"]
+          and [c["count"] for c in flat_sidecar_cells]
+              == [len(c["blocks"]) for c in cone_record["cells"]]
+          and [c["first"] for c in flat_sidecar_cells]
+              == list(itertools.accumulate([0] + [len(c["blocks"])
+                                                  for c in cone_record["cells"]][:-1]))
+          and all(c["volume"] > 0.0 for c in flat_sidecar_cells),
+          f"{len(flat_blocks)} block(s), {len(flat_sidecar_cells)} cell(s)")
+
     # --- the ROOT half: the emitted TGeoShape must answer like the closed form ---
     if with_root:
         import ROOT
@@ -2779,6 +2963,43 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
               not flat_rt_failed and flat_rt_bad == 0 and flat_rt_scored > 0,
               f"{flat_rt_bad} of {flat_rt_scored} points disagree over {len(flat_results)} "
               f"fixtures" + ("; " + "; ".join(flat_rt_failed) if flat_rt_failed else ""))
+
+        # --- R5: the shipped shape of a multi-cell flat candidate ---------------------------
+        # `prim.build_root` realises a `flatCells` description by writing its sidecar and loading
+        # it back through `LoadFlatCSG`, so this exercises the exact artifact `geom.C` loads --
+        # on a MULTI-CELL part, which the fixture round-trip above never was (every one of its
+        # fixtures is a single cell equal to the whole part).
+        flat_shape, flat_placement = prim.build_root(cone_record, "probe_flat_cells")
+        check("a multi-cell flat candidate builds an O2FlatCSG through its own sidecar",
+              flat_shape.ClassName() == "o2::base::O2FlatCSG" and flat_shape.IsClosed()
+              and flat_shape.GetNcells() == len(cone_record["cells"])
+              and flat_shape.GetNhalfspaces() == cone_record["notes"]["nHalfspaces"]
+              and flat_placement is None,
+              f"{flat_shape.GetNcells()} cell(s), {flat_shape.GetNhalfspaces()} halfspace(s), "
+              f"{flat_shape.GetNboxes()} sub-cell box(es)")
+        # the accelerated queries against the twin that defines them, and both against the
+        # Python side that wrote the file: three implementations, one answer
+        flat_rng = flat_random.Random(5150)
+        blo = [min(c["lo"][i] for c in cone_record["cells"]) for i in range(3)]
+        bhi = [max(c["hi"][i] for c in cone_record["cells"]) for i in range(3)]
+        twin_bad = python_bad = 0
+        for _ in range(20000):
+            point = [blo[i] + flat_rng.random() * (bhi[i] - blo[i]) for i in range(3)]
+            probe = array("d", point)
+            accelerated = bool(flat_shape.Contains(probe))
+            if accelerated != bool(flat_shape.Contains_Loop(probe)):
+                twin_bad += 1
+            if accelerated != any(flatmod.flat_contains(c["blocks"], tuple(point))
+                                  for c in cone_record["cells"]):
+                python_bad += 1
+        check("the shipped flat shape agrees with its own _Loop twin and with csg/flat.py",
+              twin_bad == 0 and python_bad == 0,
+              f"{twin_bad} twin and {python_bad} emitter disagreement(s) over 20000 points")
+        check("the flat shape's Capacity is the sum of its cells' own volumes",
+              abs(flat_shape.Capacity()
+                  - sum(c["volume"] for c in cone_record["cells"])) <= 1.0e-9,
+              f"{flat_shape.Capacity():.9g} vs "
+              f"{sum(c['volume'] for c in cone_record['cells']):.9g} cm^3")
 
 
     n_ok = sum(1 for _n, ok, _d in checks if ok)

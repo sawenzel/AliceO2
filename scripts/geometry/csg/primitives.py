@@ -462,8 +462,77 @@ def union_of_cells(cells, recogniser, notes=None):
     return {"op": "unionOfCells", "cells": cells, "recogniser": recogniser, "notes": notes or {}}
 
 
+FLAT_CELL_KEYS = ("blocks", "volume", "lo", "hi")
+
+
+def flat_cells(cells, recogniser, notes=None):
+    """A union of halfspace cells, for `O2FlatCSG`: the DNF with nothing bounded.
+
+    `{op: "flatCells", cells: [...], recogniser, notes}`, and deliberately no `leaves` and no
+    `op` on a cell, so nothing that reads a one- or two-level *primitive* description can read
+    half of this one and get a wrong solid rather than a `KeyError`. A cell here is
+    `{blocks, volume, lo, hi}` -- the halfspace blocks `csg/flat.py` produced, the cell's own
+    volume, and the bounding box the decomposition measured, because an intersection of
+    halfspaces does not bound itself.
+
+    **`lo`/`hi` is a correctness obligation, not a cost one** (`Design_FlatCSGSolid.md` section
+    4.2). `O2FlatCSG` builds its sub-cell boxes strictly inside the box handed to `SetCellBBox`,
+    so a cell reaching past its own declared box has material the accelerated `Contains` cannot
+    find while the `_Loop` twins still see it. The producer owes an *outer* bound; erring wide
+    costs boxes that prune to nothing, erring narrow loses material.
+
+    **One cell is legal here.** `union_of_cells` requires two, because one cell *is* that cell
+    and a one-operand `TGeoCompositeShape` is not a thing worth emitting; `O2FlatCSG` accepts one
+    and the ITS connector blocks the per-cell leaf budget refuses are one cell each.
+
+    The OCCT realisation of this description is **the padded one**: `notes["occCells"]` carries
+    the same cells as `recognise._cell_leaf`'s bounded native primitives, and `build_occ` folds
+    those. The shipped solid is not padded. That is sound for the acceptance test because the
+    padding covers the part's bounding box, which is where the symmetric difference and the
+    containment corroboration are measured -- and it is the *only* realisation available, since
+    OCCT has no unbounded halfspace either.
+    """
+    if not cells:
+        raise ValueError("op 'flatCells' takes at least one cell")
+    for i, c in enumerate(cells):
+        if not isinstance(c, dict) or set(c) != set(FLAT_CELL_KEYS):
+            raise ValueError(f"cell {i} is not a bare {{{', '.join(FLAT_CELL_KEYS)}}} "
+                             f"description: "
+                             f"{sorted(c) if isinstance(c, dict) else type(c).__name__}")
+        if not c["blocks"]:
+            raise ValueError(f"cell {i} has no halfspace block: an empty intersection is "
+                             "everything, not a cell")
+        for key in ("lo", "hi"):
+            if len(c[key]) != 3 or not all(math.isfinite(float(v)) for v in c[key]):
+                raise ValueError(f"cell {i}'s {key} is not three finite numbers: {c[key]!r}")
+        for axis in range(3):
+            if float(c["lo"][axis]) > float(c["hi"][axis]):
+                raise ValueError(f"cell {i}'s bounding box is inverted on axis {axis}: "
+                                 f"{c['lo'][axis]} > {c['hi'][axis]}")
+        if not (float(c["volume"]) > 0.0):
+            raise ValueError(f"cell {i} has non-positive volume {c['volume']!r}")
+    return {"op": "flatCells", "cells": cells, "recogniser": recogniser, "notes": notes or {}}
+
+
+def flat_occ_cells(cand):
+    """The padded bounded cells `build_occ` folds for a `flatCells` description.
+
+    Kept under `notes` rather than beside `cells` so the shipped description stays exactly the
+    four keys above: these leaves are the acceptance test's realisation and are no part of what
+    `O2FlatCSG` is given.
+    """
+    occ = (cand.get("notes") or {}).get("occCells")
+    if not occ:
+        raise ValueError("a flatCells description carries no notes['occCells']: there is nothing "
+                         "to realise it with in OCCT")
+    return occ
+
+
 def describe(cand):
     """One line, for reports."""
+    if cand["op"] == "flatCells":
+        blocks = sum(len(c["blocks"]) for c in cand["cells"])
+        return (f"O2FlatCSG({len(cand['cells'])} cell(s), {blocks} halfspace(s))")
     if cand["op"] == "unionOfCells":
         return " u ".join(f"({describe(c)})" if len(c["leaves"]) > 1 else describe(c)
                           for c in cand["cells"])
@@ -527,6 +596,10 @@ def describe(cand):
 def build_occ(cand):
     """Realise the description as a `TopoDS_Shape` in OCCT. Requires pythonOCC."""
     from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Common, BRepAlgoAPI_Cut, BRepAlgoAPI_Fuse
+    if cand["op"] == "flatCells":
+        # The padded realisation, per `flat_cells`'s docstring: OCCT has no unbounded halfspace
+        # either, so the acceptance test measures `_cell_leaf`'s bounded forms of the same cells.
+        return _occ_balanced_union([build_occ(c) for c in flat_occ_cells(cand)])
     if cand["op"] == "unionOfCells":
         return _occ_balanced_union([build_occ(c) for c in cand["cells"]])
     leaves = cand["leaves"]
@@ -1066,6 +1139,8 @@ def build_root(cand, name="shape"):
     """
     import ROOT
     placement = placement_for_candidate(cand)
+    if cand["op"] == "flatCells":
+        return _root_flat_csg(cand, name), None
     if cand["op"] == "unionOfCells":
         return _root_balanced_union(name, cand["cells"]), None
     if cand["op"] == "primitive":
@@ -1100,6 +1175,77 @@ def _root_cell(c, name):
     shapes = [(_root_leaf(lf, f"{name}_l{i}"), lf["frame"]) for i, lf in enumerate(c["leaves"])]
     outside = [bool(lf.get("outside")) for lf in c["leaves"]]
     return _root_composite(name, shapes, "intersection", outside), identity_frame()
+
+
+_FLAT_CSG_DECLARED = []
+
+
+def _declare_flat_csg():
+    """Make `o2::base::O2FlatCSG` and `LoadFlatCSG` visible to Cling. Once per interpreter.
+
+    `O2FlatCSG.h` is part of the DetectorsBase dictionary module, so it can be included
+    textually; `O2SurfaceSolidIO.h` is not, so its one free function is declared by prototype and
+    resolves from `libO2DetectorsBase`. Same treatment `O2_CADtoTGeo.emit_cpp_prelude` gives the
+    surface loader, for the same reason.
+    """
+    import ROOT
+    if _FLAT_CSG_DECLARED:
+        return
+    ROOT.gInterpreter.AddIncludePath(f"{ROOT.gSystem.Getenv('O2_ROOT')}/include")
+    ROOT.gSystem.Load("libO2DetectorsBase")
+    ROOT.gInterpreter.Declare(
+        '#include "DetectorsBase/O2FlatCSG.h"\n'
+        'namespace o2 { namespace base {\n'
+        'bool LoadFlatCSG(const std::string& file, O2FlatCSG& solid);\n'
+        '} }')
+    _FLAT_CSG_DECLARED.append(True)
+
+
+def _root_flat_csg(cand, name):
+    """The `O2FlatCSG` a `flatCells` description describes, built THROUGH ITS SIDECAR.
+
+    Deliberately not by calling `AddQuadric`/`AddTorus`/`AddCell` from Python. The sidecar is
+    what production ships (`Design_FlatCSGSolid.md` section 7: `geom.C` constructs the shape and
+    `LoadFlatCSG` fills it from `flatcsg_*.bin`), and a second construction path from the same
+    description is a second thing that can disagree with it. Writing the bytes and reading them
+    back means the shape the gate and `checkKnownSource.py` score is assembled by exactly the
+    code the simulation runs, and `csg/flat.py`'s writer is exercised on every part rather than
+    only in its own unit test.
+    """
+    import tempfile
+    from pathlib import Path
+    import ROOT
+    from csg import flat
+    _declare_flat_csg()
+    blocks, cells = flat_sidecar_records(cand)
+    with tempfile.TemporaryDirectory() as folder:
+        sidecar = Path(folder) / "flatcsg.bin"
+        flat.write_sidecar(sidecar, blocks, cells)
+        shape = ROOT.o2.base.O2FlatCSG(name)
+        ROOT.SetOwnership(shape, False)
+        if not ROOT.o2.base.LoadFlatCSG(str(sidecar), shape):
+            raise ValueError(f"LoadFlatCSG refused the sidecar written for {name!r}")
+    shape.CloseShape()
+    if not shape.IsClosed():
+        raise ValueError(f"O2FlatCSG::CloseShape refused the cells of {name!r}: see its Error "
+                         "message above (a missing, inverted or non-finite cell bounding box)")
+    return shape
+
+
+def flat_sidecar_records(cand):
+    """`(blocks, cells)` in the layout `csg.flat.write_sidecar` takes.
+
+    The halfspace blocks of every cell, concatenated, and the `(first, count, volume, lo, hi)`
+    table that indexes into them. One function, so the sidecar the macro loads and the shape the
+    gate scores are laid out by the same code.
+    """
+    blocks, cells = [], []
+    for c in cand["cells"]:
+        cells.append({"first": len(blocks), "count": len(c["blocks"]),
+                      "volume": float(c["volume"]),
+                      "lo": [float(v) for v in c["lo"]], "hi": [float(v) for v in c["hi"]]})
+        blocks.extend(c["blocks"])
+    return blocks, cells
 
 
 def _root_balanced_union(name, cells):

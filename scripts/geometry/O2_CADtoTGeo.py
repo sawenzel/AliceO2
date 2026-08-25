@@ -3560,7 +3560,8 @@ def trsf_to_tgeo(trsf: gp_Trsf, name: str, scale_to_cm: float) -> str:
 """
 
 
-def emit_cpp_prelude(exact_surfaces: bool = False, csg_shapes: bool = False) -> str:
+def emit_cpp_prelude(exact_surfaces: bool = False, csg_shapes: bool = False,
+                     flat_csg_shapes: bool = False) -> str:
     prelude = """#include <TGeoManager.h>
 #include <TFile.h>
 #include <fstream>
@@ -3594,6 +3595,8 @@ static void LoadFacets(const std::string& file, TGeoTessellated* solid, bool che
         # and must not depend on that.
         prelude += "#include <TGeoMatrix.h>\n"
         prelude += import_csg_hook().CPP_LOADER
+    if flat_csg_shapes:
+        prelude += import_csg_hook().FLAT_CPP_PRELUDE
     if not exact_surfaces:
         return prelude
 
@@ -4697,9 +4700,13 @@ def emit_root_macro(
     if csg_mode not in ("off", "auto", "required"):
         raise ValueError(f"csg must be off|auto|required, got {csg!r}")
     csg_files: Dict[str, str] = {}
+    # `flatcsg_*.bin` per part carried by `o2::base::O2FlatCSG`. Disjoint from `csg_files`: a
+    # part ships either as a native ROOT shape read from `shape_*.root` or as the flat halfspace
+    # solid read from its sidecar, never both.
+    flat_files: Dict[str, str] = {}
     if csg_mode != "off":
         hook = import_csg_hook()
-        csg_files, csg_records = hook.recognise_and_emit(
+        csg_files, flat_files, csg_records = hook.recognise_and_emit(
             def_shapes, def_names, scale_to_cm, out_folder, sanitize_filename, mode=csg_mode)
         report_path = _Path(csg_report) if csg_report else (out_folder / "csg_report.json")
         report = hook.write_report(csg_records, report_path, set(surface_files or {}),
@@ -4787,7 +4794,8 @@ def emit_root_macro(
               f"(macro requires the ALICE O2 environment)")
 
     cpp: List[str] = []
-    cpp.append(emit_cpp_prelude(exact_surfaces=bool(surface_files), csg_shapes=bool(csg_files)))
+    cpp.append(emit_cpp_prelude(exact_surfaces=bool(surface_files), csg_shapes=bool(csg_files),
+                                flat_csg_shapes=bool(flat_files)))
 
     cpp.append("TGeoVolume* build(bool check=true) {")
     cpp.append('  if (!gGeoManager) { throw std::runtime_error("gGeoManager is null. Call build_and_export() or create a TGeoManager first."); }')
@@ -4803,7 +4811,11 @@ def emit_root_macro(
             med = medium_var_map.get(mat_name, "med_Default")
 
         # The cascade, in one place: CSG, else exact surfaces, else the tessellated fallback.
-        if lid in csg_files:
+        if lid in flat_files:
+            sidecar = str(_Path(flat_files[lid]).expanduser().resolve()).replace("\\", "\\\\")
+            cpp.append(import_csg_hook().emit_flat_csg_shape_cpp(
+                lid, def_names.get(lid, ""), sidecar, med, sanitize_cpp_name))
+        elif lid in csg_files:
             shape_path = str(_Path(csg_files[lid]).expanduser().resolve()).replace("\\", "\\\\")
             cpp.append(import_csg_hook().emit_csg_shape_cpp(
                 lid, def_names.get(lid, ""), shape_path, med, sanitize_cpp_name))

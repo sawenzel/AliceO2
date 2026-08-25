@@ -63,12 +63,22 @@ def recognise_and_emit(def_shapes, def_names, scale_to_cm, out_folder, sanitize_
                        mode="auto", band_factor=1.0, verbose=True):
     """Recognise every leaf solid; emit what both acceptance tests admit.
 
-    Returns `(csg_files, records)`: `csg_files` maps a logical-volume id to the absolute path of
-    its `shape_*.root`, and `records` is the per-part evidence for `csg_report.json`.
+    Returns `(csg_files, flat_files, records)`: `csg_files` maps a logical-volume id to the
+    absolute path of its `shape_*.root`, `flat_files` maps the ids that ship as
+    `o2::base::O2FlatCSG` to their `flatcsg_*.bin` sidecar, and `records` is the per-part
+    evidence for `csg_report.json`.
+
+    A part is in exactly one of the two maps. Both artifacts are written for a flat part -- the
+    sidecar is what `geom.C` loads (`Design_FlatCSGSolid.md` section 7) and the `shape_*.root` is
+    what the oracle gate and `checkKnownSource.py` score -- but the macro has one emission branch
+    per part, and the flat branch is the one that gets the `::Fatal` on a sidecar that does not
+    load. The `.root` file is built by loading that same sidecar, so the two cannot describe
+    different solids.
     """
     out_folder = Path(out_folder)
     root_available = have_root()
     csg_files = {}
+    flat_files = {}
     records = []
     for lid, shape in def_shapes.items():
         display = def_names.get(lid, "")
@@ -87,13 +97,22 @@ def recognise_and_emit(def_shapes, def_names, scale_to_cm, out_folder, sanitize_
              "acceptance": record["acceptance"], "recogniser": record["recogniser"],
              "placement": record["placement"]}, indent=1))
         if record["accepted"]:
+            is_flat = record["candidate"]["op"] == "flatCells"
+            if is_flat:
+                # Written whether or not PyROOT is here: the sidecar needs neither ROOT nor the
+                # O2 dictionary, and it is the artifact the simulation actually loads.
+                record["flatSidecar"] = write_flat_sidecar(
+                    record["candidate"], out_folder, suffix)
             if root_available:
                 target = (out_folder / f"shape_{suffix}.root").resolve()
                 emit.write_shape_root(record["candidate"], target)
                 record["shape"] = str(target)
                 record["bboxRootVsOcctCm"] = emit.crosscheck_bbox(record["candidate"])
                 record["containsCrosscheck"] = emit.crosscheck_contains(record["candidate"], solid)
-                csg_files[lid] = str(target)
+                if is_flat:
+                    flat_files[lid] = record["flatSidecar"]
+                else:
+                    csg_files[lid] = str(target)
             else:
                 record["shape"] = None
                 record["shapeDeferred"] = True
@@ -113,7 +132,8 @@ def recognise_and_emit(def_shapes, def_names, scale_to_cm, out_folder, sanitize_
     n_csg = sum(1 for r in records if r["accepted"])
     if verbose:
         print(f"CSG recognition ({mode}): {n_csg}/{len(records)} leaf solid(s) accepted as native "
-              f"ROOT shapes ({len(csg_files)} written)")
+              f"ROOT shapes ({len(csg_files) + len(flat_files)} written, of which "
+              f"{len(flat_files)} as flat halfspace solids)")
         if n_csg and not root_available:
             n_deferred = sum(1 for r in records if r.get("shapeDeferred"))
             print(f"  [WARN] PyROOT is not importable in this interpreter: {n_deferred} accepted "
@@ -128,7 +148,21 @@ def recognise_and_emit(def_shapes, def_names, scale_to_cm, out_folder, sanitize_
             for r in failed:
                 lines.append(f"  {r['volume'] or r['lid']}: {r['reason']}")
             raise ValueError("\n".join(lines))
-    return csg_files, records
+    return csg_files, flat_files, records
+
+
+def write_flat_sidecar(cand, out_folder, suffix):
+    """Write `flatcsg_<part>.bin` for a `flatCells` candidate; returns its absolute path.
+
+    The version-1 flat-CSG sidecar of `BVHSurfaceSolid.md` ("Flat-CSG sidecar format"), written
+    by `csg/flat.py` and read by `o2::base::LoadFlatCSG`. Byte-compatible with `WriteFlatCSG`,
+    which `csg/emit.py --self-test` pins.
+    """
+    from csg import flat
+    target = (Path(out_folder) / f"flatcsg_{suffix}.bin").resolve()
+    blocks, cells = prim.flat_sidecar_records(cand)
+    flat.write_sidecar(target, blocks, cells)
+    return str(target)
 
 
 def write_report(records, path, surface_lids, facet_lids):
@@ -171,6 +205,10 @@ def write_report(records, path, surface_lids, facet_lids):
         # (scripts/geometry/Stream_I_Verdict.md).
         rows.append({"lid": lid, "part": record.get("part"), "volume": record["volume"],
                      "representation": tier, "shapeFile": record.get("shape"),
+                     # The `flatcsg_*.bin` a part carried by `o2::base::O2FlatCSG` ships with,
+                     # null for every other part. `geom.C` loads this file; `shapeFile` above is
+                     # the same solid, serialised, for the gate and the known-source check.
+                     "flatSidecar": record.get("flatSidecar"),
                      # The brief, machine-readable decline reason (None for a part that ships as
                      # CSG). Same string as evidence.declinedCsgBecause, promoted to a top-level
                      # field so consumers (decline_catalogue.py, the website) need not know the
@@ -246,6 +284,55 @@ def emit_csg_composed_placement_cpp(matrix_var, placement_var, composed_var):
         f"  TGeoHMatrix *{composed_var} = new TGeoHMatrix(*{matrix_var});",
         f"  {composed_var}->Multiply({placement_var});",
     ])
+
+
+def emit_flat_csg_shape_cpp(lid, vol_display_name, sidecar_abspath, medium_var,
+                            sanitize_cpp_name):
+    """geom.C branch for a part carried by `o2::base::O2FlatCSG`: construct, load, close.
+
+    Deliberately NOT the `LoadShape` branch above. The flat solid's sub-cell boxes and its BVH are
+    transient (`Design_FlatCSGSolid.md` section 7), so a streamed shape has to be closed again by
+    whoever reads it, and the sidecar is the form the design chose for the macro: `geom.C` stays
+    small, Cling never sees a 59-cell part inlined, and the loader is the one the surface path has
+    already proven.
+
+    **A sidecar that fails to load is fatal.** `NEXT.md` item 2 is a live defect of exactly the
+    opposite shape -- a JIT namespace bug let `geom.C` continue with a module silently absent and
+    a simulation ran without it. A geometry that cannot be built must stop the job, not shrink.
+    """
+    safe = sanitize_cpp_name(lid)
+    shape_name = vol_display_name if vol_display_name else lid
+    return "\n".join([
+        f'  auto *solid_{safe} = new o2::base::O2FlatCSG("{shape_name}");',
+        f'  if (!o2::base::LoadFlatCSG("{sidecar_abspath}", *solid_{safe})) {{',
+        f'    ::Fatal("geom", "flat-CSG sidecar for {shape_name} failed to load: '
+        f'{sidecar_abspath}");',
+        '  }',
+        f'  solid_{safe}->CloseShape();',
+        f'  if (!solid_{safe}->IsClosed()) {{',
+        f'    ::Fatal("geom", "flat-CSG shape {shape_name} refused to close; see the Error above");',
+        '  }',
+        f'  TGeoVolume *vol_{safe} = new TGeoVolume("{shape_name}", solid_{safe}, {medium_var});',
+    ])
+
+
+FLAT_CPP_PRELUDE = r'''
+// --- flat-CSG parts: o2::base::O2FlatCSG filled from a flatcsg_*.bin sidecar ---
+// O2FlatCSG.h is part of the DetectorsBase ROOT dictionary module and can be included textually;
+// O2SurfaceSolidIO.h is not, so LoadFlatCSG is declared by prototype and resolves from
+// libO2DetectorsBase. Same treatment, and the same reason, as LoadSurfaceSolid above.
+R__ADD_INCLUDE_PATH($O2_ROOT/include)
+R__LOAD_LIBRARY(libO2DetectorsBase)
+#include "DetectorsBase/O2FlatCSG.h"
+#include <TError.h>
+namespace o2
+{
+namespace base
+{
+bool LoadFlatCSG(const std::string& file, O2FlatCSG& solid);
+} // namespace base
+} // namespace o2
+'''
 
 
 CPP_LOADER = r'''
