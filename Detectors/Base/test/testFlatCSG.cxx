@@ -1261,6 +1261,32 @@ BOOST_AUTO_TEST_CASE(a_sidecar_round_trip_reproduces_the_solid)
   std::filesystem::remove(path);
 }
 
+BOOST_AUTO_TEST_CASE(writing_an_unclosed_shape_is_refused)
+{
+  // GetCellBBox reads back zeros for a cell whose box was never set -- a finite, non-inverted box
+  // that would otherwise pass CloseShape's own validation on reload, silently shipping a
+  // degenerate point-box for that cell. WriteFlatCSG refuses before that invariant can ever reach
+  // a file: no CloseShape() call at all, and a cell missing a bbox (CloseShape() refused).
+  const std::string path = "testFlatCSG_unclosed.bin";
+
+  O2FlatCSG neverClosed("bracket_never_closed");
+  buildBracket(neverClosed);
+  BOOST_REQUIRE(!neverClosed.IsClosed());
+  BOOST_CHECK(!o2::base::WriteFlatCSG(path, neverClosed));
+  BOOST_CHECK(!std::filesystem::exists(path));
+
+  O2FlatCSG refused("bracket_refused_close");
+  double coeff[10];
+  const double plane[2][3] = {{1., 0., 0.}, {0., 0., 0.}};
+  planeQuadric(plane[0], plane[1], coeff);
+  refused.AddQuadric(1., coeff);
+  refused.AddCell(0, 1, 0.); // no SetCellBBox for this cell -- CloseShape must refuse
+  refused.CloseShape();
+  BOOST_REQUIRE(!refused.IsClosed());
+  BOOST_CHECK(!o2::base::WriteFlatCSG(path, refused));
+  BOOST_CHECK(!std::filesystem::exists(path));
+}
+
 BOOST_AUTO_TEST_CASE(a_truncated_sidecar_is_refused_rather_than_half_loaded)
 {
   O2FlatCSG original("bracket_trunc");

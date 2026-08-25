@@ -865,6 +865,19 @@ bool LoadFlatCSG(const std::string& file, O2FlatCSG& solid)
 
 bool WriteFlatCSG(const std::string& file, const O2FlatCSG& solid)
 {
+  // An unclosed shape is exactly the case CloseShape's own bbox validation exists to catch: a
+  // cell whose box was never set, or one CloseShape refused outright. GetCellBBox reads back
+  // zeros for such a cell -- a finite, non-inverted box that then PASSES CloseShape's validation
+  // on reload, so a degenerate point-box for that cell would otherwise ship silently in a
+  // well-formed file. Refuse here, at the point where the invariant would escape into a file, so
+  // it never gets the chance.
+  if (!solid.IsClosed()) {
+    ::Error("WriteFlatCSG", "%s: shape %s is not closed (CloseShape() was never called, or refused); refusing to "
+                            "write a sidecar that may encode a degenerate cell box",
+            file.c_str(), solid.GetName());
+    return false;
+  }
+
   std::ofstream out(file, std::ios::binary);
   if (!out) {
     ::Error("WriteFlatCSG", "Cannot open %s for writing", file.c_str());
