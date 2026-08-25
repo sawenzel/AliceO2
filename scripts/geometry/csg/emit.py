@@ -2064,6 +2064,191 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
                     if seen_digests.get(name) != digest)
           or f"{len(_UNION_OF_CELLS_CANDIDATE_DIGESTS)} candidates unchanged")
 
+    # --- the flat emitter's sign convention, measured against the shipped cell emitter --------
+    # `Design_FlatCSGSolid.md` section 3.3: an inverted halfspace is still a solid, so the sign
+    # composition -- the carrier's own orientation against the `side` field -- is the one thing
+    # here that can be silently wrong. `recognise._cell_leaf` has shipped 1775 known-source-clean
+    # parts and bounds each carrier into a padded native primitive whose conjunction IS the cell
+    # over the part's neighbourhood, so it is the oracle the flat halfspaces are measured against.
+    import struct
+    from csg import decompose, flat as flatmod
+
+    def _flat_gradient(block, point):
+        """`|grad f|` at a point, for turning a quadric value into a first-order distance."""
+        c = block["c"]
+        x, y, z = point
+        if block["kind"] == "torus":
+            return 1.0                    # the torus block already IS a signed distance
+        gx = 2.0 * (c[0] * x + c[1] * y + c[2] * z + c[6])
+        gy = 2.0 * (c[1] * x + c[3] * y + c[4] * z + c[7])
+        gz = 2.0 * (c[2] * x + c[4] * y + c[5] * z + c[8])
+        return math.sqrt(gx * gx + gy * gy + gz * gz)
+
+    def _flat_agrees_with_cell_leaf(name, solid, seed=20260824, samples=4000, flip=None):
+        """Do the flat halfspaces and `_cell_leaf`'s padded primitives classify the same points?
+
+        Returns `(disagreements, scored, kinds, planes_off_convention, worst_plane_scaling)`.
+        Points within `REL_TOL` of a carrier surface are skipped: the padded conjunction is a
+        boolean of OCCT solids and neither side claims to decide its own boundary, which is the
+        same band `accept.contains_disagreements` already skips.
+        """
+        import random
+        from OCC.Core.BRepClass3d import BRepClass3d_SolidClassifier
+        from OCC.Core.TopAbs import TopAbs_IN, TopAbs_ON
+        from OCC.Core.gp import gp_Pnt
+        diag = decompose.bbox_diagonal(solid)
+        tol = recognise.REL_TOL * max(diag, 1.0)
+        carriers = recognise._halfspace_carriers(solid, tol)
+        box = recognise._CellBox(solid, diag)
+        blocks = flatmod.blocks_from_carriers(carriers)
+        if flip is not None:
+            blocks = [dict(b, sign=-b["sign"]) if index == flip else b
+                      for index, b in enumerate(blocks)]
+        leaves = [recognise._cell_leaf(c, box) for c in carriers]
+        cand = prim.cell("intersection" if len(leaves) > 1 else "primitive", leaves)
+        padded = prim.build_occ(cand)
+        classifier = BRepClass3d_SolidClassifier(padded)
+        rng = random.Random(seed)
+        (xlo, ylo, zlo, xhi, yhi, zhi) = recognise._bbox_of(solid)
+        disagreements = scored = 0
+        for _ in range(samples):
+            point = (rng.uniform(xlo, xhi), rng.uniform(ylo, yhi), rng.uniform(zlo, zhi))
+            near = min(abs(flatmod.eval_block(b, point))
+                       / max(_flat_gradient(b, point), 1.0e-300) for b in blocks)
+            if near <= tol:
+                continue
+            classifier.Perform(gp_Pnt(*point), tol)
+            state = classifier.State()
+            if state == TopAbs_ON:
+                continue
+            scored += 1
+            if flatmod.flat_contains(blocks, point) != (state == TopAbs_IN):
+                disagreements += 1
+        kinds = sorted({c["kind"] for c in carriers})
+        sides = sorted({c["side"] for c in carriers})
+        worst_plane = max((flatmod.plane_scaling_error(b) for b in blocks
+                           if flatmod.plane_scaling_error(b) is not None), default=None)
+        return {"name": name, "bad": disagreements, "scored": scored, "kinds": kinds,
+                "sides": sides, "blocks": blocks, "worstPlane": worst_plane}
+
+    flat_axis = gp_Ax2(gp_Pnt(0, 0, -5), gp_Dir(0, 0, 1))
+    flat_tube = BRepAlgoAPI_Cut(
+        BRepPrimAPI_MakeCylinder(flat_axis, 2.0, 10.0).Shape(),
+        BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, -6), gp_Dir(0, 0, 1)), 1.0, 12.0).Shape()
+    ).Shape()
+    # a box with a spherical scoop taken out of one corner: six planes and an EXTERIOR sphere
+    flat_scooped = BRepAlgoAPI_Cut(
+        BRepPrimAPI_MakeBox(gp_Pnt(-3, -3, -3), 6.0, 6.0, 6.0).Shape(),
+        BRepPrimAPI_MakeSphere(gp_Pnt(3, 3, 3), 2.5).Shape()).Shape()
+    flat_cases = (
+        ("a box", BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 2.0, 3.0, 4.0).Shape()),
+        ("a tube, whose bore is an exterior cylinder", flat_tube),
+        ("a cone frustum", BRepPrimAPI_MakeCone(flat_axis, 3.0, 1.0, 10.0).Shape()),
+        ("a hemisphere", BRepAlgoAPI_Common(
+            BRepPrimAPI_MakeSphere(gp_Pnt(1, 2, 3), 2.5).Shape(),
+            BRepPrimAPI_MakeBox(gp_Pnt(-3, -1, 3), 9.0, 9.0, 9.0).Shape()).Shape()),
+        ("a box with a spherical scoop, an exterior sphere", flat_scooped),
+        ("a torus ply", BRepPrimAPI_MakeTorus(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)),
+                                              4.0, 1.0).Shape()),
+    )
+    flat_results = [_flat_agrees_with_cell_leaf(name, solid) for name, solid in flat_cases]
+    for result in flat_results:
+        check(f"the flat halfspaces of {result['name']} classify exactly as _cell_leaf's "
+              "primitives",
+              result["bad"] == 0 and result["scored"] > 0,
+              f"{result['bad']} of {result['scored']} points disagree; carriers "
+              f"{'+'.join(result['kinds'])} ({'+'.join(result['sides'])})")
+
+    # All five carrier kinds must be covered, or the oracle comparison above proves less than it
+    # reads: a kind nobody exercises is a kind whose sign nothing measured.
+    flat_kinds_seen = sorted({k for r in flat_results for k in r["kinds"]})
+    check("the flat oracle comparison covers all five carrier kinds",
+          flat_kinds_seen == ["cone", "cylinder", "plane", "sphere", "torus"],
+          f"covered {flat_kinds_seen}")
+    check("the flat oracle comparison exercises a complemented (exterior) carrier",
+          any("exterior" in r["sides"] for r in flat_results),
+          "; ".join(f"{r['name']}: {'+'.join(r['sides'])}" for r in flat_results))
+
+    # The negative control on the comparison itself. Six checks that report zero disagreements
+    # would read the same way if the sampler scored nothing that discriminates, so invert one
+    # halfspace at a time -- the exact defect section 3.3 says is silent -- and require every
+    # inversion to be caught. This is what makes the six checks above evidence.
+    flat_control_name, flat_control_solid = flat_cases[1]
+    flat_control_n = len(next(r for r in flat_results
+                              if r["name"] == flat_control_name)["blocks"])
+    flat_control_missed = [index for index in range(flat_control_n)
+                           if _flat_agrees_with_cell_leaf(flat_control_name, flat_control_solid,
+                                                          samples=1500, flip=index)["bad"] == 0]
+    check("inverting any one halfspace of the tube is caught by the same comparison",
+          flat_control_n > 0 and not flat_control_missed,
+          f"{flat_control_n} halfspace(s), missed {flat_control_missed}")
+
+    # The plane convention of design section 3.1, asserted where it is CREATED. `s.Q <= 0` names
+    # the same halfspace under any positive rescaling, so no geometry test above would notice a
+    # plane stored with |2b| != 1 -- what it costs is bit identity between O2FlatCSG's
+    # accelerated queries and their _Loop twins. The C++ side cannot make this check, because it
+    # cannot tell an emitter-produced halfspace from a hand-built one.
+    flat_plane_worst = max((r["worstPlane"] for r in flat_results
+                            if r["worstPlane"] is not None), default=None)
+    check("every emitted plane block stores 2b = n for a unit normal",
+          flat_plane_worst is not None and flat_plane_worst < 1.0e-15,
+          f"worst | |2b| - 1 | over the fixtures: "
+          f"{'no plane blocks' if flat_plane_worst is None else f'{flat_plane_worst:.3g}'}")
+    # negative control on the check itself: a plane rescaled by 3 must be caught
+    flat_tripled = {"kind": "quadric", "sign": 1.0,
+                    "c": [0.0] * 6 + [1.5, 0.0, 0.0, -3.0, 0.0]}
+    check("a plane block rescaled by three is refused by the convention check",
+          abs(flatmod.plane_scaling_error(flat_tripled) - 2.0) < 1.0e-15,
+          f"residual {flatmod.plane_scaling_error(flat_tripled)}")
+
+    # A carrier kind with no quadric form declines rather than emitting a wrong halfspace.
+    try:
+        flatmod.quadric_from_carrier({"kind": "torus", "side": "interior"})
+        flat_declined = ""
+    except recognise.Declined as why:
+        flat_declined = str(why)
+    check("a carrier with no quadric form is declined, not guessed at",
+          "no quadric form" in flat_declined, f"reason: {flat_declined or 'nothing raised'}")
+
+    # The sidecar writer's record sizes, against the format `LoadFlatCSG` checks before reading:
+    # 20-byte header, 100-byte halfspace, 64-byte cell, little-endian, no padding.
+    flat_sidecar = Path("/tmp/csg_selftest_flatcsg.bin")
+    flat_probe_blocks = flatmod.blocks_from_carriers(
+        recognise._halfspace_carriers(flat_tube,
+                                      recognise.REL_TOL * max(decompose.bbox_diagonal(flat_tube),
+                                                              1.0)))
+    flat_probe_cells = [{"first": 0, "count": len(flat_probe_blocks), "volume": 1.5,
+                         "lo": [-2.0, -2.0, -5.0], "hi": [2.0, 2.0, 5.0]}]
+    flatmod.write_sidecar(flat_sidecar, flat_probe_blocks, flat_probe_cells)
+    flat_bytes = flat_sidecar.read_bytes()
+    check("the sidecar is magic + version + two counts + fixed-length records",
+          len(flat_bytes) == 20 + 100 * len(flat_probe_blocks) + 64 * len(flat_probe_cells)
+          and flat_bytes[:8] == flatmod.SIDECAR_MAGIC
+          and struct.unpack("<III", flat_bytes[8:20]) == (flatmod.SIDECAR_VERSION,
+                                                          len(flat_probe_blocks),
+                                                          len(flat_probe_cells)),
+          f"{len(flat_bytes)} bytes for {len(flat_probe_blocks)} halfspace(s) and "
+          f"{len(flat_probe_cells)} cell(s)")
+    # and it round-trips through the format's own reader, field by field
+    flat_read_back = []
+    for index in range(len(flat_probe_blocks)):
+        at = 20 + 100 * index
+        kind = struct.unpack("<i", flat_bytes[at:at + 4])[0]
+        sign = struct.unpack("<d", flat_bytes[at + 4:at + 12])[0]
+        coeff = struct.unpack("<11d", flat_bytes[at + 12:at + 100])
+        flat_read_back.append((kind, sign, coeff))
+    check("every halfspace block reads back from the sidecar bit for bit",
+          all(rb[0] == (1 if b["kind"] == "torus" else 0) and rb[1] == b["sign"]
+              and list(rb[2]) == list(b["c"]) + [0.0] * (11 - len(b["c"]))
+              for rb, b in zip(flat_read_back, flat_probe_blocks)),
+          f"{len(flat_read_back)} block(s)")
+    flat_cell_at = 20 + 100 * len(flat_probe_blocks)
+    flat_cell_read = struct.unpack("<iid3d3d", flat_bytes[flat_cell_at:flat_cell_at + 64])
+    check("the cell record reads back from the sidecar bit for bit",
+          flat_cell_read == (0, len(flat_probe_blocks), 1.5,
+                             -2.0, -2.0, -5.0, 2.0, 2.0, 5.0),
+          f"{flat_cell_read}")
+
     # --- the ROOT half: the emitted TGeoShape must answer like the closed form ---
     if with_root:
         import ROOT

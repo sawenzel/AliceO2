@@ -943,9 +943,13 @@ BOOST_AUTO_TEST_CASE(the_accelerated_distances_track_their_twins_when_a_plane_is
                                : solid.DistFromOutside_Loop(point, dir, TGeoShape::Big());
     const double slack = std::abs(accelerated - twin);
     worst = std::max(worst, slack);
-    BOOST_REQUIRE_LE(slack, 1.e-9 * std::max(1., std::abs(twin)));
+    // The bound is set just above what the rescale actually costs -- the run below measures
+    // 1.24e-14 -- so the assertion, and not only the message under it, is what pins the size of
+    // the loss. A looser bound would pass on a rescale that had broken something far larger.
+    BOOST_REQUIRE_LE(slack, 1.e-13 * std::max(1., std::abs(twin)));
   }
   BOOST_TEST_MESSAGE("largest accelerated-vs-twin gap under a x3 plane rescale: " << worst);
+  BOOST_CHECK_LE(worst, 1.e-13);
 }
 
 BOOST_AUTO_TEST_CASE(a_shape_that_failed_to_close_still_answers_through_the_loop_twins)
