@@ -499,6 +499,40 @@ void O2FlatCSG::CloseShape()
                                     (partHi[2] - partLo[2]) * (partHi[2] - partLo[2]));
   const double minSize = fMinBoxFraction * diagonal;
 
+#ifndef NDEBUG
+  // A cell's bounding box must CONTAIN the cell, and since task 5 that is a correctness
+  // precondition rather than a cost one: boxes are only ever built inside it, so a cell that
+  // spills past its own bbox is material the accelerated Contains cannot find and the accelerated
+  // distances truncate, while the twins -- which know nothing of boxes -- still see it. The
+  // converter owes this (design section 4.2); the check samples each face from just outside and
+  // requires the cell to have ended.
+  {
+    const double reach = 1.e-6 * (diagonal > 0. ? diagonal : 1.);
+    for (int cell = 0; cell < GetNcells(); ++cell) {
+      const double* cellLo = &fCellLo[3 * cell];
+      const double* cellHi = &fCellHi[3 * cell];
+      for (int axis = 0; axis < 3; ++axis) {
+        const int first = (axis + 1) % 3;
+        const int second = (axis + 2) % 3;
+        for (int side = 0; side < 2; ++side) {
+          for (int step1 = 0; step1 <= 4; ++step1) {
+            for (int step2 = 0; step2 <= 4; ++step2) {
+              double probe[3];
+              probe[axis] = side == 0 ? cellLo[axis] - reach : cellHi[axis] + reach;
+              probe[first] = cellLo[first] + 0.25 * step1 * (cellHi[first] - cellLo[first]);
+              probe[second] = cellLo[second] + 0.25 * step2 * (cellHi[second] - cellLo[second]);
+              assert(!CellContains(cell, probe) &&
+                     "O2FlatCSG::CloseShape: a cell reaches past the bounding box SetCellBBox was "
+                     "given; the accelerated queries build boxes only inside it and would lose that "
+                     "material");
+            }
+          }
+        }
+      }
+    }
+  }
+#endif
+
   for (int cell = 0; cell < GetNcells(); ++cell) {
     std::vector<int> active;
     active.reserve(fCells[cell].count);

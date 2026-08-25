@@ -98,6 +98,29 @@ surface of revolution, and whatever bounds it in phi is a plane carrier of the s
 Both block types are fixed length. A part's halfspaces live in one flat array; a cell is a
 `(first, count)` pair into it.
 
+**The plane row's scaling is an obligation on the emitter, not a convention of convenience.** A
+plane must be stored with `2b = n` for a *unit* outward normal `n` — that is, `b = n/2` — and not
+with any other multiple. `s·Q ≤ 0` describes the same halfspace for any positive rescaling of
+`(A, b, c)`, so nothing in the geometry, in `Contains`, or in the acceptance tests would notice a
+rescaled plane. What it costs is **bit identity between the accelerated queries and their `_Loop`
+twins** (§6), which is this class's whole self-check discipline.
+
+The mechanism, since it is not guessable from the row: a cell's bounding box routinely has a face
+lying exactly on one of that cell's own axis-aligned plane halfspaces, and there the box face and
+the halfspace surface are the same plane, crossed at one parameter. The BVH traversal reaches it
+as the slab bound `(v − o_k) / d_k`; the interval clipping reaches it as the quadratic's root
+`−½γ/β`. Under `2b = n` those two divide a numerator and a denominator each scaled by exactly one
+half, and IEEE division returns the identical double for both, so the endpoint is one value. Any
+**power-of-two** rescaling is equally safe, for the same reason. A **non-power-of-two** one is not:
+an unnormalised carrier normal `(3,0,0)` gives `b_x = 1.5`, `fl(1.5·d_x)` rounds, the root moves an
+ulp off the slab bound, and the interval endpoint the accelerated query returns is the slab bound
+where the twin returns the root.
+
+One ulp on an exit distance is navigationally irrelevant, so this is not a correctness rule — it is
+what keeps the twins usable as an exact oracle. The `testFlatCSG` case
+`the_accelerated_distances_track_their_twins_when_a_plane_is_rescaled` measures what a ×3 rescale
+actually costs, so the size of the loss is on the record rather than assumed.
+
 ### 3.2 Why this is more faithful, not just faster
 
 Stated once more because it is the part that is easy to miss: the composite emission has to
@@ -164,6 +187,22 @@ the sub-patch BVH (`Stream_X`), and `O2BVHAssembly` (`Stream_AE`).
 The pruning is conservative in the only direction that is safe: an over-wide range bound loses
 pruning, never correctness.
 
+**The cell AABB the converter supplies must contain the cell, and that is a correctness
+obligation.** An intersection of halfspaces does not bound itself, so `SetCellBBox` is the only
+thing that says where a cell ends, and the split starts from it: no box is ever built outside it.
+A cell that reaches past its own declared box therefore has material the accelerated `Contains`
+cannot find, because it looks only inside boxes, and that the accelerated distances cut short --
+while the `_Loop` twins, which know nothing of boxes, still see it. The disagreement is silent and
+one-sided, which is the shape of defect §4.4 and §6 exist to prevent, so the converter owes an
+**outer** bound: erring wide costs only boxes that prune to nothing, erring narrow loses material.
+
+`CloseShape` already refuses a bbox that is unset, inverted or non-finite, with an `Error` and an
+all-or-nothing build. Containment it cannot decide cheaply in general, so it carries a
+**debug-build check** instead: each face is sampled on a 5x5 grid offset outward by `1e-6` of the
+part diagonal, and every sample must fail `CellContains`. That catches the ordinary way this goes
+wrong -- a bbox measured on the wrong piece, or in the wrong frame -- without putting a sampling
+loop on the release path.
+
 ### 4.3 What it buys, in three places at once
 
 1. **Tight boxes** on the long, diagonal and curved cells that motivate the class.
@@ -202,8 +241,21 @@ The result is the cell's occupancy as a set of intervals, with **no convexity as
 anywhere** — which is required, not merely elegant, because a complemented carrier (`side ==
 "exterior"`) makes cells routinely non-convex, and every part with a hole in it has one.
 
-`DistFromOutside` is then the first entry point at `t > 0` across the boxes the ray meets, and
-the traversal can stop at the first box that produces one because boxes are visited in `t` order.
+`DistFromOutside` is then the first entry point at `t > 0` across the boxes the ray meets. An
+earlier draft of this section said the traversal may stop at the first box that produces an entry,
+because boxes are visited in `t` order. **That is unsound as written, and the implementation does
+not do it.** The entry only counts if its interval's exit clears `TGeoShape::Tolerance()` -- a point
+already on the boundary is inside, not entering -- so the first box to produce an entry can produce
+a sub-tolerance sliver the answer must reject, and the real entry then lies in a later box. The same
+tolerance rule is why a cell's pieces have to be rejoined across the boxes that tile it *before* the
+rule is applied: a box boundary crossed within the tolerance of the ray origin would otherwise cut
+the real interval into a stub the rule discards.
+
+The shipped traversal is therefore **order-independent**: it visits every box the ray meets, each
+box contributes its own intervals over its own clipped window, the pieces are rejoined per cell, and
+the rule is applied to the rejoined intervals. That is exactly what `DistFromOutside_Loop` computes,
+which is the point. A sound early exit does exist -- a box whose slab entry already exceeds the
+standing best cannot improve it -- and §9 measures whether it is worth the code.
 `DistFromInside` is the far end of the occupancy interval containing `t = 0`, which needs the
 union across cells — a point can leave one cell into an adjacent one, and the part's boundary is
 where the union ends, not where a cell does. Both obey ROOT's usual `iact`/`step` contract and

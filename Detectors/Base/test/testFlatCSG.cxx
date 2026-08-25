@@ -737,9 +737,24 @@ namespace
 {
 /// An L-shaped bracket with a bore: three cells, a complemented cylinder, a long diagonal extent.
 /// Deliberately the shape a cell-level BVH would handle badly.
-void buildBracket(O2FlatCSG& solid)
+///
+/// The washer sits ABOVE the arm, at z in [1, 3], so its bore is a genuine hole in the union: the
+/// arm spans |y| <= 1 and |z| <= 1, so a washer at |z| <= 1 would have had its own bore filled in
+/// by the arm and the solid would have had no cavity anywhere.
+///
+/// \a planeScale multiplies every PLANE quadric. `sign * Q <= 0` is the same halfspace for any
+/// positive scale, so the solid is unchanged -- but the accelerated queries are only bit-identical
+/// to their twins when the scale is a power of two; see the rescaled test below and
+/// scripts/geometry/Design_FlatCSGSolid.md section 3.1.
+void buildBracket(O2FlatCSG& solid, double planeScale = 1.)
 {
   double coeff[10];
+  const auto scaledPlane = [&](const double* normal, const double* through) {
+    planeQuadric(normal, through, coeff);
+    for (int index = 0; index < 10; ++index) {
+      coeff[index] *= planeScale;
+    }
+  };
   // cell 0: the long arm, x in [-10, 10], y in [-1, 1], z in [-1, 1]
   const double arm[6][2][3] = {{{1., 0., 0.}, {10., 0., 0.}},
                                {{-1., 0., 0.}, {-10., 0., 0.}},
@@ -749,7 +764,7 @@ void buildBracket(O2FlatCSG& solid)
                                {{0., 0., -1.}, {0., 0., -1.}}};
   int first = solid.GetNhalfspaces();
   for (const auto& plane : arm) {
-    planeQuadric(plane[0], plane[1], coeff);
+    scaledPlane(plane[0], plane[1]);
     solid.AddQuadric(1., coeff);
   }
   solid.AddCell(first, 6, 8. * 10. * 1. * 1.);
@@ -766,7 +781,7 @@ void buildBracket(O2FlatCSG& solid)
                                    {{0., 0., -1.}, {0., 0., 1.}}};
   first = solid.GetNhalfspaces();
   for (const auto& plane : upright) {
-    planeQuadric(plane[0], plane[1], coeff);
+    scaledPlane(plane[0], plane[1]);
     solid.AddQuadric(1., coeff);
   }
   solid.AddCell(first, 6, 2. * 2. * 11.);
@@ -774,7 +789,8 @@ void buildBracket(O2FlatCSG& solid)
   const double uprightHi[3] = {10., 1., 12.};
   solid.SetCellBBox(1, uprightLo, uprightHi);
 
-  // cell 2: a washer around z at x = -8, with a bore -- a complemented cylinder, so non-convex
+  // cell 2: a washer around z at x = -8 and z in [1, 3], with a bore -- a complemented cylinder,
+  // so non-convex, and clear of the arm so the bore is empty space
   first = solid.GetNhalfspaces();
   const double centreShift = -8.;
   // outer cylinder about the axis through (-8, 0, *): translate by completing the square
@@ -784,14 +800,14 @@ void buildBracket(O2FlatCSG& solid)
   const double inner[10] = {1., 0., 0., 1., 0., 0., -centreShift, 0., 0.,
                             centreShift * centreShift - 1.};
   solid.AddQuadric(-1., inner);
-  const double washer[2][2][3] = {{{0., 0., 1.}, {0., 0., 1.}}, {{0., 0., -1.}, {0., 0., -1.}}};
+  const double washer[2][2][3] = {{{0., 0., 1.}, {0., 0., 3.}}, {{0., 0., -1.}, {0., 0., 1.}}};
   for (const auto& plane : washer) {
-    planeQuadric(plane[0], plane[1], coeff);
+    scaledPlane(plane[0], plane[1]);
     solid.AddQuadric(1., coeff);
   }
   solid.AddCell(first, 4, TMath::Pi() * (9. - 1.) * 2.);
-  const double washerLo[3] = {-11., -3., -1.};
-  const double washerHi[3] = {-5., 3., 1.};
+  const double washerLo[3] = {-11., -3., 1.};
+  const double washerHi[3] = {-5., 3., 3.};
   solid.SetCellBBox(2, washerLo, washerHi);
 }
 } // namespace
@@ -848,13 +864,84 @@ BOOST_AUTO_TEST_CASE(a_ray_along_the_long_arm_crosses_every_cell_it_should)
   O2FlatCSG solid("bracket_long");
   buildBracket(solid);
   solid.CloseShape();
-  const double origin[3] = {-20., 0., 0.};
   const double dir[3] = {1., 0., 0.};
-  BOOST_CHECK_SMALL(solid.DistFromOutside(origin, dir, 3, TGeoShape::Big(), nullptr) - 9., 1.e-12);
+
+  // the entry, which one box decides on its own: nothing lies before the arm along z = 0
+  const double origin[3] = {-20., 0., 0.};
+  BOOST_CHECK_SMALL(solid.DistFromOutside(origin, dir, 3, TGeoShape::Big(), nullptr) - 10., 1.e-12);
+
+  // the exit, which sixteen boxes of cell 0 decide together: the arm is split along x into boxes
+  // 1.25 wide, so this is the cross-box join, and a traversal that forgot it would stop at the
+  // first box boundary
   const double inArm[3] = {0., 0., 0.};
   // inside the arm at the origin, the exit is x = 10 (the arm and the upright touch at x = 8..10
   // only for z > 1, so along z = 0 the arm alone decides)
   BOOST_CHECK_SMALL(solid.DistFromInside(inArm, dir, 3, TGeoShape::Big(), nullptr) - 10., 1.e-12);
+
+  // An ENTRY that needs the per-cell merge, which is otherwise hard to reach: the twin's rule
+  // takes the smallest entry over the intervals whose exit clears TGeoShape::Tolerance(), so a
+  // box boundary crossed within the tolerance of the origin cuts the real interval into a
+  // sub-tolerance stub the rule would throw away, and the answer would jump from the true entry
+  // to the box boundary. This ray starts 1e-11 outside the arm's y = 1 face and 2e-11 before its
+  // x = -8.75 box boundary, so both crossings sit inside the tolerance.
+  const double grazing[3] = {-8.75 - 2.e-11, 1. + 1.e-11, 0.5};
+  const double slant = 1. / std::sqrt(2.);
+  const double slantDir[3] = {slant, -slant, 0.};
+  const double entered = solid.DistFromOutside(grazing, slantDir, 3, TGeoShape::Big(), nullptr);
+  BOOST_CHECK_EQUAL(entered, solid.DistFromOutside_Loop(grazing, slantDir, TGeoShape::Big()));
+  // and it really is in the regime where a per-box rule would differ: below the tolerance, and
+  // strictly nearer than the x = -8.75 box boundary at 2e-11 * sqrt(2)
+  BOOST_CHECK_GT(entered, 0.);
+  BOOST_CHECK_LT(entered, TGeoShape::Tolerance());
+  BOOST_CHECK_LT(entered, 2.e-11 * std::sqrt(2.));
+}
+
+BOOST_AUTO_TEST_CASE(the_accelerated_distances_track_their_twins_when_a_plane_is_rescaled)
+{
+  // Bit identity between an accelerated query and its twin is a self-check discipline, not a
+  // physics requirement: a one-ulp difference in an exit distance is navigationally irrelevant.
+  // It is achievable only under the plane convention of design section 3.1, where a unit normal n
+  // is stored as 2b = n. There the slab bound (v - o_k) / d_k and the root -0.5*gamma/beta divide
+  // numerator and denominator each scaled by exactly one half, so the single IEEE division returns
+  // the same double for both, and a box face lying on a plane halfspace is crossed at one value.
+  //
+  // Rescaling every plane by a NON-POWER-OF-TWO -- 3 here, which is what an unnormalised carrier
+  // normal (3, 0, 0) would give -- describes exactly the same solid, but fl(1.5 * d_x) rounds, the
+  // root moves off the slab bound by an ulp, and the last bit is lost. Nothing else in the system
+  // notices, so this test pins the size of what is lost: the answers must still agree closely.
+  O2FlatCSG solid("bracket_scaled");
+  buildBracket(solid, 3.);
+  solid.CloseShape();
+  BOOST_REQUIRE(solid.IsClosed());
+
+  Rng rng(1357911ULL);
+  double worst = 0.;
+  for (int trial = 0; trial < 200000; ++trial) {
+    double point[3] = {rng.uniform(-16., 16.), rng.uniform(-8., 8.), rng.uniform(-6., 17.)};
+    double dir[3];
+    double norm = 0.;
+    do {
+      for (int index = 0; index < 3; ++index) {
+        dir[index] = rng.uniform(-1., 1.);
+      }
+      norm = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+    } while (norm < 1.e-3);
+    for (int index = 0; index < 3; ++index) {
+      dir[index] /= norm;
+    }
+    const bool inside = solid.Contains_Loop(point);
+    // Contains has no arithmetic of its own to lose, so it stays bit-identical under any scale
+    BOOST_REQUIRE_EQUAL(solid.Contains(point), inside);
+    const double accelerated =
+      inside ? solid.DistFromInside(point, dir, 3, TGeoShape::Big(), nullptr)
+             : solid.DistFromOutside(point, dir, 3, TGeoShape::Big(), nullptr);
+    const double twin = inside ? solid.DistFromInside_Loop(point, dir, TGeoShape::Big())
+                               : solid.DistFromOutside_Loop(point, dir, TGeoShape::Big());
+    const double slack = std::abs(accelerated - twin);
+    worst = std::max(worst, slack);
+    BOOST_REQUIRE_LE(slack, 1.e-9 * std::max(1., std::abs(twin)));
+  }
+  BOOST_TEST_MESSAGE("largest accelerated-vs-twin gap under a x3 plane rescale: " << worst);
 }
 
 BOOST_AUTO_TEST_CASE(a_shape_that_failed_to_close_still_answers_through_the_loop_twins)
@@ -887,17 +974,16 @@ BOOST_AUTO_TEST_CASE(a_shape_that_failed_to_close_still_answers_through_the_loop
   // material inside every one of the four cells is still found, and empty space is still empty
   const double inArm[3] = {0., 0., 0.};
   const double inUpright[3] = {9., 0., 6.};
-  const double inWasher[3] = {-10.5, 0., 0.};
+  const double inWasher[3] = {-10.5, 0., 2.};
   const double inExtra[3] = {13., 0., 0.};
-  // the washer's bore is covered by the arm, so the empty spot is the gap between the arm and the
-  // extra cell instead
-  const double betweenCells[3] = {11., 0., 0.};
+  // the washer's bore, which is empty space now that the washer sits above the arm
+  const double inBore[3] = {-8., 0., 2.};
   const double outside[3] = {0., 0., 20.};
   BOOST_CHECK(solid.Contains(inArm));
   BOOST_CHECK(solid.Contains(inUpright));
   BOOST_CHECK(solid.Contains(inWasher));
   BOOST_CHECK(solid.Contains(inExtra));
-  BOOST_CHECK(!solid.Contains(betweenCells));
+  BOOST_CHECK(!solid.Contains(inBore));
   BOOST_CHECK(!solid.Contains(outside));
 
   Rng rng(24680ULL);
