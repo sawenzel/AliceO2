@@ -19,6 +19,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 
 ClassImp(o2::base::O2FlatCSG);
 
@@ -148,23 +149,53 @@ void O2FlatCSG::HalfspaceRange(const FlatCSGHalfspace& halfspace, const double* 
   }
   const double middle = EvalHalfspace(halfspace, centre);
 
+  // The pad below tracks mag, the sum of the MAGNITUDES of the terms EvalHalfspace(centre) adds,
+  // not |middle| (the cancelled result). Deep in a subdivision, on a box straddling the surface,
+  // middle and halfWidth both go to zero, but the terms that summed to middle do not -- so a pad
+  // built from |middle| would collapse to nothing exactly on the boxes whose nActive == 0 Task 6
+  // trusts as a hard guarantee. kPadFactor is a generic small multiple of DBL_EPSILON (Higham's
+  // backward-error bound for a chain of n additions is about (n-1)*u; this evaluation is a
+  // dozen-ish terms either way), not a tight derivation for either branch.
+  constexpr double kPadFactor = 16. * std::numeric_limits<double>::epsilon();
+
   double halfWidth;
+  double mag;
   if (halfspace.kind == FlatCSGHalfspace::kTorus) {
     // f is the torus's exact signed distance, proved 1-Lipschitz in task 3: |f(x) - f(m)| <=
     // |x - m|, and the farthest point of the box from its own centre is the corner, at distance
     // |h|. sign only flips the sign of the deviation, never its magnitude (|sign| == 1), so the
     // same reach bounds sign*f - sign*f(m) too.
     halfWidth = std::sqrt(half[0] * half[0] + half[1] * half[1] + half[2] * half[2]);
+    const double* c = halfspace.c;
+    const double offset[3] = {centre[0] - c[0], centre[1] - c[1], centre[2] - c[2]};
+    const double along = offset[0] * c[3] + offset[1] * c[4] + offset[2] * c[5];
+    const double radial[3] = {offset[0] - along * c[3], offset[1] - along * c[4],
+                              offset[2] - along * c[5]};
+    const double rho = std::sqrt(radial[0] * radial[0] + radial[1] * radial[1] +
+                                 radial[2] * radial[2]);
+    // the magnitudes feeding hypot(rho - major, along) - minor, the terms EvalHalfspace's torus
+    // branch actually forms
+    mag = rho + std::abs(c[6]) + std::abs(along) + std::abs(c[7]);
   } else {
     const double* c = halfspace.c;
     const double a[3][3] = {{c[0], c[1], c[2]}, {c[1], c[3], c[4]}, {c[2], c[4], c[5]}};
     const double b[3] = {c[6], c[7], c[8]};
     double slack = 0.;
+    mag = std::abs(c[9]);
     for (int row = 0; row < 3; ++row) {
       double gradient = b[row];
+      mag += 2. * std::abs(b[row] * centre[row]);
       for (int column = 0; column < 3; ++column) {
         gradient += a[row][column] * centre[column];
+        // sum |A_ij| h_i h_j over-estimates the true |Q(x) - Q(m)| cross-term deviation ONLY
+        // when every half-extent is >= 0 -- summed over the (i,j)/(j,i) pair, the mis-indexed
+        // h_j^2-for-h_i*h_j substitution a reviewer once proposed here exceeds the correct term
+        // by |A_ij| (h_i - h_j)^2 >= 0, which needs h_i, h_j real and the inequality direction
+        // needs them nonnegative to mean "over", not merely "different". CloseShape's refusal of
+        // an inverted cell bbox is what guarantees that for every box reaching this function from
+        // SplitBox; a caller going around CloseShape must keep the invariant itself.
         slack += std::abs(a[row][column]) * half[row] * half[column];
+        mag += std::abs(a[row][column] * centre[row] * centre[column]);
       }
       slack += 2. * std::abs(gradient) * half[row];
     }
@@ -174,11 +205,10 @@ void O2FlatCSG::HalfspaceRange(const FlatCSGHalfspace& halfspace, const double* 
     halfWidth = slack;
   }
   // SplitBox's drop tests (rangeLo > 0., rangeHi <= 0.) treat this bound as exact, and Task 6
-  // leans on nActive == 0 as a HARD guarantee -- but slack/reach is itself a sum of floating-
-  // point products, so its true supremum can round a ulp or two low. Pad by a small relative
-  // amount so a halfspace whose exact bound sits at +1e-17 is never dropped by rounding alone;
-  // this only ever widens the enclosure, which is the safe direction.
-  halfWidth += 1.e-15 * (std::abs(middle) + halfWidth);
+  // leans on nActive == 0 as a HARD guarantee -- but slack/reach and middle are both floating-
+  // point sums, so their true values can round a few ulps off. Only ever widens the enclosure,
+  // which is the safe direction.
+  halfWidth += kPadFactor * mag;
   rangeLo = middle - halfWidth;
   rangeHi = middle + halfWidth;
 }
@@ -264,7 +294,11 @@ void O2FlatCSG::CloseShape()
   // never grow longest past its 0. initialiser in SplitBox, so it would be kept immediately with
   // whatever active list the (invalid, negative-half-extent) range bound happened to compute --
   // possibly nActive == 0, which reads as solid material -- with IsClosed() true and nothing
-  // printed. Same treatment as the missing-bbox case: refuse the whole shape.
+  // printed. A non-finite (NaN/Inf) bound gets its own check rather than folding into the
+  // inverted-box test: every comparison against NaN is false, so `hi < lo` alone would let a NaN
+  // box sail through silently and go on to produce a NaN range in HalfspaceRange, which fails
+  // both of SplitBox's drop tests and is kept -- possibly as another spuriously "solid"
+  // nActive == 0 box. Same treatment as the missing-bbox case: refuse the whole shape.
   bool anyProblem = false;
   for (int cell = 0; cell < GetNcells(); ++cell) {
     if (!fCellBBoxSet[cell]) {
@@ -276,12 +310,22 @@ void O2FlatCSG::CloseShape()
       continue;
     }
     for (int index = 0; index < 3; ++index) {
-      if (fCellHi[3 * cell + index] < fCellLo[3 * cell + index]) {
+      const double loValue = fCellLo[3 * cell + index];
+      const double hiValue = fCellHi[3 * cell + index];
+      if (!std::isfinite(loValue) || !std::isfinite(hiValue)) {
+        Error("CloseShape",
+              "Shape %s cell %d has a non-finite bounding box on axis %d (lo %g, hi %g). Not "
+              "building any boxes -- IsClosed() stays false.",
+              GetName(), cell, index, loValue, hiValue);
+        anyProblem = true;
+        continue;
+      }
+      if (hiValue < loValue) {
         Error("CloseShape",
               "Shape %s cell %d has an inverted bounding box on axis %d (lo %g > hi %g); "
               "SetCellBBox's arguments look swapped. Not building any boxes -- IsClosed() stays "
               "false.",
-              GetName(), cell, index, fCellLo[3 * cell + index], fCellHi[3 * cell + index]);
+              GetName(), cell, index, loValue, hiValue);
         anyProblem = true;
       }
     }

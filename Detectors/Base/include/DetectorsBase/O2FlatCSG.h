@@ -132,7 +132,18 @@ class O2FlatCSG : public TGeoBBox
   /// correctness. For a quadric it is the centred form -- with `m` the centre, `h` the
   /// half-extents and `g = A m + b`, `|Q(x) - Q(m)| <= 2 sum|g_i| h_i + sum |A_ij| h_i h_j` --
   /// which tightens quadratically as the boxes shrink. For a torus it is the 1-Lipschitz signed
-  /// distance, so the enclosure is `f(m) +/- |h|`.
+  /// distance, so the enclosure is `f(m) +/- |h|`. Both are padded by a small multiple of the
+  /// magnitude actually accumulated computing `f(m)`, not of `f(m)` itself, so the margin does
+  /// not collapse to nothing on a box straddling the surface, where `f(m)` is heavily cancelled.
+  ///
+  /// REQUIRES `lo[i] <= hi[i]` on every axis (so every half-extent is `>= 0`) and every component
+  /// of `lo`/`hi` finite. `CloseShape` enforces both on the boxes it feeds this function, because
+  /// the quadric branch's cross-term bound `sum |A_ij| h_i h_j` is only an over-estimate of the
+  /// true deviation when every `h_i, h_j >= 0` -- see the AM-GM identity at the cross-term
+  /// accumulation in the .cxx -- and because a NaN half-extent or centre would produce a NaN
+  /// range that neither drop test in `SplitBox` can act on, silently keeping a box that should
+  /// have been rejected. A caller that builds boxes without going through `CloseShape` must keep
+  /// both invariants itself; this function does not check them.
   static void HalfspaceRange(const FlatCSGHalfspace& halfspace, const double* lo, const double* hi,
                              double& rangeLo, double& rangeHi);
 

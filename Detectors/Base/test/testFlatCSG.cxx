@@ -23,6 +23,7 @@
 #include "TMath.h"
 
 #include <cmath>
+#include <limits>
 #include <vector>
 
 namespace
@@ -708,6 +709,24 @@ BOOST_AUTO_TEST_CASE(an_inverted_cell_bbox_fails_loudly_instead_of_being_kept_as
   const double lo[3] = {-1., -1., -1.};
   const double hi[3] = {1., 1., 1.};
   solid.SetCellBBox(0, hi, lo); // lo/hi swapped
+
+  solid.CloseShape();
+  BOOST_CHECK(!solid.IsClosed());
+  BOOST_CHECK_EQUAL(solid.GetNboxes(), 0);
+}
+
+BOOST_AUTO_TEST_CASE(a_nan_cell_bbox_fails_loudly_instead_of_defeating_the_inverted_box_check)
+{
+  // a NaN passes every ordinary "hi < lo" comparison silently (every comparison with NaN is
+  // false), so it must be its own check rather than fall through the inverted-box test above --
+  // otherwise it would reach HalfspaceRange, produce a NaN range that fails both of SplitBox's
+  // drop tests, and get kept as a spurious box
+  O2FlatCSG solid("nan_bbox");
+  addBoxCell(solid, 1., 1., 1.);
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const double lo[3] = {-1., -1., -1.};
+  const double hi[3] = {1., nan, 1.};
+  solid.SetCellBBox(0, lo, hi);
 
   solid.CloseShape();
   BOOST_CHECK(!solid.IsClosed());
