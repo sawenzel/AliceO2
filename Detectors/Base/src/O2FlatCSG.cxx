@@ -141,6 +141,14 @@ double O2FlatCSG::EvalHalfspace(const FlatCSGHalfspace& halfspace, const double*
 void O2FlatCSG::HalfspaceRange(const FlatCSGHalfspace& halfspace, const double* lo,
                                const double* hi, double& rangeLo, double& rangeHi)
 {
+  // Preconditions this function does not check at runtime (see the header doc comment): every
+  // half-extent nonnegative (lo[i] <= hi[i]) and every bound finite. CloseShape enforces both on
+  // the boxes it feeds SplitBox/HalfspaceRange; this catches only a caller going around it.
+  assert(std::isfinite(lo[0]) && std::isfinite(lo[1]) && std::isfinite(lo[2]) &&
+        std::isfinite(hi[0]) && std::isfinite(hi[1]) && std::isfinite(hi[2]) &&
+        lo[0] <= hi[0] && lo[1] <= hi[1] && lo[2] <= hi[2] &&
+        "O2FlatCSG::HalfspaceRange: lo/hi must be finite and lo[i] <= hi[i] on every axis");
+
   double centre[3];
   double half[3];
   for (int index = 0; index < 3; ++index) {
@@ -153,10 +161,11 @@ void O2FlatCSG::HalfspaceRange(const FlatCSGHalfspace& halfspace, const double* 
   // not |middle| (the cancelled result). Deep in a subdivision, on a box straddling the surface,
   // middle and halfWidth both go to zero, but the terms that summed to middle do not -- so a pad
   // built from |middle| would collapse to nothing exactly on the boxes whose nActive == 0 Task 6
-  // trusts as a hard guarantee. kPadFactor is a generic small multiple of DBL_EPSILON (Higham's
-  // backward-error bound for a chain of n additions is about (n-1)*u; this evaluation is a
-  // dozen-ish terms either way), not a tight derivation for either branch.
-  constexpr double kPadFactor = 16. * std::numeric_limits<double>::epsilon();
+  // trusts as a hard guarantee. The quadric chain is roughly 6 diagonal and 6 cross-term
+  // multiplications plus about 10 additions -- nearer 16 to 26 operations than a clean dozen, so
+  // a rigorous Higham bound sits close to 16u; kPadFactor is set well past that edge rather than
+  // riding it.
+  constexpr double kPadFactor = 32. * std::numeric_limits<double>::epsilon();
 
   double halfWidth;
   double mag;
@@ -173,8 +182,13 @@ void O2FlatCSG::HalfspaceRange(const FlatCSGHalfspace& halfspace, const double* 
                               offset[2] - along * c[5]};
     const double rho = std::sqrt(radial[0] * radial[0] + radial[1] * radial[1] +
                                  radial[2] * radial[2]);
-    // the magnitudes feeding hypot(rho - major, along) - minor, the terms EvalHalfspace's torus
-    // branch actually forms
+    // mag does not need a term for centre/c[0..2]'s own scale, however far the torus sits from
+    // the origin: point and centre are always within O(major + minor) of each other near the
+    // core circle, so by Sterbenz's lemma (subtracting two doubles within a factor of two of one
+    // another is exact) offset carries no rounding error regardless of |c[0..2]|. The only
+    // cancellation left is local, at rho - major, which rho + |major| already covers -- the
+    // magnitudes feeding hypot(rho - major, along) - minor, the terms EvalHalfspace's torus
+    // branch actually forms.
     mag = rho + std::abs(c[6]) + std::abs(along) + std::abs(c[7]);
   } else {
     const double* c = halfspace.c;
