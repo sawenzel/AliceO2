@@ -2084,13 +2084,18 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
         gz = 2.0 * (c[2] * x + c[4] * y + c[5] * z + c[8])
         return math.sqrt(gx * gx + gy * gy + gz * gz)
 
-    def _flat_agrees_with_cell_leaf(name, solid, seed=20260824, samples=4000, flip=None):
-        """Do the flat halfspaces and `_cell_leaf`'s padded primitives classify the same points?
+    def _flat_oracle(name, solid, seed=20260824, samples=4000):
+        """The flat blocks of a one-cell solid, and `_cell_leaf`'s verdict on sampled points.
 
-        Returns `(disagreements, scored, kinds, planes_off_convention, worst_plane_scaling)`.
-        Points within `REL_TOL` of a carrier surface are skipped: the padded conjunction is a
-        boolean of OCCT solids and neither side claims to decide its own boundary, which is the
-        same band `accept.contains_disagreements` already skips.
+        Sampling is done once and the verdicts kept, so the sign-inversion controls below re-use
+        them instead of rebuilding the padded OCCT solid per flip.
+
+        Points within `REL_TOL x max(diag, 1)` of a carrier surface are not scored, and neither
+        are points the classifier itself answers `TopAbs_ON` for. `|f| / |grad f|` is the
+        first-order distance to that block's surface for every block type here -- with `grad`
+        forced to 1 for the torus, whose block already is a signed distance -- so the band is a
+        band around the boundary and nothing else. It cannot hide the defect this test exists to
+        find: an inverted sign is a volumetric error, and a volumetric error has interior points.
         """
         import random
         from OCC.Core.BRepClass3d import BRepClass3d_SolidClassifier
@@ -2101,16 +2106,12 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
         carriers = recognise._halfspace_carriers(solid, tol)
         box = recognise._CellBox(solid, diag)
         blocks = flatmod.blocks_from_carriers(carriers)
-        if flip is not None:
-            blocks = [dict(b, sign=-b["sign"]) if index == flip else b
-                      for index, b in enumerate(blocks)]
         leaves = [recognise._cell_leaf(c, box) for c in carriers]
         cand = prim.cell("intersection" if len(leaves) > 1 else "primitive", leaves)
-        padded = prim.build_occ(cand)
-        classifier = BRepClass3d_SolidClassifier(padded)
+        classifier = BRepClass3d_SolidClassifier(prim.build_occ(cand))
         rng = random.Random(seed)
         (xlo, ylo, zlo, xhi, yhi, zhi) = recognise._bbox_of(solid)
-        disagreements = scored = 0
+        scored = []
         for _ in range(samples):
             point = (rng.uniform(xlo, xhi), rng.uniform(ylo, yhi), rng.uniform(zlo, zhi))
             near = min(abs(flatmod.eval_block(b, point))
@@ -2121,15 +2122,16 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
             state = classifier.State()
             if state == TopAbs_ON:
                 continue
-            scored += 1
-            if flatmod.flat_contains(blocks, point) != (state == TopAbs_IN):
-                disagreements += 1
-        kinds = sorted({c["kind"] for c in carriers})
-        sides = sorted({c["side"] for c in carriers})
+            scored.append((point, state == TopAbs_IN))
         worst_plane = max((flatmod.plane_scaling_error(b) for b in blocks
                            if flatmod.plane_scaling_error(b) is not None), default=None)
-        return {"name": name, "bad": disagreements, "scored": scored, "kinds": kinds,
-                "sides": sides, "blocks": blocks, "worstPlane": worst_plane}
+        return {"name": name, "solid": solid, "carriers": carriers, "blocks": blocks,
+                "points": scored, "kinds": sorted({c["kind"] for c in carriers}),
+                "sides": sorted({c["side"] for c in carriers}), "worstPlane": worst_plane}
+
+    def _flat_disagreements(blocks, points):
+        return sum(1 for point, occ_inside in points
+                   if flatmod.flat_contains(blocks, point) != occ_inside)
 
     flat_axis = gp_Ax2(gp_Pnt(0, 0, -5), gp_Dir(0, 0, 1))
     flat_tube = BRepAlgoAPI_Cut(
@@ -2140,6 +2142,12 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
     flat_scooped = BRepAlgoAPI_Cut(
         BRepPrimAPI_MakeBox(gp_Pnt(-3, -3, -3), 6.0, 6.0, 6.0).Shape(),
         BRepPrimAPI_MakeSphere(gp_Pnt(3, 3, 3), 2.5).Shape()).Shape()
+    # A cylinder about (1, 1, 1): the ONLY fixture with off-diagonal quadric coefficients. Every
+    # axis-aligned carrier leaves a01, a02 and a12 at zero, so a transposition in `_quadric`'s
+    # slots -- or a mismatch against `EvalHalfspace`'s 2*(c1 xy + c2 xz + c4 yz) -- would pass a
+    # suite built only from them and ship a wrong solid. A = I - dd^T here is -1/3 off-diagonal.
+    flat_tilted = BRepPrimAPI_MakeCylinder(
+        gp_Ax2(gp_Pnt(-1, -1, -1), gp_Dir(1, 1, 1)), 1.5, 6.0).Shape()
     flat_cases = (
         ("a box", BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 2.0, 3.0, 4.0).Shape()),
         ("a tube, whose bore is an exterior cylinder", flat_tube),
@@ -2150,13 +2158,15 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
         ("a box with a spherical scoop, an exterior sphere", flat_scooped),
         ("a torus ply", BRepPrimAPI_MakeTorus(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)),
                                               4.0, 1.0).Shape()),
+        ("a cylinder tilted about (1,1,1), whose quadric is dense", flat_tilted),
     )
-    flat_results = [_flat_agrees_with_cell_leaf(name, solid) for name, solid in flat_cases]
+    flat_results = [_flat_oracle(name, solid) for name, solid in flat_cases]
     for result in flat_results:
+        bad = _flat_disagreements(result["blocks"], result["points"])
         check(f"the flat halfspaces of {result['name']} classify exactly as _cell_leaf's "
               "primitives",
-              result["bad"] == 0 and result["scored"] > 0,
-              f"{result['bad']} of {result['scored']} points disagree; carriers "
+              bad == 0 and len(result["points"]) > 0.5 * 4000,
+              f"{bad} of {len(result['points'])} scored points disagree; carriers "
               f"{'+'.join(result['kinds'])} ({'+'.join(result['sides'])})")
 
     # All five carrier kinds must be covered, or the oracle comparison above proves less than it
@@ -2168,20 +2178,114 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
     check("the flat oracle comparison exercises a complemented (exterior) carrier",
           any("exterior" in r["sides"] for r in flat_results),
           "; ".join(f"{r['name']}: {'+'.join(r['sides'])}" for r in flat_results))
+    # and a quadric with genuinely non-zero off-diagonal terms, per the note on `flat_tilted`
+    flat_dense = [r["name"] for r in flat_results
+                  if any(b["kind"] == "quadric" and max(abs(b["c"][1]), abs(b["c"][2]),
+                                                        abs(b["c"][4])) > 1.0e-3
+                         for b in r["blocks"])]
+    check("the flat oracle comparison exercises off-diagonal quadric coefficients",
+          bool(flat_dense), f"dense-quadric fixtures: {flat_dense}")
 
-    # The negative control on the comparison itself. Six checks that report zero disagreements
-    # would read the same way if the sampler scored nothing that discriminates, so invert one
-    # halfspace at a time -- the exact defect section 3.3 says is silent -- and require every
-    # inversion to be caught. This is what makes the six checks above evidence.
-    flat_control_name, flat_control_solid = flat_cases[1]
-    flat_control_n = len(next(r for r in flat_results
-                              if r["name"] == flat_control_name)["blocks"])
-    flat_control_missed = [index for index in range(flat_control_n)
-                           if _flat_agrees_with_cell_leaf(flat_control_name, flat_control_solid,
-                                                          samples=1500, flip=index)["bad"] == 0]
-    check("inverting any one halfspace of the tube is caught by the same comparison",
-          flat_control_n > 0 and not flat_control_missed,
-          f"{flat_control_n} halfspace(s), missed {flat_control_missed}")
+    # The negative control on the comparison itself. Zero disagreements would read the same way
+    # if the sampler scored nothing that discriminates, so invert one halfspace at a time -- the
+    # exact defect section 3.3 says is silent -- across EVERY fixture, and require every
+    # inversion to be caught. This is what makes the checks above evidence rather than assertion.
+    flat_missed = []
+    for result in flat_results:
+        for index in range(len(result["blocks"])):
+            flipped = [dict(b, sign=-b["sign"]) if i == index else b
+                       for i, b in enumerate(result["blocks"])]
+            if _flat_disagreements(flipped, result["points"]) == 0:
+                flat_missed.append(f"{result['name']}[{index}]")
+    flat_flips = sum(len(r["blocks"]) for r in flat_results)
+    check("inverting any one halfspace of any fixture is caught by the same comparison",
+          flat_flips > 0 and not flat_missed,
+          f"{flat_flips} inversion(s) over {len(flat_results)} fixtures, missed {flat_missed}")
+
+    # --- the cone's mirror nappe, which the oracle sampler structurally cannot see -------------
+    # `sign*Q <= 0` for a cone is `rho <= |r + k u|`: the DOUBLE cone. The mirror nappe lies
+    # beyond the apex, which for an interior cone is outside the part bbox -- so neither the
+    # sampler above nor `accept.contains_disagreements` (part bbox + 5%) ever looks at it. It is
+    # not harmless there: `Contains_Loop` tests halfspaces with no cell-box clip while `Contains`
+    # walks boxes built inside the declared box, so a nappe leaving that box makes O2FlatCSG's
+    # own twins disagree. The assertion therefore has to be direct.
+    flat_cone_result = next(r for r in flat_results if r["name"] == "a cone frustum")
+    flat_cone_carrier = next(c for c in flat_cone_result["carriers"] if c["kind"] == "cone")
+    flat_apex, flat_k = flatmod.cone_apex(flat_cone_carrier)
+    flat_axis_d = flat_cone_carrier["d"]
+    flat_ref = flat_cone_carrier["x"]
+
+    def _flat_along_apex(steps, radial=0.0):
+        """A point `steps` along the axis from the apex, positive being the material side.
+
+        `rho <= r + k u` holds on the side where `k * (x - apex).d > 0`, so the material side is
+        `+sign(k) d` and the mirror nappe is the other one, whatever the sign of `k`.
+        """
+        walk = math.copysign(1.0, flat_k) * steps
+        return tuple(flat_apex[i] + walk * flat_axis_d[i] + radial * flat_ref[i]
+                     for i in range(3))
+
+    # a point strictly inside the mirror nappe: |r + k u| = |k| * 5 there, and the radius is half
+    flat_mirror = _flat_along_apex(-5.0, radial=0.5 * abs(flat_k) * 5.0)
+    flat_real = _flat_along_apex(5.0, radial=0.5 * abs(flat_k) * 5.0)
+    # the emitter's contract for ONE cone carrier, isolated from the fixture's caps
+    flat_cone_blocks = flatmod.blocks_from_carriers([flat_cone_carrier])
+    flat_cone_quadric = [b for b in flat_cone_blocks
+                         if not (b["kind"] == "quadric" and all(b["c"][i] == 0.0
+                                                                for i in range(6)))]
+    check("the cone quadric alone would admit a point on the mirror nappe",
+          len(flat_cone_quadric) == 1 and flatmod.flat_contains(flat_cone_quadric, flat_mirror),
+          f"the point {tuple(round(v, 6) for v in flat_mirror)} beyond the apex "
+          f"{tuple(round(v, 6) for v in flat_apex)}")
+    check("the emitted interior cone excludes the mirror nappe beyond its apex",
+          len(flat_cone_blocks) == 2
+          and not flatmod.flat_contains(flat_cone_blocks, flat_mirror),
+          f"{len(flat_cone_blocks)} block(s) for one carrier, apex plane included")
+    check("the apex plane cuts nothing on the cone's real nappe",
+          flatmod.flat_contains(flat_cone_blocks, flat_real),
+          f"the mirrored point {tuple(round(v, 6) for v in flat_real)} is still material")
+    flat_apex_plane = flatmod.cone_apex_plane(flat_cone_carrier)
+    check("the apex plane obeys the 2b = n convention like any other plane",
+          flatmod.plane_scaling_error(flat_apex_plane) < 1.0e-15,
+          f"residual {flatmod.plane_scaling_error(flat_apex_plane)}")
+
+    # An EXTERIOR cone cannot be repaired that way -- the complement of one nappe is a union, so
+    # a plane there would cut real material -- and must be DECLINED wherever the cell box reaches
+    # past the apex. That needs the box, so it lives in `check_cell_box`, which the CONVERTER
+    # owes per cell with the same lo/hi it passes to `SetCellBBox`.
+    flat_exterior_cone = dict(flat_cone_carrier, side="exterior")
+    check("an exterior cone is not silently given an apex plane",
+          flatmod.cone_apex_plane(flat_exterior_cone) is None,
+          "cone_apex_plane declines to repair a complemented cone")
+
+    def _flat_cube_at(centre, half=0.5):
+        return ([centre[i] - half for i in range(3)], [centre[i] + half for i in range(3)])
+
+    flat_past_lo, flat_past_hi = _flat_cube_at(_flat_along_apex(-5.0))
+    try:
+        flatmod.check_cell_box([flat_exterior_cone], flat_past_lo, flat_past_hi)
+        flat_box_reason = ""
+    except recognise.Declined as why:
+        flat_box_reason = str(why)
+    check("an exterior cone whose cell box reaches past its apex is declined",
+          "mirror nappe" in flat_box_reason, f"reason: {flat_box_reason or 'nothing raised'}")
+    flat_short_lo, flat_short_hi = _flat_cube_at(_flat_along_apex(5.0))
+    try:
+        flatmod.check_cell_box([flat_exterior_cone], flat_short_lo, flat_short_hi)
+        flat_stay_ok = True
+    except recognise.Declined:
+        flat_stay_ok = False
+    check("an exterior cone whose cell box stays short of its apex is not declined",
+          flat_stay_ok, f"box {tuple(round(v, 3) for v in flat_short_lo)} .. "
+                        f"{tuple(round(v, 3) for v in flat_short_hi)}")
+    # and an INTERIOR cone is never refused by that check, since its apex plane already fixed it
+    try:
+        flatmod.check_cell_box([flat_cone_carrier], flat_past_lo, flat_past_hi)
+        flat_interior_ok = True
+    except recognise.Declined:
+        flat_interior_ok = False
+    check("an interior cone is not refused for reaching past its apex",
+          flat_interior_ok, "the apex plane already removed the mirror nappe")
 
     # The plane convention of design section 3.1, asserted where it is CREATED. `s.Q <= 0` names
     # the same halfspace under any positive rescaling, so no geometry test above would notice a
@@ -2194,7 +2298,7 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
           flat_plane_worst is not None and flat_plane_worst < 1.0e-15,
           f"worst | |2b| - 1 | over the fixtures: "
           f"{'no plane blocks' if flat_plane_worst is None else f'{flat_plane_worst:.3g}'}")
-    # negative control on the check itself: a plane rescaled by 3 must be caught
+    # negative control on that check itself: a plane rescaled by 3 must be caught
     flat_tripled = {"kind": "quadric", "sign": 1.0,
                     "c": [0.0] * 6 + [1.5, 0.0, 0.0, -3.0, 0.0]}
     check("a plane block rescaled by three is refused by the convention check",
@@ -2210,13 +2314,19 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
     check("a carrier with no quadric form is declined, not guessed at",
           "no quadric form" in flat_declined, f"reason: {flat_declined or 'nothing raised'}")
 
+    # A torus axis is normalised on the way into a block, because `AddTorus` normalises on load
+    # and two evaluators reading one file must not differ.
+    flat_long_axis = flatmod.blocks_from_carriers(
+        [{"kind": "torus", "side": "interior", "p": (0.0, 0.0, 0.0), "d": (0.0, 0.0, 3.0),
+          "r": 4.0, "rt": 1.0}])[0]
+    check("a torus block's axis is a unit vector whatever the carrier carried",
+          abs(math.sqrt(sum(flat_long_axis["c"][3 + i] ** 2 for i in range(3))) - 1.0) < 1.0e-15,
+          f"axis {tuple(flat_long_axis['c'][3:6])}")
+
     # The sidecar writer's record sizes, against the format `LoadFlatCSG` checks before reading:
     # 20-byte header, 100-byte halfspace, 64-byte cell, little-endian, no padding.
     flat_sidecar = Path("/tmp/csg_selftest_flatcsg.bin")
-    flat_probe_blocks = flatmod.blocks_from_carriers(
-        recognise._halfspace_carriers(flat_tube,
-                                      recognise.REL_TOL * max(decompose.bbox_diagonal(flat_tube),
-                                                              1.0)))
+    flat_probe_blocks = flat_results[1]["blocks"]
     flat_probe_cells = [{"first": 0, "count": len(flat_probe_blocks), "volume": 1.5,
                          "lo": [-2.0, -2.0, -5.0], "hi": [2.0, 2.0, 5.0]}]
     flatmod.write_sidecar(flat_sidecar, flat_probe_blocks, flat_probe_cells)
@@ -2625,6 +2735,51 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
                   and back.ClassName() == record["candidate"]["leaves"][0]["type"],
                   f"read {back.ClassName() if back else 'nothing'}")
             handle.Close()
+
+        # --- the loaded shape reads the slots the writer meant -----------------------------
+        # Byte parity with `WriteFlatCSG` says the two writers agree; it says nothing about
+        # whether `LoadFlatCSG` and `O2FlatCSG::EvalHalfspace` INTERPRET slot 1 as a01 and slot 4
+        # as a12. This closes that, and closes the duplication between `flat.eval_block` and
+        # `EvalHalfspace` at the same time: a sidecar written by `flat.write_sidecar`, loaded and
+        # closed in C++, must answer `Contains` exactly as `flat.flat_contains` does. The tilted
+        # cylinder is in the loop on purpose -- it is the only fixture with off-diagonal terms,
+        # so a transposition in either implementation shows up here.
+        ROOT.gInterpreter.AddIncludePath(f"{ROOT.gSystem.Getenv('O2_ROOT')}/include")
+        ROOT.gSystem.Load("libO2DetectorsBase")
+        ROOT.gInterpreter.Declare(
+            '#include "DetectorsBase/O2FlatCSG.h"\n'
+            'namespace o2 { namespace base {\n'
+            'bool LoadFlatCSG(const std::string& file, O2FlatCSG& solid);\n'
+            '} }')
+        flat_rt_bad = flat_rt_scored = 0
+        flat_rt_failed = []
+        for flat_index, result in enumerate(flat_results):
+            blocks = result["blocks"]
+            xlo, ylo, zlo, xhi, yhi, zhi = recognise._bbox_of(result["solid"])
+            # the part bbox is an outer bound of this cell, because the cell IS the part here
+            cells = [{"first": 0, "count": len(blocks), "volume": 1.0,
+                      "lo": [xlo, ylo, zlo], "hi": [xhi, yhi, zhi]}]
+            sidecar = Path(f"/tmp/csg_selftest_flatrt_{flat_index}.bin")
+            flatmod.write_sidecar(sidecar, blocks, cells)
+            loaded = ROOT.o2.base.O2FlatCSG(f"probe_flat_{flat_index}")
+            if not ROOT.o2.base.LoadFlatCSG(str(sidecar), loaded):
+                flat_rt_failed.append(f"{result['name']}: LoadFlatCSG refused the sidecar")
+                continue
+            loaded.CloseShape()
+            if loaded.GetNhalfspaces() != len(blocks) or loaded.GetNcells() != 1:
+                flat_rt_failed.append(f"{result['name']}: loaded "
+                                      f"{loaded.GetNhalfspaces()}/{loaded.GetNcells()}")
+                continue
+            for point, _occ in result["points"]:
+                flat_rt_scored += 1
+                if bool(loaded.Contains(array("d", list(point)))) != \
+                        flatmod.flat_contains(blocks, point):
+                    flat_rt_bad += 1
+        check("a sidecar written in Python and loaded in C++ answers Contains identically",
+              not flat_rt_failed and flat_rt_bad == 0 and flat_rt_scored > 0,
+              f"{flat_rt_bad} of {flat_rt_scored} points disagree over {len(flat_results)} "
+              f"fixtures" + ("; " + "; ".join(flat_rt_failed) if flat_rt_failed else ""))
+
 
     n_ok = sum(1 for _n, ok, _d in checks if ok)
     if verbose:

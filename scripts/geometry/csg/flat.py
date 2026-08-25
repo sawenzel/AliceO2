@@ -93,13 +93,102 @@ def quadric_from_carrier(carrier):
 
 
 def torus_from_carrier(carrier):
-    """`(sign, centre, axis, major, minor)` for a torus carrier."""
+    """`(sign, centre, axis, major, minor)` for a torus carrier.
+
+    The axis is normalised here. `O2FlatCSG::AddTorus` normalises what it is given, so a non-unit
+    axis written to a sidecar would make the loaded shape and `eval_block` evaluate two different
+    tori and neither would say so. Carriers are unit today -- `_halfspace_carriers` builds them
+    through `_unit` -- so this changes nothing now and closes the divergence for good.
+    """
     sign = -1.0 if carrier["side"] == "exterior" else 1.0
-    return sign, list(carrier["p"]), list(carrier["d"]), carrier["r"], carrier["rt"]
+    axis = list(carrier["d"])
+    length = math.sqrt(sum(v * v for v in axis))
+    if length <= 0.0 or not math.isfinite(length):
+        raise ValueError(f"a torus carrier's axis {tuple(axis)} has no direction")
+    return (sign, list(carrier["p"]), [v / length for v in axis], carrier["r"], carrier["rt"])
+
+
+# Below this the tangent of a cone's semi-angle is a cylinder's, and the carrier has no apex.
+# `recognise._cell_leaf` uses the same floor and declines there rather than build a leaf.
+_APEX_SLOPE_FLOOR = 1.0e-30
+
+
+def cone_apex(carrier):
+    """The apex of a cone carrier, or None when its semi-angle is too small for one to exist."""
+    k = math.tan(carrier["a"])
+    if abs(k) < _APEX_SLOPE_FLOOR:
+        return None, k
+    p, d = carrier["p"], carrier["d"]
+    return tuple(p[i] - (carrier["r"] / k) * d[i] for i in range(3)), k
+
+
+def cone_apex_plane(carrier):
+    """The plane block an INTERIOR cone carrier needs beside its quadric, or None.
+
+    A cone's carrier halfspace is `rho <= r + k u`, but `sign*Q <= 0` is `rho <= |r + k u|` --
+    the DOUBLE cone. The mirror nappe beyond the apex is in the quadric and is not in the
+    carrier, which is why `recognise._cell_leaf` clips its window at the apex instead of letting
+    the second nappe into the leaf. The difference is not academic: `Contains_Loop` tests
+    halfspaces with no cell-box clip while `Contains` walks boxes built inside the declared cell
+    box, so a mirror nappe reaching out of that box makes the class's own twins disagree.
+
+    Removing it is exact and costs one block: `{rho <= r + k u} == {Q <= 0} n {r + k u >= 0}`,
+    and `{r + k u >= 0}` is the plane through the apex with outward normal `-sign(k) d`. That
+    normal is already unit, so the block obeys the `2b = n` convention of design section 3.1
+    without any rescaling, and it needs no cell box.
+
+    An EXTERIOR cone gets nothing here, and must not: the complement of one nappe is a union,
+    not an intersection, so a plane would cut real material away. `check_cell_box` is where that
+    case is refused instead.
+    """
+    if carrier["kind"] != "cone" or carrier["side"] == "exterior":
+        return None
+    apex, k = cone_apex(carrier)
+    if apex is None:
+        return None
+    d = carrier["d"]
+    n = tuple(-math.copysign(1.0, k) * d[i] for i in range(3))
+    return {"kind": "quadric", "sign": 1.0,
+            "c": _quadric([[0.0] * 3 for _ in range(3)],
+                          [0.5 * n[0], 0.5 * n[1], 0.5 * n[2]],
+                          -(n[0] * apex[0] + n[1] * apex[1] + n[2] * apex[2])) + [0.0]}
+
+
+def check_cell_box(carriers, lo, hi):
+    """`Declined` when a carrier's quadric describes more than the carrier over this cell box.
+
+    One case reaches here, and only one. An EXTERIOR cone's material is `rho >= r + k u`, but the
+    stored quadric says `rho >= |r + k u|`, so beyond the apex it carves out a solid mirror cone
+    that is real material. `cone_apex_plane` cannot fix it, because the complement of one nappe
+    is a union. The sound answer is to refuse the part, and refusing needs the cell box, which is
+    the only thing that says how far the cell reaches.
+
+    **This is the converter's obligation and it is not discharged by `blocks_from_carriers`.**
+    Whatever calls the flat emitter must call this with the same `lo`/`hi` it passes to
+    `O2FlatCSG::SetCellBBox`, per cell, before writing a sidecar.
+    """
+    from csg import recognise
+    corners = [(x, y, z) for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])]
+    for carrier in carriers:
+        if carrier["kind"] != "cone" or carrier["side"] != "exterior":
+            continue
+        apex, k = cone_apex(carrier)
+        if apex is None:
+            continue
+        d = carrier["d"]
+        reach = min(k * sum((corner[i] - apex[i]) * d[i] for i in range(3)) for corner in corners)
+        if reach < 0.0:
+            raise recognise.Declined(
+                "an exterior cone carrier whose cell box reaches past its apex: the quadric's "
+                "mirror nappe would remove material that is really there")
 
 
 def blocks_from_carriers(carriers):
-    """One halfspace block per carrier, in the carriers' own order."""
+    """The halfspace blocks of one cell, in the carriers' own order.
+
+    One block per carrier, plus the apex plane an interior cone needs -- so this is NOT a
+    one-to-one map and a caller sizing a cell's `count` must use `len(...)` of the result.
+    """
     blocks = []
     for carrier in carriers:
         if carrier["kind"] == "torus":
@@ -109,6 +198,9 @@ def blocks_from_carriers(carriers):
         else:
             sign, block = quadric_from_carrier(carrier)
             blocks.append({"kind": "quadric", "sign": sign, "c": block + [0.0]})
+        apex_plane = cone_apex_plane(carrier)
+        if apex_plane is not None:
+            blocks.append(apex_plane)
     return blocks
 
 
