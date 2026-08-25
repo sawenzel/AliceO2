@@ -53,7 +53,30 @@ false accept was caught and closed (`accept.contains_disagreements`: OCCT `Cut` 
 `IsDone()` with zero solids both ways — `ST0923290_01#b19`). R5's demand is measured: 21 parts
 over the cell/leaf budgets (task-r4-report §7), plus 24 declines where a dihedrally-convex piece
 is not a carrier-arrangement cell — the split-at-every-carrier-crossing trade is R5's to price.
-Next: **R5 (`TGeoBVHCSG`)** and/or **R6 (the census)** — R6 is cheap and sharpens R5's demand.
+
+**R5 is DONE** (2026-08-25, the ten-task run beginning at `eaab5b2f5b`; the record is
+[`Stream_AK_FlatCSG.md`](Stream_AK_FlatCSG.md), the spec
+[`Design_FlatCSGSolid.md`](Design_FlatCSGSolid.md)). The class shipped is
+**`o2::base::O2FlatCSG`**, not `TGeoBVHCSG` — a union of intersection-cells over signed implicit
+halfspaces with a BVH over sub-boxes of those cells, a `_Loop` twin behind every accelerated query
+and bit identity required between them, a versioned `flatcsg_*.bin` sidecar, and 31 ctest cases.
+**Ten parts convert that declined before**, every one at `dV_sym = 0`: TRD `BREF1` (47 cells / 282
+halfspaces), `VolTOFrail` (37/227), `B077__body` (20/122); ITS `SpaceFrameVolumeLay3/4/5/6__body`
+(17/111 each), `IBCYSSFlangeC` (12/96); TPC `TPC_OCGEM` ×2 (12/72). Corpora PIPE 166/9/1 (unchanged)
+· ITS **255/9/0** · TPC **165/7/0** · ABSO 29/0/0 (unchanged) · TRD **1170/0/0** (100 %);
+known-source **1785/1785**; all 1775 previously accepted candidates bit-identical.
+**The crossover is measured, not predicted**: against the same parts emitted as plain composites,
+`Contains` 3.2–34×, `Safety` 4.5–30×, `DistFromInside` 0.9–4.5×, `DistFromOutside` 0.4–2.3× (the
+one kernel that can lose), transport 0.83–7.1×; the transport crossover is at **45 composite
+leaves** against a routing threshold of 64, so the emission policy is unchanged and is now on
+evidence. Of the two counts the design named, **cells predicts better than halfspaces** on every
+kernel. The split defaults moved from (6, 0.01) to **(4, 0.05)** on the sweep, which is worth
+2.1× median transport and 4–19× memory. `Safety`'s inside branch is a structural lower bound that
+returns `0.` for 78–100 % of interior points; that is a tessellation-resolution property with a
+closed form, **not** a depth-cap one, and the fix is the 1-Lipschitz per-halfspace safety, which is
+the successor stream's first item.
+Next: **R6 (the census)** — MAG, TOF, MFT, MCH, MID, FT0, FV0, ZDC, EMC, PHS, CPV, HMP — which is
+what turns the crossover from a statement about ten parts into one about the geometry.
 
 ## 2. The rungs, in order
 

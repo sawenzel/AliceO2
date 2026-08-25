@@ -265,7 +265,7 @@ export ALIBUILD_WORK_DIR=$HOME/alisw/sw
 B=$HOME/alisw/sw/BUILD/O2-latest-swenzel-bvhsurfacesolid/O2
 cd $B && eval "$($HOME/alisw/alibuild/alienv printenv O2/latest-swenzel-bvhsurfacesolid-o2,ninja/latest,CMake/latest)" \
   && export CMAKE_PREFIX_PATH=$HOME/alisw/sw/ubuntu2404_aarch64/Clang/v20.1.7-local1:$CMAKE_PREFIX_PATH \
-  && cmake . >/dev/null && ninja O2exe-detectors-base-test-FlatCSG
+  && cmake . >/dev/null && ninja O2test-detectorsbase-FlatCSG
 ```
 
 Expected: FAIL — `DetectorsBase/O2FlatCSG.h: No such file or directory`.
@@ -485,7 +485,7 @@ export ALIBUILD_WORK_DIR=$HOME/alisw/sw
 B=$HOME/alisw/sw/BUILD/O2-latest-swenzel-bvhsurfacesolid/O2
 cd $B && eval "$($HOME/alisw/alibuild/alienv printenv O2/latest-swenzel-bvhsurfacesolid-o2,ninja/latest,CMake/latest)" \
   && export LD_LIBRARY_PATH=$B/stage/lib:$B/stage/lib64:$LD_LIBRARY_PATH \
-  && ninja O2exe-detectors-base-test-FlatCSG && ctest -R 'FlatCSG|BVHSurfaceSolid|BVHAssembly' --output-on-failure
+  && ninja O2test-detectorsbase-FlatCSG && ctest -R 'FlatCSG|BVHSurfaceSolid|BVHAssembly' --output-on-failure
 ```
 
 Expected: PASS, 3 FlatCSG cases; `BVHSurfaceSolid` and `BVHAssembly` unchanged and green.
@@ -669,7 +669,7 @@ BOOST_AUTO_TEST_CASE(a_ray_leaving_one_cell_into_a_touching_one_does_not_stop_be
 export ALIBUILD_WORK_DIR=$HOME/alisw/sw
 B=$HOME/alisw/sw/BUILD/O2-latest-swenzel-bvhsurfacesolid/O2
 cd $B && eval "$($HOME/alisw/alibuild/alienv printenv O2/latest-swenzel-bvhsurfacesolid-o2,ninja/latest,CMake/latest)" \
-  && ninja O2exe-detectors-base-test-FlatCSG
+  && ninja O2test-detectorsbase-FlatCSG
 ```
 
 Expected: FAIL — `no member named 'DistFromInside_Loop' in 'o2::base::O2FlatCSG'`.
@@ -935,7 +935,7 @@ export ALIBUILD_WORK_DIR=$HOME/alisw/sw
 B=$HOME/alisw/sw/BUILD/O2-latest-swenzel-bvhsurfacesolid/O2
 cd $B && eval "$($HOME/alisw/alibuild/alienv printenv O2/latest-swenzel-bvhsurfacesolid-o2,ninja/latest,CMake/latest)" \
   && export LD_LIBRARY_PATH=$B/stage/lib:$B/stage/lib64:$LD_LIBRARY_PATH \
-  && ninja O2exe-detectors-base-test-FlatCSG && ctest -R FlatCSG --output-on-failure
+  && ninja O2test-detectorsbase-FlatCSG && ctest -R FlatCSG --output-on-failure
 ```
 
 Expected: PASS, 6 cases.

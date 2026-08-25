@@ -33,6 +33,9 @@ done), **historical** (kept for the reasoning, no longer steering anything).
 | `Handoff_IntegrationTest.md` | open | the Geant integration test brief; basis of Track 1 |
 | `Handoff_Recognition.md` | open | the recognition programme: prism + revolved recognisers, before the closure test |
 | `Handoff_ClosureTest.md` | open | the closure test: real physics through the round trip, for a fresh session |
+| `Handoff_FlatCSG.md` | open | the flat-CSG programme: rungs R1-R6; R1-R5 done, R6 (the census) next |
+| `Design_FlatCSGSolid.md` | reference | the spec of `o2::base::O2FlatCSG`: representation, sub-cell BVH, queries, twins, sidecar |
+| `Plan_FlatCSGSolid.md` | record | the ten-task implementation plan R5 was executed from |
 | `MeshHealing.md` | open | mesh validity ≠ accuracy; repair options unbuilt |
 | `Workstreams.md` | historical | the parallel-streams contract (waves 0–3, executed) |
 | `CodeReview_Fable.md`, `_v2.md` | historical | the two defect registers that drove waves 0–1 |
@@ -66,6 +69,17 @@ done), **historical** (kept for the reasoning, no longer steering anything).
 | `Stream_W_DoublePlacement.md` | record | ALICE3's duplicate identity placement: 103 leaf parts, not 206 |
 | `Stream_X_SubPatchBVH.md` | record | sub-patch cover boxes; safety candidates 8.6 → 3.9/call |
 | `Stream_Y_SidecarJoinTolerance.md` | record | the wire-join gate honours the model's declared tolerance |
+| `Stream_Z_IntegrationDemo.md` | record | IRIS and Bagger through `o2-sim` as sensitive external detectors |
+| `Stream_AA_FlatCSG.md` | record | the cell-count table and the verdict that became the flat-CSG programme |
+| `Stream_AC_OTOFTraversal.md` | record | the oTOF XCAF traversal: 20 prototypes, 62 628 placements |
+| `Stream_AD_TGeoToStep.md` | record | TGeo → STEP, and the round trip back |
+| `Stream_AE_BVHAssembly.md` | record | `O2BVHAssembly`, and its honest limit at ≤68 daughters |
+| `Stream_AF_RoundtripITS.md` | record | the round trip on ITS |
+| `Stream_AG_RoundtripTPC.md` | record | the round trip on the TPC |
+| `Stream_AH_RoundtripPassives.md` | record | the round trip on TRD, MAG and ABSO |
+| `Stream_AI_WriterFixes.md` | record | the three writer fixes |
+| `Stream_AJ_Recognition.md` | record | the recognition programme: every primitive class the writer emits, recognised |
+| `Stream_AK_FlatCSG.md` | record | `O2FlatCSG`: ten new parts, the measured crossover, the split knobs, the emission policy |
 
 `attic/` holds parked stale script variants (pre-branch `O2_TGeoToCAD*` experiments and scratch);
 nothing in it is live, and it is untracked on purpose.
