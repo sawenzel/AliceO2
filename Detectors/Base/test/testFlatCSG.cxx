@@ -15,7 +15,9 @@
 #include <boost/test/unit_test.hpp>
 
 #include "DetectorsBase/O2FlatCSG.h"
+#include "DetectorsBase/O2SurfaceSolidIO.h"
 
+#include "TFile.h"
 #include "TGeoBBox.h"
 #include "TGeoShape.h"
 #include "TGeoTorus.h"
@@ -24,6 +26,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <limits>
 #include <vector>
 
@@ -1230,4 +1233,71 @@ BOOST_AUTO_TEST_CASE(a_zero_extent_cell_bbox_does_not_burn_the_whole_cubify_budg
   // measured 272 boxes with the guard in place; a generous margin above that, and two orders of
   // magnitude below what hitting the per-path ceiling on every branch would produce
   BOOST_CHECK_LT(solid.GetNboxes(), 600);
+}
+
+BOOST_AUTO_TEST_CASE(a_sidecar_round_trip_reproduces_the_solid)
+{
+  O2FlatCSG original("bracket_io");
+  buildBracket(original);
+  original.CloseShape();
+
+  const std::string path = "testFlatCSG_roundtrip.bin";
+  BOOST_REQUIRE(o2::base::WriteFlatCSG(path, original)); // test-only writer, see step 3
+
+  O2FlatCSG loaded("bracket_io_loaded");
+  BOOST_REQUIRE(o2::base::LoadFlatCSG(path, loaded));
+  loaded.CloseShape();
+
+  BOOST_CHECK_EQUAL(loaded.GetNhalfspaces(), original.GetNhalfspaces());
+  BOOST_CHECK_EQUAL(loaded.GetNcells(), original.GetNcells());
+  BOOST_CHECK_EQUAL(loaded.GetNboxes(), original.GetNboxes());
+  BOOST_CHECK_EQUAL(loaded.Capacity(), original.Capacity());
+
+  Rng rng(97531ULL);
+  for (int trial = 0; trial < 100000; ++trial) {
+    const double point[3] = {rng.uniform(-13., 13.), rng.uniform(-5., 5.), rng.uniform(-3., 14.)};
+    BOOST_REQUIRE_EQUAL(loaded.Contains(point), original.Contains(point));
+  }
+  std::filesystem::remove(path);
+}
+
+BOOST_AUTO_TEST_CASE(a_truncated_sidecar_is_refused_rather_than_half_loaded)
+{
+  O2FlatCSG original("bracket_trunc");
+  buildBracket(original);
+  original.CloseShape();
+  const std::string path = "testFlatCSG_truncated.bin";
+  BOOST_REQUIRE(o2::base::WriteFlatCSG(path, original));
+  std::filesystem::resize_file(path, std::filesystem::file_size(path) - 17);
+
+  O2FlatCSG loaded("bracket_trunc_loaded");
+  BOOST_CHECK(!o2::base::LoadFlatCSG(path, loaded));
+  std::filesystem::remove(path);
+}
+
+BOOST_AUTO_TEST_CASE(the_shape_survives_a_ROOT_file_without_its_sidecar)
+{
+  O2FlatCSG original("bracket_root");
+  buildBracket(original);
+  original.CloseShape();
+
+  const std::string path = "testFlatCSG_shape.root";
+  {
+    TFile file(path.c_str(), "RECREATE");
+    file.WriteObject(&original, "shape");
+  }
+  O2FlatCSG* restored = nullptr;
+  {
+    TFile file(path.c_str(), "READ");
+    file.GetObject("shape", restored);
+  }
+  BOOST_REQUIRE(restored != nullptr);
+  restored->CloseShape(); // the BVH is not streamed; it is rebuilt
+
+  Rng rng(11223ULL);
+  for (int trial = 0; trial < 100000; ++trial) {
+    const double point[3] = {rng.uniform(-13., 13.), rng.uniform(-5., 5.), rng.uniform(-3., 14.)};
+    BOOST_REQUIRE_EQUAL(restored->Contains(point), original.Contains(point));
+  }
+  std::filesystem::remove(path);
 }

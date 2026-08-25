@@ -110,6 +110,9 @@ class O2FlatCSG : public TGeoBBox
   /// The AABB of cell \a cell. The halfspaces alone do not bound a cell -- an intersection of
   /// halfspaces can be unbounded -- so the converter supplies the box the decomposition measured.
   void SetCellBBox(int cell, const double* lo, const double* hi);
+  /// The AABB `SetCellBBox` recorded for cell \a cell, for the sidecar writer. Reads back zeros
+  /// for a cell whose box was never set.
+  void GetCellBBox(int cell, double* lo, double* hi) const;
 
   /// Build the sub-cell boxes (and, from task 5, the BVH). Call once, after the last AddCell.
   void CloseShape();
@@ -271,14 +274,22 @@ class O2FlatCSG : public TGeoBBox
   std::vector<FlatCSGHalfspace> fHalfspaces; ///< the flat halfspace array
   std::vector<FlatCSGCell> fCells;           ///< the DNF's cells, indexing into it
 
-  std::vector<FlatCSGBox> fBoxes; ///< the sub-cell boxes produced by `CloseShape`
-  std::vector<int> fActive;       ///< the boxes' active-halfspace lists, concatenated
-  std::vector<double> fCellLo;    ///< each cell's AABB low corner, 3 doubles per cell
-  std::vector<double> fCellHi;    ///< each cell's AABB high corner, 3 doubles per cell
+  /// The sub-cell boxes produced by `CloseShape`. Not streamed -- like `fBVH`, this is rebuilt
+  /// from `fHalfspaces`, `fCells`, `fCellLo` and `fCellHi` by `CloseShape`, and streaming it would
+  /// only be a second thing that can disagree with the data it describes (design section 7).
+  std::vector<FlatCSGBox> fBoxes; //!
+  /// The boxes' active-halfspace lists, concatenated. Derived alongside `fBoxes`; not streamed
+  /// for the same reason.
+  std::vector<int> fActive; //!
+  std::vector<double> fCellLo; ///< each cell's AABB low corner, 3 doubles per cell
+  std::vector<double> fCellHi; ///< each cell's AABB high corner, 3 doubles per cell
   /// Whether `SetCellBBox` was ever called for a given cell; `CloseShape` refuses to build a
   /// solid missing one rather than silently drop that cell -- see `CloseShape`'s implementation.
   std::vector<bool> fCellBBoxSet;
-  bool fClosed = false;
+  /// Set only by a successful `CloseShape`; not streamed, since it describes `fBoxes`/`fBVH`
+  /// rather than the shape's own source data, and the caller is always expected to call
+  /// `CloseShape` again after a read (design section 7, and the loader's own contract).
+  bool fClosed = false; //!
   int fSplitDepth = 6;           ///< subdivision depth cap; task 10 measures where it belongs
   double fMinBoxFraction = 0.01; ///< min box size as a fraction of the part's bbox diagonal
 

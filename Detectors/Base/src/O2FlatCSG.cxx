@@ -318,6 +318,16 @@ void O2FlatCSG::SetCellBBox(int cell, const double* lo, const double* hi)
   fCellBBoxSet[cell] = true;
 }
 
+void O2FlatCSG::GetCellBBox(int cell, double* lo, double* hi) const
+{
+  const bool set = cell >= 0 && cell < GetNcells() && static_cast<size_t>(cell) < fCellBBoxSet.size() &&
+                   fCellBBoxSet[cell];
+  for (int index = 0; index < 3; ++index) {
+    lo[index] = set ? fCellLo[3 * cell + index] : 0.;
+    hi[index] = set ? fCellHi[3 * cell + index] : 0.;
+  }
+}
+
 double O2FlatCSG::EvalHalfspace(const FlatCSGHalfspace& halfspace, const double* point)
 {
   if (halfspace.kind == FlatCSGHalfspace::kTorus) {

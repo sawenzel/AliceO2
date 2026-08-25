@@ -19,6 +19,7 @@
 #include "DetectorsBase/O2SurfaceSolidIO.h"
 #include "DetectorsBase/O2BVHSurfaceSolid.h"
 #include "DetectorsBase/O2Tessellated.h"
+#include "DetectorsBase/O2FlatCSG.h"
 
 #include "BoundedSurface.h"
 
@@ -54,6 +55,15 @@ constexpr uint32_t kSidecarVersionMax = 3;
 constexpr double kSidecarV1FallbackTolerance = 1.e-6;
 
 constexpr uint32_t kFlagInnerWall = 1u << 0;
+
+/// The flat-CSG sidecar version this reader/writer pair understands (BVHSurfaceSolid.md,
+/// "Flat-CSG sidecar format"). One halfspace record is `int32 kind; float64 sign; float64 c[11]`,
+/// packed with no padding: 4 + 8 + 11*8 = 100 bytes. One cell record is
+/// `int32 first; int32 count; float64 volume; float64 lo[3]; float64 hi[3]`: 4 + 4 + 8 + 24 + 24 =
+/// 64 bytes. Both sizes are used to check the file length exactly, before any record is read.
+constexpr uint32_t kFlatCSGVersion = 1;
+constexpr uint64_t kFlatCSGHalfspaceBytes = 100;
+constexpr uint64_t kFlatCSGCellBytes = 64;
 
 enum SurfaceType : uint32_t {
   kPlane = 1,
@@ -123,6 +133,24 @@ bool readU32(std::ifstream& in, uint32_t& value)
 }
 
 bool readU8(std::ifstream& in, uint8_t& value)
+{
+  in.read(reinterpret_cast<char*>(&value), sizeof(value));
+  return static_cast<bool>(in);
+}
+
+bool readI32(std::ifstream& in, int32_t& value)
+{
+  in.read(reinterpret_cast<char*>(&value), sizeof(value));
+  return static_cast<bool>(in);
+}
+
+/// A single float64 field, read on its own -- never as part of a struct read. The flat-CSG
+/// sidecar packs `int32 kind; float64 sign; float64 c[11]` with no padding (100 bytes), while the
+/// natural C++ struct layout of the equivalent fields pads to 104: a struct-based read would be
+/// correct for the first halfspace and silently wrong for every one after it. Field-by-field IO,
+/// on both the read and the write side below, is what keeps this format's on-disk layout equal to
+/// its documented one regardless of what the compiler would otherwise choose to pad.
+bool readF64(std::ifstream& in, double& value)
 {
   in.read(reinterpret_cast<char*>(&value), sizeof(value));
   return static_cast<bool>(in);
@@ -726,6 +754,164 @@ bool LoadFacetSolid(const std::string& file, O2Tessellated& solid)
     ::Warning("LoadFacetSolid", "%s: skipped %u degenerate facet(s) of %u", file.c_str(), nDegenerate, nTriangles);
   }
 
+  return true;
+}
+
+bool LoadFlatCSG(const std::string& file, O2FlatCSG& solid)
+{
+  std::ifstream in(file, std::ios::binary);
+  if (!in) {
+    ::Error("LoadFlatCSG", "Cannot open flat-CSG sidecar file %s", file.c_str());
+    return false;
+  }
+
+  in.seekg(0, std::ios::end);
+  const std::streamoff fileSize = in.tellg();
+  in.seekg(0, std::ios::beg);
+
+  char magic[8];
+  in.read(magic, sizeof(magic));
+  if (!in || std::memcmp(magic, "O2FLTCSG", sizeof(magic)) != 0) {
+    ::Error("LoadFlatCSG", "%s is not a flat-CSG sidecar file (bad magic)", file.c_str());
+    return false;
+  }
+
+  uint32_t version = 0, nHalfspaces = 0, nCells = 0;
+  if (!readU32(in, version) || !readU32(in, nHalfspaces) || !readU32(in, nCells)) {
+    ::Error("LoadFlatCSG", "%s: truncated header", file.c_str());
+    return false;
+  }
+  if (version != kFlatCSGVersion) {
+    ::Error("LoadFlatCSG", "%s: unsupported sidecar version %u (reader supports %u)", file.c_str(), version,
+            kFlatCSGVersion);
+    return false;
+  }
+
+  // The whole point of this check: refuse a truncated (or overlong) file before a single record
+  // is read, rather than filling the solid partway and letting the caller CloseShape() it into a
+  // silently wrong shape.
+  const uint64_t expected =
+    static_cast<uint64_t>(nHalfspaces) * kFlatCSGHalfspaceBytes + static_cast<uint64_t>(nCells) * kFlatCSGCellBytes;
+  const uint64_t remaining = bytesRemaining(in, fileSize);
+  if (remaining != expected) {
+    ::Error("LoadFlatCSG",
+            "%s: file length does not match its header (%u halfspace(s) + %u cell(s) implies %llu more byte(s), "
+            "found %llu)",
+            file.c_str(), nHalfspaces, nCells, static_cast<unsigned long long>(expected),
+            static_cast<unsigned long long>(remaining));
+    return false;
+  }
+
+  // Every field below is read on its own -- see readF64's comment on why a struct-based read of
+  // the 100-byte halfspace record would be wrong for every record after the first.
+  for (uint32_t h = 0; h < nHalfspaces; ++h) {
+    int32_t kind = 0;
+    double sign = 0.;
+    if (!readI32(in, kind) || !readF64(in, sign)) {
+      ::Error("LoadFlatCSG", "%s: truncated halfspace record %u", file.c_str(), h);
+      return false;
+    }
+    double c[11];
+    bool ok = true;
+    for (int i = 0; i < 11 && ok; ++i) {
+      ok = readF64(in, c[i]);
+    }
+    if (!ok) {
+      ::Error("LoadFlatCSG", "%s: truncated halfspace record %u", file.c_str(), h);
+      return false;
+    }
+    if (kind == FlatCSGHalfspace::kQuadric) {
+      solid.AddQuadric(sign, c);
+    } else if (kind == FlatCSGHalfspace::kTorus) {
+      const double centre[3] = {c[0], c[1], c[2]};
+      const double axis[3] = {c[3], c[4], c[5]};
+      solid.AddTorus(sign, centre, axis, c[6], c[7]);
+    } else {
+      ::Error("LoadFlatCSG", "%s: halfspace %u has unknown kind %d", file.c_str(), h, kind);
+      return false;
+    }
+  }
+
+  for (uint32_t cellIdx = 0; cellIdx < nCells; ++cellIdx) {
+    int32_t first = 0, count = 0;
+    double volume = 0.;
+    if (!readI32(in, first) || !readI32(in, count) || !readF64(in, volume)) {
+      ::Error("LoadFlatCSG", "%s: truncated cell record %u", file.c_str(), cellIdx);
+      return false;
+    }
+    double lo[3], hi[3];
+    bool ok = true;
+    for (int i = 0; i < 3 && ok; ++i) {
+      ok = readF64(in, lo[i]);
+    }
+    for (int i = 0; i < 3 && ok; ++i) {
+      ok = readF64(in, hi[i]);
+    }
+    if (!ok) {
+      ::Error("LoadFlatCSG", "%s: truncated cell record %u", file.c_str(), cellIdx);
+      return false;
+    }
+    if (first < 0 || count <= 0 || static_cast<int64_t>(first) + count > static_cast<int64_t>(nHalfspaces)) {
+      ::Error("LoadFlatCSG", "%s: cell %u has an invalid range (first=%d, count=%d) into %u halfspace(s)",
+              file.c_str(), cellIdx, first, count, nHalfspaces);
+      return false;
+    }
+    solid.AddCell(first, count, volume);
+    solid.SetCellBBox(static_cast<int>(cellIdx), lo, hi);
+  }
+
+  return true;
+}
+
+bool WriteFlatCSG(const std::string& file, const O2FlatCSG& solid)
+{
+  std::ofstream out(file, std::ios::binary);
+  if (!out) {
+    ::Error("WriteFlatCSG", "Cannot open %s for writing", file.c_str());
+    return false;
+  }
+
+  out.write("O2FLTCSG", 8);
+  const uint32_t version = kFlatCSGVersion;
+  const uint32_t nHalfspaces = static_cast<uint32_t>(solid.GetNhalfspaces());
+  const uint32_t nCells = static_cast<uint32_t>(solid.GetNcells());
+  out.write(reinterpret_cast<const char*>(&version), sizeof(version));
+  out.write(reinterpret_cast<const char*>(&nHalfspaces), sizeof(nHalfspaces));
+  out.write(reinterpret_cast<const char*>(&nCells), sizeof(nCells));
+
+  // Field by field, exactly as documented, so this writer and the sidecar the loader above reads
+  // -- and, per the interface comment, scripts/geometry/csg/flat.py's Python writer -- agree byte
+  // for byte with no compiler-chosen padding anywhere.
+  for (uint32_t h = 0; h < nHalfspaces; ++h) {
+    const FlatCSGHalfspace& halfspace = solid.GetHalfspace(static_cast<int>(h));
+    const int32_t kind = halfspace.kind;
+    out.write(reinterpret_cast<const char*>(&kind), sizeof(kind));
+    out.write(reinterpret_cast<const char*>(&halfspace.sign), sizeof(halfspace.sign));
+    for (double value : halfspace.c) {
+      out.write(reinterpret_cast<const char*>(&value), sizeof(value));
+    }
+  }
+  for (uint32_t cellIdx = 0; cellIdx < nCells; ++cellIdx) {
+    const FlatCSGCell& cell = solid.GetCell(static_cast<int>(cellIdx));
+    const int32_t first = cell.first;
+    const int32_t count = cell.count;
+    out.write(reinterpret_cast<const char*>(&first), sizeof(first));
+    out.write(reinterpret_cast<const char*>(&count), sizeof(count));
+    out.write(reinterpret_cast<const char*>(&cell.volume), sizeof(cell.volume));
+    double lo[3], hi[3];
+    solid.GetCellBBox(static_cast<int>(cellIdx), lo, hi);
+    for (double value : lo) {
+      out.write(reinterpret_cast<const char*>(&value), sizeof(value));
+    }
+    for (double value : hi) {
+      out.write(reinterpret_cast<const char*>(&value), sizeof(value));
+    }
+  }
+
+  if (!out) {
+    ::Error("WriteFlatCSG", "%s: write failed", file.c_str());
+    return false;
+  }
   return true;
 }
 

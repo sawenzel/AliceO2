@@ -793,6 +793,49 @@ Consecutive edge endpoints may differ by the extractor's ~1e-6 projection precis
 joins within `kJoinTolerance = 1e-5` and the kernel's `CurveWire` accepts the loop within the
 matching `kWireJoinTolerance = 1e-5` (both looser than the `1e-9` boundary tolerance).
 
+## Flat-CSG sidecar format
+
+The flat-CSG sidecar (`flatcsg_<VOLNAME>_<LID>.bin`), read and written by
+`o2::base::LoadFlatCSG`/`WriteFlatCSG` (`Detectors/Base/include/DetectorsBase/O2SurfaceSolidIO.h`
++ `src/O2SurfaceSolidIO.cxx`); the production writer is `scripts/geometry/csg/flat.py`. All
+integers are little-endian `int32`/`uint32`, all geometry values are little-endian `float64`,
+lengths in cm.
+
+Every record is read and written **field by field**, never as a struct: the halfspace record's
+natural C++ layout pads to 104 bytes, while the file packs it at 100 with no padding, so a
+struct-based read is correct for the first halfspace and silently wrong for every one after it.
+
+```
+magic          char[8]   "O2FLTCSG"
+version        uint32    1
+nHalfspaces    uint32
+nCells         uint32
+halfspaces     nHalfspaces * { int32 kind; float64 sign; float64 c[11] }
+cells          nCells     * { int32 first; int32 count; float64 volume;
+                              float64 lo[3]; float64 hi[3] }
+```
+
+- `kind`: 0 = quadric, 1 = torus (`o2::base::FlatCSGHalfspace::Kind`).
+- `sign`: +1 or -1; the halfspace's material side is `sign * f(x) <= 0`.
+- `c[11]`: for a quadric, `(a00, a01, a02, a11, a12, a22, b0, b1, b2, c)` in the first ten slots
+  (the carrier-to-quadric map is `Design_FlatCSGSolid.md` section 3.1), the eleventh unused. For a
+  torus, `(px, py, pz, dx, dy, dz, R, r)` in the first eight (canonical centre, unit axis, major
+  and minor radius), the remaining three unused.
+- `first`, `count`: the cell's halfspace range `[first, first + count)`; the loader rejects
+  `first < 0`, `count <= 0`, or `first + count > nHalfspaces`.
+- `volume`: the cell's own volume, written by the converter from OCCT's `GProp` on the source
+  piece.
+- `lo`, `hi`: the cell's AABB, as given to `SetCellBBox` -- an outer bound the converter owes (see
+  `Design_FlatCSGSolid.md` section 4.2), not a computed one.
+
+One halfspace record is 4 + 8 + 11*8 = 100 bytes; one cell record is 4 + 4 + 8 + 24 + 24 = 64
+bytes. The loader checks the remaining file length against `nHalfspaces*100 + nCells*64` exactly,
+before reading any record, so a truncated (or overlong) file is refused outright rather than
+half-loaded. `LoadFlatCSG` fills the shape via `AddQuadric`/`AddTorus`/`AddCell`/`SetCellBBox`; the
+caller is expected to call `CloseShape()` afterwards -- the sidecar does not carry the BVH or the
+sub-cell boxes, which are rebuilt from the halfspaces, cells and cell boxes on every load (design
+section 7).
+
 ## CAD conversion milestones
 
 - [x] Add exact-surface extraction probes to `O2_CADtoTGeo.py` without changing default output.

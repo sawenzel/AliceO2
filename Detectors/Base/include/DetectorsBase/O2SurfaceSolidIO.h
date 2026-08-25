@@ -21,6 +21,7 @@ namespace base
 
 class O2BVHSurfaceSolid;
 class O2Tessellated;
+class O2FlatCSG;
 
 /// Load an exact-surface sidecar file (surfaces_*.bin, version-1 format documented in
 /// scripts/geometry/BVHSurfaceSolid.md, "Surface sidecar format") into \a solid by
@@ -40,6 +41,17 @@ bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid);
 /// O2Tessellated rejects as degenerate are a property of the input mesh rather than of the file,
 /// so they are skipped and counted in a warning instead of failing the load.
 bool LoadFacetSolid(const std::string& file, O2Tessellated& solid);
+
+/// Load a flat-CSG sidecar (flatcsg_*.bin, version-1 format documented in
+/// scripts/geometry/BVHSurfaceSolid.md, "Flat-CSG sidecar format") into \a solid by dispatching
+/// to its AddQuadric / AddTorus / AddCell / SetCellBBox methods. The caller is expected to call
+/// CloseShape() afterwards. Returns false (with an error message) on I/O or format problems; the
+/// solid may then be partly filled and should be discarded.
+bool LoadFlatCSG(const std::string& file, O2FlatCSG& solid);
+
+/// Write \a solid in the same format. Used by the converter's tests and by the round-trip case;
+/// the production writer is scripts/geometry/csg/flat.py, and the two must agree byte for byte.
+bool WriteFlatCSG(const std::string& file, const O2FlatCSG& solid);
 
 } // namespace base
 } // namespace o2
