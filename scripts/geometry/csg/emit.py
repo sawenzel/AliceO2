@@ -166,13 +166,26 @@ def write_shape_object(shape, placement, path):
     return shape
 
 
-def twin_parity(shape, n_points=20000, seed=7771, grow=1.0):
+# How many points `twin_parity` draws when the caller does not say. The defect it hunts is
+# per-cell -- one cell whose halfspaces do not close it up -- and the points are spread over the
+# union of every cell's box, so a fixed count thins out as the part gains cells: a flat 20 000
+# gave `BREF1`'s 47 cells 425 points each and a one-cell part 20 000 it did not need. The floor is
+# what a single cell gets regardless.
+_TWIN_PARITY_FLOOR = 4000
+_TWIN_PARITY_PER_CELL = 500
+
+
+def twin_parity(shape, n_points=None, seed=7771, grow=1.0):
     """`Contains` against `Contains_Loop` on a shape that has twins. `None` when it has none.
 
     This is the positive discharge of the cell-bounding-box obligation of
     `Design_FlatCSGSolid.md` section 4.2, and it is deliberately independent of OCCT so that both
     emission paths can run it -- the live one in `csg/hook.py` and the deferred completion in
     `from_json()`, which has PyROOT and no CAD solid at all.
+
+    `n_points` defaults to `max(4000, 500 * cells)` -- see `_TWIN_PARITY_PER_CELL`. Pass a number
+    to pin it, which is what the self-test does so its counts do not move with a fixture's cell
+    table.
 
     The sampling box is the union of the shape's own declared cell boxes, expanded by `grow`
     about its centre. At the default `grow = 1.0` the box doubles on every axis, so `1/8` of the
@@ -184,6 +197,8 @@ def twin_parity(shape, n_points=20000, seed=7771, grow=1.0):
     """
     if not (hasattr(shape, "Contains_Loop") and hasattr(shape, "GetCellBBox")):
         return None
+    if n_points is None:
+        n_points = max(_TWIN_PARITY_FLOOR, _TWIN_PARITY_PER_CELL * shape.GetNcells())
     import random
     from array import array
     lo = [float("inf")] * 3
@@ -2768,7 +2783,9 @@ def self_test(verbose=True, with_root=True):  # noqa: C901
                   "not exercised here: same reason")
         else:
             broken_shape, _broken_placement = prim.build_root(out_of_box, "probe_out_of_box")
-            broken_parity = emit_mod.twin_parity(broken_shape)
+            # Pinned, not defaulted: this is a negative control and its sensitivity must not
+            # move with `_TWIN_PARITY_PER_CELL` or with the fixture's cell count.
+            broken_parity = emit_mod.twin_parity(broken_shape, n_points=20000)
             check("a cell outside its declared box is caught before it can ship",
                   broken_parity["disagreements"] > 0
                   and broken_parity["insideAccelerated"] > 0,
