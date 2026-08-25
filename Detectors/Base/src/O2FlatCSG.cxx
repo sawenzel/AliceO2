@@ -378,8 +378,11 @@ void O2FlatCSG::HalfspaceRange(const FlatCSGHalfspace& halfspace, const double* 
   // trusts as a hard guarantee. The quadric chain is roughly 6 diagonal and 6 cross-term
   // multiplications plus about 10 additions -- nearer 16 to 26 operations than a clean dozen, so
   // a rigorous Higham bound sits close to 16u; kPadFactor is set well past that edge rather than
-  // riding it.
-  constexpr double kPadFactor = 32. * std::numeric_limits<double>::epsilon();
+  // riding it. 64u rather than 32u because 32u cleared the hand-counted 16u-26u bound by only
+  // about 1.2x while `nActive == 0` is trusted as a hard guarantee, and a wider pad costs nothing
+  // but pruning: it can only make a halfspace harder to drop and a box harder to reject, never
+  // the reverse. Measured on the ten shipped parts: no box count moved.
+  constexpr double kPadFactor = 64. * std::numeric_limits<double>::epsilon();
 
   double halfWidth;
   double mag;
