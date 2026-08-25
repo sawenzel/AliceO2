@@ -74,6 +74,10 @@ class O2FlatCSG : public TGeoBBox
   // ---- building -------------------------------------------------------------------------
   /// Append a quadric halfspace; returns its index. `sign` is +1 or -1, inside is `sign*Q <= 0`.
   int AddQuadric(double sign, const double coeff[10]);
+  /// Append a torus halfspace: inside is `sign * (sqrt((rho - major)^2 + z^2) - minor) <= 0`,
+  /// with `rho` the distance from the axis through \a centre along \a axis and `z` the coordinate
+  /// along it. \a axis must be a unit vector. Returns the halfspace index.
+  int AddTorus(double sign, const double* centre, const double* axis, double major, double minor);
   /// Append a cell over `[first, first + count)` of the halfspace array; returns its index.
   int AddCell(int first, int count, double volume);
 

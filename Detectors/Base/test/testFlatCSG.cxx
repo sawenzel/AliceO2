@@ -18,6 +18,7 @@
 
 #include "TGeoBBox.h"
 #include "TGeoShape.h"
+#include "TGeoTorus.h"
 #include "TGeoTube.h"
 #include "TMath.h"
 
@@ -323,4 +324,87 @@ BOOST_AUTO_TEST_CASE(tangential_ray_on_a_cylinder_from_a_point_on_its_surface_ha
   const double hit[3] = {origin[0] + roots[0] * dir[0], origin[1] + roots[0] * dir[1],
                          origin[2] + roots[0] * dir[2]};
   BOOST_CHECK_SMALL(O2FlatCSG::EvalHalfspace(cylinder, hit), 1.e-9);
+}
+
+BOOST_AUTO_TEST_CASE(torus_contains_and_distances_match_TGeoTorus)
+{
+  // a full torus, R = 10, r = 3, about z -- one cell of one halfspace
+  O2FlatCSG solid("torus");
+  const double centre[3] = {0., 0., 0.};
+  const double axis[3] = {0., 0., 1.};
+  solid.AddTorus(1., centre, axis, 10., 3.);
+  solid.AddCell(0, 1, 2. * TMath::Pi() * TMath::Pi() * 10. * 9.);
+
+  TGeoTorus reference(10., 0., 3.);
+  Rng rng(31415ULL);
+  int scoredPoints = 0;
+  for (int trial = 0; trial < 20000; ++trial) {
+    const double point[3] = {rng.uniform(-15., 15.), rng.uniform(-15., 15.), rng.uniform(-5., 5.)};
+    const double radial = std::hypot(point[0], point[1]);
+    const double distance = std::hypot(radial - 10., point[2]) - 3.;
+    if (std::abs(distance) < 1.e-9) {
+      continue;
+    }
+    BOOST_REQUIRE_EQUAL(solid.Contains_Loop(point), reference.Contains(point));
+    ++scoredPoints;
+  }
+  BOOST_CHECK_GT(scoredPoints, 19000);
+
+  for (int trial = 0; trial < 20000; ++trial) {
+    double point[3] = {rng.uniform(-20., 20.), rng.uniform(-20., 20.), rng.uniform(-8., 8.)};
+    double dir[3];
+    double norm = 0.;
+    do {
+      for (int index = 0; index < 3; ++index) {
+        dir[index] = rng.uniform(-1., 1.);
+      }
+      norm = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+    } while (norm < 1.e-3);
+    for (int index = 0; index < 3; ++index) {
+      dir[index] /= norm;
+    }
+    const bool inside = reference.Contains(point);
+    if (inside != static_cast<bool>(solid.Contains_Loop(point))) {
+      continue;
+    }
+    const double mine = inside ? solid.DistFromInside_Loop(point, dir, TGeoShape::Big())
+                               : solid.DistFromOutside_Loop(point, dir, TGeoShape::Big());
+    const double theirs = inside ? reference.DistFromInside(point, dir, 3, TGeoShape::Big(), nullptr)
+                                 : reference.DistFromOutside(point, dir, 3, TGeoShape::Big(), nullptr);
+    if (theirs >= TGeoShape::Big()) {
+      BOOST_REQUIRE_GE(mine, TGeoShape::Big());
+    } else {
+      // the quartic is the looser of the two solvers; 1e-6 cm on a 10 cm torus
+      BOOST_REQUIRE_SMALL(mine - theirs, 1.e-6);
+    }
+  }
+}
+
+BOOST_AUTO_TEST_CASE(a_tilted_torus_is_the_same_solid_as_an_upright_one_rotated)
+{
+  // the frame handling is where a torus block goes wrong silently, so it gets its own case
+  const double axis[3] = {0., 1. / std::sqrt(2.), 1. / std::sqrt(2.)};
+  const double centre[3] = {1., 2., 3.};
+  O2FlatCSG solid("tilted_torus");
+  solid.AddTorus(1., centre, axis, 8., 2.);
+  solid.AddCell(0, 1, 0.);
+
+  Rng rng(2718ULL);
+  for (int trial = 0; trial < 20000; ++trial) {
+    const double point[3] = {rng.uniform(-14., 16.), rng.uniform(-13., 17.), rng.uniform(-12., 18.)};
+    // the closed-form signed distance is the reference: sqrt((rho - R)^2 + z^2) - r
+    const double offset[3] = {point[0] - centre[0], point[1] - centre[1], point[2] - centre[2]};
+    const double along = offset[0] * axis[0] + offset[1] * axis[1] + offset[2] * axis[2];
+    double radialVec[3];
+    for (int index = 0; index < 3; ++index) {
+      radialVec[index] = offset[index] - along * axis[index];
+    }
+    const double rho = std::sqrt(radialVec[0] * radialVec[0] + radialVec[1] * radialVec[1] +
+                                 radialVec[2] * radialVec[2]);
+    const double signedDistance = std::hypot(rho - 8., along) - 2.;
+    if (std::abs(signedDistance) < 1.e-9) {
+      continue;
+    }
+    BOOST_REQUIRE_EQUAL(static_cast<bool>(solid.Contains_Loop(point)), signedDistance < 0.);
+  }
 }

@@ -11,9 +11,12 @@
 
 #include "DetectorsBase/O2FlatCSG.h"
 
+#include "BoundedSurface.h"
+
 #include "TGeoShape.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstddef>
 
@@ -56,6 +59,22 @@ int O2FlatCSG::AddQuadric(double sign, const double coeff[10])
   return static_cast<int>(fHalfspaces.size()) - 1;
 }
 
+int O2FlatCSG::AddTorus(double sign, const double* centre, const double* axis, double major,
+                        double minor)
+{
+  FlatCSGHalfspace halfspace;
+  halfspace.kind = FlatCSGHalfspace::kTorus;
+  halfspace.sign = sign < 0. ? -1. : 1.;
+  for (int index = 0; index < 3; ++index) {
+    halfspace.c[index] = centre[index];
+    halfspace.c[3 + index] = axis[index];
+  }
+  halfspace.c[6] = major;
+  halfspace.c[7] = minor;
+  fHalfspaces.push_back(halfspace);
+  return static_cast<int>(fHalfspaces.size()) - 1;
+}
+
 int O2FlatCSG::AddCell(int first, int count, double volume)
 {
   FlatCSGCell cell;
@@ -68,7 +87,17 @@ int O2FlatCSG::AddCell(int first, int count, double volume)
 
 double O2FlatCSG::EvalHalfspace(const FlatCSGHalfspace& halfspace, const double* point)
 {
-  // the torus branch arrives in task 3; until then only quadrics are constructible
+  if (halfspace.kind == FlatCSGHalfspace::kTorus) {
+    const double* c = halfspace.c;
+    const double offset[3] = {point[0] - c[0], point[1] - c[1], point[2] - c[2]};
+    const double along = offset[0] * c[3] + offset[1] * c[4] + offset[2] * c[5];
+    const double radial[3] = {offset[0] - along * c[3], offset[1] - along * c[4],
+                              offset[2] - along * c[5]};
+    const double rho = std::sqrt(radial[0] * radial[0] + radial[1] * radial[1] +
+                                 radial[2] * radial[2]);
+    // the exact signed distance, which is 1-Lipschitz -- task 4's range bound needs that
+    return halfspace.sign * (std::hypot(rho - c[6], along) - c[7]);
+  }
   const double* c = halfspace.c;
   const double x = point[0];
   const double y = point[1];
@@ -109,7 +138,48 @@ Bool_t O2FlatCSG::Contains(const Double_t* point) const
 int O2FlatCSG::HalfspaceRoots(const FlatCSGHalfspace& halfspace, const double* origin,
                               const double* dir, double* roots)
 {
-  // the torus branch arrives in task 3
+  if (halfspace.kind == FlatCSGHalfspace::kTorus) {
+    // the quartic derivation below takes the leading coefficient a4 = |dir|^4 to be exactly 1;
+    // a non-unit direction silently returns wrong roots instead of failing, so catch it here
+    assert(std::abs(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2] - 1.) < 1.e-9 &&
+          "O2FlatCSG::HalfspaceRoots: torus branch requires a unit direction");
+    const double* c = halfspace.c;
+    const double axis[3] = {c[3], c[4], c[5]};
+    const double major = c[6];
+    const double minor = c[7];
+    const double offset[3] = {origin[0] - c[0], origin[1] - c[1], origin[2] - c[2]};
+    // components along the axis, and the perpendicular parts
+    const double pz = offset[0] * axis[0] + offset[1] * axis[1] + offset[2] * axis[2];
+    const double dz = dir[0] * axis[0] + dir[1] * axis[1] + dir[2] * axis[2];
+    double pPerp[3];
+    double dPerp[3];
+    for (int index = 0; index < 3; ++index) {
+      pPerp[index] = offset[index] - pz * axis[index];
+      dPerp[index] = dir[index] - dz * axis[index];
+    }
+    const double pp = pPerp[0] * pPerp[0] + pPerp[1] * pPerp[1] + pPerp[2] * pPerp[2];
+    const double dd = dPerp[0] * dPerp[0] + dPerp[1] * dPerp[1] + dPerp[2] * dPerp[2];
+    const double pd = pPerp[0] * dPerp[0] + pPerp[1] * dPerp[1] + pPerp[2] * dPerp[2];
+    // (|X|^2 + R^2 - r^2)^2 - 4 R^2 (X_perp . X_perp) = 0 with X = P + tD, |D| = 1
+    const double e = pp + pz * pz + major * major - minor * minor;
+    const double f = pd + pz * dz;
+    const double a4 = 1.;
+    const double a3 = 4. * f;
+    const double a2 = 2. * e + 4. * f * f - 4. * major * major * dd;
+    const double a1 = 4. * e * f - 8. * major * major * pd;
+    const double a0 = e * e - 4. * major * major * pp;
+    // solveQuarticReal is scale-normalised internally, so the torus branch needs no degeneracy
+    // guard of its own -- unlike the quadric path below, whose alpha threshold is a substitute
+    // for exactly that normalisation
+    const std::vector<double> found = o2::base::surface::solveQuarticReal(a4, a3, a2, a1, a0);
+    int count = 0;
+    for (double value : found) {
+      if (count < kMaxRootsPerHalfspace) {
+        roots[count++] = value;
+      }
+    }
+    return count;
+  }
   const double* c = halfspace.c;
   // A d
   const double ad[3] = {c[0] * dir[0] + c[1] * dir[1] + c[2] * dir[2],
