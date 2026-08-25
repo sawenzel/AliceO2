@@ -94,6 +94,14 @@ int O2FlatCSG::AddCell(int first, int count, double volume)
 
 void O2FlatCSG::SetCellBBox(int cell, const double* lo, const double* hi)
 {
+  if (cell < 0 || cell >= GetNcells()) {
+    // "call after the last AddCell" is only a doc comment; without this check a cell index that
+    // predates its AddCell, or is simply wrong, would write past the end of fCellLo/fCellHi --
+    // silent heap corruption in release, not a bounds error anyone would see at the call site
+    Error("SetCellBBox", "Shape %s: cell %d is out of range (%d cell(s) so far); ignoring",
+          GetName(), cell, GetNcells());
+    return;
+  }
   if (static_cast<int>(fCellBBoxSet.size()) < GetNcells()) {
     fCellLo.resize(3 * GetNcells(), 0.);
     fCellHi.resize(3 * GetNcells(), 0.);
@@ -140,34 +148,39 @@ void O2FlatCSG::HalfspaceRange(const FlatCSGHalfspace& halfspace, const double* 
   }
   const double middle = EvalHalfspace(halfspace, centre);
 
+  double halfWidth;
   if (halfspace.kind == FlatCSGHalfspace::kTorus) {
     // f is the torus's exact signed distance, proved 1-Lipschitz in task 3: |f(x) - f(m)| <=
     // |x - m|, and the farthest point of the box from its own centre is the corner, at distance
     // |h|. sign only flips the sign of the deviation, never its magnitude (|sign| == 1), so the
     // same reach bounds sign*f - sign*f(m) too.
-    const double reach = std::sqrt(half[0] * half[0] + half[1] * half[1] + half[2] * half[2]);
-    rangeLo = middle - reach;
-    rangeHi = middle + reach;
-    return;
-  }
-
-  const double* c = halfspace.c;
-  const double a[3][3] = {{c[0], c[1], c[2]}, {c[1], c[3], c[4]}, {c[2], c[4], c[5]}};
-  const double b[3] = {c[6], c[7], c[8]};
-  double slack = 0.;
-  for (int row = 0; row < 3; ++row) {
-    double gradient = b[row];
-    for (int column = 0; column < 3; ++column) {
-      gradient += a[row][column] * centre[column];
-      slack += std::abs(a[row][column]) * half[row] * half[column];
+    halfWidth = std::sqrt(half[0] * half[0] + half[1] * half[1] + half[2] * half[2]);
+  } else {
+    const double* c = halfspace.c;
+    const double a[3][3] = {{c[0], c[1], c[2]}, {c[1], c[3], c[4]}, {c[2], c[4], c[5]}};
+    const double b[3] = {c[6], c[7], c[8]};
+    double slack = 0.;
+    for (int row = 0; row < 3; ++row) {
+      double gradient = b[row];
+      for (int column = 0; column < 3; ++column) {
+        gradient += a[row][column] * centre[column];
+        slack += std::abs(a[row][column]) * half[row] * half[column];
+      }
+      slack += 2. * std::abs(gradient) * half[row];
     }
-    slack += 2. * std::abs(gradient) * half[row];
+    // slack bounds |Q(x) - Q(m)| (the unsigned Q, built from the unsigned A/b above). middle is
+    // sign*Q(m), and sign*Q(x) - sign*Q(m) = sign*(Q(x) - Q(m)), whose magnitude is |Q(x) - Q(m)|
+    // because |sign| == 1 -- so the same slack bounds the signed deviation too, on either sign.
+    halfWidth = slack;
   }
-  // slack bounds |Q(x) - Q(m)| (the unsigned Q, built from the unsigned A/b above). middle is
-  // sign*Q(m), and sign*Q(x) - sign*Q(m) = sign*(Q(x) - Q(m)), whose magnitude is |Q(x) - Q(m)|
-  // because |sign| == 1 -- so the same slack bounds the signed deviation too, on either sign.
-  rangeLo = middle - slack;
-  rangeHi = middle + slack;
+  // SplitBox's drop tests (rangeLo > 0., rangeHi <= 0.) treat this bound as exact, and Task 6
+  // leans on nActive == 0 as a HARD guarantee -- but slack/reach is itself a sum of floating-
+  // point products, so its true supremum can round a ulp or two low. Pad by a small relative
+  // amount so a halfspace whose exact bound sits at +1e-17 is never dropped by rounding alone;
+  // this only ever widens the enclosure, which is the safe direction.
+  halfWidth += 1.e-15 * (std::abs(middle) + halfWidth);
+  rangeLo = middle - halfWidth;
+  rangeHi = middle + halfWidth;
 }
 
 bool O2FlatCSG::CellContains(int index, const double* point) const
@@ -246,18 +259,34 @@ void O2FlatCSG::CloseShape()
   // A cell an intersection of halfspaces does not bound itself, so a cell whose bbox was never
   // handed in by SetCellBBox has no box built for it: it would silently vanish from the solid,
   // Contains() returning false inside real material with nothing to signal it. Fail loudly and
-  // build nothing rather than emit a partial, silently-wrong solid.
-  bool anyMissing = false;
+  // build nothing rather than emit a partial, silently-wrong solid. An inverted box (e.g. from a
+  // converter that swapped lo/hi) is caught here too: an all-axes-inverted box would otherwise
+  // never grow longest past its 0. initialiser in SplitBox, so it would be kept immediately with
+  // whatever active list the (invalid, negative-half-extent) range bound happened to compute --
+  // possibly nActive == 0, which reads as solid material -- with IsClosed() true and nothing
+  // printed. Same treatment as the missing-bbox case: refuse the whole shape.
+  bool anyProblem = false;
   for (int cell = 0; cell < GetNcells(); ++cell) {
     if (!fCellBBoxSet[cell]) {
       Error("CloseShape",
             "Shape %s cell %d has no bounding box (SetCellBBox was never called for it); it would "
             "silently vanish from the solid. Not building any boxes -- IsClosed() stays false.",
             GetName(), cell);
-      anyMissing = true;
+      anyProblem = true;
+      continue;
+    }
+    for (int index = 0; index < 3; ++index) {
+      if (fCellHi[3 * cell + index] < fCellLo[3 * cell + index]) {
+        Error("CloseShape",
+              "Shape %s cell %d has an inverted bounding box on axis %d (lo %g > hi %g); "
+              "SetCellBBox's arguments look swapped. Not building any boxes -- IsClosed() stays "
+              "false.",
+              GetName(), cell, index, fCellLo[3 * cell + index], fCellHi[3 * cell + index]);
+        anyProblem = true;
+      }
     }
   }
-  if (anyMissing) {
+  if (anyProblem) {
     return;
   }
 

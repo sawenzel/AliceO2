@@ -66,6 +66,33 @@ void zCylinderQuadric(double r, double coeff[10])
   }
 }
 
+/// The quadric of the cylinder of radius \a r about the tilted axis d = (1,1,1)/sqrt(3):
+/// Q(x) = x^T (I - d d^T) x - r^2. Every plane in this file has A = 0 and every upright cylinder
+/// has A diagonal, so this is the only halfspace with a genuinely nonzero off-diagonal A -- it
+/// exists to exercise the half[row]*half[column] cross term in HalfspaceRange's quadric branch,
+/// which a mis-indexed variant (half[column]*half[column]) can get past every other quadric here.
+void tiltedCylinderQuadric(double r, double coeff[10])
+{
+  const double s = 1. / std::sqrt(3.);
+  const double d[3] = {s, s, s};
+  double a[3][3];
+  for (int row = 0; row < 3; ++row) {
+    for (int column = 0; column < 3; ++column) {
+      a[row][column] = (row == column ? 1. : 0.) - d[row] * d[column];
+    }
+  }
+  coeff[0] = a[0][0];
+  coeff[1] = a[0][1];
+  coeff[2] = a[0][2];
+  coeff[3] = a[1][1];
+  coeff[4] = a[1][2];
+  coeff[5] = a[2][2];
+  coeff[6] = 0.;
+  coeff[7] = 0.;
+  coeff[8] = 0.;
+  coeff[9] = -r * r;
+}
+
 /// A box of half-extents (dx, dy, dz) centred on the origin, as one cell of six planes.
 void addBoxCell(O2FlatCSG& solid, double dx, double dy, double dz)
 {
@@ -473,8 +500,67 @@ BOOST_AUTO_TEST_CASE(the_range_bound_encloses_the_sampled_range)
   const double centre[3] = {1., 0., 0.};
   const double axis[3] = {0., 0., 1.};
   const int torus = solid.AddTorus(1., centre, axis, 7., 2.);
+  tiltedCylinderQuadric(5., coeff);
+  const int tilted = solid.AddQuadric(1., coeff);
 
   Rng rng(555ULL);
+  const std::vector<int> halfspaces = {cylinder, plane, torus, tilted};
+
+  auto checkBox = [&](const double* lo, const double* hi) {
+    for (int which : halfspaces) {
+      double rangeLo = 0.;
+      double rangeHi = 0.;
+      O2FlatCSG::HalfspaceRange(solid.GetHalfspace(which), lo, hi, rangeLo, rangeHi);
+      BOOST_REQUIRE_LE(rangeLo, rangeHi);
+
+      auto checkPoint = [&](const double point[3]) {
+        const double value = O2FlatCSG::EvalHalfspace(solid.GetHalfspace(which), point);
+        BOOST_REQUIRE_GE(value, rangeLo - 1.e-9);
+        BOOST_REQUIRE_LE(value, rangeHi + 1.e-9);
+      };
+
+      // deterministic coverage of the box's extremities: a plane's bound is tight exactly AT a
+      // corner, so uniform interior sampling has probability zero of ever landing where a
+      // slightly under-wide bound would actually be caught
+      for (int cx : {0, 1}) {
+        for (int cy : {0, 1}) {
+          for (int cz : {0, 1}) {
+            const double corner[3] = {cx ? hi[0] : lo[0], cy ? hi[1] : lo[1], cz ? hi[2] : lo[2]};
+            checkPoint(corner);
+          }
+        }
+      }
+      const double mid[3] = {0.5 * (lo[0] + hi[0]), 0.5 * (lo[1] + hi[1]), 0.5 * (lo[2] + hi[2])};
+      for (int faceAxis = 0; faceAxis < 3; ++faceAxis) {
+        for (int side : {0, 1}) {
+          double face[3] = {mid[0], mid[1], mid[2]};
+          face[faceAxis] = side ? hi[faceAxis] : lo[faceAxis];
+          checkPoint(face);
+        }
+      }
+      for (int edgeAxis = 0; edgeAxis < 3; ++edgeAxis) {
+        const int other1 = (edgeAxis + 1) % 3;
+        const int other2 = (edgeAxis + 2) % 3;
+        for (int s1 : {0, 1}) {
+          for (int s2 : {0, 1}) {
+            double edge[3];
+            edge[edgeAxis] = mid[edgeAxis];
+            edge[other1] = s1 ? hi[other1] : lo[other1];
+            edge[other2] = s2 ? hi[other2] : lo[other2];
+            checkPoint(edge);
+          }
+        }
+      }
+
+      // plus random interior samples, as before
+      for (int sample = 0; sample < 200; ++sample) {
+        const double point[3] = {rng.uniform(lo[0], hi[0]), rng.uniform(lo[1], hi[1]),
+                                 rng.uniform(lo[2], hi[2])};
+        checkPoint(point);
+      }
+    }
+  };
+
   for (int trial = 0; trial < 3000; ++trial) {
     double lo[3];
     double hi[3];
@@ -484,19 +570,21 @@ BOOST_AUTO_TEST_CASE(the_range_bound_encloses_the_sampled_range)
       lo[index] = a;
       hi[index] = b;
     }
-    for (int which : {cylinder, plane, torus}) {
-      double rangeLo = 0.;
-      double rangeHi = 0.;
-      O2FlatCSG::HalfspaceRange(solid.GetHalfspace(which), lo, hi, rangeLo, rangeHi);
-      BOOST_REQUIRE_LE(rangeLo, rangeHi);
-      for (int sample = 0; sample < 200; ++sample) {
-        const double point[3] = {rng.uniform(lo[0], hi[0]), rng.uniform(lo[1], hi[1]),
-                                 rng.uniform(lo[2], hi[2])};
-        const double value = O2FlatCSG::EvalHalfspace(solid.GetHalfspace(which), point);
-        BOOST_REQUIRE_GE(value, rangeLo - 1.e-9);
-        BOOST_REQUIRE_LE(value, rangeHi + 1.e-9);
-      }
-    }
+    checkBox(lo, hi);
+  }
+
+  // extreme-aspect-ratio boxes -- one axis ~0.01 wide, another ~24 -- outside the size range the
+  // random trials above ever draw (at most 6 wide per axis)
+  const double extreme[4][3][2] = {
+    {{-0.005, 0.005}, {-12., 12.}, {-0.5, 0.5}},
+    {{-12., 12.}, {-0.005, 0.005}, {3., 27.}},
+    {{2., 2.01}, {-1., 1.}, {-12., 12.}},
+    {{-24., 0.}, {5., 5.01}, {-3., 3.}},
+  };
+  for (const auto& box : extreme) {
+    const double lo[3] = {box[0][0], box[1][0], box[2][0]};
+    const double hi[3] = {box[0][1], box[1][1], box[2][1]};
+    checkBox(lo, hi);
   }
 }
 
@@ -603,6 +691,23 @@ BOOST_AUTO_TEST_CASE(a_cell_without_a_bbox_fails_loudly_instead_of_vanishing)
   const double lo[3] = {-1., -1., -1.};
   const double hi[3] = {1., 1., 1.};
   solid.SetCellBBox(0, lo, hi); // cell 1's box is never set
+
+  solid.CloseShape();
+  BOOST_CHECK(!solid.IsClosed());
+  BOOST_CHECK_EQUAL(solid.GetNboxes(), 0);
+}
+
+BOOST_AUTO_TEST_CASE(an_inverted_cell_bbox_fails_loudly_instead_of_being_kept_as_solid)
+{
+  // a converter that swapped lo/hi arguments must not get a shape that quietly reports itself
+  // closed: an all-axes-inverted box never grows past SplitBox's longest = 0. initialiser, so it
+  // would otherwise be kept immediately with an active list computed from a negative-half-extent
+  // (hence invalid) range bound -- possibly nActive == 0, which downstream reads as solid material
+  O2FlatCSG solid("inverted_bbox");
+  addBoxCell(solid, 1., 1., 1.);
+  const double lo[3] = {-1., -1., -1.};
+  const double hi[3] = {1., 1., 1.};
+  solid.SetCellBBox(0, hi, lo); // lo/hi swapped
 
   solid.CloseShape();
   BOOST_CHECK(!solid.IsClosed());
