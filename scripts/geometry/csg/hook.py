@@ -36,7 +36,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from csg import emit, primitives as prim  # noqa: E402
+from csg import emit, planar, primitives as prim  # noqa: E402
 
 
 def have_root():
@@ -204,9 +204,19 @@ def write_report(records, path, surface_lids, facet_lids):
     reports one row per part with the representation that accepted it and the evidence that
     admitted it -- the symmetric-difference volume for CSG, the exact-surface extractor's own
     verdict for the surface solid, and nothing at all for the mesh, which is the point.
+
+    Each row also carries `tessellationExact`: whether this part's *mesh* is the same solid as its
+    exact surfaces rather than an approximation of them (`csg/planar.py`). That is a property of
+    the part, not a choice between representations, and it is recorded rather than acted on --
+    see the module docstring for what the measurements say the policy could be.
+
+    `surface_lids` may be a set of lids or the lid -> sidecar-path mapping the converter builds;
+    only the mapping lets the exactness be computed, and a bare set simply leaves it null.
     """
+    surface_paths = surface_lids if isinstance(surface_lids, dict) else {}
     rows = []
     tiers = {"csg": 0, "surface": 0, "mesh": 0}
+    exactness = {"exact": 0, "approximate": 0, "unknown": 0}
     for record in records:
         lid = record["lid"]
         if record["accepted"] and record.get("shape"):
@@ -229,6 +239,13 @@ def write_report(records, path, surface_lids, facet_lids):
             why_not_csg = record["reason"]
             evidence = {"declinedCsgBecause": record["reason"]}
         tiers[tier] += 1
+        sidecar = surface_paths.get(lid)
+        if sidecar:
+            mesh_exact, mesh_reason, mesh_census = planar.tessellation_is_exact(sidecar)
+        else:
+            mesh_exact, mesh_reason, mesh_census = None, "no exact sidecar for this part", None
+        exactness["exact" if mesh_exact else
+                  ("approximate" if mesh_exact is False else "unknown")] += 1
         # `part` is the artifact stem -- `<VOLNAME>_<LID>`, the same suffix that names
         # surfaces_/facets_/brep_/shape_ -- and it is written here so that a consumer can join
         # this row to `manifest.json` and to `gate.json` without re-implementing the converter's
@@ -251,8 +268,15 @@ def write_report(records, path, surface_lids, facet_lids):
                      # or null for identity (Stream_N_PlacedPrimitives.md). Mirrors the
                      # TGeoHMatrix under the `placement` key of shape_<part>.root.
                      "shapePlacement": record.get("placement"),
+                     # Is this part's TESSELLATION the same solid as its exact surfaces? True only
+                     # when every face is a planar polygon; null when there is no sidecar to ask.
+                     # Recorded, not acted on -- csg/planar.py says why it is worth having.
+                     "tessellationExact": mesh_exact,
+                     "tessellationExactWhy": mesh_reason,
+                     "surfaceCensus": mesh_census,
                      "evidence": evidence})
-    report = {"tiers": tiers, "nLeafSolids": len(records), "parts": rows}
+    report = {"tiers": tiers, "tessellationExactness": exactness,
+              "nLeafSolids": len(records), "parts": rows}
     Path(path).write_text(json.dumps(report, indent=1))
     return report
 
@@ -268,6 +292,12 @@ def print_tier_table(report):
         else:
             detail = f"declined CSG: {ev['declinedCsgBecause']}"
         print(f"  {(row['volume'] or row['lid'])[:28]:<28} {row['representation']:<10} {detail}")
+    exact = report.get("tessellationExactness") or {}
+    if exact.get("exact"):
+        total = sum(exact.values()) or 1
+        print(f"  tessellation is EXACT (every face a planar polygon) for {exact['exact']} of "
+              f"{total} part(s) -- {100.0 * exact['exact'] / total:.1f} %; for those the mesh is "
+              f"not an approximation of the part, it is the part")
     tiers = report["tiers"]
     print(f"  tiers: CSG {tiers['csg']}, exact surfaces {tiers['surface']}, "
           f"tessellated {tiers['mesh']}  (of {report['nLeafSolids']} leaf solids)")

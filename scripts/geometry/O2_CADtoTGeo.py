@@ -4709,7 +4709,10 @@ def emit_root_macro(
         csg_files, flat_files, csg_records = hook.recognise_and_emit(
             def_shapes, def_names, scale_to_cm, out_folder, sanitize_filename, mode=csg_mode)
         report_path = _Path(csg_report) if csg_report else (out_folder / "csg_report.json")
-        report = hook.write_report(csg_records, report_path, set(surface_files or {}),
+        # The mapping, not a set of lids: write_report reads each part's sidecar to decide whether
+        # its tessellation is the same solid as its exact surfaces (csg/planar.py). `lid in ...`
+        # behaves identically either way, so the tier decision is untouched.
+        report = hook.write_report(csg_records, report_path, dict(surface_files or {}),
                                    set(logical_volumes))
         hook.print_tier_table(report)
         print(f"Wrote CSG report: {report_path}")
