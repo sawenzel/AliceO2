@@ -13,16 +13,98 @@ primitive class the writer emits. Parts whose cells would make a `TGeoCompositeS
 64 leaves now ship as **`o2::base::O2FlatCSG`** — a union of intersection-cells over signed
 implicit halfspaces with a BVH over sub-boxes of the cells — and that representation is measured
 to be 3–34× faster on `Contains`, 4.5–30× on `Safety` and 0.83–7.1× on transport against the same
-part emitted as a plain composite. The two things still queued are the **closure test** (real
-physics through the round trip) and **R6, the breadth census** over the remaining Run 3 modules.
+part emitted as a plain composite. **R6, the breadth census, is now done**: all seventeen Run 3
+modules round-trip at **22 736 native CSG of 22 901 leaf solids (99.3 %)**, every one agreeing with
+its source. The one thing still queued is the **closure test** (real physics through the round
+trip).
 
-## The two queued next steps, both for a FRESH session
+## Two findings from 2026-08-25 that change how numbers here should be read
 
-1. **R6 — the breadth census.** Convert and score MAG, TOF, MFT, MCH, MID, FT0, FV0, ZDC, EMC,
-   PHS, CPV, HMP — one command each now. It is what turns "87 % of composite-sourced parts" and
-   the flat-CSG crossover from statements about five detectors into statements about the geometry.
-   → [`Handoff_FlatCSG.md`](Handoff_FlatCSG.md) §2 (R6).
-2. **The closure test** — real `o2-sim -m PIPE ITS TPC MAG` physics through the round-tripped
+**1. The flat solid's speed-up is against the round-tripped composite, not against what O2 ships.**
+`Stream_AK_FlatCSG.md`'s 3.2–34x on `Contains` is measured against the same cells emitted as a
+plain `TGeoCompositeShape`. Measured instead against the **source** `TGeoShape` each part was made
+from, on the same 4000 points in the same kernel, the picture depends entirely on how deep that
+source tree is: TRD `BREF1`'s original is 3 leaves at boolean depth **2** and beats the flat solid
+on all four kernels (0.9x / 0.4x / 0.2x / 0.24x); ITS `IBCYSSFlangeC`'s is 36 leaves at depth **35**
+and loses 6.9x on `Contains` and 5.7x on `Safety`; TRD `VolTOFrail` (22 leaves, depth 8) is in
+between. This does not undercut the representation — its purpose is CAD-native geometry where no
+original exists — but any quoted ratio must now say *against what*. The baseline is on the website
+per part, and `exportSourceShapes.py` is how it gets there.
+
+**2. `tgeoRayService.py` was corrupting every composite it traced, and is fixed.**
+`TGeoBoolNode`'s per-thread scratch state is indexed by `TGeoManager::ThreadId()`, which returns 0
+for every thread unless the manager is multi-threaded — and that needs `SetMaxThreads()`, which
+needs a closed geometry, which this service does not have. On `BREF1` with 8 threads the composite
+missed 13 033 of 35 420 hits, invented phantom hits and returned normals up to 90° wrong on ~19 %
+of pixels; at one thread every one of those is **0**. Boolean shapes are now traced single-threaded
+(`raysvc::isThreadSafe`) and `/load` reports it. **No `--perf`, gate, X-ray or `/bench` number is
+affected** — all of those are single-threaded by construction — but any *picture* of a composite
+from this bridge taken before 2026-08-25 was wrong. It is a harness bug, not a ROOT defect: ROOT
+documents the `SetMaxThreads` requirement and this service never met it.
+
+**3. An exact tessellation is not a fallback, and 82 % of ITS+TPC+TRD has one.**
+A triangulation of a planar polygon IS that polygon, so a part whose every face is a plane with
+straight trim edges has a mesh that is the *same solid*, not an approximation. Measured: 30 random
+all-planar parts, 600 000 points, **zero** `Contains` disagreements against the exact surface solid.
+The census is 143/264 ITS, 72/172 TPC, 1107/1170 TRD — **1322 of 1606** — at a median of 12 facets,
+because 92 % of them are boxes. `csg/planar.py` is the predicate (the same `PlanarPolygon` vs
+`CurvedPlanar` rule `LoadSurfaceSolid` applies) and `csg_report.json` now carries
+`tessellationExact` per part plus a census line in the tier table. **It is an annotation and
+routes nothing**, deliberately: exactness says the mesh costs no accuracy for such a part, not that
+it is the right thing to emit — a box is a `TGeoBBox` and should stay one. Two measurements sit
+beside it for whenever emission is revisited: preferring the mesh over the exact `surface` solid
+would move **zero** parts (across all seven corpora every one of the 25 `surface` parts has curved
+faces), while against the **flat solid** the exact mesh wins every kernel on all nine all-planar
+flat parts (median 2.0x `Contains`, 7.7x `DistFromOutside`, 9.8x `DistFromInside`, 3.5x `Safety`) at
+72–324 facets. Sandro's call, 2026-08-25: no decision now; what a part emits is ultimately a small
+per-part benchmark's job, and `/bench` already times every subject of one part on one shared sample
+set. `MeshHealing.md`'s caveat — a mesh can be *invalid*, not merely inaccurate — is the argument on
+the other side that none of these numbers address.
+
+## R6, the breadth census: DONE (2026-08-25)
+
+All seventeen Run 3 modules round-tripped and scored — **22 901 leaf solids**, ABSO CPV EMC FT0
+FV0 HMP ITS MAG MCH MFT MID PHS PIPE TOF TPC TRD ZDC. The document is
+`roundTripReport.py --corpus <root>`; the numbers:
+
+| | |
+| --- | --- |
+| native CSG tree | **22 736** (99.28 %) |
+| `O2FlatCSG` | 20 |
+| exact surfaces | 130 |
+| tessellated | 15 |
+| agrees with its source `TGeoShape` | **22 747 / 22 756** |
+| tessellation is exact (all-planar) | 19 622 (86 %) |
+| declined by the *writer*, never reaching the converter | 31 volumes |
+
+**Every native primitive class round-trips at 100 %** — `TGeoBBox` 18 069, `TGeoTube` 754,
+`TGeoTrd1` 133, `TGeoTrap` 126, `TGeoPcon` 123, `TGeoTubeSeg` 100, `TGeoXtru` 45, `TGeoPgon` 33,
+`TGeoEltu` 26, `TGeoArb8` 9, `TGeoCtub` 8 — except `TGeoCone` (41/42) and `TGeoTorus` (302/308).
+**Everything that declines is a `TGeoCompositeShape`**: 3125 of them, 2969 tree / 18 flat / 123
+surface / 15 mesh. Coverage is a question about booleans and about nothing else.
+
+The writer's 31 declines are the other half, and they are invisible if only converted parts are
+counted: **`TGeoPara` is not mapped at all** (13 volumes), six composites are *unbounded* (a
+half-space has no B-rep body), six `TGeoTorus` are hollow, and the rest are prism section-count
+mismatches in `TGeoTrd1`/`TGeoArb8`/`TGeoPgon` plus two `TGeoCompositeShape(union)`.
+
+**The nine "disagreements" are not defects.** All nine are MFT bodies of a multi-body label where
+the body is ~6 ppm of the label's volume (2.0e-5 cm^3 inside 3.49 cm^3), and
+`checkKnownSource.contains_crosscheck` samples the *source's* bounding box, so 20 000 uniform
+points never land in the body and the instrument correctly refuses to pass an empty comparison.
+Re-scored in the emitted body's own box, 200 000 points each: 3342–41 868 points inside the body,
+**zero** outside the source. The fix is to sample the emitted body's box when `one_way` is set;
+it is not made, because it changes an acceptance instrument.
+
+**MFT is an outlier and it is not our doing.** 16 965 of its 19 185 solid-carrying volumes are
+geometric duplicates: `capacitor`, `welding0` and `welding1` are **5144 separate `TGeoVolume`
+objects with 5144 separate `TGeoBBox` objects each**, all one box, one medium. 25 853 volumes
+where ~2000 would do. It costs the manager, the STEP file, ~90 min of conversion (each duplicate
+gets a full 4000-point acceptance test) and presumably `o2-sim` load time and navigation. Worth a
+JIRA against the MFT geometry; the report has a section for it per module.
+
+## The queued next step, for a FRESH session
+1. **The closure test** — real `o2-sim -m PIPE ITS TPC MAG` physics through the round-tripped
    geometry in three representations, scored against the original C++ TGeo as its own oracle.
    → [`Handoff_ClosureTest.md`](Handoff_ClosureTest.md). Unaffected by R5: it scores the
    representations that exist, and there is now one more of them.
@@ -60,7 +142,7 @@ deep review with the verification appendix; [`INDEX.md`](INDEX.md) orders every 
 | **Geant integration demo** | works: IRIS + Bagger as sensitive external detectors, real hits, zero stuck tracks / nav errors (`Stream_Z_IntegrationDemo.md`) |
 | material budget, exact vs tessellated | 0.039 % aggregate over 512 Fibonacci geantino rays; sole 8192-ray divergence is `BucketLink2`, the not-closed mesh |
 | costs, exact vs tessellated | 1.94× transport, +42 s one-off build (IRIS CloseShape), +174 MB; exact is *smaller on disk* |
-| website (`website/`) | mesh viewer, charts, JS exact raytracer bit-true vs the kernel, event-display player, self-check 30/30; `website_data/decline_reasons.json` regenerated 2026-08-25 post-R5 |
+| website (`website/`) | mesh viewer, charts, JS exact raytracer bit-true vs the kernel, event-display player, self-check **99/99** over 29 parts; `website_data/decline_reasons.json` regenerated 2026-08-25 post-R5. **Six subjects** are now first class (2026-08-25): the ten R5 flat-CSG parts are in `testdata/`, `tgeoRayService.py` loads every artefact by magic, and the live `/bench` measures each on the *same* sample points. Two of the six are not conversion products — the **Original TGeo** baseline (`exportSourceShapes.py`) and the cells-tree comparison — and a `role` field keeps both out of every "ships" statement |
 | ray bridge (`tgeoRayService.py`) | the real kernel serving pixels: 10k rays in 4 ms |
 | oTOF converts | 20 prototypes / 62 628 placements, 20/20 exact surfaces, 19/20 CSG `TGeoBBox` at dV_sym = 0 (`Stream_AC_OTOFTraversal.md`) |
 | TGeo → STEP round trip | six-module study: ~7.4 M Contains samples, ONE disagreement (`Stream_AD/AF/AG/AH/AI`) |
@@ -75,9 +157,16 @@ distance, and returns `0.` for 78–100 % of interior points.
 
 ## Open, in the order I would take them
 
-1. **R6, the breadth census** (`Handoff_FlatCSG.md` §2) — cheap, one command per module, and it is
-   what makes every claim above a claim about the geometry rather than about five detectors.
-2. **The closure test** (`Handoff_ClosureTest.md`) — fresh session.
+1. **The closure test** (`Handoff_ClosureTest.md`) — fresh session. The only queued item left.
+2. **The `one_way` sampling box in `checkKnownSource.py`** — a one-way containment comparison
+   samples the *source's* bounding box, so a body that is parts-per-million of a multi-body label
+   is never hit and the part reports as a failure it cannot be scored for. Nine MFT parts, proven
+   clean on 200 000 points each in the body's own box. Sample the emitted body's box when
+   `one_way` is set.
+3. **MFT's duplicate logical volumes** — 16 965 of 19 185. Written up as
+   [`MFT_deduplication_task.md`](MFT_deduplication_task.md) for its own session; the complication
+   is that `MFTSensor` is one of the duplicated families and hit scoring resolves the sensor from
+   four levels of copy numbers above it.
 3. **The flat solid's three named follow-ups** (`Stream_AK_FlatCSG.md` §12), in order: the
    1-Lipschitz per-halfspace `Safety`; front-to-back ordering and early exit in
    `DistFromOutside` (the one kernel the flat solid can lose); and split at every carrier crossing
@@ -190,9 +279,23 @@ $B/stage/bin/o2-bench-detectorsbase-xray --perf --raster 32 \
 #   and the two split knobs, for sweeping them from outside the class:
 #     --flat-split-depth N   --flat-min-box-fraction X
 
+# the TGeo -> STEP -> TGeo report over a corpus (one directory per module, each with
+# o2sim_geometry.root, <MOD>_writer_report.json and a conv/ holding csg_report.json)
+python3 scripts/geometry/roundTripReport.py --corpus <root> --out report.md
+python3 scripts/geometry/roundTripReport.py --corpus <root> --out report.html --html  # print to PDF
+python3 scripts/geometry/roundTripReport.py --corpus <root> --part BREF1              # one part
+# and the round trip that fills such a corpus, per module:
+#   o2-sim-serial -n 0 -g boxgen -m $MOD
+#   O2_TGeoToCAD.py o2sim_geometry.root $MOD.step --report ${MOD}_writer_report.json
+#   O2_CADtoTGeo.py $MOD.step -o geom.C --output-folder conv --exact-surfaces auto --csg auto --mesh
+#   checkKnownSource.py --original o2sim_geometry.root --writer-report ${MOD}_writer_report.json \
+#       --converted conv --json conv/knownsource.json
+
 # the website (serve locally, then open the printed URL)
 cd scripts/geometry/website && ./fetch_testdata.sh <gate-workdir> && python3 -m http.server 8231
-# the ray bridge (inside the O2 env), for the website's RemoteEngine / engine-diff view
+# the ray bridge (inside the O2 env), for the website's RemoteEngine / engine-diff view.
+# It now loads all four representations and dispatches on the file's own magic, so a bridge left
+# running from before 2026-08-25 will refuse flatcsg_*.bin: restart it after pulling.
 python3 scripts/geometry/tgeoRayService.py --port 8077
 # the integration demo, end to end
 scripts/geometry/integration_demo/   # see its README / convert_all.sh, run scripts

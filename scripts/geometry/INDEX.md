@@ -37,6 +37,7 @@ done), **historical** (kept for the reasoning, no longer steering anything).
 | `Design_FlatCSGSolid.md` | reference | the spec of `o2::base::O2FlatCSG`: representation, sub-cell BVH, queries, twins, sidecar |
 | `Plan_FlatCSGSolid.md` | record | the ten-task implementation plan R5 was executed from |
 | `MeshHealing.md` | open | mesh validity ≠ accuracy; repair options unbuilt |
+| `MFT_deduplication_task.md` | open | MFT builds 16 965 duplicate logical volumes; the hit-scoring chain is the complication |
 | `Workstreams.md` | historical | the parallel-streams contract (waves 0–3, executed) |
 | `CodeReview_Fable.md`, `_v2.md` | historical | the two defect registers that drove waves 0–1 |
 | `ExactTrimTopology.md` | historical | why closure moved from proximity to topology |
@@ -80,6 +81,14 @@ done), **historical** (kept for the reasoning, no longer steering anything).
 | `Stream_AI_WriterFixes.md` | record | the three writer fixes |
 | `Stream_AJ_Recognition.md` | record | the recognition programme: every primitive class the writer emits, recognised |
 | `Stream_AK_FlatCSG.md` | record | `O2FlatCSG`: ten new parts, the measured crossover, the split knobs, the emission policy |
+
+## The instruments that produce documents
+
+| script | what it makes |
+| --- | --- |
+| `roundTripReport.py` | the TGeo &rarr; STEP &rarr; TGeo report over a whole corpus: the per-module summary, the **feature matrix** (every source shape class against what the round trip made of it), the decline census, and one row per leaf solid. Markdown or standalone HTML; `--part NAME` prints one part's full record on the fly. |
+| `exportSourceShapes.py` | `original_<stem>.root` &mdash; the `TGeoShape` a round-tripped part was made FROM, as its own traceable artefact; `--no-write` describes every part instead (class, boolean depth, leaf classes) for the report above. |
+| `csg/planar.py` | whether a part's tessellation is the *same solid* as its exact surfaces rather than an approximation &mdash; the `PlanarPolygon` test, recorded per part in `csg_report.json`. |
 
 `attic/` holds parked stale script variants (pre-branch `O2_TGeoToCAD*` experiments and scratch);
 nothing in it is live, and it is untracked on purpose.
