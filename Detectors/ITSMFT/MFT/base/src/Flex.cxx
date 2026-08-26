@@ -242,7 +242,12 @@ TGeoVolumeAssembly* Flex::makeElectricComponent(Double_t dx, Double_t dy, Double
   static TGeoVolume* capacitor = nullptr;
   static TGeoVolume* welding0 = nullptr;
   static TGeoVolume* welding1 = nullptr;
+  static Double_t sCachedDx = 0., sCachedDy = 0., sCachedDz = 0.;
   if (!capacitor) {
+    sCachedDx = dx;
+    sCachedDy = dy;
+    sCachedDz = dz;
+
     TGeoMedium* kmedX7R = gGeoManager->GetMedium("MFT_X7Rcapacitors$");
     TGeoMedium* kmedX7Rw = gGeoManager->GetMedium("MFT_X7Rweld$");
 
@@ -270,6 +275,13 @@ TGeoVolumeAssembly* Flex::makeElectricComponent(Double_t dx, Double_t dy, Double
     welding1->SetLineWidth(1);
     welding1->SetFillColor(welding1->GetLineColor());
     welding1->SetFillStyle(4000); // 0% transparent
+  } else if (dx != sCachedDx || dy != sCachedDy || dz != sCachedDz) {
+    // The cache above assumes every call site passes the same dimensions; if that ever
+    // stops being true (e.g. the dead connector-component code below is revived with
+    // different args) the cached shapes would silently be the wrong size.
+    LOG(fatal) << "Flex::makeElectricComponent: cached capacitor/welding shapes were built "
+                  "with different dx,dy,dz than this call - the single-shape cache assumes "
+                  "identical dimensions at every call site";
   }
 
   X7R0402->AddNode(capacitor, 1, new TGeoTranslation(0., 0., 0.));
