@@ -9,13 +9,29 @@
 // answer back here, where it is drawn next to the recorded one and labelled as live.
 
 import { liveResults, measurablePlan, measurePart, probeBridge, defaultPort } from './livebench.js';
+import { REPRESENTATIONS, PRODUCTS, repLabel, repNote, partHas, partNote } from './representations.js';
 
-const SERIES = [
-  { key: 'surface', label: 'surface (exact)', color: '#3987e5' },
-  { key: 'mesh', label: 'mesh (tessellated)', color: '#d95926' },
-  { key: 'shape', label: 'shape (CSG)', color: '#199e70' },
-];
-const SERIES_BY_KEY = Object.fromEntries(SERIES.map(s => [s.key, s]));
+// Colour is the only thing the chart decides for itself. Every NAME comes from
+// representations.js, so a bar, a badge, a raytracer view and the part card all call the same
+// thing by the same word -- which is the whole reason that module exists. The baseline and the
+// comparison are grey on purpose: neither is something the converter ships, and giving them a
+// hue would put them on the same footing as the four that are.
+const SERIES_COLOR = {
+  surface: '#3987e5', mesh: '#d95926', shape: '#199e70', flatcsg: '#a163d8',
+  original: '#8d94a4', cellstree: '#5c6473',
+};
+
+/// The drawing spec for one series of the chart. `name` is either a representation key, for a
+/// recorded bar, or `<key>-live` for one measured on the spot.
+function seriesSpec(name) {
+  const live = typeof name === 'string' && name.endsWith('-live');
+  const key = live ? name.slice(0, -'-live'.length) : name;
+  const colour = SERIES_COLOR[key];
+  if (!colour) { return { color: '#8a94a6', label: String(name) }; }
+  if (!live) { return { color: colour, label: `${repLabel(key)}, recorded` }; }
+  return { color: LIVE_TINT[key] || colour, stroke: colour, live: true,
+           label: `${repLabel(key)}, measured live` };
+}
 
 const FUNCTIONS = [
   { key: 'contains', label: 'Contains' },
@@ -24,11 +40,11 @@ const FUNCTIONS = [
   { key: 'safety', label: 'Safety' },
 ];
 
-// The live series sit beside their recorded twin: the same hue, lighter, and dash-outlined, so a
-// bar measured a second ago is never mistaken for the record it is compared against.
-const LIVE_STYLE = {
-  surface: { color: '#7fb2ea', stroke: '#3987e5', label: 'surface (exact), measured live' },
-  shape: { color: '#5fc4a2', stroke: '#199e70', label: 'shape (CSG), measured live' },
+// A live series sits beside its recorded twin in the same hue, lighter and dash-outlined, so a
+// bar measured a second ago is never mistaken for the record it is being compared against.
+const LIVE_TINT = {
+  surface: '#7fb2ea', mesh: '#eda184', shape: '#5fc4a2', flatcsg: '#c9a4ec',
+  original: '#b9bfca', cellstree: '#8a92a1',
 };
 
 const svgNS = 'http://www.w3.org/2000/svg';
@@ -37,6 +53,31 @@ function el(name, attrs = {}, text = null) {
   for (const [k, v] of Object.entries(attrs)) { node.setAttribute(k, v); }
   if (text !== null) { node.textContent = text; }
   return node;
+}
+
+/// The one ratio printed under a group of bars. A series is looked up in its recorded form first
+/// and then in its live form, so a part with no Track-2 record still gets the annotation.
+function ratioFor(reps, fnKey) {
+  const value = (key) => nsPerCall(reps.find(r => r.name === key), fnKey)
+                      ?? nsPerCall(reps.find(r => r.name === `${key}-live`), fnKey);
+  // Named both ways round, because "FlatCSG / original 4.5x" does not say which of the two is the
+  // fast one and a reader should not have to look at the bars to find out. The names are the short
+  // forms: one group of this chart is about 160 px wide and the full labels collide.
+  const SHORT = { original: 'original', shape: 'CSG', cellstree: 'cells-tree',
+                  flatcsg: 'FlatCSG', surface: 'exact', mesh: 'mesh' };
+  const faster = (aKey, aVal, bKey, bVal) => (aVal <= bVal
+    ? `${SHORT[aKey] || aKey} ${(bVal / aVal).toFixed(1)}x faster`
+    : `${SHORT[bKey] || bKey} ${(aVal / bVal).toFixed(1)}x faster`);
+  const original = value('original');
+  if (original && original > 0) {
+    for (const key of ['flatcsg', 'shape', 'surface']) {
+      const v = value(key);
+      if (v && v > 0) { return faster('original', original, key, v); }
+    }
+  }
+  const surface = value('surface'), mesh = value('mesh');
+  if (surface && mesh && surface > 0) { return faster('surface', surface, 'mesh', mesh); }
+  return null;
 }
 
 /// null / undefined means "not measured" and is rendered as n/a -- never as zero.
@@ -104,7 +145,7 @@ export function barChart(doc, { width = 720, height = 320 } = {}) {
     plot.appendChild(el('text', { x: cx, y: plotH + 20, 'text-anchor': 'middle', class: 'axis-label' }, fn.label));
 
     present.forEach((rep, si) => {
-      const spec = rep.style || SERIES_BY_KEY[rep.name] || { color: '#8a94a6', label: rep.name };
+      const spec = seriesSpec(rep.name);
       const v = nsPerCall(rep, fn.key);
       const x = cx - (present.length * barW) / 2 + si * barW;
       if (v === null || !(v > 0)) {
@@ -124,12 +165,14 @@ export function barChart(doc, { width = 720, height = 320 } = {}) {
       plot.appendChild(el('text', { x: x + barW / 2, y: y - 5, 'text-anchor': 'middle', class: 'value-label' }, fmt(v, 3)));
     });
 
-    // the headline of this whole story: how many times slower the mesh is than the exact surface
-    const surfaceValue = nsPerCall(reps.find(r => r.name === 'surface'), fn.key);
-    const meshValue = nsPerCall(reps.find(r => r.name === 'mesh'), fn.key);
-    if (surfaceValue && meshValue && surfaceValue > 0) {
+    // One ratio under each group, and WHICH ratio depends on what the part carries. Where the
+    // shape the part was made from is present that is the comparison worth printing -- everything
+    // else on this chart is a reconstruction of it. Failing that, the mesh against the exact
+    // surfaces, which was this chart's original headline.
+    const ratio = ratioFor(reps, fn.key);
+    if (ratio) {
       plot.appendChild(el('text', { x: cx, y: plotH + 38, 'text-anchor': 'middle', class: 'ratio-label' },
-        `mesh / exact ${(meshValue / surfaceValue).toFixed(1)}x`));
+        ratio));
     }
   });
 
@@ -138,7 +181,7 @@ export function barChart(doc, { width = 720, height = 320 } = {}) {
   const legend = document.createElement('div');
   legend.className = 'legend';
   for (const rep of present) {
-    const spec = rep.style || SERIES_BY_KEY[rep.name] || { color: '#8a94a6', label: rep.name };
+    const spec = seriesSpec(rep.name);
     const item = document.createElement('span');
     item.className = 'legend-item';
     const swatch = document.createElement('span');
@@ -188,7 +231,7 @@ export function countersTable(doc) {
     const acc = rep.accuracy || {};
     const xray = rep.xray || {};
     return [
-      (SERIES_BY_KEY[rep.name] || { label: rep.name }).label,
+      repLabel(rep.name),
       acc.capacityRelativeDeviation === undefined ? null : fmt(acc.capacityRelativeDeviation),
       countOf(acc.disagreements),
       countOf(acc.unexplained),
@@ -215,10 +258,13 @@ export function shipsVerdict(partName, entry, summary) {
   if (row && row.ships) { return { ships: row.ships, source: 'website_data/summary.json' }; }
   if (entry && entry.ships) { return { ships: entry.ships, source: 'the converter that wrote testdata/' }; }
   if (!entry) { return null; }
-  return { ships: entry.surfaces ? 'surface' : 'mesh', source: 'inferred from what testdata/ holds' };
+  // Failing both, the cascade's own order decides: the first artefact this part carries is the
+  // furthest the cascade got before it stopped.
+  const first = PRODUCTS.find(rep => partHas(entry, rep.key));
+  return { ships: first ? first.key : 'mesh', source: 'inferred from what testdata/ holds' };
 }
 
-export const SHIPS_LABEL = { surface: 'SURFACE', mesh: 'TESSELLATED', shape: 'CSG' };
+export const SHIPS_LABEL = Object.fromEntries(REPRESENTATIONS.map(rep => [rep.key, rep.badge]));
 
 /// Every representation this part carries at full quality, the cascade's own choice first.
 ///
@@ -229,17 +275,21 @@ export const SHIPS_LABEL = { surface: 'SURFACE', mesh: 'TESSELLATED', shape: 'CS
 export function shipsKeys(primary, entry, csg) {
   const keys = [];
   if (primary) { keys.push(primary); }
-  if (entry && entry.surfaces && !keys.includes('surface')) { keys.push('surface'); }
   const rejected = !!(csg && csg.acceptance && csg.acceptance.accepted === false);
-  if (entry && entry.shape && !rejected && !keys.includes('shape')) { keys.push('shape'); }
+  // Only a PRODUCT can be what a part ships: the original is the conversion's input and the
+  // cells-tree is a comparison built for this page, so neither is ever a badge.
+  for (const rep of PRODUCTS) {
+    if (keys.includes(rep.key) || !partHas(entry, rep.key)) { continue; }
+    // The mesh is named only when it is what the part ships as (see the note above).
+    if (rep.key === 'mesh') { continue; }
+    // A candidate the acceptance test threw out is not a representation this part has.
+    if (rep.key === 'shape' && rejected) { continue; }
+    keys.push(rep.key);
+  }
   return keys;
 }
 
-const SHIPS_NOTE = {
-  surface: 'the exact trimmed analytic faces, navigated by O2BVHSurfaceSolid',
-  mesh: 'the triangle mesh, navigated by O2Tessellated -- the fallback',
-  shape: 'native CSG primitives, navigated by a TGeo composite shape',
-};
+const SHIPS_NOTE = Object.fromEntries(REPRESENTATIONS.map(rep => [rep.key, rep.note]));
 
 // ------------------------------------------------------------------------------------------
 // the CSG record
@@ -253,7 +303,17 @@ const CSG_OPERATOR = { union: ' \u222a ', intersection: ' \u2229 ', subtraction:
 /// Returns null when there is no accepted candidate -- a part that is not CSG says so elsewhere.
 export function csgStructure(csg) {
   const candidate = csg && csg.candidate;
-  if (!candidate || !Array.isArray(candidate.leaves) || !candidate.leaves.length) { return null; }
+  if (!candidate) { return null; }
+  // A flat-DNF candidate has no leaf list at all: it is cells over halfspaces, and saying so is
+  // the only honest one-liner for it.
+  if (candidate.op === 'flatCells') {
+    const notes = candidate.notes || {};
+    const cells = notes.nCells || (candidate.cells || []).length;
+    return notes.nHalfspaces
+      ? `${cells} intersection-cells over ${notes.nHalfspaces} halfspaces`
+      : `${cells} intersection-cells`;
+  }
+  if (!Array.isArray(candidate.leaves) || !candidate.leaves.length) { return null; }
   const types = candidate.leaves.map(leaf => leaf.type || '?');
   if (candidate.op === 'primitive' || types.length === 1) { return types[0]; }
   return types.join(CSG_OPERATOR[candidate.op] || ` ${candidate.op} `);
@@ -278,6 +338,23 @@ function csgSection(card, part, csg, decline) {
   const candidate = csg && csg.candidate;
   const acceptance = csg && csg.acceptance;
   const whyNot = decline && decline.whyNotCSG;
+
+  // A flat-DNF candidate is not a tree of native primitives and must not be printed as one --
+  // `(candidate.leaves || []).every(...)` is vacuously true on an empty list and would claim
+  // every leaf carries a frame. It gets its own section; this one says where to look.
+  if (candidate && candidate.op === 'flatCells') {
+    const line = document.createElement('p');
+    line.className = 'muted small';
+    line.textContent = 'The recogniser did not produce a native CSG tree for this part: its cells make a ' +
+      'composite wider than the routing threshold, so the cascade emitted the flat halfspace solid ' +
+      'instead. What it found is in the FlatCSG section below.' +
+      (partHas(part, 'cellstree')
+        ? ` The cells-tree beside it is ${partNote(part, 'cellstree') || 'the decomposed cells as a plain composite'}` +
+          ' -- a comparison built for this page, not what the converter ships.'
+        : '');
+    card.appendChild(line);
+    return;
+  }
 
   if (candidate) {
     const pairs = [
@@ -334,6 +411,81 @@ function csgSection(card, part, csg, decline) {
   }
 }
 
+/// Where this part came from, when it came from an existing detector geometry rather than from
+/// CAD. This is the row a reader should read first: every other number on the card is about a
+/// reconstruction, and this one is the thing being reconstructed.
+function baselineSection(card, part) {
+  if (!partHas(part, 'original')) { return; }
+  const heading = document.createElement('h4');
+  heading.textContent = 'the shape this part was made from';
+  card.appendChild(heading);
+  card.appendChild(dl([
+    ['source', partNote(part, 'original') || 'the TGeoShape this part was made from'],
+    ['artefact', `testdata/${part.original}, written by scripts/geometry/exportSourceShapes.py`],
+    ['what it is for', 'the baseline. It is the input to the round trip, not one of its outputs, ' +
+      'so it is never counted in what the part ships -- but it is what every other representation ' +
+      'here has to beat, and the "Original TGeo (bridge)" view and bars are it'],
+  ]));
+}
+
+/// What the flat halfspace solid IS, read off the very bytes the kernel loads: the cell table,
+/// the halfspace kinds, and the boxes the converter had to supply because an intersection of
+/// halfspaces does not bound itself. The recogniser's own notes fill in what the file cannot say.
+function flatCsgSection(card, part, csg, flat) {
+  if (!partHas(part, 'flatcsg') && !(csg && csg.candidate && csg.candidate.op === 'flatCells')) { return; }
+  const heading = document.createElement('h4');
+  heading.textContent = 'FlatCSG, as the halfspace solid';
+  card.appendChild(heading);
+
+  if (!flat) {
+    const line = document.createElement('p');
+    line.className = 'muted small';
+    line.textContent = partHas(part, 'flatcsg')
+      ? 'The flat-CSG sidecar is named in the manifest but this page could not read it.'
+      : 'The recogniser produced a flat-DNF candidate for this part, but no flatcsg_*.bin was copied ' +
+        'into testdata/, so there is nothing here to read.';
+    card.appendChild(line);
+    return;
+  }
+
+  const notes = (csg && csg.candidate && csg.candidate.notes) || {};
+  const kinds = [];
+  if (flat.kinds.quadric) { kinds.push(`${flat.kinds.quadric} quadric`); }
+  if (flat.kinds.torus) { kinds.push(`${flat.kinds.torus} torus`); }
+  const pairs = [
+    ['structure', `a union of ${flat.nCells} intersection-cell(s) over ${flat.nHalfspaces} signed halfspaces`],
+    ['halfspaces', `${kinds.join(', ')} (${flat.signs.interior} interior, ${flat.signs.exterior} exterior)`],
+    ['per cell', flat.minCellHalfspaces === flat.maxCellHalfspaces
+      ? `${flat.minCellHalfspaces} halfspaces in every cell`
+      : `${flat.minCellHalfspaces} to ${flat.maxCellHalfspaces} halfspaces`],
+    ['cell boxes', `${flat.nCells} AABB(s) supplied by the converter -- an intersection of halfspaces ` +
+      'does not bound itself, so the decomposition is the only thing that can say where a cell ends'],
+    ['sidecar', `version ${flat.version}, ${(flat.byteLength / 1024).toFixed(1)} kB`],
+    ['cell volume', `${fmt(flat.volume, 6)} cm^3, summed over the cells`],
+  ];
+  if (notes.nSplits !== undefined) { pairs.push(['decomposition splits', String(notes.nSplits)]); }
+  if (notes.cellGapCm !== undefined) { pairs.push(['worst cell gap', `${fmt(notes.cellGapCm)} cm`]); }
+  if (notes.cellBoxMarginCm !== undefined) {
+    pairs.push(['cell-box margin', `${fmt(notes.cellBoxMarginCm)} cm`]);
+  }
+  if (notes.containsScored !== undefined) {
+    pairs.push(['Contains corroborated at', `${notes.containsScored} point(s) against the CAD solid`]);
+  }
+  pairs.push(['traceable here', partHas(part, 'flatcsg')
+    ? `testdata/${part.flatcsg} -- the "FlatCSG (bridge)" raytracer view traces this very file, ` +
+      'and "measure this part now" benchmarks it'
+    : 'no flatcsg_*.bin in testdata/ for this part']);
+  if (partHas(part, 'cellstree')) {
+    pairs.push(['measured against', `${partNote(part, 'cellstree') || 'the decomposed cells as a plain composite'} ` +
+      `(testdata/${part.cellstree}) -- the "CSG cells-tree" view and bars are that composite`]);
+  }
+  if (partHas(part, 'original')) {
+    pairs.push(['and against the baseline', `${partNote(part, 'original') || 'the source TGeoShape'} ` +
+      `(testdata/${part.original}) -- what this part looked like before the round trip`]);
+  }
+  card.appendChild(dl(pairs));
+}
+
 function dl(pairs) {
   const list = document.createElement('dl');
   list.className = 'facts';
@@ -362,7 +514,7 @@ function representationTable(doc) {
   const rows = reps.map((rep) => {
     const acc = rep.accuracy || {};
     return [
-      (SERIES_BY_KEY[rep.name] || { label: rep.name }).label,
+      repLabel(rep.name),
       rep.primitives === undefined ? null : `${rep.primitives} ${rep.primitiveKind || ''}`.trim(),
       bytes(rep.memoryBytes),
       bytes(rep.sidecarBytes),
@@ -396,6 +548,17 @@ export function partCard(entry, state, summary) {
     badge.title = `${SHIPS_NOTE[key] || ''} (${index === 0 ? `${verdict.source}; what the cascade picked` : 'also carried by this part, at full quality'})`;
     heading.append(' ', badge);
   });
+  // Not a representation the part ships -- a property of one of them. A tessellation of a part
+  // whose every face is a planar polygon is the SAME SOLID, not an approximation, and that turns
+  // the mesh from a fallback into a candidate on its merits.
+  const meshExact = state && state.meshExact;
+  if (meshExact && meshExact.exact && part && part.facets) {
+    const badge = document.createElement('span');
+    badge.className = 'badge exact';
+    badge.textContent = 'tessellation is EXACT';
+    badge.title = meshExact.reason;
+    heading.append(' ', badge);
+  }
   card.appendChild(heading);
 
   if (verdict) {
@@ -446,10 +609,15 @@ export function partCard(entry, state, summary) {
       records.className = 'badge ok';
       records.textContent = 'all records built';
     }
+    const meshExactness = state.meshExact;
     card.appendChild(dl([
       ['exact faces', solid ? String(solid.nSurfaces) : null],
       ['by type', solid ? (Object.entries(solid.counts).map(([k, n]) => `${n} ${k}`).join(', ') || '-') : null],
       ['triangles', facets ? String(facets.nTriangles) : null],
+      ['tessellation', !(meshExactness && facets) ? null : (meshExactness.exact
+        ? `EXACT -- ${meshExactness.reason}. The mesh is not an approximation of this part, it is ` +
+          'the same solid, so choosing it costs no accuracy at all'
+        : `an approximation -- ${meshExactness.reason}`)],
       ['sidecar', parsed ? `version ${parsed.version}, ${(parsed.byteLength / 1024).toFixed(1)} kB` : null],
       ['wire-trimmed', solid ? `${solid.wireTrimFaces} face(s)` : null],
       ['B-spline trims', solid ? `${solid.bsplineTrimFaces} face(s)` : null],
@@ -459,7 +627,9 @@ export function partCard(entry, state, summary) {
     ]));
   }
 
+  if (part) { baselineSection(card, part); }
   if (part) { csgSection(card, part, state.csg, state.decline); }
+  if (part) { flatCsgSection(card, part, state.csg, state.flatcsg); }
 
   // Whatever the bridge measured on this machine, this run. It is timing only, so it joins the
   // bars and nothing else; the Track-2 record stays the authority on accuracy and the X-ray counts.
@@ -467,7 +637,6 @@ export function partCard(entry, state, summary) {
   const liveReps = live ? live.reps.map(rep => ({
     name: `${rep.key}-live`,
     functions: rep.functions,
-    style: { ...(LIVE_STYLE[rep.key] || { color: '#8a94a6', label: `${rep.key}, live` }), live: true },
   })) : [];
   const staticReps = (doc && doc.representations) || [];
 
@@ -497,7 +666,14 @@ export function partCard(entry, state, summary) {
       caption.textContent = `The dashed bars were measured live on this machine, load avg ` +
         `${fmt(live.loadAverage, 2)}, at ${live.when.toLocaleTimeString()}: ${live.samples} deterministic samples ` +
         `x ${live.repeats} repeats per function, single-threaded, on the shape the bridge itself loaded ` +
-        `(${live.reps.map(r => `${SHIPS_LABEL[r.key] || r.key} from ${r.path}`).join('; ')}). ` +
+        `(${live.reps.map(r => `${repLabel(r.key)} from ${r.path}`).join('; ')}). ` +
+        (live.reps.length > 1
+          ? 'Every subject was put the SAME sample points -- the artefacts of one part do not share a ' +
+            `bounding box, so the ${repLabel(live.boxFrom || 'surface')} box was passed to each /bench. ` +
+            `${live.insideSamples} of them are interior points, ` +
+            `${live.reps[0].insideFromEntry || 0} of those harvested from where a ray enters the solid, which ` +
+            'is what makes DistFromInside measurable on a thin part at all. '
+          : '') +
         (staticReps.length
           ? 'The solid bars are the Track-2 record, taken on the machine named in website_data/summary.json. '
           : '') +
@@ -518,6 +694,10 @@ export function partCard(entry, state, summary) {
 // What the last measurement of a part said. The pane is rebuilt when the result lands -- the
 // bars have to be redrawn -- so the sentence has to outlive the element that wrote it.
 const liveStatus = new Map();
+
+// Whether the reader has asked for the opt-in comparison subjects. Lives here rather than in the
+// pane, for the same reason: the pane is thrown away and rebuilt on every measurement.
+let wantComparisons = false;
 
 /// The "measure now" pane: the button, what it will do, and what it cannot do.
 function livePane(state, rerender) {
@@ -550,15 +730,43 @@ function livePane(state, rerender) {
   row.append(button, status);
   pane.appendChild(row);
 
-  const plan = measurablePlan(part);
+  const plan = measurablePlan(part, { comparisons: wantComparisons });
   const coverage = document.createElement('p');
   coverage.className = 'muted small';
   coverage.textContent = plan.can.length
-    ? `Measurable here: ${plan.can.map(m => SHIPS_LABEL[m.key] || m.key).join(' and ')}` +
-      (plan.skipped.length ? '. The mesh is static data only: the bridge has no kernel loader for facets_*.bin, ' +
-        'so a tessellated row can only ever come from the recorded set.' : '.')
-    : 'This part has neither an exact sidecar nor a shape.root, so there is nothing the bridge can load for it.';
+    ? `Measurable here: ${plan.can.map(m => repLabel(m.key)).join(', ')}. ` +
+      'Each one is a separate /load of a separate file into the same kernel, benchmarked on the same ' +
+      'deterministic sample points, so the bars differ only by which representation answered.'
+    : 'This part carries none of the representation artefacts, so there is nothing the bridge can load for it.';
   pane.appendChild(coverage);
+
+  // The opt-in subjects, named for what they are rather than hidden. A part with none of them
+  // gets no checkbox at all rather than a dead one.
+  if (plan.optional.length || wantComparisons) {
+    const optional = measurablePlan(part, { comparisons: true }).can
+      .filter(m => m.role === 'comparison');
+    if (optional.length) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      const label = document.createElement('label');
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = wantComparisons;
+      box.addEventListener('change', () => { wantComparisons = box.checked; rerender(); });
+      label.appendChild(box);
+      label.appendChild(document.createTextNode(
+        ` also measure ${optional.map(m => repLabel(m.key)).join(', ')}`));
+      row.appendChild(label);
+      pane.appendChild(row);
+      const why = document.createElement('p');
+      why.className = 'muted small';
+      why.textContent = 'Off by default. The cells-tree is not a representation this part ships -- ' +
+        'it is the decomposition emitted as a plain composite, and it exists so the flat solid has ' +
+        'something to be measured against. Turn it on to reproduce that specific ratio; leave it off ' +
+        'to compare the shape this part was made from against what the converter can ship.';
+      pane.appendChild(why);
+    }
+  }
 
   if (!part || !plan.can.length) {
     status.textContent = 'nothing to measure';
@@ -592,7 +800,8 @@ function livePane(state, rerender) {
     status.className = 'status';
     liveStatus.delete(part.name);
     try {
-      const record = await measurePart(part, { port, onStep: (line) => { status.textContent = line; } });
+      const record = await measurePart(part, { port, comparisons: wantComparisons,
+                                              onStep: (line) => { status.textContent = line; } });
       liveStatus.set(part.name, {
         text: `measured ${record.reps.length} representation(s) at load avg ${fmt(record.loadAverage, 2)}` +
           (record.restored ? `; the bridge is back on ${record.restored}` : ''),

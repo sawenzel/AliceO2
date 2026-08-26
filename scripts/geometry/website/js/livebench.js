@@ -5,12 +5,15 @@
 // looking at: POST /load a representation, POST /bench it, and hand the answer to the chart
 // labelled as what it is -- a live measurement, with the load average it was taken under.
 //
-// Only what the bridge has a kernel loader for is measurable: the exact sidecar (surfaces.bin)
-// and the CSG composite (shape.root). There is no loader for facets_*.bin, so the mesh row stays
-// static data only.
+// Every representation the bridge has a kernel loader for is measurable, and since the loaders
+// were generalised that is all four of them: the CSG composite (shape.root), the flat halfspace
+// solid (flatcsg.bin), the exact sidecar (surfaces.bin) and the facet mesh (facets.bin). The
+// service dispatches on the file's own magic, so this module only has to name the artefacts.
 //
 // /bench answers timing and nothing else. Accuracy, capacity and the X-ray counters come from the
 // Track-2 records and are not touched here.
+
+import { REPRESENTATIONS } from './representations.js';
 
 const STORAGE_KEY = 'o2surfaces.bridge';        // the same settings the raytracer tab writes
 const PROBE_TIMEOUT_MS = 4000;
@@ -24,11 +27,22 @@ export const SAMPLES = 4000;
 /// part name -> the last live record measured for it, for as long as the page is open.
 export const liveResults = new Map();
 
-/// The representations the bridge can load, in the order they are measured.
-export const MEASURABLE = [
-  { key: 'surface', field: 'surfaces' },
-  { key: 'shape', field: 'shape' },
-];
+/// The subjects the bridge can load, in the order they are measured -- the baseline first,
+/// because that is what a reader compares against, then the cascade's own order.
+export const MEASURABLE = REPRESENTATIONS.map(rep => ({ key: rep.key, field: rep.field,
+                                                       role: rep.role }));
+
+/// What a measurement covers unless it is asked for more. A `comparison` subject is left out: the
+/// cells-tree exists to reproduce one specific claim about the flat solid, and putting it in the
+/// default chart asks every reader to work out what it is before they can read the four bars they
+/// came for -- the shape the part was made from, and the three the converter can ship.
+export function defaultSubjects() { return MEASURABLE.filter(m => m.role !== 'comparison'); }
+
+/// Whose bounding box fixes the sample points for ALL of them. The exact surface solid's is the
+/// tightest and is the CAD extent itself; a TGeoCompositeShape's is the union of its padded leaf
+/// boxes and is wider, sometimes much wider, so using one of those would spread the points over a
+/// volume that no representation actually fills. Falls back to whatever the part has.
+const BOX_PREFERENCE = ['surface', 'flatcsg', 'mesh', 'shape', 'cellstree', 'original'];
 
 function settings() {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch (e) { return {}; }
@@ -92,12 +106,13 @@ export async function probeBridge(port = defaultPort()) {
   }
 }
 
-/// What a live measurement of this part would cover, and what it cannot.
-export function measurablePlan(entry) {
-  const can = MEASURABLE.filter(m => entry && entry[m.field]);
-  const skipped = [];
-  if (entry && entry.facets) { skipped.push('mesh'); }
-  return { can, skipped };
+/// What a live measurement of this part would cover. `comparisons` adds the opt-in subjects; what
+/// is left out because the part does not carry it is reported separately from what is left out
+/// because it was not asked for, so neither can be mistaken for the other.
+export function measurablePlan(entry, { comparisons = false } = {}) {
+  const carried = MEASURABLE.filter(m => entry && entry[m.field]);
+  const can = carried.filter(m => comparisons || m.role !== 'comparison');
+  return { can, skipped: [], optional: carried.filter(m => !can.includes(m)) };
 }
 
 /// Put the bridge back to the file the raytracer tab expects to be there. The tracer tracks its
@@ -118,10 +133,11 @@ async function restoreRaytracer() {
 ///
 /// Returns { part, when, port, samples, repeats, loadAverage, reps: [{ key, path, functions }] }
 /// and remembers it in `liveResults`.
-export async function measurePart(entry, { port = defaultPort(), samples = SAMPLES, onStep = () => {} } = {}) {
-  const { can } = measurablePlan(entry);
+export async function measurePart(entry, { port = defaultPort(), samples = SAMPLES,
+                                           comparisons = false, onStep = () => {} } = {}) {
+  const { can } = measurablePlan(entry, { comparisons });
   if (!can.length) {
-    throw new Error(`${entry.name} has neither an exact sidecar nor a shape.root: the bridge has nothing to load for it`);
+    throw new Error(`${entry.name} carries none of the four representation artefacts: the bridge has nothing to load for it`);
   }
   // The service resolves a relative path against its own --root, which is not this page's URL
   // space. The raytracer tab remembers the prefix that worked; try it first, then the documented
@@ -133,7 +149,16 @@ export async function measurePart(entry, { port = defaultPort(), samples = SAMPL
   }
   let prefix = null;
   const reps = [];
-  for (const target of can) {
+  const boxKey = BOX_PREFERENCE.find(key => can.some(m => m.key === key)) || can[0].key;
+  const boxOrder = [MEASURABLE.find(m => m.key === boxKey), ...can.filter(m => m.key !== boxKey)];
+  // The sample points must be the same for every subject or the bars are not a comparison: the
+  // artefacts of one part do NOT share a bounding box (a TGeoCompositeShape's is the union of its
+  // padded leaf boxes), and /bench draws from the loaded shape's box unless it is told otherwise.
+  // One subject is loaded first purely to read its box, and that box is then passed to every
+  // /bench. The load is cached on the service, so the subject's own turn costs nothing extra.
+  let sharedBox = null;
+  let boxFrom = null;
+  for (const target of boxOrder) {
     const file = `testdata/${entry[target.field]}`;
     onStep(`loading ${file} on the bridge ...`);
     let info = null, failure = null;
@@ -141,16 +166,24 @@ export async function measurePart(entry, { port = defaultPort(), samples = SAMPL
       try { info = await post(port, '/load', { path: candidate + file }, LOAD_TIMEOUT_MS); prefix = candidate; break; } catch (e) { failure = e; }
     }
     if (!info) { throw failure || new Error(`the bridge could not load ${file}`); }
+    if (target.key === boxKey && Array.isArray(info.bbox) && info.bbox.length === 6) {
+      sharedBox = info.bbox;
+      boxFrom = boxKey;
+    }
     onStep(`benchmarking ${target.key} (${samples} samples) ...`);
-    const measured = await post(port, '/bench', { samples }, BENCH_TIMEOUT_MS);
+    const measured = await post(port, '/bench', sharedBox ? { samples, bbox: sharedBox } : { samples },
+                                BENCH_TIMEOUT_MS);
     reps.push({
       key: target.key,
       path: prefix + file,
       kind: info.kind,
+      info,
       functions: measured.functions || {},
       samples: measured.samples,
       repeats: measured.repeats,
       insideSamples: measured.insideSamples,
+      insideFromEntry: measured.insideFromEntry,
+      bboxSource: measured.bboxSource,
       loadAverage: measured.loadAverage,
     });
   }
@@ -158,11 +191,16 @@ export async function measurePart(entry, { port = defaultPort(), samples = SAMPL
     part: entry.name,
     when: new Date(),
     port,
+    sharedBox,
+    boxFrom,
     samples: reps[0].samples,
     repeats: reps[0].repeats,
+    insideSamples: reps[0].insideSamples,
     loadAverage: Math.max(...reps.map(r => (typeof r.loadAverage === 'number' ? r.loadAverage : 0))),
     reps,
   };
+  record.reps.sort((a, b) => MEASURABLE.findIndex(m => m.key === a.key) -
+                             MEASURABLE.findIndex(m => m.key === b.key));
   liveResults.set(entry.name, record);
   onStep('restoring the shape the raytracer view needs ...');
   record.restored = await restoreRaytracer();

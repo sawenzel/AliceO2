@@ -4,8 +4,19 @@
 Serves the website's RemoteEngine: rays in, kernel answers out, so the browser view is the
 actual O2BVHSurfaceSolid (or any TGeoShape) rather than a port of it.
 
-  POST /load   JSON {"path": "<surfaces_*.bin or shape_*.root>"}
-               -> {"ok": true, "kind": "surface|shape", "nSurfaces": N, "bbox": [...]}
+  POST /load   JSON {"path": "<surfaces_*.bin, flatcsg_*.bin, facets_*.bin or shape_*.root>"}
+               -> {"ok": true, "kind": "surface|flatcsg|mesh|shape", "bbox": [...], ...}
+
+               All four representations one converted part can ship as, so the same part can be
+               traced and benchmarked in each of them by the real kernel. A .root file is a
+               TGeoShape; a .bin file is dispatched on its own magic ("O2SS" -> the exact surface
+               sidecar, "O2FLTCSG" -> the flat-CSG sidecar, neither -> the facet mesh, which has
+               no magic and begins with its triangle count).
+  POST /bench  JSON {"samples": N, "bbox": [x0,y0,z0,x1,y1,z1], "seed": S}
+               -> per-call timings for Contains / DistFromOutside / DistFromInside / Safety.
+                  `bbox` and `seed` fix the sample points, so the SAME points can be put to every
+                  representation of one part; without them the loaded shape's own box is used.
+
   POST /trace  raw Float32Array, 6 floats per ray (origin, unit direction, cm)
                -> raw Float32Array, 5 floats per ray: (t, nx, ny, nz, startedInside);
                   t < 0 means no hit
@@ -29,6 +40,8 @@ import ROOT
 
 CPP = r"""
 #include "DetectorsBase/O2BVHSurfaceSolid.h"
+#include "DetectorsBase/O2FlatCSG.h"
+#include "DetectorsBase/O2Tessellated.h"
 #include "DetectorsBase/O2SurfaceSolidIO.h"
 #include "TGeoShape.h"
 #include "TFile.h"
@@ -46,6 +59,30 @@ o2::base::O2BVHSurfaceSolid* loadSurface(const char* path)
     return nullptr;
   }
   solid->CloseShape();
+  return solid;
+}
+
+o2::base::O2FlatCSG* loadFlatCSG(const char* path)
+{
+  auto* solid = new o2::base::O2FlatCSG("raysvcflat");
+  if (!o2::base::LoadFlatCSG(path, *solid)) {
+    delete solid;
+    return nullptr;
+  }
+  solid->CloseShape();
+  return solid;
+}
+
+o2::base::O2Tessellated* loadFacets(const char* path)
+{
+  auto* solid = new o2::base::O2Tessellated("raysvcmesh");
+  if (!o2::base::LoadFacetSolid(path, *solid)) {
+    delete solid;
+    return nullptr;
+  }
+  // The mesh is a converter artefact, not a hand-written one: check and fix flipped facets, but
+  // do not print a report per load.
+  solid->CloseShape(true, true, false);
   return solid;
 }
 
@@ -86,8 +123,36 @@ void traceChunk(const TGeoShape* shape, const float* rays, int begin, int end, f
   }
 }
 
+// Is this shape safe to query from several threads at once?
+//
+// A TGeoCompositeShape is NOT. Every TGeoBoolNode keeps per-thread scratch state -- which operand
+// the last DistFrom* selected, and cached operand points -- behind TGeoBoolNode::GetThreadData(),
+// which indexes an array by TGeoManager::ThreadId(). ThreadId() returns 0 for EVERY thread unless
+// the manager is multi-threaded, and a manager only becomes multi-threaded through
+// SetMaxThreads(), which refuses before the geometry is closed. This service has no geometry to
+// close -- it navigates bare shapes -- so every worker here would be thread 0 and they would all
+// write over one another's scratch state.
+//
+// That is not a theoretical race. Measured on ITS BREF1 with 8 threads, the composite MISSED 13033
+// of 35420 hits its own exact solid found, reported phantom hits, and returned surface normals up
+// to 90 degrees wrong on ~19% of pixels -- all of it gone, exactly, at one thread. Registering the
+// threads instead is not an option here: ThreadId() hands out ids from a counter that is never
+// recycled, this pool creates fresh std::threads per band, and TGeoBoolNode::GetThreadData() has
+// its bounds check commented out, so the ids would run past the array and read out of bounds.
+//
+// So a boolean shape is traced on one thread. It costs nothing that matters: composites are the
+// fast subjects, and the slow ones -- the surface solid, the flat solid, the mesh -- hold no
+// mutable per-query state and stay parallel.
+bool isThreadSafe(const TGeoShape* shape)
+{
+  return shape != nullptr && !shape->InheritsFrom("TGeoCompositeShape");
+}
+
 void trace(const TGeoShape* shape, const float* rays, int n, float* out, int nThreads)
 {
+  if (!isThreadSafe(shape)) {
+    nThreads = 1;
+  }
   if (nThreads <= 1 || n < 512) {
     traceChunk(shape, rays, 0, n, out);
     return;
@@ -143,12 +208,74 @@ def jit_setup(o2_src: str):
     # multi-second trace starves every other request, and a worker thread that needs the
     # interpreter for lazy symbol resolution while the caller holds the GIL deadlocks the
     # whole server (observed on the first threaded trace of a surface solid).
-    for fn in (ROOT.raysvc.trace, ROOT.raysvc.loadSurface, ROOT.raysvc.loadShapeFile,
-               ROOT.raysvc.benchFunction):
+    for fn in (ROOT.raysvc.trace, ROOT.raysvc.loadSurface, ROOT.raysvc.loadFlatCSG,
+               ROOT.raysvc.loadFacets, ROOT.raysvc.loadShapeFile, ROOT.raysvc.benchFunction):
         try:
             fn.__release_gil__ = True
         except AttributeError:
             pass
+
+
+# The four representations one converted part can ship as. A .root file is a streamed TGeoShape;
+# a .bin sidecar says which one it is in its own first bytes, so a caller never has to encode the
+# kind in the path it sends -- the website simply posts whatever artefact the manifest names.
+SIDECAR_MAGIC = (("O2FLTCSG", "flatcsg"), ("O2SS", "surface"))
+
+
+def sidecar_kind(path):
+    """Which representation `path` holds, from its extension and its magic."""
+    if path.endswith(".root"):
+        return "shape"
+    with open(path, "rb") as handle:
+        head = handle.read(8)
+    for magic, kind in SIDECAR_MAGIC:
+        if head.startswith(magic.encode()):
+            return kind
+    # facets_*.bin carries no magic at all: it opens with its uint32 triangle count.
+    return "mesh"
+
+
+def load_shape(kind, path):
+    """The kernel loader for one kind, called on the JIT-compiled C++ side."""
+    return {"shape": ROOT.raysvc.loadShapeFile, "surface": ROOT.raysvc.loadSurface,
+            "flatcsg": ROOT.raysvc.loadFlatCSG, "mesh": ROOT.raysvc.loadFacets}[kind](path)
+
+
+def boolean_shape_size(shape):
+    """`(depth, leaves)` of a TGeo boolean tree; a shape that is not one is `(0, 1)`."""
+    if not shape.InheritsFrom("TGeoCompositeShape"):
+        return 0, 1
+    node = shape.GetBoolNode()
+    left = boolean_shape_size(node.GetLeftShape())
+    right = boolean_shape_size(node.GetRightShape())
+    return max(left[0], right[0]) + 1, left[1] + right[1]
+
+
+def shape_info(kind, shape):
+    """What this representation can say about itself, beyond its bounding box: the counts the
+    part card prints. Every number is read off the loaded shape, never off the file."""
+    if kind == "surface":
+        return {"nSurfaces": shape.GetNsurfaces(),
+                "reliability": shape.GetNavigationReliabilityName(shape.GetNavigationReliability())}
+    if kind == "flatcsg":
+        return {"nCells": shape.GetNcells(), "nHalfspaces": shape.GetNhalfspaces(),
+                "nBoxes": shape.GetNboxes(), "bvhBytes": int(shape.GetBVHMemory())}
+    if kind == "mesh":
+        return {"nFacets": shape.GetNfacets(), "nVertices": shape.GetNvertices()}
+    info = {"className": shape.ClassName()}
+    # A .root may hold a boolean tree, and how that tree is SHAPED is the thing a reader wants to
+    # know about it -- ITS's IBCYSSFlangeC is 36 leaves at recursion depth 35, because it is a
+    # chain of 33 subtractions and not a balanced tree, and a navigator descends that depth on
+    # every query. Reporting the class alone hides exactly that.
+    depth, leaves = boolean_shape_size(shape)
+    if depth:
+        info["booleanDepth"] = depth
+        info["leaves"] = leaves
+        # See raysvc::isThreadSafe: a TGeoBoolNode's scratch state is shared between this
+        # service's workers, so a boolean shape is traced on one thread and the page says so
+        # rather than quietly rendering a corrupted picture.
+        info["singleThreaded"] = True
+    return info
 
 
 class State:
@@ -195,10 +322,8 @@ def make_handler(state: State, threads: int):
                     if path in state.cache:
                         shape, kind = state.cache[path]
                     else:
-                        if path.endswith(".root"):
-                            shape, kind = ROOT.raysvc.loadShapeFile(path), "shape"
-                        else:
-                            shape, kind = ROOT.raysvc.loadSurface(path), "surface"
+                        kind = sidecar_kind(path)
+                        shape = load_shape(kind, path)
                         if not shape:
                             return self._reply_json({"ok": False, "error": f"cannot load {path}"}, 422)
                         state.cache[path] = (shape, kind)
@@ -213,10 +338,7 @@ def make_handler(state: State, threads: int):
                 info = {"ok": True, "kind": kind,
                         "bbox": [origin[0] - half[0], origin[1] - half[1], origin[2] - half[2],
                                  origin[0] + half[0], origin[1] + half[1], origin[2] + half[2]]}
-                if kind == "surface":
-                    info["nSurfaces"] = state.shape.GetNsurfaces()
-                    info["reliability"] = state.shape.GetNavigationReliabilityName(
-                        state.shape.GetNavigationReliability())
+                info.update(shape_info(kind, state.shape))
                 return self._reply_json(info)
             if self.path == "/trace":
                 if state.shape is None:
@@ -241,9 +363,24 @@ def make_handler(state: State, threads: int):
                 n = int(cfg.get("samples", 4000))
                 n = max(100, min(n, 50000))
                 sh = state.shape
-                o = [sh.GetOrigin()[i] for i in range(3)]
-                h = [sh.GetDX(), sh.GetDY(), sh.GetDZ()]
-                rng = np.random.default_rng(20260822)
+                # The sample box may be given, and for a comparison it MUST be: /bench is called
+                # once per representation of the same part, and the representations do not share a
+                # bounding box -- a TGeoCompositeShape's is the union of its padded leaf boxes and
+                # is wider than the flat solid's or the sidecar's. Drawing each one's points from
+                # its own box would time four kernels on four different point sets and call the
+                # result a comparison. The caller therefore passes one box for all of them;
+                # falling back to the loaded shape's own box keeps a single /bench honest.
+                box = cfg.get("bbox")
+                if isinstance(box, (list, tuple)) and len(box) == 6 and all(
+                        isinstance(v, (int, float)) for v in box):
+                    o = [0.5 * (box[i] + box[i + 3]) for i in range(3)]
+                    h = [max(1e-9, 0.5 * abs(box[i + 3] - box[i])) for i in range(3)]
+                    box_source = "caller"
+                else:
+                    o = [sh.GetOrigin()[i] for i in range(3)]
+                    h = [sh.GetDX(), sh.GetDY(), sh.GetDZ()]
+                    box_source = "loaded shape"
+                rng = np.random.default_rng(int(cfg.get("seed", 20260822)))
                 # points spread over 1.5x the bbox: a mix of inside and outside
                 pts = np.stack([rng.uniform(o[i] - 1.5 * h[i], o[i] + 1.5 * h[i], n)
                                 for i in range(3)], axis=1).astype(np.float32)
@@ -255,14 +392,38 @@ def make_handler(state: State, threads: int):
                 rays = np.concatenate([pts, dirs], axis=1).astype(np.float32).ravel()
                 with state.lock:
                     ROOT.raysvc.trace(sh, rays, n, probe, 1)
-                    started_inside = probe.reshape(-1, 5)[:, 4] > 0.5
-                    inside = np.ascontiguousarray(pts[started_inside])
+                    answers = probe.reshape(-1, 5)
+                    started_inside = answers[:, 4] > 0.5
+                    inside_pts = [pts[started_inside]]
+                    inside_dirs = [dirs[started_inside]]
+                    harvested = 0
+                    # A uniform draw over the bounding box of a thin part -- a frame, a rail, a
+                    # shell -- lands inside it essentially never, and then DistFromInside is not
+                    # measured at all. The probe already knows where every outside ray ENTERS the
+                    # solid, so a hair past that entry point is an interior point that cost nothing
+                    # extra. Contains is asked about each one and only the confirmed ones are
+                    # kept, so a grazing tangent cannot smuggle an outside point in.
+                    entered = (~started_inside) & (answers[:, 0] >= 0)
+                    if entered.any():
+                        span = 2.0 * float(np.hypot(h[0], np.hypot(h[1], h[2])))
+                        step = (answers[entered, 0] + 1e-6 * span)[:, None]
+                        candidates = (pts[entered] + step * dirs[entered]).astype(np.float32)
+                        entered_dirs = dirs[entered]
+                        keep = np.fromiter(
+                            (bool(sh.Contains(np.asarray(pt, dtype=np.float64))) for pt in candidates),
+                            dtype=bool, count=len(candidates))
+                        harvested = int(keep.sum())
+                        inside_pts.append(candidates[keep])
+                        inside_dirs.append(entered_dirs[keep])
+                    inside = np.ascontiguousarray(np.concatenate(inside_pts))
+                    din = np.ascontiguousarray(np.concatenate(inside_dirs))
                     outside = np.ascontiguousarray(pts[~started_inside])
-                    din = np.ascontiguousarray(dirs[started_inside])
                     dout = np.ascontiguousarray(dirs[~started_inside])
                     repeats = max(1, 20000 // n)
                     result = {"ok": True, "samples": n, "repeats": repeats,
-                              "insideSamples": int(started_inside.sum()),
+                              "insideSamples": int(len(inside)),
+                              "insideFromEntry": harvested,
+                              "bboxSource": box_source,
                               "loadAverage": os.getloadavg()[0],
                               "functions": {}}
                     result["functions"]["contains"] = {
@@ -301,9 +462,8 @@ def main():
     state.lock = threading.Lock()
     state.root = args.root
     if args.load:
-        loader = ROOT.raysvc.loadShapeFile if args.load.endswith(".root") else ROOT.raysvc.loadSurface
-        state.shape = loader(args.load)
-        state.kind = "shape" if args.load.endswith(".root") else "surface"
+        state.kind = sidecar_kind(args.load)
+        state.shape = load_shape(state.kind, args.load)
         if not state.shape:
             print(f"cannot load {args.load}", file=sys.stderr)
             return 1

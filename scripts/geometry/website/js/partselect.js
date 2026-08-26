@@ -134,14 +134,18 @@ export class PartSelector {
 function cssEscape(s) { return s.replace(/["\\]/g, '\\$&'); }
 
 /// The one line under a part's name: what representations this checkout actually has for it.
+/// A part carrying all four is the interesting case this site exists for, so it says so rather
+/// than listing them.
 function subtitleOf(entry) {
   if (entry.subtitle) { return entry.subtitle; }
   const bits = [];
   if (entry.surfaces) { bits.push('exact'); }
   if (entry.facets) { bits.push('mesh'); }
+  if (entry.flatcsg) { bits.push('FlatCSG'); }
   if (entry.shape) { bits.push('CSG'); }
   if (!bits.length) { return 'nothing to load'; }
-  if (!entry.surfaces) { return entry.shape ? bits.join(' + ') : 'tessellated only'; }
+  if (bits.length === 4) { return 'all four representations'; }
+  if (!entry.surfaces) { return (entry.shape || entry.flatcsg) ? bits.join(' + ') : 'tessellated only'; }
   if (!entry.facets) { return `${bits.join(' + ')}, no mesh`; }
   return bits.join(' + ');
 }

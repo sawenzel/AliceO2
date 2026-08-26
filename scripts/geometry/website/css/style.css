@@ -240,3 +240,9 @@ canvas.rt-overlay.stale { opacity: 0; }
 #asm-legend .mono { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #tab-assembly .row label.grow { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-secondary); }
 #asm-slice-readout { flex: 1 1 100%; }
+
+/* A tessellation that is the same solid as the exact surfaces, not an approximation of them.
+   Green because it is a fact in the part's favour, and distinct from the "ships" badges because
+   it is a property of a representation rather than a choice between them. */
+.badge.exact { background: #12332a; color: #63d3a6; border: 1px solid #1d5a47; }
+.exact-note { color: #63d3a6; }

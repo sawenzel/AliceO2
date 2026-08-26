@@ -173,6 +173,116 @@ export function wireJoinToleranceFor(modelTolerance) {
 
 /// Parse facets_*.bin: uint32 nTriangles, then 9 x float32 per triangle (cm).
 /// Returns { nTriangles, positions: Float32Array(9*n) }.
+/// Is this part's tessellation the SAME SOLID as its exact surfaces, or an approximation of them?
+///
+/// A triangulation of a planar polygon **is** that polygon: three points span the plane exactly and
+/// a polygon's boundary is already straight lines. A triangulation of a cylinder, cone, sphere or
+/// torus is not that surface, and neither is a triangulation of a *flat* face whose boundary is an
+/// arc or a spline -- the face is exact but its outline gets polygonised. So the condition is
+/// narrow and exactly checkable: every surface a plane, and every trim edge of every wire a line.
+///
+/// That is not a rule invented here. It is the same test `LoadSurfaceSolid` applies when it decides
+/// whether a plane record becomes a `PlanarPolygon` or a `CurvedPlanar` surface: any arc or bspline
+/// edge anywhere on the face routes it through `AddCurvedPlanarSurface`. This returns the same
+/// verdict from the same bytes.
+///
+/// Measured, not assumed: on 30 random all-planar parts of ITS/TPC/TRD, 600 000 points, the mesh
+/// and the exact solid disagreed about `Contains` **zero** times. See website/README.md.
+export function tessellationExactness(parsed) {
+  if (!parsed || !Array.isArray(parsed.surfaces) || !parsed.surfaces.length) { return null; }
+  let planarPolygon = 0, curvedPlanar = 0;
+  const curvedKinds = {};
+  for (const surface of parsed.surfaces) {
+    if (surface.type !== SURFACE_TYPE.PLANE) {
+      const name = surfaceTypeName(surface.type);
+      curvedKinds[name] = (curvedKinds[name] || 0) + 1;
+      continue;
+    }
+    const straight = (surface.wires || []).every(
+      wire => (wire.edges || []).every(edge => edge.curveType === CURVE_TYPE.LINE));
+    if (straight) { planarPolygon += 1; } else { curvedPlanar += 1; }
+  }
+  const curved = Object.values(curvedKinds).reduce((a, b) => a + b, 0);
+  const exact = curved === 0 && curvedPlanar === 0 && planarPolygon > 0;
+  let reason;
+  if (exact) {
+    reason = `all ${planarPolygon} faces are planar polygons, so triangulating them loses nothing`;
+  } else if (curved) {
+    reason = Object.entries(curvedKinds).map(([k, n]) => `${n} ${k}`).join(', ') +
+             ' face(s) are curved, and a triangulation approximates them';
+  } else {
+    reason = `${curvedPlanar} face(s) are flat but have a curved boundary (an arc or a spline), ` +
+             'so the face is exact and its outline is not';
+  }
+  return { exact, planarPolygon, curvedPlanar, curved, curvedKinds, reason };
+}
+
+// ------------------------------------------------------------------------------------------
+// the flat-CSG sidecar (flatcsg_*.bin, version 1)
+// ------------------------------------------------------------------------------------------
+
+export const FLATCSG_MAGIC = 'O2FLTCSG';
+export const FLATCSG_VERSION = 1;
+export const FLATCSG_KIND = { QUADRIC: 0, TORUS: 1 };
+
+/// Read a flat-CSG sidecar's structure: the halfspace kinds and the cell table.
+///
+/// A port of the header and record layout of `LoadFlatCSG` in
+/// Detectors/Base/src/O2SurfaceSolidIO.cxx, documented in scripts/geometry/BVHSurfaceSolid.md
+/// ("Flat-CSG sidecar format"). The halfspace coefficients are read past, not kept: the page does
+/// not evaluate this representation -- the bridge does, in the real kernel -- and what the part
+/// card needs is what the solid is MADE of, which is the counts, the per-cell halfspace spans and
+/// the boxes the converter had to supply because an intersection of halfspaces does not bound
+/// itself.
+export function parseFlatCSG(buffer, fileLabel = 'flatcsg') {
+  const cursor = new Cursor(buffer);
+  if (cursor.remaining < 8 + 12) { throw new Error(`${fileLabel}: truncated header`); }
+  let magic = '';
+  for (let i = 0; i < 8; ++i) { magic += String.fromCharCode(cursor.u8()); }
+  if (magic !== FLATCSG_MAGIC) {
+    throw new Error(`${fileLabel}: not a flat-CSG sidecar (magic "${magic}")`);
+  }
+  const version = cursor.u32();
+  if (version !== FLATCSG_VERSION) {
+    throw new Error(`${fileLabel}: unsupported flat-CSG sidecar version ${version}`);
+  }
+  const nHalfspaces = cursor.u32();
+  const nCells = cursor.u32();
+  const kinds = { quadric: 0, torus: 0 };
+  const signs = { interior: 0, exterior: 0 };
+  for (let h = 0; h < nHalfspaces; ++h) {
+    if (cursor.remaining < 4 + 8 + 11 * 8) { throw new Error(`${fileLabel}: truncated halfspace record ${h}`); }
+    const kind = cursor.view.getInt32(cursor.offset, true); cursor.offset += 4;
+    const sign = cursor.f64();
+    cursor.offset += 11 * 8;                       // the eleven coefficients: read past, see above
+    if (kind === FLATCSG_KIND.TORUS) { kinds.torus += 1; } else { kinds.quadric += 1; }
+    if (sign < 0) { signs.exterior += 1; } else { signs.interior += 1; }
+  }
+  const cells = [];
+  let volume = 0;
+  for (let c = 0; c < nCells; ++c) {
+    if (cursor.remaining < 8 + 8 + 6 * 8) { throw new Error(`${fileLabel}: truncated cell record ${c}`); }
+    const first = cursor.view.getInt32(cursor.offset, true); cursor.offset += 4;
+    const count = cursor.view.getInt32(cursor.offset, true); cursor.offset += 4;
+    const cellVolume = cursor.f64();
+    const lo = Array.from(cursor.doubles(3));
+    const hi = Array.from(cursor.doubles(3));
+    if (first < 0 || count <= 0 || first + count > nHalfspaces) {
+      throw new Error(`${fileLabel}: cell ${c} has an invalid range (first=${first}, count=${count}) ` +
+                      `into ${nHalfspaces} halfspace(s)`);
+    }
+    cells.push({ first, count, volume: cellVolume, lo, hi });
+    volume += cellVolume;
+  }
+  const counts = cells.map(cell => cell.count);
+  return {
+    version, nHalfspaces, nCells, cells, kinds, signs, volume,
+    minCellHalfspaces: counts.length ? Math.min(...counts) : 0,
+    maxCellHalfspaces: counts.length ? Math.max(...counts) : 0,
+    byteLength: buffer.byteLength,
+  };
+}
+
 export function parseFacets(buffer, fileLabel = 'facets') {
   if (buffer.byteLength < 4) { throw new Error(`${fileLabel}: truncated header`); }
   const view = new DataView(buffer);

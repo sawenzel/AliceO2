@@ -99,7 +99,11 @@ HERO_PARTS = [
     },
 ]
 
-REP_ORDER = ["surface", "mesh", "shape"]
+# The representation names the three instruments use, in the order the website's charts print
+# them. `flatcsg` is `o2::base::O2FlatCSG` and is the same string
+# `Detectors/Base/test/runXRayBenchmark.cxx` uses for it, so a perf/xray/gate record that carries
+# a flat subject flows through here without any translation.
+REP_ORDER = ["surface", "mesh", "shape", "flatcsg"]
 # Website schema key -> the perf JSON's own key (o2-bench-detectorsbase-xray --perf writes
 # the full names "distFromOutside"/"distFromInside", NOT the "distout"/"distin" abbreviation
 # runOracleGate.py's "oracle" columns use -- the two source JSONs use different conventions

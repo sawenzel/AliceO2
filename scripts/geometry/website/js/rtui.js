@@ -1,6 +1,8 @@
 // The raytracer tab's controls, counters and camera interaction.
 
-import { Raytracer, VIEWS, CSG_VIEWS, DIFF_VIEWS } from './raytrace.js';
+import { Raytracer, VIEWS, VIEW_GROUPS, REP_VIEWS, DIFF_VIEWS, SUBJECT_DIFF_VIEWS,
+         SUBJECT_VIEW, representationFor, REPRESENTATION_NOTE } from './raytrace.js';
+import { REPRESENTATIONS, repLabel, repRole, partHas, partPath, partNote } from './representations.js';
 import { state, onPartChanged, registerRaytracer } from './app.js';
 import { Viewer3D } from './viewer3d.js';
 
@@ -78,9 +80,11 @@ export function initRaytracerTab() {
           <p class="muted small">The picture is produced by an engine that answers rays. The local engine is
             this page's JS port of the O2 kernel. The bridge sends the same rays to
             <code>scripts/geometry/tgeoRayService.py</code>, which traces them through the real kernel, so the
-            two can be subtracted. The bridge holds <strong>one</strong> shape at a time, so a switch between an
-            exact view and a CSG view re-loads the part's other file &mdash; the sidecar or the
-            <code>shape.root</code> composite &mdash; before the first band goes out.</p>
+            two can be subtracted. The bridge holds <strong>one</strong> shape at a time, so a switch between
+            two representations re-loads the part's other file &mdash; the <code>surfaces.bin</code> sidecar, the
+            <code>shape.root</code> composite, the <code>flatcsg.bin</code> halfspace solid or the
+            <code>facets.bin</code> mesh &mdash; before the first band goes out. The service dispatches on the
+            file's own magic, so all four are one endpoint.</p>
           <div class="row">
             <label>port <input type="number" id="rt-port" value="8077" min="1" max="65535" style="width:6.5em"></label>
             <button id="rt-connect">connect bridge</button>
@@ -95,10 +99,10 @@ export function initRaytracerTab() {
         <div class="pane">
           <h3>ms per frame, per engine</h3>
           <p class="muted small">The same picture &mdash; the exact surfaces &mdash; asked of each engine in
-            turn, and then the same part's <em>CSG composite</em> asked of the same kernel. Each row is the
-            last such frame, and the whole of it was that engine's work, so they are directly comparable when
-            the camera and the resolution agree. A mesh or parity frame is a different question and does not
-            appear here.</p>
+            turn, and then the same part's <em>other representations</em> asked of the same kernel: the CSG
+            composite, the flat halfspace solid and the tessellation. Each row is the last such frame, and the
+            whole of it was that engine's work, so they are directly comparable when the camera and the
+            resolution agree. A difference or parity frame is a different question and does not appear here.</p>
           <table id="rt-perf"></table>
           <div class="row" style="margin-top:8px">
             <button id="rt-timeboth">time every engine</button>
@@ -134,11 +138,24 @@ export function initRaytracerTab() {
 
   // Every view but these two asks the exact solid a question; a tessellated-only part cannot answer.
   const MESH_ONLY_VIEWS = new Set(['mesh', 'parityMesh']);
-  for (const view of VIEWS) {
-    const option = document.createElement('option');
-    option.value = view.key;
-    option.textContent = view.label;
-    viewSelect.appendChild(option);
+  // A bridge view of another representation asks nothing of the exact sidecar, so it stays open
+  // on a part that has no surfaces_*.bin.
+  const LOCAL_MESH_INDEPENDENT = new Set(['csgBridge', 'flatcsgBridge', 'meshBridge']);
+  const GROUP_LABEL = {
+    shaded: 'one representation, shaded',
+    differences: 'two representations, subtracted',
+    watertightness: 'crossing parity',
+  };
+  for (const group of VIEW_GROUPS) {
+    const optgroup = document.createElement('optgroup');
+    optgroup.label = GROUP_LABEL[group] || group;
+    for (const view of VIEWS.filter(v => v.group === group)) {
+      const option = document.createElement('option');
+      option.value = view.key;
+      option.textContent = view.label;
+      optgroup.appendChild(option);
+    }
+    viewSelect.appendChild(optgroup);
   }
 
   /// Why this part has no CSG composite to trace, in the recogniser's own words where they exist.
@@ -150,16 +167,40 @@ export function initRaytracerTab() {
     return 'no shape_*.root was written for this part, so there is no CSG composite to trace';
   }
 
-  /// Turn the exact views off for a part that has no sidecar, and the CSG views off for a part
-  /// with no shape_*.root -- in both cases saying why rather than failing.
+  /// Why a representation cannot be traced for this part, named for the representation.
+  function whyNotRepresentation(rep) {
+    if (rep === 'shape') { return whyNotCSG(); }
+    if (rep === 'flatcsg') {
+      return 'the cascade did not emit a flat halfspace solid for this part, so there is no ' +
+             'flatcsg_*.bin in testdata/ to trace';
+    }
+    if (rep === 'cellstree') {
+      return 'this part has no flat-CSG decomposition to emit as a plain composite, so there is ' +
+             'nothing to compare one against';
+    }
+    if (rep === 'original') {
+      return 'this part came from CAD, not from an existing detector geometry, so there is no ' +
+             'earlier TGeoShape it was made from -- run exportSourceShapes.py for a round-tripped part';
+    }
+    if (rep === 'mesh') { return 'no facets_*.bin was copied for this part'; }
+    return 'no surfaces_*.bin for this part';
+  }
+
+  /// Turn the exact views off for a part with no sidecar, and every representation view off for a
+  /// part that does not carry that representation's artefact -- in both cases saying why rather
+  /// than failing.
   function applyCoverage() {
     const exact = !!state.sidecarBuffer;
-    const csg = !!(state.part && state.part.shape);
-    const reason = csg ? '' : whyNotCSG();
+    const part = state.part;
     for (const option of viewSelect.options) {
-      const needsCSG = CSG_VIEWS.has(option.value);
-      option.disabled = (!exact && !MESH_ONLY_VIEWS.has(option.value)) || (needsCSG && !csg);
-      if (needsCSG) { option.title = csg ? `traces testdata/${state.part.shape} on the bridge` : reason; }
+      const rep = representationFor(option.value);
+      const needsRep = REP_VIEWS.has(option.value);
+      const has = needsRep ? partHas(part, rep) : true;
+      option.disabled = (!exact && !MESH_ONLY_VIEWS.has(option.value) && !LOCAL_MESH_INDEPENDENT.has(option.value))
+        || (needsRep && !has);
+      if (needsRep) {
+        option.title = has ? `traces ${partPath(part, rep)} on the bridge` : whyNotRepresentation(rep);
+      }
     }
     if (viewSelect.selectedOptions[0] && viewSelect.selectedOptions[0].disabled) {
       const fallback = exact ? 'exact' : 'mesh';
@@ -173,12 +214,23 @@ export function initRaytracerTab() {
     }
     const notes = [];
     if (!exact) {
-      notes.push(`${state.part ? state.part.name : 'This part'} is tessellated only -- no exact ` +
+      notes.push(`${part ? part.name : 'This part'} is tessellated only -- no exact ` +
         'sidecar. The converter declined it for exact extraction, so there is nothing here to intersect a ray ' +
         'with but triangles: the exact, bridge, difference and exact-parity views are turned off.');
     }
-    if (!csg) {
-      notes.push(`No CSG composite for this part: ${reason}. The two CSG views are turned off.`);
+    const missing = REPRESENTATIONS.filter(r => r.key !== 'surface' && !partHas(part, r.key));
+    for (const rep of missing) {
+      notes.push(`No ${rep.label} artefact for this part: ${whyNotRepresentation(rep.key)}.`);
+    }
+    const carried = REPRESENTATIONS.filter(r => partHas(part, r.key));
+    if (carried.length > 1) {
+      notes.push(`This part carries ${carried.length} subjects -- ` +
+        carried.map(r => r.label).join(', ') +
+        ' -- and every one of them can be put on this camera through the bridge.');
+      for (const rep of carried) {
+        const note = partNote(part, rep.key);
+        if (note) { notes.push(`${rep.label} here is ${note}.`); }
+      }
     }
     coverage.hidden = !notes.length;
     coverage.textContent = notes.join(' ');
@@ -200,21 +252,37 @@ export function initRaytracerTab() {
     return part && part.surfaces ? `${prefix}testdata/${part.surfaces}` : '';
   }
 
-  /// The CSG composite for this part, on the bridge host. The service keeps one shape loaded, so
-  /// this file and the sidecar take turns; the tracer swaps them when the view changes.
-  function shapePath() {
+  /// The part's other representations on the bridge host, keyed the way the tracer keys them.
+  /// The service holds ONE shape at a time, so these take turns with the exact sidecar and the
+  /// tracer swaps them when the view changes.
+  function otherPaths() {
     const part = state.part;
     const prefix = settings.prefix || '';
-    return part && part.shape ? `${prefix}testdata/${part.shape}` : null;
+    const paths = {};
+    for (const rep of REPRESENTATIONS) {
+      if (rep.key === 'surface') { continue; }
+      const relative = partPath(part, rep.key);
+      paths[rep.key] = relative ? prefix + relative : null;
+    }
+    return paths;
   }
 
   /// What the bridge is, and which of the part's two files it is holding right now.
   function describeBridge() {
     if (!tracer.bridgeReady) { return; }
     const info = tracer.bridgeInfo || {};
+    // Every kind reports what it is made of, so the panel says which representation is resident
+    // and how big it is without the page having to guess from the path.
+    const shape = [];
+    if (info.nSurfaces !== undefined) { shape.push(`${info.nSurfaces} surfaces`); }
+    if (info.nCells !== undefined) { shape.push(`${info.nCells} cells, ${info.nHalfspaces} halfspaces`); }
+    if (info.nFacets !== undefined) { shape.push(`${info.nFacets} facets`); }
+    if (info.className) { shape.push(info.className); }
+    if (info.booleanDepth) { shape.push(`${info.leaves} leaves at boolean depth ${info.booleanDepth}`); }
+    if (info.singleThreaded) { shape.push('traced on ONE thread (TGeoBoolNode scratch state is not per-thread here)'); }
     const holding = tracer.bridgeLoaded ? ` holding ${tracer.bridgeLoaded}` : '';
     bridgeStatus.textContent = `bridge ready: ${info.kind || '?'}` +
-      (info.nSurfaces === undefined ? '' : `, ${info.nSurfaces} surfaces`) + holding;
+      (shape.length ? `, ${shape.join(', ')}` : '') + holding;
     bridgeStatus.className = 'status';
   }
 
@@ -275,11 +343,18 @@ export function initRaytracerTab() {
     const notes = {
       exactBridge: 'The same picture, every pixel answered by scripts/geometry/tgeoRayService.py driving the REAL O2 kernel through TGeo. Identical shading, so what you see is the kernel\'s own hit points and its own analytic normals -- not a difference image of them.',
       exact: 'Every pixel is a ray intersected with the real trimmed patches: quadratics for the plane, cylinder, cone and sphere, the quartic for the torus, and 2D winding against the trim wires. The shading normal is analytic, so a cylinder is smooth.',
-      mesh: 'The same camera, against the triangles of facets_*.bin, with flat facet normals. The silhouette is a polygon.',
-      diff: 'Red where one representation is hit and the other is not; otherwise a heatmap of the depth difference, saturating at one part in a thousand of the model size.',
+      mesh: 'The same camera, against the triangles of facets_*.bin in this page\'s JS port, with flat facet normals. The silhouette is a polygon.',
+      diff: 'Red where one representation is hit and the other is not; otherwise a heatmap of the depth difference, saturating at one part in a thousand of the model size. On a part whose tessellation is EXACT -- every face a planar polygon -- there is nothing here to find: the two are the same solid, and a flat blue frame is the correct answer rather than a boring one.',
       csgBridge: 'The part\'s CSG composite -- the TGeoShape the recogniser produced and the converter ships -- traced by the real kernel through the bridge, shaded exactly like the two exact views. Same pixels, a different representation: the ms/frame row is where the measured Contains ratio becomes something you can watch.',
       engine: 'The same rays sent to the JS port and to the bridge. This is the port\'s validation instrument: any structure in this image is a disagreement with the real kernel.',
       csgDiff: 'The exact surface solid against the CSG composite, on the same rays. This is the acceptance test made visible: a part whose dV_sym came out 0 should show no red at all and a flat blue heatmap, because the two representations are the same solid.',
+      originalBridge: 'The TGeoShape this part was made FROM, before it ever went to STEP -- the shape the detector geometry ships today -- traced by the real kernel through the bridge. This is the baseline: it is the input to the round trip, not one of its outputs, and it is what every other representation here has to beat. The ms/frame row is where that comparison stops being a table.',
+      originalDiff: 'The exact surface solid against the shape the part was made from. Red here would be a round-trip defect: the two are supposed to be the same solid, and the converter\'s third acceptance test (checkKnownSource.py) is the instrument that says so on a point set rather than on a picture.',
+      cellstreeBridge: 'The part\'s decomposed cells emitted as a plain TGeoCompositeShape. NOTHING ships this: it exists so the flat solid has something to be measured against, namely the tree the cascade refused to emit because those cells would make one wider than the 64-leaf routing threshold. Do not read it as what the converter produces.',
+      cellstreeDiff: 'The exact surface solid against the cells as a plain composite, on the same rays. They are the same cells, so this should be flat and free of red.',
+      flatcsgBridge: 'The part\'s FLAT-CSG solid -- a union of intersection-cells over signed implicit halfspaces, with a BVH over sub-boxes of those cells -- read from flatcsg_*.bin by the real kernel and traced through the bridge. It is what the part IS after decomposition, with nothing padded into a native primitive to make ROOT able to hold it. Same pixels as the exact view, a different representation, and the ms/frame row is where its measured speed-up stops being a table.',
+      flatcsgDiff: 'The exact surface solid against the flat halfspace solid, on the same rays. A flat-CSG part converts at dV_sym exactly 0, so this picture should show no red at all and a flat blue heatmap.',
+      meshBridge: 'The same triangles as the tessellation view, but answered by the real O2Tessellated in the kernel rather than by this page\'s JS port. The picture is the mesh\'s picture; the ms/frame row is the kernel\'s own mesh navigation cost, which is what the other three representations are competing with.',
       parityExact: 'Crossings are counted along the whole ray. Magenta means an odd count -- the ray entered the solid and never came out, which is a hole in the surface set.',
       parityMesh: 'The same count against the tessellation. A mesh that loses rays lights up here; the exact solid should not.',
     };
@@ -309,8 +384,26 @@ export function initRaytracerTab() {
 
   /// The two engines side by side. A row appears only once that engine has rendered a frame of
   /// its own; a frame in which both ran is not apportioned between them and is not shown here.
+  // The perf slots, in the order the table prints them: the JS port, then the same picture from
+  // the kernel, then the kernel asked the same question of each of the part's other
+  // representations. Every row is one engine's whole frame, so they are directly comparable.
+  const PERF_ROWS = [
+    ['local', 'local'],
+    ['bridge exact', 'remote'],
+    ['bridge Original TGeo', 'original'],
+    ['bridge CSG', 'csg'],
+    ['bridge cells-tree', 'cellstree'],
+    ['bridge FlatCSG', 'flatcsg'],
+    ['bridge mesh', 'meshKernel'],
+  ];
+
+  /// The other bridge subjects, quoted against the exact surfaces on the SAME kernel, so a ratio
+  /// is representation against representation and not kernel against port.
+  const PERF_OTHERS = [['Original TGeo', 'original'], ['CSG', 'csg'], ['cells-tree', 'cellstree'],
+                       ['FlatCSG', 'flatcsg'], ['mesh', 'meshKernel']];
+
   function showPerf() {
-    const rows = [['local', tracer.perf.local], ['bridge', tracer.perf.remote], ['bridge CSG', tracer.perf.csg]];
+    const rows = PERF_ROWS.map(([label, slot]) => [label, tracer.perf[slot]]);
     perfTable.innerHTML = '';
     const head = document.createElement('tr');
     for (const label of ['engine', 'ms/frame', 'rays', 'rate']) {
@@ -319,8 +412,13 @@ export function initRaytracerTab() {
     perfTable.appendChild(head);
     for (const [key, entry] of rows) {
       const tr = document.createElement('tr');
+      const suffix = { 'bridge Original TGeo': ', the shape before the round trip',
+                       'bridge CSG': ', the composite the converter ships',
+                       'bridge cells-tree': ', the cells as a plain composite',
+                       'bridge FlatCSG': ', flat halfspace solid',
+                       'bridge mesh': ', O2Tessellated' }[key] || '';
       const cells = entry
-        ? [`${entry.engine}${key === 'bridge CSG' ? ', CSG composite' : ''}`, `${entry.ms}`, `${entry.rays}`, rate(entry)]
+        ? [`${entry.engine}${suffix}`, `${entry.ms}`, `${entry.rays}`, rate(entry)]
         : [key, 'not rendered yet', '-', '-'];
       cells.forEach((text, i) => {
         const td = document.createElement('td');
@@ -336,12 +434,15 @@ export function initRaytracerTab() {
     td.colSpan = 4;
     td.style.textAlign = 'left';
     td.className = 'na';
-    const a = tracer.perf.local, b = tracer.perf.remote, c = tracer.perf.csg;
+    const a = tracer.perf.local, b = tracer.perf.remote;
     const matches = (x, y) => x && y && x.width === y.width && x.height === y.height && x.camera === y.camera;
     if (a && b) {
       const bits = [];
       if (matches(a, b)) { bits.push(`bridge / local ${(b.ms / a.ms).toFixed(2)}x`); }
-      if (matches(b, c)) { bits.push(`bridge exact / bridge CSG ${(b.ms / c.ms).toFixed(2)}x`); }
+      for (const [label, slot] of PERF_OTHERS) {
+        const other = tracer.perf[slot];
+        if (matches(b, other)) { bits.push(`bridge exact / bridge ${label} ${(b.ms / other.ms).toFixed(2)}x`); }
+      }
       td.textContent = bits.length
         ? `same camera at ${a.width}x${a.height}: ${bits.join(', ')}`
         : 'the frames used a different camera or resolution -- press "time every engine" for a matched set';
@@ -359,12 +460,17 @@ export function initRaytracerTab() {
       const dd = document.createElement('dd'); dd.textContent = value;
       counters.appendChild(dt); counters.appendChild(dd);
     };
-    if ((tracer.view === 'engine' || tracer.view === 'csgDiff') && tracer.bridgeReady) {
+    if ((tracer.view === 'engine' || SUBJECT_DIFF_VIEWS.has(tracer.view)) && tracer.bridgeReady) {
       add('engine', `local vs ${tracer.remote.name}`);
-    } else if (tracer.view === 'exactBridge' || tracer.view === 'csgBridge') {
+    } else if (tracer.view === 'exactBridge' || REP_VIEWS.has(tracer.view)) {
       add('engine', tracer.remote ? tracer.remote.name : 'bridge (not connected)');
     } else { add('engine', tracer.local.name); }
-    if (CSG_VIEWS.has(tracer.view)) { add('representation', 'CSG composite (shape.root) on the bridge'); }
+    if (REP_VIEWS.has(tracer.view)) {
+      const rep = representationFor(tracer.view);
+      const role = { baseline: ' [the baseline, not a conversion output]',
+                     comparison: ' [a comparison, shipped by nothing]' }[repRole(rep)] || '';
+      add('representation', `${repLabel(rep)} on the bridge${role} -- ${REPRESENTATION_NOTE[rep] || ''}`);
+    }
     add('pixels', `${c.total}`);
     add('hit', c.hit === undefined ? 'n/a' : `${c.hit} (${(100 * c.hit / Math.max(1, c.total)).toFixed(1)}%)`);
     if (DIFF_VIEWS.has(tracer.view)) {
@@ -388,11 +494,15 @@ export function initRaytracerTab() {
     showCounters(c);
     showPerf();
     describeBridge();
-    const a = tracer.perf.local, b = tracer.perf.remote, csg = tracer.perf.csg;
+    const a = tracer.perf.local, b = tracer.perf.remote;
     const same = (x, y) => x && y && x.width === y.width && x.height === y.height && x.camera === y.camera;
+    const others = PERF_OTHERS
+      .map(([label, slot]) => [label, tracer.perf[slot]])
+      .filter(([, entry]) => same(b, entry))
+      .map(([label, entry]) => `  vs  bridge ${label} ${entry.ms} ms  (${(b.ms / entry.ms).toFixed(2)}x)`)
+      .join('');
     const both = same(a, b)
-      ? `\nlocal ${a.ms} ms  vs  bridge ${b.ms} ms  (${(b.ms / a.ms).toFixed(2)}x)` +
-        (same(b, csg) ? `  vs  bridge CSG ${csg.ms} ms  (${(b.ms / csg.ms).toFixed(2)}x)` : '') : '';
+      ? `\nlocal ${a.ms} ms  vs  bridge ${b.ms} ms  (${(b.ms / a.ms).toFixed(2)}x)` + others : '';
     const scissor = c.scissorSaving > 0.001
       ? `\nscissor ${c.scissorPixels} px traced, ${(100 * c.scissorSaving).toFixed(1)}% saved` : '';
     hud.textContent = `${state.part ? state.part.name : ''} - ${VIEWS.find(v => v.key === tracer.view).label}\n` +
@@ -461,7 +571,7 @@ export function initRaytracerTab() {
 
   viewSelect.addEventListener('change', () => {
     tracer.view = viewSelect.value;
-    const needsBridge = tracer.view === 'engine' || tracer.view === 'exactBridge' || CSG_VIEWS.has(tracer.view);
+    const needsBridge = tracer.view === 'engine' || tracer.view === 'exactBridge' || REP_VIEWS.has(tracer.view);
     if (needsBridge && !tracer.bridgeReady) {
       bridgeStatus.textContent = 'bridge offline: connect it, or this view has nothing to render';
       bridgeStatus.className = 'status error';
@@ -504,8 +614,10 @@ export function initRaytracerTab() {
     const port = Number(portInput.value) || 8077;
     for (const prefix of candidates) {
       const path = prefix + suffix;
-      const shape = state.part.shape ? `${prefix}testdata/${state.part.shape}` : null;
-      const result = await tracer.connectBridge(port, path, { shapePath: shape });
+      const saved = settings.prefix;
+      settings.prefix = prefix;
+      const result = await tracer.connectBridge(port, path, { paths: otherPaths() });
+      settings.prefix = saved;
       if (result.ok) {
         settings.prefix = prefix;
         settings.port = port;
@@ -531,9 +643,11 @@ export function initRaytracerTab() {
     }
     button.disabled = true;
     const restore = viewSelect.value;
-    // The CSG composite joins the matched set when the part has one: same camera, same rays, the
-    // same kernel -- only the representation differs.
-    const views = tracer.csgReady ? ['exact', 'exactBridge', 'csgBridge'] : ['exact', 'exactBridge'];
+    // Every other representation the part carries joins the matched set: same camera, same rays,
+    // the same kernel -- only the representation differs. That IS the comparison this page exists
+    // for, so it is one button and not one view switch per artefact.
+    const views = ['exact', 'exactBridge',
+                   ...Object.values(SUBJECT_VIEW).filter(v => tracer.viewReady(v))];
     for (const view of views) {
       tracer.view = view;
       viewSelect.value = view;
@@ -557,10 +671,10 @@ export function initRaytracerTab() {
     saveBridgeSettings(settings);
     bridgeStatus.textContent = `connecting to 127.0.0.1:${port} ...`;
     bridgeStatus.className = 'status';
-    const result = await tracer.connectBridge(port, path, { shapePath: shapePath() });
+    const result = await tracer.connectBridge(port, path, { paths: otherPaths() });
     if (result.ok) {
       describeBridge();
-      if (tracer.view === 'engine' || CSG_VIEWS.has(tracer.view)) { scheduleRender(); }
+      if (tracer.view === 'engine' || REP_VIEWS.has(tracer.view)) { scheduleRender(); }
     } else {
       bridgeStatus.textContent = `bridge offline (${result.error}); staying on the local engine`;
       bridgeStatus.className = 'status error';

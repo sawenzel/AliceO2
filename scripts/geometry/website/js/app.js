@@ -1,7 +1,7 @@
 // Page wiring: the part selector, the tabs, and the state every tab shares.
 
 import { listParts, loadBinary, loadJSON, loadBenchmarks, loadDeclineReasons } from './data.js';
-import { parseSidecar, parseFacets } from './sidecar.js';
+import { parseSidecar, parseFacets, parseFlatCSG, tessellationExactness } from './sidecar.js';
 import { SurfaceSolid } from './solid.js';
 import { Viewer3D } from './viewer3d.js';
 import { renderBenchmarks, csgStructure, shipsKeys, SHIPS_LABEL } from './charts.js';
@@ -16,6 +16,8 @@ export const state = {
   facets: null,        // { nTriangles, positions }
   facetsBuffer: null,  // the raw facets_*.bin bytes, for the worker
   assembly: null,      // the selected assembly entry, when the selection is one rather than a part
+  flatcsg: null,       // parseFlatCSG result for testdata/<part>/flatcsg.bin, when the part has one
+  meshExact: null,     // tessellationExactness(parsed): is the mesh the same solid, or an approximation?
   csg: null,           // testdata/<part>/csg.json: what the CSG recogniser found, and its verdict
   decline: null,       // the matching website_data/decline_reasons.json entry, when there is one
   aabb: null,          // the part's extent, from the exact solid or, failing that, the mesh
@@ -130,11 +132,28 @@ function renderMeshTab() {
   // Every representation this part has at full quality, the cascade's own pick first.
   const ships = shipsKeys(state.part.ships, state.part, state.csg)
     .map(key => SHIPS_LABEL[key] || key.toUpperCase()).join(' + ');
+  const flat = state.flatcsg;
+  const meshExact = state.meshExact;
   document.getElementById('mesh-hud').textContent =
     `${state.part.name}\n` + (solid ? `${solid.nSurfaces} exact faces` : 'tessellated only -- no exact sidecar') +
     (facets ? ` / ${facets.nTriangles} triangles` : ' / no mesh') +
+    (flat ? ` / ${flat.nCells} cells, ${flat.nHalfspaces} halfspaces` : '') +
     `\nbbox ${(box[3] - box[0]).toFixed(2)} x ${(box[4] - box[1]).toFixed(2)} x ${(box[5] - box[2]).toFixed(2)} cm` +
-    `\nships ${ships}` + (structure ? `: ${structure}` : '');
+    `\nships ${ships}` + (structure ? `: ${structure}` : '') +
+    (meshExact && meshExact.exact && facets ? '\nthe tessellation is EXACT: every face is a planar polygon' : '');
+  // A part whose every face is a planar polygon has no tessellation error to look for, and the
+  // pane's standing instruction to hunt for one would be a wild goose chase.
+  const meshNote = document.getElementById('mesh-exactness');
+  if (meshNote) {
+    meshNote.hidden = !(meshExact && facets);
+    if (meshExact && facets) {
+      meshNote.className = meshExact.exact ? 'small exact-note' : 'muted small';
+      meshNote.textContent = meshExact.exact
+        ? `This part's tessellation is exact: ${meshExact.reason}. The grey mesh and the gold loops ` +
+          'describe the same solid, so any gap you can see here is the renderer, not the geometry.'
+        : `This part's tessellation is an approximation: ${meshExact.reason}.`;
+    }
+  }
 }
 
 // --- loading a part ------------------------------------------------------------------------------
@@ -164,6 +183,15 @@ async function loadPart(entry) {
   const csg = entry.csg ? await loadJSON(`testdata/${entry.csg}`, { optional: true }) : null;
   const reasons = await loadDeclineReasons();
   const decline = reasons ? (reasons.get(entry.name) || null) : null;
+  // The flat halfspace solid is not traced in this page -- the bridge does that, in the real
+  // kernel -- so only its structure is read: the header and the cell table, which is what the
+  // part card prints. A malformed sidecar is reported and does not stop the part from loading.
+  let flatcsg = null;
+  if (entry.flatcsg) {
+    try {
+      flatcsg = parseFlatCSG(await loadBinary(`testdata/${entry.flatcsg}`), entry.flatcsg);
+    } catch (e) { flatcsg = null; console.warn(`${entry.flatcsg}: ${e.message}`); }
+  }
   let facets = null;
   let facetsBuffer = null;
   if (entry.facets) {
@@ -179,6 +207,8 @@ async function loadPart(entry) {
   state.facets = facets;
   state.facetsBuffer = facetsBuffer;
   state.csg = csg;
+  state.flatcsg = flatcsg;
+  state.meshExact = tessellationExactness(parsed);
   state.decline = decline;
 
   state.aabb = solid ? solid.aabb : facetsBox(facets);
@@ -189,6 +219,7 @@ async function loadPart(entry) {
   if (solid && solid.unsupported.length) { notes.push(`${solid.unsupported.length} unsupported record(s)`); }
   setStatus(`${entry.name}: ` + (solid ? `${solid.nSurfaces} faces` : 'tessellated only -- no exact sidecar') +
             (facets ? `, ${facets.nTriangles} triangles` : '') +
+            (flatcsg ? `, ${flatcsg.nCells} cells / ${flatcsg.nHalfspaces} halfspaces` : '') +
             (notes.length ? ` (${notes.join('; ')})` : ''), !!(solid && solid.failed.length));
 
   renderMeshTab();
@@ -284,7 +315,8 @@ async function boot() {
       root: `testdata/${assemblyIndex.name}`,
       group: assemblyIndex.group || '',
       subtitle: `${grouped(totals.solids || 0)} placed solids`,
-      surfaces: null, facets: null, shape: null, csg: null,
+      surfaces: null, facets: null, shape: null, cellstree: null, original: null,
+      flatcsg: null, csg: null,
     });
   }
   state.parts = parts;
