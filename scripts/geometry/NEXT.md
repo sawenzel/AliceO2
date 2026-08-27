@@ -1,8 +1,8 @@
 # NEXT — session-start instruction for the CAD → TGeo work
 
 This file is the current hand-over. Whoever finishes a session should **rewrite it**.
-Last rewritten 2026-08-25, at the close of the flat-CSG programme's rung R5 (`o2::base::O2FlatCSG`
-built, shipped, measured and recorded).
+Last rewritten 2026-08-27, at the close of the closure test (real `o2-sim` physics through the
+round-tripped PIPE/ITS/TPC/MAG geometry, scored against the hand-written original).
 
 Branch `swenzel/bvhsurfacesolid`. Everything below is committed unless marked otherwise.
 
@@ -103,11 +103,34 @@ where ~2000 would do. It costs the manager, the STEP file, ~90 min of conversion
 gets a full 4000-point acceptance test) and presumably `o2-sim` load time and navigation. Worth a
 JIRA against the MFT geometry; the report has a section for it per module.
 
-## The queued next step, for a FRESH session
-1. **The closure test** — real `o2-sim -m PIPE ITS TPC MAG` physics through the round-tripped
-   geometry in three representations, scored against the original C++ TGeo as its own oracle.
-   → [`Handoff_ClosureTest.md`](Handoff_ClosureTest.md). Unaffected by R5: it scores the
-   representations that exist, and there is now one more of them.
+## The closure test is DONE (2026-08-27) → [`Stream_AL_ClosureTest.md`](Stream_AL_ClosureTest.md)
+
+`o2-sim -m PIPE ITS TPC MAG` run on the hand-written geometry and on its own STEP round trip,
+fixed seed, `trackSeed=true`. **The round trip is material-equivalent**: 2000 Fibonacci rays to
+r = 800 cm give mean x/X₀ 27.904215 vs 27.904907, a median per-ray relative difference of
+**2.6e-12**, 5 rays of 2000 above 1 %, none above 10 %, and the same 246.5 volumes crossed.
+746 of 746 volumes carry their source medium; 95 of 95 media agree on cuts and processes.
+
+**Hit-by-hit agreement of charged tracks is not achievable, as the handoff predicted** — 10 of 198
+primaries keep every hit within 1 cm. Geant draws from the RNG per step and the round-tripped world
+has a different boundary structure, so a track that takes one extra boundary step decorrelates.
+Two separate confounders are now instrumented rather than silent: the two sides do not define a hit
+the same way (1.2–2.7× multiplicity per layer), and a track index is not a shared name between two
+runs.
+
+**The tessellated-only variant does not close, and not because of chordal error.**
+`TGeoTessellated` has no notion of an internal cavity: a closed two-shell body reads as filled.
+Shown on the converted beam pipe (both shells present, `IsClosedBody()` true, `Contains(0,0,0)`
+true) and reproduced on a hand-built 24-facet cube with a cubic cavity. Every hollow volume becomes
+solid, so that world crosses 81.3 volumes per ray instead of 246.5 while carrying 3.3× the
+radiation length. **This is the first item on the open list below.**
+
+Four defects real transport exposed that no per-solid gate could — mixtures flattened in
+`remapCADMedia`, one material registered per medium, the JIT namespace bug (old item 4), and the
+anchoring/nesting pair — are fixed and are why this took a day. A module has **no single mother**:
+PIPE attaches at 10 places, ITS at 33. And STEP cannot express a solid containing other solids, so
+the converter has to put the mother/daughter nesting back or the mother's body swallows everything
+inside it.
 
 **The flat-CSG programme's R1–R5 are DONE** (2026-08-24/25).
 → [`Stream_AK_FlatCSG.md`](Stream_AK_FlatCSG.md) is the record and is where every R5 number lives;
@@ -157,7 +180,12 @@ distance, and returns `0.` for 78–100 % of interior points.
 
 ## Open, in the order I would take them
 
-1. **The closure test** (`Handoff_ClosureTest.md`) — fresh session. The only queued item left.
+1. **`TGeoTessellated` has no internal cavities** (`Stream_AL_ClosureTest.md` §5). Decide whether
+   to report it upstream; meanwhile the converter should **refuse** to emit a tessellated fallback
+   for a solid with an inner shell rather than emitting one that is silently wrong. This bounds the
+   tessellated fallback for every TGeo-derived geometry, and the standing bargain of
+   `Stream_R`/`Stream_U` — "absent an exact route the honest answer is tessellated" — has to be
+   re-read in that light.
 2. **The `one_way` sampling box in `checkKnownSource.py`** — a one-way containment comparison
    samples the *source's* bounding box, so a body that is parts-per-million of a multi-body label
    is never hit and the part reports as a failure it cannot be scored for. Nine MFT parts, proven
