@@ -3602,24 +3602,22 @@ static void LoadFacets(const std::string& file, TGeoTessellated* solid, bool che
 
     # Exact-surface solids need the O2 DetectorsBase library. The macro stays loadable in
     # ROOT interpreted mode: O2BVHSurfaceSolid.h is part of the ROOT dictionary module so
-    # it can be included textually, while O2SurfaceSolidIO.h is not -- its single free
-    # function is declared by prototype instead (the symbol resolves from
-    # libO2DetectorsBase). Do not export ROOT_INCLUDE_PATH for this; R__ADD_INCLUDE_PATH
+    # it can be included textually. O2SurfaceSolidIO.h is included the same way: a
+    # prototype in a `namespace o2` block would be nested by the JIT wrapper and shadow
+    # the real namespace. Do not export ROOT_INCLUDE_PATH for this; R__ADD_INCLUDE_PATH
     # keeps ROOT's C++ modules intact.
     prelude += """
 // --- exact-surface solid support (requires the ALICE O2 environment) ---
 R__ADD_INCLUDE_PATH($O2_ROOT/include)
 R__LOAD_LIBRARY(libO2DetectorsBase)
 #include "DetectorsBase/O2BVHSurfaceSolid.h"
-// O2SurfaceSolidIO.h is not part of the ROOT dictionary module; declare the loader
-// prototype directly (the symbol resolves from libO2DetectorsBase).
-namespace o2
-{
-namespace base
-{
-bool LoadSurfaceSolid(const std::string& file, O2BVHSurfaceSolid& solid);
-} // namespace base
-} // namespace o2
+// The loader comes from its own public header, NOT from a hand-rolled prototype.
+// o2::base::loadCADGeometryHook JITs this macro inside a unique namespace and hoists
+// only lines beginning with '#' to global scope, so a `namespace o2 { namespace base {`
+// block here becomes `<wrapper>::o2::base` and shadows the real one -- every later
+// `o2::base::O2BVHSurfaceSolid` then fails to resolve and the whole module silently
+// does not load. An #include is hoisted, so it declares the right symbol.
+#include "DetectorsBase/O2SurfaceSolidIO.h"
 
 static void LoadSurfaces(const std::string& file, o2::base::O2BVHSurfaceSolid* solid, bool check=false)
 {

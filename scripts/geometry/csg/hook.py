@@ -380,20 +380,16 @@ def emit_flat_csg_shape_cpp(lid, vol_display_name, sidecar_abspath, medium_var,
 
 FLAT_CPP_PRELUDE = r'''
 // --- flat-CSG parts: o2::base::O2FlatCSG filled from a flatcsg_*.bin sidecar ---
-// O2FlatCSG.h is part of the DetectorsBase ROOT dictionary module and can be included textually;
-// O2SurfaceSolidIO.h is not, so LoadFlatCSG is declared by prototype and resolves from
-// libO2DetectorsBase. Same treatment, and the same reason, as LoadSurfaceSolid above.
+// Both headers are included, never declared by prototype: loadCADGeometryHook JITs this
+// macro inside a unique namespace and hoists only '#' lines to global scope, so a
+// `namespace o2 { namespace base {` block here becomes `<wrapper>::o2::base` and shadows
+// the real one -- every later o2::base:: name then fails to resolve and the module
+// silently does not load. O2SurfaceSolidIO.h declares LoadFlatCSG and LoadSurfaceSolid both.
 R__ADD_INCLUDE_PATH($O2_ROOT/include)
 R__LOAD_LIBRARY(libO2DetectorsBase)
 #include "DetectorsBase/O2FlatCSG.h"
+#include "DetectorsBase/O2SurfaceSolidIO.h"
 #include <TError.h>
-namespace o2
-{
-namespace base
-{
-bool LoadFlatCSG(const std::string& file, O2FlatCSG& solid);
-} // namespace base
-} // namespace o2
 '''
 
 
