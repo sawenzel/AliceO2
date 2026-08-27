@@ -137,6 +137,15 @@ TGeoTessellated* MakeTessellated(const TBuffer3D& buf)
 } // end anonymous namespace
 
 ///< Transform any (primitive) TGeoShape to a TGeoTessellated
+///
+/// WARNING: the result does NOT navigate. TGeoTessellated derives from TGeoBBox and
+/// overrides none of Contains, DistFromInside, DistFromOutside or Safety, so a volume
+/// built on one is navigated as its filled BOUNDING BOX unless ROOT was built with
+/// VecGeom and the shape is wrapped in a TGeoVGShape. Measured: a converted beam pipe
+/// answered Contains() true at the centre of its own bore, and a whole detector
+/// tessellated this way carried 3.3x its true radiation length while crossing a third
+/// of the volumes. Use o2::base::O2Tessellated for anything that will be transported;
+/// this factory is for display and export only.
 TGeoTessellated* TGeoGeometryUtils::TGeoShapeToTGeoTessellated(TGeoShape const* shape)
 {
   auto& buf = shape->GetBuffer3D(TBuffer3D::kRawSizes | TBuffer3D::kRaw | TBuffer3D::kCore, false);

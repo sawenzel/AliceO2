@@ -3561,7 +3561,7 @@ def trsf_to_tgeo(trsf: gp_Trsf, name: str, scale_to_cm: float) -> str:
 
 
 def emit_cpp_prelude(exact_surfaces: bool = False, csg_shapes: bool = False,
-                     flat_csg_shapes: bool = False) -> str:
+                     flat_csg_shapes: bool = False, o2_tessellated: bool = False) -> str:
     prelude = """#include <TGeoManager.h>
 #include <TFile.h>
 #include <fstream>
@@ -3597,20 +3597,41 @@ static void LoadFacets(const std::string& file, TGeoTessellated* solid, bool che
         prelude += import_csg_hook().CPP_LOADER
     if flat_csg_shapes:
         prelude += import_csg_hook().FLAT_CPP_PRELUDE
-    if not exact_surfaces:
+    if not exact_surfaces and not o2_tessellated:
         return prelude
 
-    # Exact-surface solids need the O2 DetectorsBase library. The macro stays loadable in
+    # The navigable solids need the O2 DetectorsBase library. The macro stays loadable in
     # ROOT interpreted mode: O2BVHSurfaceSolid.h is part of the ROOT dictionary module so
     # it can be included textually. O2SurfaceSolidIO.h is included the same way: a
     # prototype in a `namespace o2` block would be nested by the JIT wrapper and shadow
     # the real namespace. Do not export ROOT_INCLUDE_PATH for this; R__ADD_INCLUDE_PATH
     # keeps ROOT's C++ modules intact.
     prelude += """
-// --- exact-surface solid support (requires the ALICE O2 environment) ---
+// --- navigable O2 solid support (requires the ALICE O2 environment) ---
 R__ADD_INCLUDE_PATH($O2_ROOT/include)
 R__LOAD_LIBRARY(libO2DetectorsBase)
-#include "DetectorsBase/O2BVHSurfaceSolid.h"
+"""
+    if o2_tessellated:
+        # ROOT's TGeoTessellated carries no navigation of its own -- its class doc says so, and
+        # it inherits Contains/DistFromInside/DistFromOutside/Safety from TGeoBBox, so a
+        # tessellated volume navigates as its bounding box. o2::base::O2Tessellated is the same
+        # facet data with a real BVH-backed implementation of those four. The facet file is read
+        # by o2::base::LoadFacetSolid, the same public reader the solid harness uses, rather than
+        # by a second copy of the format -- see O2SurfaceSolidIO.h.
+        prelude += """#include "DetectorsBase/O2Tessellated.h"
+#include "DetectorsBase/O2SurfaceSolidIO.h"
+
+static void LoadFacetsO2(const std::string& file, o2::base::O2Tessellated* solid, bool check=false)
+{
+  if (!o2::base::LoadFacetSolid(file, *solid)) {
+    throw std::runtime_error("Cannot load facet sidecar: " + file);
+  }
+  solid->CloseShape(check, true, false);
+}
+"""
+    if not exact_surfaces:
+        return prelude
+    prelude += """#include "DetectorsBase/O2BVHSurfaceSolid.h"
 // The loader comes from its own public header, NOT from a hand-rolled prototype.
 // o2::base::loadCADGeometryHook JITs this macro inside a unique namespace and hoists
 // only lines beginning with '#' to global scope, so a `namespace o2 { namespace base {`
@@ -3776,7 +3797,16 @@ def emit_materials_cpp(
 
 
 
-def emit_tessellated_cpp(lid: str, vol_display_name: str, facet_abspath: str, ntriangles: int, medium_var: str) -> str:
+def emit_tessellated_cpp(lid: str, vol_display_name: str, facet_abspath: str, ntriangles: int, medium_var: str,
+                         solid_class: str = "o2::base::O2Tessellated") -> str:
+    """Emit the tessellated fallback for one leaf solid.
+
+    ``solid_class`` picks the shape class. The default is o2::base::O2Tessellated, which is the
+    only one of the two that navigates: ROOT's TGeoTessellated implements no Contains,
+    DistFromInside, DistFromOutside or Safety of its own and inherits all four from TGeoBBox, so a
+    TGeoTessellated volume is navigated as its bounding box. ROOT says so itself -- "The class does
+    not provide navigation functionality, it just wraps the data for the composing faces"
+    (TGeoTessellated.cxx class doc) -- and SolidNavigationHarness.md says the same."""
     safe = sanitize_cpp_name(lid)
     shape_name = vol_display_name if vol_display_name else lid
 
@@ -3786,9 +3816,10 @@ def emit_tessellated_cpp(lid: str, vol_display_name: str, facet_abspath: str, nt
         out.append(f'  TGeoVolume *vol_{safe} = new TGeoVolume("{shape_name}", solid_{safe}, {medium_var});')
         return "\n".join(out)
 
+    loader = "LoadFacetsO2" if solid_class != "TGeoTessellated" else "LoadFacets"
     out = []
-    out.append(f'  TGeoTessellated *solid_{safe} = new TGeoTessellated("{shape_name}", {ntriangles});')
-    out.append(f'  LoadFacets("{facet_abspath}", solid_{safe}, check);')
+    out.append(f'  {solid_class} *solid_{safe} = new {solid_class}("{shape_name}", {ntriangles});')
+    out.append(f'  {loader}("{facet_abspath}", solid_{safe}, check);')
     out.append(f'  TGeoVolume *vol_{safe} = new TGeoVolume("{shape_name}", solid_{safe}, {medium_var});')
     return "\n".join(out)
 
@@ -4632,6 +4663,7 @@ def emit_root_macro(
     dump_brep: bool = False,
     csg: str = "off",
     csg_report: Optional[str] = None,
+    mesh_solid: str = "o2",
 ):
     # surface_files: def_lid -> absolute path of an exact-surface sidecar (surfaces_*.bin).
     # Volumes listed here are emitted as O2BVHSurfaceSolid via emit_surface_solid_cpp;
@@ -4908,9 +4940,31 @@ def emit_root_macro(
         print(f"Emitting {len(surface_files)}/{len(logical_volumes)} logical volumes as exact O2BVHSurfaceSolid "
               f"(macro requires the ALICE O2 environment)")
 
+    # Which shape class carries the tessellated fallback. ROOT's TGeoTessellated overrides none
+    # of Contains/DistFromInside/DistFromOutside/Safety and inherits all four from TGeoBBox, so a
+    # geometry that leans on it is navigated as a pile of bounding boxes. o2::base::O2Tessellated
+    # is the same facet data with real navigation, so it is the default; "tgeo" stays available
+    # for a macro that must load without the O2 environment, and says loudly what it costs.
+    if mesh_solid not in ("o2", "tgeo"):
+        raise ValueError(f"mesh_solid must be 'o2' or 'tgeo', got {mesh_solid!r}")
+    tess_lids = [lid for lid in logical_volumes
+                 if lid not in flat_files and lid not in csg_files and lid not in surface_files
+                 and len(logical_volumes[lid]) > 0]
+    solid_class = "o2::base::O2Tessellated" if mesh_solid == "o2" else "TGeoTessellated"
+    if tess_lids:
+        if mesh_solid == "o2":
+            print(f"Emitting {len(tess_lids)}/{len(logical_volumes)} logical volumes as navigable "
+                  f"o2::base::O2Tessellated (macro requires the ALICE O2 environment)")
+        else:
+            print(f"  [WARN] --mesh-solid tgeo: {len(tess_lids)}/{len(logical_volumes)} logical volume(s) "
+                  f"are emitted as ROOT TGeoTessellated, which implements no navigation of its own and "
+                  f"inherits Contains/DistFrom*/Safety from TGeoBBox. Every one of them will be navigated "
+                  f"as its bounding box, filled. Use --mesh-solid o2 for a geometry meant to be traversed.")
+
     cpp: List[str] = []
     cpp.append(emit_cpp_prelude(exact_surfaces=bool(surface_files), csg_shapes=bool(csg_files),
-                                flat_csg_shapes=bool(flat_files)))
+                                flat_csg_shapes=bool(flat_files),
+                                o2_tessellated=bool(tess_lids) and mesh_solid == "o2"))
 
     _media_unresolved: List[Tuple[str, str]] = []   # part named a medium the sidecar lacks
     _media_unnamed: List[str] = []                  # part the sidecar does not name at all
@@ -4951,7 +5005,8 @@ def emit_root_macro(
             sidecar = str(_Path(surface_files[lid]).expanduser().resolve()).replace("\\", "\\\\")
             cpp.append(emit_surface_solid_cpp(lid, def_names.get(lid, ""), sidecar, med))
         else:
-            cpp.append(emit_tessellated_cpp(lid, def_names.get(lid, ""), facet_files[lid], ntriangles, med))
+            cpp.append(emit_tessellated_cpp(lid, def_names.get(lid, ""), facet_files[lid], ntriangles, med,
+                                            solid_class=solid_class))
 
     if media_sidecar is not None:
         nvol = len(logical_volumes)
@@ -5104,7 +5159,8 @@ def main():
     ap.add_argument("--exclude-name", action="append", default=[], help="Skip CAD labels/subtrees whose XCAF name or label entry matches this regex; may be repeated.")
     ap.add_argument("--name-filter-case-sensitive", action="store_true", help="Make --include-name/--exclude-name matching case-sensitive (default: case-insensitive)")
     ap.add_argument("--surface-report", default=None, metavar="PATH", help="Write a JSON report classifying each face by analytic surface type and each logical volume by exact O2BVHSurfaceSolid conversion eligibility. Does not change the generated geometry output.")
-    ap.add_argument("--exact-surfaces", default="off", choices=["off", "auto", "required"], help="Emit exact O2BVHSurfaceSolid shapes instead of TGeoTessellated where possible. 'off' (default): tessellated only. 'auto': exact for each leaf solid whose faces all extract exactly, tessellated fallback otherwise. 'required': fail with a report if any leaf solid cannot be represented exactly. Writes a surfaces_*.bin sidecar per exact volume.")
+    ap.add_argument("--mesh-solid", default="o2", choices=["o2", "tgeo"], help="Shape class for the tessellated fallback. 'o2' (default): o2::base::O2Tessellated, which navigates (BVH-backed Contains/DistFrom*/Safety) and needs the ALICE O2 environment. 'tgeo': ROOT's TGeoTessellated, which implements none of those four and inherits them from TGeoBBox -- every such volume is then navigated as its filled bounding box. Only use 'tgeo' for a macro that must load outside O2 and is not meant to be traversed.")
+    ap.add_argument("--exact-surfaces", default="off", choices=["off", "auto", "required"], help="Emit exact O2BVHSurfaceSolid shapes instead of the tessellated fallback where possible. 'off' (default): tessellated only (see --mesh-solid). 'auto': exact for each leaf solid whose faces all extract exactly, tessellated fallback otherwise. 'required': fail with a report if any leaf solid cannot be represented exactly. Writes a surfaces_*.bin sidecar per exact volume.")
     ap.add_argument("--dump-brep", action="store_true", help="With --exact-surfaces auto|required, also write brep_<VOLNAME>_<LID>.brep (OCCT BREP of the leaf solid, scaled to cm like the sidecar and the mesh) next to each surfaces_*.bin. Input for the OCCT reference oracle; changes nothing else in the output.")
     ap.add_argument("--csg", default="off", choices=["off", "auto", "required"], help="Recognise leaf solids as native ROOT CSG shapes (TGeoBBox/TGeoTube/TGeoTubeSeg/TGeoCone/TGeoSphere, and the two-cluster TGeoTube-union of a barrel and a lug) and emit each accepted one as shape_<VOLNAME>_<LID>.root. 'off' (default): unchanged behaviour. 'auto': makes the per-part cascade CSG -> exact surfaces -> tessellated. 'required': fail with a report if any leaf solid is not CSG. A part is only converted this way when OCCT's symmetric-difference volume against the CAD solid is inside the model tolerance; the description and that evidence are written to csg_<VOLNAME>_<LID>.json and csg_report.json either way.")
     ap.add_argument("--csg-report", default=None, metavar="PATH", help="Where to write the per-part CSG cascade report (default: csg_report.json in the output folder).")
@@ -5203,6 +5259,7 @@ def main():
         dump_brep=args.dump_brep,
         csg=args.csg,
         csg_report=args.csg_report,
+        mesh_solid=args.mesh_solid,
     )
     out_macro.write_text(code)
 

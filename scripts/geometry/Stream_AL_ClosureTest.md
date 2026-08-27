@@ -95,8 +95,13 @@ reported a real defect as clean twice in this project.
 | 2000 rays, r ≤ 800 cm | mean x/X₀ | median rel. diff | rays > 1 % | rays > 10 % | volumes crossed |
 | --- | --- | --- | --- | --- | --- |
 | baseline | 27.904215 | — | — | — | 246.5 |
-| **CSG cascade** | **27.904907** (+0.002 %) | **2.6e-12** | 5 / 2000 | **0** | **246.5** |
-| tessellated only | 91.780165 (+229 %) | 7.4e-01 | 1994 / 2000 | 1923 | 81.3 |
+| CSG cascade, `TGeoTessellated` | 27.904907 (+0.002 %) | 2.6e-12 | 5 / 2000 | 0 | 246.5 |
+| **CSG cascade, `O2Tessellated`** | **27.903624** | **2.6e-12** | **3 / 2000** | **0** | **246.5** |
+| tessellated only, `TGeoTessellated` | 91.780165 (+229 %) | 7.4e-01 | 1994 / 2000 | 1923 | 81.3 |
+| **tessellated only, `O2Tessellated`** | **27.903700** | **1.9e-05** | **4 / 2000** | **0** | **249.8** |
+
+The two `TGeoTessellated` rows are the defect of §5, kept because they are what a naive
+tessellated fallback costs. The `O2Tessellated` rows are what the pipeline ships.
 
 Restricted to the ITS region (500 rays, r ≤ 45 cm) the cascade agrees to a mean absolute difference
 of **1.3e-10** on 0.0647, i.e. floating point. ITS sensor placements are identical detector-wide:
@@ -120,27 +125,63 @@ Two things confound a naive hit comparison and must be stated separately:
   the millimetre. `compare_hits.py` gained primary-ordinal keying and nearest-neighbour matching so
   both traps are visible rather than silent.
 
-## 5. The tessellated-only variant, and why it fails
+## 5. The tessellated-only variant, and the defect it exposed
 
-Asked for as a benchmark. It does not close, and the reason is **structural, not chordal**:
+Asked for as a benchmark. In its first form it did not close at all -- 3.3x the radiation
+length while crossing 81.3 volumes per ray instead of 246.5, and in the ITS region 3.6 against
+169.2, i.e. the inner detector was simply invisible. The cause is neither chordal error nor, as
+this document first claimed, any inability to express a cavity:
 
-> **`TGeoTessellated` has no notion of an internal cavity.** A closed two-shell body reads as
-> filled.
+> **`TGeoTessellated` does not navigate.** It derives from `TGeoBBox` and overrides none of
+> `Contains`, `DistFromInside`, `DistFromOutside` or `Safety`, so every volume built on one is
+> navigated as its filled **bounding box**. ROOT says so in the class doc -- *"The class does not
+> provide navigation functionality, it just wraps the data for the composing faces"* -- and real
+> navigation exists only through `TGeoVGShape`, which needs a VecGeom build this install does not
+> have.
 
-Measured on the converted beam pipe: `IP_PIPE` comes back with 1008 facets and 504 vertices whose
-radii run 1.82 to 1.90 cm — both shells present — and `IsClosedBody()` is true, yet
-`Contains(0,0,0)` and `Contains(1,0,0)` are **both true**, inside the vacuum bore. Reproduced from
-scratch on a hand-built 24-facet cube-with-a-cubic-cavity: `Contains` is true inside the cavity.
+The minimal reproducer is a **tetrahedron**: four facets, correct outward winding,
+`IsClosedBody()` true, and `Contains(0.9, 0.9, 0.9)` true for a point nowhere near it. A convex,
+cavity-free, closed body is already wrong, which retires the cavity hypothesis outright. (A
+cube-with-a-cavity is a bad reproducer twice over: a cube *is* its bounding box, and the obvious
+hand-winding of the inner shell is wrong.)
 
-Every hollow volume therefore becomes solid, which is why the tessellated world crosses **81.3
-volumes per ray instead of 246.5** while carrying **3.3× the radiation length**. In the ITS region
-it crosses **3.6** volumes per ray against 169.2 — the inner detector is simply invisible. Mesh
-precision is not the lever; the default 0.1 was used and refining it cannot add a cavity the shape
-class does not represent.
+**The emitted mesh was never at fault.** `IP_PIPE`: 1008 facets over 504 unique vertices, all 3024
+directed edges present exactly once with their reverse, Euler V-E+F = 0 as a genus-1 shell must be,
+0 degenerate facets, and a divergence-theorem signed volume of 82.988 cm^3 against the analytic
+83.0227 -- a 0.04 % chordal deficit. An inward-wound inner shell would have read 1931.17 and a
+missing one 1007.09. The decisive measurement: over 200 000 random points,
+`TGeoTessellated::Contains` and a `TGeoBBox` of the same half-lengths and origin disagreed **0
+times**.
 
-This is `MeshHealing.md`'s "a mesh can be *invalid*, not merely inaccurate" in its sharpest form,
-and it bounds the tessellated fallback for any TGeo-derived geometry: it is usable for solids
-without cavities and not otherwise.
+**This reached the simulation, not only this document's instrument.** O2 runs Geant4 with
+`G4Params::navmode = kTGeo`, and `TG4RootSolid` forwards `Inside`/`DistanceToIn`/`DistanceToOut`
+straight to the `TGeoShape` virtuals, so Geant4 saw the same boxes.
+
+**Why no gate caught it.** `runOracleGate.py`, `tgeoRayService.py` and `O2SolidHarness` all score
+`o2::base::O2Tessellated`, which does navigate. The emitted `geom.C` used ROOT's class. The
+instrument and the product were testing different shapes -- a sharper form of NEXT.md's standing
+caveat that a per-solid number says nothing about an assembled world.
+
+**The fix.** `O2_CADtoTGeo.py --mesh-solid {o2,tgeo}`, default `o2`, emits
+`o2::base::O2Tessellated` through the existing `LoadFacetSolid`; `tgeo` keeps ROOT's class for a
+macro that must load outside O2 and warns that every such volume becomes its bounding box.
+`TGeoGeometryUtils::TGeoShapeToTGeoTessellated` carries the same warning; it has no callers today.
+
+**It also moved the cascade.** The one mesh-tier part in the whole test is `ARB8`, a twisted
+`TGeoArb8` with four free-form faces: 26.73 cm^3 of M55J6K carbon navigated as an 875.49 cm^3 box,
+a factor 32.7. Fixing it cut the cascade's mean absolute difference 3.2x and its worst ray 6.8x
+(0.7007 -> 0.1027). That was this document's own open item 4.
+
+**Cost.** 2000 rays take 1.47 s through the hand-written geometry, 1.66 s through the cascade and
+1.76 s through the tessellated-only world -- **+20 % wall, +17 % per boundary crossing** over
+hand-written CSG. `o2sim_geometry.root` grows 16.7 -> 38.6 MB, because `O2Tessellated` streams its
+outward normals.
+
+Two incidental findings. `LoadFacetSolid` reports 2 degenerate facets across the PIPE barrel meshes
+(`RB24ValveMA1` index 1516, `RB24VMABCPirani` index 3827) that `TGeoTessellated::AddFacet` had been
+dropping silently; both solids still close, so they are benign. And ROOT's
+`TGeoTessellated::FlipFacets()` iterates `for (auto facet : fFacets)` **by value**, so it is a
+no-op -- a bug `O2Tessellated` inherited verbatim when it was copied.
 
 ## 6. Reproduce
 
@@ -160,12 +201,22 @@ python3 scripts/geometry/ClosureTest/matbudget_diff.py \
 
 ## 7. Open after this
 
-1. **`TGeoTessellated` cavities** — decide whether to report upstream, and meanwhile refuse to emit
-   a tessellated fallback for a solid with an inner shell rather than emitting one that is wrong.
+1. **Report `TGeoTessellated`'s missing navigation to ROOT** — as a feature request, not a bug:
+   ROOT documents the limitation, it simply does not shout when a `TGeoTessellated` is put in a
+   `TGeoVolume` without VecGeom, and silence there costs a factor 32 on a real part. ROOT's master
+   already carries an implementation similar to `O2Tessellated`. Also worth reporting: the
+   `FlipFacets()` by-value loop, which needs fixing in `O2Tessellated` too.
 2. **A geantino/`o2-sim-evalmat` cross-check** of §4's numbers through the real transport, so the
    claim rests on two independent instruments rather than on `matbudget_diff.py` alone.
 3. **Hit semantics** — a `sensitiveMacro` reproducing ITS's own `ProcessHits` would make the hit
    records comparable one-to-one; today only positions are.
-4. **The five outlier rays** above 1 % in the cascade column are unnamed. A per-ray localiser would
-   say which volume they cross, and one of them is probably PIPE's single tessellated part.
-5. **CPU comparison** — not measured. The configuration is fair now, so it can be.
+4. **Tree closeness.** The round trip is material-equivalent but the tree is not identical: a
+   mother with daughters returns as an assembly plus a `__body` volume where the source had one
+   volume, and each module sits under one extra hall wrapper (338 347 nodes / 649 volume UIDs
+   against 374 285 / 875). Collapsing an assembly that has exactly one `__body` child at the
+   identity into a single volume should reproduce the source tree one-for-one. Until then the extra
+   boundaries are extra steps, which is one of the reasons per-track hits cannot correspond.
+5. **The remaining outlier rays** — 3 of 2000 above 1 % in the cascade, 4 in the tessellated world.
+   A per-ray localiser would name the volume each crosses.
+6. **CPU comparison under real transport** — §5 measures ray tracing only. The configuration is
+   fair now, so a transport-level number can be taken.
