@@ -29,11 +29,21 @@ import sys
 PARAMS = ("isvol", "ifield", "fieldm", "tmaxfd", "stemax", "deemax", "epsil", "stmin")
 
 
-def base_name(name):
-    """The source volume name behind a writer-emitted part name."""
+def base_name(name, hollow_rename=None):
+    """The source volume name behind a writer-emitted part name.
+
+    `hollow_rename` is an EXACT map of tagged hall name -> source name, read from
+    the writer report. A suffix rule would be wrong: the beam pipe has a volume
+    genuinely called `IP_PIPE`, which a "strip a trailing _PIPE" rule turns into
+    `IP` and then fails to find.
+    """
+    if hollow_rename and name in hollow_rename:
+        return hollow_rename[name]
     for suffix in ("__mirrored", "__body"):
         while name.endswith(suffix):
             name = name[: -len(suffix)]
+    if hollow_rename and name in hollow_rename:
+        return hollow_rename[name]
     # `X#2` is the writer's disambiguation of one TGeo name over two definitions
     return name.split("#", 1)[0]
 
@@ -98,11 +108,23 @@ def main():
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--original", required=True, help="the source o2sim_geometry.root")
     p.add_argument("--macro", required=True, help="the converted geom.C")
+    p.add_argument("--writer-report", default=None,
+                   help="the writer's JSON report, read for hollowVolumes/hollowTag "
+                        "so a tagged hall volume still finds its source")
     p.add_argument("--rtol", type=float, default=0.0,
                    help="relative tolerance on the scalar material fields "
                         "(default 0: require exact equality)")
     p.add_argument("--json", help="write the full result here")
     args = p.parse_args()
+
+    hollow_rename = {}
+    if args.writer_report:
+        with open(args.writer_report) as fh:
+            rep = json.load(fh)
+        tag = rep.get("hollowTag")
+        if tag:
+            for h in rep.get("hollowVolumes", []):
+                hollow_rename[f"{h}_{tag}"] = h
 
     import ROOT
     ROOT.gROOT.SetBatch(True)
@@ -140,7 +162,7 @@ def main():
         if d["medium"] == "Default":
             res["default"].append(name)
             continue
-        src = source.get(base_name(name))
+        src = source.get(base_name(name, hollow_rename))
         if src is None:
             res["missingInSource"].append(name)
             continue

@@ -1303,6 +1303,7 @@ class TGeoToStep:
         # they are all air, but four coincident boundaries for the navigator to
         # resolve and a step count that no longer measures the geometry.
         self.hollow = set(getattr(self.opts, 'hollow_volumes', None) or ())
+        self.hollow_tag = getattr(self.opts, 'hollow_tag', None) or ''
         self._intern = {}          # definition key -> definition id
         self._byvol = {}           # (volume address, mirrored) -> definition id
         self._seen_vols = set()    # distinct TGeoVolume objects visited
@@ -1391,6 +1392,13 @@ class TGeoToStep:
         depth-first walk makes deterministic.  The mapping goes into the report.
         """
         base = str(vol.GetName())
+        # A hollowed volume is the experiment hall, and every module converted from
+        # `cave` downward emits the same three names. Placed side by side in one world
+        # they collide -- four sibling nodes called `cave_1`, five volumes called
+        # `barrel` -- and the transport quietly loses everything below them. They carry
+        # no material, so tagging them per module is free and is the fix.
+        if base in self.hollow and self.hollow_tag:
+            base = f"{base}_{self.hollow_tag}"
         slots = self._name_slots.setdefault(base, {})
         nm = slots.get(slot)
         if nm is None:
@@ -1528,6 +1536,11 @@ class TGeoToStep:
         """The volume's own OCCT solid, Z-mirrored if this is the prototype."""
         if not wanted:
             return None, "excluded by --include-name"
+        # A hollowed volume contributes structure only, whether it has daughters or
+        # not -- the daughterless case reaches here by a different route, and without
+        # this it would ship a solid copy of a hall volume the CAD run builds itself.
+        if str(vol.GetName()) in self.hollow:
+            return None, "hollow volume (--hollow-volume)"
         occ, reason = self._solid_for(vol)
         if occ is None or not mirrored:
             return occ, reason
@@ -1571,8 +1584,7 @@ class TGeoToStep:
         # content agree, which is the dedup the name key used to claim.
         occ, reason = self._own_solid(vol, wanted, mirrored)
         emit_body = (occ is not None and self.opts.mother_bodies
-                     and not (depth == 0 and self.opts.skip_top_body)
-                     and str(vol.GetName()) not in self.hollow)
+                     and not (depth == 0 and self.opts.skip_top_body))
         plan = []
         for i in range(nd):
             node = vol.GetNode(i)
@@ -1881,8 +1893,15 @@ class TGeoToStep:
         for r in self.records.values():
             if not r.get("medium"):
                 continue
-            if r.get("emittedName"):
-                parts[r["emittedName"]] = r["medium"]
+            name = r.get("emittedName")
+            # Only a part that is actually emitted as a solid wears a medium. A
+            # volume the writer declined has no STEP part at all, and the assembly
+            # label of a volume with daughters is structure -- its material lives in
+            # the separate `__body` leaf, handled below.
+            is_body = bool(name) and (name.endswith("__body")
+                                      or name.endswith("__body__mirrored"))
+            if name and r.get("converted") and (r.get("ndaughters", 0) == 0 or is_body):
+                parts[name] = r["medium"]
             # A volume with daughters is written as an assembly label plus a
             # separate leaf holding the mother's own solid, and only that leaf
             # carries material.  Its name is the one the reverse converter reads
@@ -1952,6 +1971,7 @@ class TGeoToStep:
             "maxRelDev": max(devs) if devs else None,
             "medianRelDev": sorted(devs)[len(devs) // 2] if devs else None,
             "hollowVolumes": sorted(self.hollow),
+            "hollowTag": self.hollow_tag or None,
             "nameDisambiguation": disambiguated,
             "nDisambiguatedNames": len(disambiguated),
             "sharedDefinitionMaxRelDev": self.share_worst[0],
@@ -2755,6 +2775,7 @@ def self_test():
     o11.include_name = None
     o11.dedup_world = False
     o11.hollow_volumes = []
+    o11.hollow_tag = None
     conv11 = TGeoToStep(o11)
     conv11.build(top11)
     side11 = conv11.media_sidecar("in-memory")
@@ -2767,7 +2788,7 @@ def self_test():
     r11.append((f"the three media are collected once each ({side11['nMedia']})",
                 side11["nMedia"] == 3, None, None, None))
     r11.append(("each part names its own medium",
-                side11["parts"].get("top") == "Air_F"
+                side11["parts"].get("top__body") == "Air_F"
                 and side11["parts"].get("a") == "Air_NF"
                 and side11["parts"].get("b") == "Fe", None, None, None))
     mf, mn = side11["media"]["Air_F"], side11["media"]["Air_NF"]
@@ -2805,6 +2826,36 @@ def self_test():
     r11.append(("hollowing is opt-in: the same build without it keeps the body "
                 "(negative control)",
                 side11["parts"].get("top__body") == "Air_F", None, None, None))
+    o11.hollow_tag = "MOD"
+    conv11t = TGeoToStep(o11)
+    conv11t.build(top11)
+    side11t = conv11t.media_sidecar("in-memory")
+    r11.append(("--hollow-tag renames only the hollowed volume, so two modules "
+                "converted from one world do not collide",
+                conv11t.records[[d for d in conv11t.records
+                                 if conv11t.records[d]["name"] == "top"][0]]
+                ["emittedName"].startswith("top_MOD")
+                and side11t["parts"].get("a") == "Air_NF", None, None, None))
+    # A hollowed volume with NO daughters takes the leaf path, not the assembly one.
+    mgr11b = ROOT.TGeoManager("mediatest2", "hollow leaf")
+    fe11b = ROOT.TGeoMaterial("Fe2", 55.85, 26.0, 7.87)
+    med11b = ROOT.TGeoMedium("Fe2", 1, fe11b, ROOT.nullptr)
+    top11b = mgr11b.MakeBox("w", med11b, 50, 50, 50)
+    mgr11b.SetTopVolume(top11b)
+    leaf11b = mgr11b.MakeBox("hall", med11b, 5, 5, 5)
+    keep11b = mgr11b.MakeBox("keepme", med11b, 5, 5, 5)
+    top11b.AddNode(leaf11b, 1, ROOT.TGeoTranslation(10, 0, 0))
+    top11b.AddNode(keep11b, 1, ROOT.TGeoTranslation(-10, 0, 0))
+    mgr11b.CloseGeometry()
+    o11.hollow_volumes = ["hall"]
+    o11.hollow_tag = None
+    conv11b = TGeoToStep(o11)
+    conv11b.build(top11b)
+    side11b = conv11b.media_sidecar("in-memory")
+    r11.append(("a hollowed volume with no daughters is not emitted either",
+                "hall" not in side11b["parts"], None, None, None))
+    r11.append(("its daughterless sibling still is (negative control)",
+                side11b["parts"].get("keepme") == "Fe2", None, None, None))
     total += len(r11)
     failures += _print_suite("the media/material sidecar", r11)
 
@@ -2841,6 +2892,10 @@ def main(argv=None):
                          "own transforms, but no body of its own. Repeatable. Meant for "
                          "the experiment hall (cave, barrel, caveRB24), which o2-sim "
                          "builds natively whatever module list is asked for.")
+    ap.add_argument("--hollow-tag", default=None, metavar="TAG",
+                    help="suffix the name of every --hollow-volume with _TAG. Two "
+                         "modules converted from the same world would otherwise emit "
+                         "the same hall volume names and collide when placed together.")
     ap.add_argument("--media-json", default=None,
                     help="write the media/material sidecar here (default: "
                          "<output>_media.json). The reverse converter reads it "

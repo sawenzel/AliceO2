@@ -26,9 +26,10 @@ echo "=== $MOD: TGeo -> STEP + media sidecar"
 ( source "$S/env_o2.sh" >/dev/null 2>&1
   source "$S/env_converter.sh"
   cd "$D" && "$SW/Python/latest/bin/python3.10" \
-      "$S/wt/scripts/geometry/O2_TGeoToCAD.py" o2sim_geometry.root "$MOD.step" \
+      "$HOME/alisw/O2/scripts/geometry/O2_TGeoToCAD.py" o2sim_geometry.root "$MOD.step" \
       --report "${MOD}_writer_report.json" --media-json "${MOD}_media.json" \
       --hollow-volume cave --hollow-volume barrel --hollow-volume caveRB24 \
+      --hollow-tag "$MOD" \
       > writer.log 2>&1 )
 tail -3 "$D/writer.log"
 
@@ -36,18 +37,18 @@ echo "=== $MOD: STEP -> TGeo (csg auto / exact surfaces auto / mesh fallback)"
 ( source "$S/env_o2.sh" >/dev/null 2>&1
   source "$S/env_converter.sh"
   cd "$D" && "$SW/Python/latest/bin/python3.10" \
-      "$S/wt/scripts/geometry/O2_CADtoTGeo.py" "$MOD.step" -o geom.C \
+      "$HOME/alisw/O2/scripts/geometry/O2_CADtoTGeo.py" "$MOD.step" -o geom.C \
       --output-folder conv --csg auto --exact-surfaces auto --mesh \
       --media-json "${MOD}_media.json" > conv.log 2>&1 )
 grep -E "tiers:|Media from sidecar|WARN" "$D/conv.log" || true
 
 echo "=== $MOD: where does this module hang itself?"
 ( source "$S/env_o2.sh" >/dev/null 2>&1
-  cd "$D" && python3 "$S/wt/scripts/geometry/ClosureTest/module_anchors.py" \
+  cd "$D" && python3 "$HOME/alisw/O2/scripts/geometry/ClosureTest/module_anchors.py" \
       o2sim_geometry.root --json anchors.json 2>&1 | grep -vE "^Info in|^Warning in" )
 
 echo "=== $MOD: do the media survive?"
 ( source "$S/env_o2.sh" >/dev/null 2>&1
-  cd "$D" && python3 "$S/wt/scripts/geometry/ClosureTest/check_media.py" \
-      --original o2sim_geometry.root --macro conv/geom.C --rtol 1e-6 \
+  cd "$D" && python3 "$HOME/alisw/O2/scripts/geometry/ClosureTest/check_media.py" \
+      --original o2sim_geometry.root --macro conv/geom.C --rtol 1e-6 --writer-report "${MOD}_writer_report.json" \
       --json media_check.json 2>&1 | grep -vE "^Info in|^Warning in|^Note:" )
