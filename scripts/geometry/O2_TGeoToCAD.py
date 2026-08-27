@@ -1909,10 +1909,26 @@ class TGeoToStep:
             # the geometry silently comes back transparent.
             if r.get("bodyComponent"):
                 parts[r["bodyComponent"]] = r["medium"]
+        # Which emitted part is the *body* of which assembly. STEP cannot express
+        # "a solid that contains other solids": XCAF makes a label either a simple
+        # shape or an assembly, so the writer emits a mother as an assembly holding
+        # its own `__body` leaf beside its children. TGeo can express it, and does
+        # -- a daughter takes precedence over its mother's solid -- so the reverse
+        # converter has to put the nesting back or the mother's body silently
+        # swallows everything inside it. Carving the mother is not a substitute:
+        # an assembly daughter has no solid to subtract, and ITSUWrapVol0's only
+        # daughter is one.
+        bodies = {}
+        for r in self.records.values():
+            if r.get("bodyComponent") and r.get("emittedName"):
+                bodies[r["bodyComponent"]] = r["emittedName"]
+
         return {
             "generator": "O2_TGeoToCAD.py",
             "source": os.path.abspath(source),
             "mediumParamOrder": list(MEDIUM_PARAM_NAMES),
+            "bodyOfAssembly": bodies,
+            "nBodies": len(bodies),
             "nMedia": len(self.media),
             "nParts": len(parts),
             "media": self.media,
@@ -2812,6 +2828,10 @@ def self_test():
                 None, None, None))
     r11.append(("radiation and interaction length are carried, not recomputed",
                 mf["material"]["radLen"] > 0.0 and mf["material"]["intLen"] > 0.0,
+                None, None, None))
+    r11.append(("the sidecar says which part is the body of which assembly, so "
+                "the converter can put the mother/daughter nesting back",
+                side11["bodyOfAssembly"].get("top__body") == "top",
                 None, None, None))
     # --hollow-volume: the hall is structure the CAD run already has.
     o11.hollow_volumes = ["top"]

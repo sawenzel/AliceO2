@@ -1,0 +1,233 @@
+#include <TGeoManager.h>
+#include <TFile.h>
+#include <fstream>
+#include <functional>
+#include <stdexcept>
+#include <string>
+
+static void LoadFacets(const std::string& file, TGeoTessellated* solid, bool check=false)
+{
+  std::ifstream in(file, std::ios::binary);
+  if (!in) throw std::runtime_error("Cannot open facet file: " + file);
+
+  uint32_t nTri = 0;
+  in.read(reinterpret_cast<char*>(&nTri), sizeof(nTri));
+  if (!in) throw std::runtime_error("Bad facet header in: " + file);
+
+  for (uint32_t i=0;i<nTri;i++) {
+    float v[9];
+    in.read(reinterpret_cast<char*>(v), sizeof(v));
+    if (!in) throw std::runtime_error("Unexpected EOF in: " + file);
+
+    solid->AddFacet(TGeoTessellated::Vertex_t(v[0],v[1],v[2]),
+                    TGeoTessellated::Vertex_t(v[3],v[4],v[5]),
+                    TGeoTessellated::Vertex_t(v[6],v[7],v[8]));
+  }
+  solid->CloseShape(check, true);
+}
+
+TGeoVolume* build(bool check=true) {
+  if (!gGeoManager) { throw std::runtime_error("gGeoManager is null. Call build_and_export() or create a TGeoManager first."); }
+  // Default material/medium (placeholder; can be replaced later)
+  TGeoMaterial *mat_Default = new TGeoMaterial("Default", 0., 0., 0.);
+  TGeoMedium   *med_Default = new TGeoMedium("Default", 1, mat_Default);
+
+  TGeoTessellated *solid__0_1_1_2 = new TGeoTessellated("BasePin", 500);
+  LoadFacets("/home/swenzel/alisw/O2/scripts/geometry/Bagger/facets_BasePin_0_1_1_2.bin", solid__0_1_1_2, check);
+  TGeoVolume *vol__0_1_1_2 = new TGeoVolume("BasePin", solid__0_1_1_2, med_Default);
+  TGeoTessellated *solid__0_1_1_3 = new TGeoTessellated("Base", 4364);
+  LoadFacets("/home/swenzel/alisw/O2/scripts/geometry/Bagger/facets_Base_0_1_1_3.bin", solid__0_1_1_3, check);
+  TGeoVolume *vol__0_1_1_3 = new TGeoVolume("Base", solid__0_1_1_3, med_Default);
+  TGeoTessellated *solid__0_1_1_4 = new TGeoTessellated("Boom", 4520);
+  LoadFacets("/home/swenzel/alisw/O2/scripts/geometry/Bagger/facets_Boom_0_1_1_4.bin", solid__0_1_1_4, check);
+  TGeoVolume *vol__0_1_1_4 = new TGeoVolume("Boom", solid__0_1_1_4, med_Default);
+  TGeoTessellated *solid__0_1_1_5 = new TGeoTessellated("Stick", 4412);
+  LoadFacets("/home/swenzel/alisw/O2/scripts/geometry/Bagger/facets_Stick_0_1_1_5.bin", solid__0_1_1_5, check);
+  TGeoVolume *vol__0_1_1_5 = new TGeoVolume("Stick", solid__0_1_1_5, med_Default);
+  TGeoTessellated *solid__0_1_1_6 = new TGeoTessellated("Bucket", 9556);
+  LoadFacets("/home/swenzel/alisw/O2/scripts/geometry/Bagger/facets_Bucket_0_1_1_6.bin", solid__0_1_1_6, check);
+  TGeoVolume *vol__0_1_1_6 = new TGeoVolume("Bucket", solid__0_1_1_6, med_Default);
+  TGeoTessellated *solid__0_1_1_7 = new TGeoTessellated("BucketLink2", 4628);
+  LoadFacets("/home/swenzel/alisw/O2/scripts/geometry/Bagger/facets_BucketLink2_0_1_1_7.bin", solid__0_1_1_7, check);
+  TGeoVolume *vol__0_1_1_7 = new TGeoVolume("BucketLink2", solid__0_1_1_7, med_Default);
+  TGeoTessellated *solid__0_1_1_8 = new TGeoTessellated("BucketLink1", 4316);
+  LoadFacets("/home/swenzel/alisw/O2/scripts/geometry/Bagger/facets_BucketLink1_0_1_1_8.bin", solid__0_1_1_8, check);
+  TGeoVolume *vol__0_1_1_8 = new TGeoVolume("BucketLink1", solid__0_1_1_8, med_Default);
+  TGeoTessellated *solid__0_1_1_9 = new TGeoTessellated("BoomCylinderOuter", 2244);
+  LoadFacets("/home/swenzel/alisw/O2/scripts/geometry/Bagger/facets_BoomCylinderOuter_0_1_1_9.bin", solid__0_1_1_9, check);
+  TGeoVolume *vol__0_1_1_9 = new TGeoVolume("BoomCylinderOuter", solid__0_1_1_9, med_Default);
+  TGeoTessellated *solid__0_1_1_10 = new TGeoTessellated("BoomCylinderInner", 1612);
+  LoadFacets("/home/swenzel/alisw/O2/scripts/geometry/Bagger/facets_BoomCylinderInner_0_1_1_10.bin", solid__0_1_1_10, check);
+  TGeoVolume *vol__0_1_1_10 = new TGeoVolume("BoomCylinderInner", solid__0_1_1_10, med_Default);
+  TGeoTessellated *solid__0_1_1_11 = new TGeoTessellated("StickCylinderInner", 1612);
+  LoadFacets("/home/swenzel/alisw/O2/scripts/geometry/Bagger/facets_StickCylinderInner_0_1_1_11.bin", solid__0_1_1_11, check);
+  TGeoVolume *vol__0_1_1_11 = new TGeoVolume("StickCylinderInner", solid__0_1_1_11, med_Default);
+  TGeoTessellated *solid__0_1_1_12 = new TGeoTessellated("StickCylinderOuter", 2244);
+  LoadFacets("/home/swenzel/alisw/O2/scripts/geometry/Bagger/facets_StickCylinderOuter_0_1_1_12.bin", solid__0_1_1_12, check);
+  TGeoVolume *vol__0_1_1_12 = new TGeoVolume("StickCylinderOuter", solid__0_1_1_12, med_Default);
+  TGeoTessellated *solid__0_1_1_13 = new TGeoTessellated("BucketCylinderInner", 1636);
+  LoadFacets("/home/swenzel/alisw/O2/scripts/geometry/Bagger/facets_BucketCylinderInner_0_1_1_13.bin", solid__0_1_1_13, check);
+  TGeoVolume *vol__0_1_1_13 = new TGeoVolume("BucketCylinderInner", solid__0_1_1_13, med_Default);
+  TGeoTessellated *solid__0_1_1_14 = new TGeoTessellated("BucketCylinderOuter", 2178);
+  LoadFacets("/home/swenzel/alisw/O2/scripts/geometry/Bagger/facets_BucketCylinderOuter_0_1_1_14.bin", solid__0_1_1_14, check);
+  TGeoVolume *vol__0_1_1_14 = new TGeoVolume("BucketCylinderOuter", solid__0_1_1_14, med_Default);
+  TGeoVolumeAssembly *asm__0_1_1_1 = new TGeoVolumeAssembly("Assembly");
+
+  Double_t tr__0_1_1_1__0_1_1_2_1_m[9] = {
+    1.0, 0.0, 0.0,
+    0.0, 1.0, 0.0,
+    0.0, 0.0, 1.0
+  };
+  TGeoRotation *tr__0_1_1_1__0_1_1_2_1_rot = new TGeoRotation();
+  tr__0_1_1_1__0_1_1_2_1_rot->SetMatrix(tr__0_1_1_1__0_1_1_2_1_m);
+  TGeoCombiTrans *tr__0_1_1_1__0_1_1_2_1 = new TGeoCombiTrans(-20.65170288085, 4.0255699157715, 36.426800537109, tr__0_1_1_1__0_1_1_2_1_rot);
+  asm__0_1_1_1->AddNode(vol__0_1_1_2, 1, tr__0_1_1_1__0_1_1_2_1);
+
+
+  Double_t tr__0_1_1_1__0_1_1_3_2_m[9] = {
+    0.9999892678292844, 0.004632950059268318, 0.0,
+    -0.004632950059268318, 0.9999892678292844, -0.0,
+    -0.0, 0.0, 1.0
+  };
+  TGeoRotation *tr__0_1_1_1__0_1_1_3_2_rot = new TGeoRotation();
+  tr__0_1_1_1__0_1_1_3_2_rot->SetMatrix(tr__0_1_1_1__0_1_1_3_2_m);
+  TGeoCombiTrans *tr__0_1_1_1__0_1_1_3_2 = new TGeoCombiTrans(-20.65170288085, 9.9415699157715, 36.426800537109, tr__0_1_1_1__0_1_1_3_2_rot);
+  asm__0_1_1_1->AddNode(vol__0_1_1_3, 2, tr__0_1_1_1__0_1_1_3_2);
+
+
+  Double_t tr__0_1_1_1__0_1_1_4_3_m[9] = {
+    0.9999892678292842, 0.004166223349623936, 0.002026526400825161,
+    -0.004632950059324304, 0.8992496322334823, 0.4374112878078189,
+    5.423760931633728e-16, -0.437415982230814, 0.8992592832376278
+  };
+  TGeoRotation *tr__0_1_1_1__0_1_1_4_3_rot = new TGeoRotation();
+  tr__0_1_1_1__0_1_1_4_3_rot->SetMatrix(tr__0_1_1_1__0_1_1_4_3_m);
+  TGeoCombiTrans *tr__0_1_1_1__0_1_1_4_3 = new TGeoCombiTrans(-20.293168775210003, 23.096951641122004, 22.924670342923, tr__0_1_1_1__0_1_1_4_3_rot);
+  asm__0_1_1_1->AddNode(vol__0_1_1_4, 3, tr__0_1_1_1__0_1_1_4_3);
+
+
+  Double_t tr__0_1_1_1__0_1_1_5_4_m[9] = {
+    0.9999892678292842, 0.00425571888085071, 0.001831142555716658,
+    -0.004632950059323515, 0.9185666051339085, 0.395239076644142,
+    3.5965013248817976e-15, -0.39524331846291, 0.9185764634533299
+  };
+  TGeoRotation *tr__0_1_1_1__0_1_1_5_4_rot = new TGeoRotation();
+  tr__0_1_1_1__0_1_1_5_4_rot->SetMatrix(tr__0_1_1_1__0_1_1_5_4_m);
+  TGeoCombiTrans *tr__0_1_1_1__0_1_1_5_4 = new TGeoCombiTrans(-20.546886674470002, 39.040757205825, 20.842086768647, tr__0_1_1_1__0_1_1_5_4_rot);
+  asm__0_1_1_1->AddNode(vol__0_1_1_5, 4, tr__0_1_1_1__0_1_1_5_4);
+
+
+  Double_t tr__0_1_1_1__0_1_1_6_5_m[9] = {
+    0.9999892678292842, 0.004137575458208305, 0.0020843933361592766,
+    -0.004632950059324281, 0.893066188942454, 0.4499014535890596,
+    1.523081303534412e-15, -0.4499062820600848, 0.8930757735841184
+  };
+  TGeoRotation *tr__0_1_1_1__0_1_1_6_5_rot = new TGeoRotation();
+  tr__0_1_1_1__0_1_1_6_5_rot->SetMatrix(tr__0_1_1_1__0_1_1_6_5_m);
+  TGeoCombiTrans *tr__0_1_1_1__0_1_1_6_5 = new TGeoCombiTrans(-21.00753214669, 43.219406070204, 19.661955425438002, tr__0_1_1_1__0_1_1_6_5_rot);
+  asm__0_1_1_1->AddNode(vol__0_1_1_6, 5, tr__0_1_1_1__0_1_1_6_5);
+
+
+  Double_t tr__0_1_1_1__0_1_1_7_6_m[9] = {
+    0.9999892678292842, -0.0031552305071849934, 0.003392454376806784,
+    -0.004632950059323581, -0.6810340289258523, 0.7322371113367374,
+    1.1764923854638536e-15, -0.7322449699147604, -0.681041337977756
+  };
+  TGeoRotation *tr__0_1_1_1__0_1_1_7_6_rot = new TGeoRotation();
+  tr__0_1_1_1__0_1_1_7_6_rot->SetMatrix(tr__0_1_1_1__0_1_1_7_6_m);
+  TGeoCombiTrans *tr__0_1_1_1__0_1_1_7_6 = new TGeoCombiTrans(-21.553483323400002, -124.67296395240001, 27.647715935780003, tr__0_1_1_1__0_1_1_7_6_rot);
+  asm__0_1_1_1->AddNode(vol__0_1_1_7, 6, tr__0_1_1_1__0_1_1_7_6);
+
+
+  Double_t tr__0_1_1_1__0_1_1_8_7_m[9] = {
+    0.9999892678292841, 0.0024307175005865355, 0.003944089081719854,
+    -0.004632950059324989, 0.5246530574656374, 0.8513035328634003,
+    1.0515877534567786e-15, -0.8513126692962997, 0.5246586881922466
+  };
+  TGeoRotation *tr__0_1_1_1__0_1_1_8_7_rot = new TGeoRotation();
+  tr__0_1_1_1__0_1_1_8_7_rot->SetMatrix(tr__0_1_1_1__0_1_1_8_7_m);
+  TGeoCombiTrans *tr__0_1_1_1__0_1_1_8_7 = new TGeoCombiTrans(-21.20889443908, -0.24321035316900003, -2.038628636038, tr__0_1_1_1__0_1_1_8_7_rot);
+  asm__0_1_1_1->AddNode(vol__0_1_1_8, 7, tr__0_1_1_1__0_1_1_8_7);
+
+
+  Double_t tr__0_1_1_1__0_1_1_9_8_m[9] = {
+    0.9999892678292842, 0.004249708100952039, 0.001845049405542684,
+    -0.004632950059324059, 0.9172692211103177, 0.3982407711139317,
+    7.025136275023458e-17, -0.398245045147743, 0.9172790655058427
+  };
+  TGeoRotation *tr__0_1_1_1__0_1_1_9_8_rot = new TGeoRotation();
+  tr__0_1_1_1__0_1_1_9_8_rot->SetMatrix(tr__0_1_1_1__0_1_1_9_8_m);
+  TGeoCombiTrans *tr__0_1_1_1__0_1_1_9_8 = new TGeoCombiTrans(-20.910638569200003, 13.625419380278002, 26.896319574495, tr__0_1_1_1__0_1_1_9_8_rot);
+  asm__0_1_1_1->AddNode(vol__0_1_1_9, 8, tr__0_1_1_1__0_1_1_9_8);
+
+
+  Double_t tr__0_1_1_1__0_1_1_10_9_m[9] = {
+    0.9999892678292842, 0.004249708100952416, 0.001845049405542684,
+    -0.004632950059324405, 0.9172692211103177, 0.3982407711139317,
+    2.2053180228904213e-16, -0.398245045147743, 0.9172790655058427
+  };
+  TGeoRotation *tr__0_1_1_1__0_1_1_10_9_rot = new TGeoRotation();
+  tr__0_1_1_1__0_1_1_10_9_rot->SetMatrix(tr__0_1_1_1__0_1_1_10_9_m);
+  TGeoCombiTrans *tr__0_1_1_1__0_1_1_10_9 = new TGeoCombiTrans(-20.8726583851, 10.858235762312, 23.880529805216, tr__0_1_1_1__0_1_1_10_9_rot);
+  asm__0_1_1_1->AddNode(vol__0_1_1_10, 9, tr__0_1_1_1__0_1_1_10_9);
+
+
+  Double_t tr__0_1_1_1__0_1_1_11_10_m[9] = {
+    0.9999892678292842, 0.00378022011716279, 0.0026784626407684578,
+    -0.004632950059324468, 0.8159335841719458, 0.5781270811803146,
+    1.5679808368298452e-15, -0.5781332858054343, 0.8159423410044437
+  };
+  TGeoRotation *tr__0_1_1_1__0_1_1_11_10_rot = new TGeoRotation();
+  tr__0_1_1_1__0_1_1_11_10_rot->SetMatrix(tr__0_1_1_1__0_1_1_11_10_m);
+  TGeoCombiTrans *tr__0_1_1_1__0_1_1_11_10 = new TGeoCombiTrans(-20.37089608032, 31.095216213757, 23.671125566035002, tr__0_1_1_1__0_1_1_11_10_rot);
+  asm__0_1_1_1->AddNode(vol__0_1_1_11, 10, tr__0_1_1_1__0_1_1_11_10);
+
+
+  Double_t tr__0_1_1_1__0_1_1_12_11_m[9] = {
+    0.9999892678292842, 0.0037802201171621918, 0.002678462640769457,
+    -0.0046329500593245585, 0.8159335841719458, 0.5781270811803146,
+    4.0642265123009874e-16, -0.5781332858054343, 0.8159423410044437
+  };
+  TGeoRotation *tr__0_1_1_1__0_1_1_12_11_rot = new TGeoRotation();
+  tr__0_1_1_1__0_1_1_12_11_rot->SetMatrix(tr__0_1_1_1__0_1_1_12_11_m);
+  TGeoCombiTrans *tr__0_1_1_1__0_1_1_12_11 = new TGeoCombiTrans(-20.302705817610004, 34.762324786744, 22.192180548249, tr__0_1_1_1__0_1_1_12_11_rot);
+  asm__0_1_1_1->AddNode(vol__0_1_1_12, 11, tr__0_1_1_1__0_1_1_12_11);
+
+
+  Double_t tr__0_1_1_1__0_1_1_13_12_m[9] = {
+    0.9999892678292842, 0.003983275180513531, 0.0023659554282577733,
+    -0.004632950059324785, 0.8597615731482748, 0.5106746254821669,
+    3.554795462533281e-15, -0.5106801061882477, 0.8597708003552809
+  };
+  TGeoRotation *tr__0_1_1_1__0_1_1_13_12_rot = new TGeoRotation();
+  tr__0_1_1_1__0_1_1_13_12_rot->SetMatrix(tr__0_1_1_1__0_1_1_13_12_m);
+  TGeoCombiTrans *tr__0_1_1_1__0_1_1_13_12 = new TGeoCombiTrans(-20.535508559860002, 39.597204492723, 11.055505260248001, tr__0_1_1_1__0_1_1_13_12_rot);
+  asm__0_1_1_1->AddNode(vol__0_1_1_13, 12, tr__0_1_1_1__0_1_1_13_12);
+
+
+  Double_t tr__0_1_1_1__0_1_1_14_13_m[9] = {
+    0.9999892678292842, 0.003941376892663103, 0.0024351128191865998,
+    -0.004632950059323494, 0.8507181261753631, 0.5256017556766975,
+    3.2636957607600783e-15, -0.5256073965850071, 0.8507272563255106
+  };
+  TGeoRotation *tr__0_1_1_1__0_1_1_14_13_rot = new TGeoRotation();
+  tr__0_1_1_1__0_1_1_14_13_rot->SetMatrix(tr__0_1_1_1__0_1_1_14_13_m);
+  TGeoCombiTrans *tr__0_1_1_1__0_1_1_14_13 = new TGeoCombiTrans(-20.54034412703, 41.747990622491, 4.6504500967597, tr__0_1_1_1__0_1_1_14_13_rot);
+  asm__0_1_1_1->AddNode(vol__0_1_1_14, 13, tr__0_1_1_1__0_1_1_14_13);
+
+  return asm__0_1_1_1;
+}
+void build_and_export(const char* out_root = "geom.root", bool check=true) {
+  if (!gGeoManager) { new TGeoManager("geom","geom"); }
+  TGeoVolume* top = build(check);
+  gGeoManager->SetTopVolume(top);
+  gGeoManager->CloseGeometry();
+  gGeoManager->CheckOverlaps();
+  gGeoManager->Export(out_root);
+}
+std::function<TGeoVolume*()> get_builder_hook_checked() {
+  return []() { return build(true); };
+}
+std::function<TGeoVolume*()> get_builder_hook_unchecked() {
+  return []() { return build(false); };
+}

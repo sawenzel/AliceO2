@@ -4513,6 +4513,45 @@ def expand_free_shapes(
 # ROOT macro emission
 # -------------------------------
 
+def emit_nested_placement_cpp(body_def: str, child_def: str, trsf: gp_Trsf, copy_no: int,
+                              scale_to_cm: float, csg_lids: Optional[set] = None) -> str:
+    """One `AddNode` of a daughter INTO its mother's body volume, not beside it.
+
+    STEP cannot express a solid that contains other solids, so the writer emits a
+    mother as an assembly holding its own `__body` leaf beside its children. Read
+    back literally that gives a full-size solid overlapping its own daughters, and
+    TGeo's navigator, having entered the body, never reaches them: measured, a ray
+    crossed ITSUWrapVol0__body from r=2.1 to r=16.4 cm and met no ITS layer, and
+    the run produced zero hits. Putting the daughter back inside the body restores
+    exactly what the source geometry meant -- a daughter takes precedence over its
+    mother's solid -- and costs no boolean.
+
+    The frames: the body sits in the assembly at its own shape placement P (the
+    writer places the body component at the identity, so the assembly frame and
+    the body's part frame coincide, and only a CSG part's canonical-frame offset
+    remains). A child at T in the assembly frame is therefore at `P^-1 * T` in the
+    body volume's frame.
+    """
+    body_cpp = cpp_var_for_def(body_def)
+    child_cpp = cpp_var_for_def(child_def)
+    tr_name = f"trn_{sanitize_cpp_name(body_def)}_{sanitize_cpp_name(child_def)}_{copy_no}"
+    out = trsf_to_tgeo(trsf, tr_name, scale_to_cm)
+    node_matrix = tr_name
+
+    hook = import_csg_hook()
+    if csg_lids and child_def in csg_lids:
+        node_matrix = f"{tr_name}_placed"
+        out += hook.emit_csg_composed_placement_cpp(
+            tr_name, hook.csg_placement_var(child_def, sanitize_cpp_name), node_matrix) + "\n"
+    if csg_lids and body_def in csg_lids:
+        inv = f"{tr_name}_inbody"
+        pvar = hook.csg_placement_var(body_def, sanitize_cpp_name)
+        out += (f"  TGeoHMatrix *{inv} = new TGeoHMatrix({pvar}->Inverse());\n"
+                f"  {inv}->Multiply({node_matrix});\n")
+        node_matrix = inv
+    return out + f"  {body_cpp}->AddNode({child_cpp}, {copy_no}, {node_matrix});\n"
+
+
 def emit_placement_cpp(parent_def: str, child_def: str, trsf: gp_Trsf, copy_no: int, scale_to_cm: float,
                        csg_lids: Optional[set] = None) -> str:
     """One `AddNode`, with the child's own shape placement composed in when it has one.
@@ -4929,8 +4968,36 @@ def emit_root_macro(
         cpp.append(emit_assembly_cpp(lid, def_names.get(lid, "")))
 
     csg_lids = set(csg_files)
+
+    # Which emitted part is the body of which assembly, from the writer's sidecar.
+    # Keyed by def id here, because that is what the placement edges carry.
+    body_of = {}          # assembly def id -> its body def id
+    if media_sidecar is not None:
+        name_to_lid = {}
+        for _lid, _nm in def_names.items():
+            if _nm:
+                name_to_lid.setdefault(_nm, []).append(_lid)
+        for bodyname, asmname in (media_sidecar.get("bodyOfAssembly") or {}).items():
+            blids, alids = name_to_lid.get(bodyname, []), name_to_lid.get(asmname, [])
+            if len(blids) == 1 and len(alids) == 1:
+                body_of[alids[0]] = blids[0]
+            elif blids and alids:
+                # An ambiguous name would nest a mother's daughters into the wrong
+                # body, so refuse rather than guess.
+                print(f"  [WARN] not nesting {asmname}: {len(alids)} definition(s) "
+                      f"of that name and {len(blids)} of {bodyname}")
+
+    _nested = 0
     for idx, (parent, child, trsf) in enumerate(placements, start=1):
-        cpp.append(emit_placement_cpp(parent, child, trsf, idx, scale_to_cm, csg_lids))
+        body = body_of.get(parent)
+        if body is not None and child != body:
+            cpp.append(emit_nested_placement_cpp(body, child, trsf, idx, scale_to_cm, csg_lids))
+            _nested += 1
+        else:
+            cpp.append(emit_placement_cpp(parent, child, trsf, idx, scale_to_cm, csg_lids))
+    if media_sidecar is not None:
+        print(f"Mother nesting: {_nested} of {len(placements)} placement(s) go inside "
+              f"their mother's body volume ({len(body_of)} assembly/assemblies with a body)")
 
     # A top-level volume has no AddNode of its own, so a CSG shape placement would be dropped on
     # the floor there. Wrapping it in a one-node assembly is the only place to put the matrix, and

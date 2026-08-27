@@ -16,7 +16,10 @@
 #     CAD run is repeated with them loaded, dumping its own;
 #  3. the two dumps are compared per medium -- a difference means the physics
 #     configuration differs and the transport comparison must not be believed;
-#  4. only then the hits.
+#  4. only then the hits. Note where they are: under o2-sim-serial an external
+#     detector's hits stay in o2sim.root on a branch named after the detector
+#     (CITSHit), rather than being split into o2sim_Hits<DetID>.root the way a
+#     built-in detector's are.
 #
 # Bit-identical hits are NOT the acceptance for charged particles in material:
 # Geant draws from the RNG per step, so one extra boundary crossing shifts every
@@ -87,5 +90,5 @@ echo "############ 5. the hits"
 ( source "$S/env_o2.sh" >/dev/null 2>&1
   python3 "$CT/compare_hits.py" "$R/base1" "$R/cad" \
       --file-a o2sim_HitsITS.root --branch-a ITSHit \
-      --file-b o2sim_HitsITS.root --branch-b CITSHit \
+      --file-b o2sim.root --branch-b CITSHit \
       --tol 1e-4 --json "$R/hits.json" ) || true

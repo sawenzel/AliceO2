@@ -7,13 +7,13 @@ o2::passive::ExternalModule; ITS is the hit detector and goes in as
 o2::ext::ExternalDetector on the ITS DetID slot, so its hits are written to
 o2sim_HitsITS.root like any built-in detector's.
 
-Anchoring.  Each module was converted from its source geometry's top volume with
-the experiment hall hollowed out (--hollow-volume cave barrel caveRB24), so the
-converted macro reproduces the hall's *structure* -- and therefore every
-subtree's transform relative to it -- while contributing none of its material.
-Anchoring at `cave` with no placement is then exact by construction: nothing has
-to be re-derived, and there is no second copy of the hall for the navigator to
-resolve against the real one.
+Anchoring.  A module can need more than one placement, and roundtrip_module.py
+has already worked out which: everything the source hung under `barrel` is one
+conversion anchored back into the real `barrel`, and a subtree hung off `cave` or
+`caveRB24` is converted from its own root and placed with that root's own matrix.
+Anchoring the whole module at `cave` instead does NOT work -- its detectors would
+sit geometrically inside the native `barrel` while being daughters of `cave`, and
+the navigator, having descended into `barrel`, never finds them.
 
 The external names are deliberately NOT the real module names: build_geometry.C
 activates a module when its name is in the active list, so calling the external
@@ -49,30 +49,55 @@ def main():
     p.add_argument("studydir")
     p.add_argument("--name", default="CADCLOSURE",
                    help="the detector-list key o2-sim is pointed at")
+    p.add_argument("--variant", default="csg", choices=("csg", "mesh"),
+                   help="which back-conversion to configure: the shipped cascade "
+                        "(csg) or tessellated-only (mesh), the fallback every other "
+                        "CAD pipeline uses and the benchmark for the exact path")
+    p.add_argument("--out-prefix", default="",
+                   help="prefix for the written JSON file names, so two variants "
+                        "can live side by side in one study directory")
     args = p.parse_args()
 
     study = os.path.abspath(args.studydir)
     modules, detectors, names, missing = [], [], [], []
 
     for mod, name, kind, title in MODULES:
-        macro = os.path.join(study, "cad", mod, "conv", "geom.C")
-        if not os.path.exists(macro):
-            missing.append(macro)
+        frag = os.path.join(study, "cad", mod, "module_entries.json")
+        if not os.path.exists(frag):
+            missing.append(frag)
             continue
-        entry = {"name": name, "title": title, "macro": macro, "anchor": "cave"}
-        if kind == "sensitive":
-            entry["detID"] = DET_ID[name]
-            entry["sensitiveVolumes"] = SENSITIVE_VOLUMES[name]
-            detectors.append(entry)
-        else:
-            modules.append(entry)
-        names.append(name)
+        # One module can need several placements: everything under `barrel` goes
+        # in as one piece, and a subtree the source hung off `cave` or `caveRB24`
+        # goes in separately, at its own matrix. Each becomes its own external
+        # module or detector, named <name> or <name>_<tag>.
+        frag_entries = json.load(open(frag))["entries"]
+        if isinstance(frag_entries, dict):          # variants
+            if args.variant not in frag_entries:
+                missing.append(f"{frag} (no '{args.variant}' variant)")
+                continue
+            frag_entries = frag_entries[args.variant]
+        for e in frag_entries:
+            suffix = "" if e["tag"] == "barrel" else "_" + e["tag"][:8].upper()
+            ename = (name + suffix)[:15]
+            entry = {"name": ename, "title": f"{title} [{e['tag']}]",
+                     "macro": e["macro"], "anchor": e["anchor"]}
+            if e.get("placement"):
+                entry["placement"] = e["placement"]
+            if kind == "sensitive":
+                entry["detID"] = DET_ID[name]
+                entry["sensitiveVolumes"] = SENSITIVE_VOLUMES[name]
+                detectors.append(entry)
+            else:
+                modules.append(entry)
+            names.append(ename)
 
     if missing:
-        raise SystemExit("no converted macro for:\n  " + "\n  ".join(missing))
+        raise SystemExit("no module_entries.json for:\n  " + "\n  ".join(missing)
+                         + "\n(run roundtrip_module.py for each module first)")
 
-    ext_path = os.path.join(study, "externalDetectors.json")
-    det_path = os.path.join(study, "detectorlist.json")
+    pre = args.out_prefix
+    ext_path = os.path.join(study, f"{pre}externalDetectors.json")
+    det_path = os.path.join(study, f"{pre}detectorlist.json")
     with open(ext_path, "w") as fh:
         json.dump({"externalModules": modules, "externalDetectors": detectors},
                   fh, indent=2)
