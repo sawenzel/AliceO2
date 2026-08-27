@@ -29,6 +29,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace o2::base
 {
@@ -139,7 +140,25 @@ void remapCADMedia(TGeoVolume* top, const char* modulename)
       auto curr_mat = medium->GetMaterial();
       auto& matmgr = o2::base::MaterialManager::Instance();
 
-      matmgr.Material(modulename, counter, curr_mat->GetName(), curr_mat->GetA(), curr_mat->GetZ(), curr_mat->GetDensity(), curr_mat->GetRadLen(), curr_mat->GetIntLen());
+      // A TGeoMixture must go through Mixture(), not Material(): flattening a
+      // compound to its effective A and Z keeps the radiation length but loses
+      // the element composition Geant needs for ionisation, bremsstrahlung and
+      // every hadronic cross section. Most media of a real detector are mixtures
+      // -- 55 of the 90 in PIPE, ITS, TPC and MAG -- so the flattened path is the
+      // normal case, not an edge case.
+      if (auto* mix = dynamic_cast<TGeoMixture*>(curr_mat)) {
+        const Int_t nel = mix->GetNelements();
+        std::vector<Float_t> a(nel), z(nel), w(nel);
+        for (Int_t i = 0; i < nel; ++i) {
+          a[i] = mix->GetAmixt()[i];
+          z[i] = mix->GetZmixt()[i];
+          w[i] = mix->GetWmixt()[i];
+        }
+        matmgr.Mixture(modulename, counter, curr_mat->GetName(), a.data(), z.data(),
+                       curr_mat->GetDensity(), nel, w.data());
+      } else {
+        matmgr.Material(modulename, counter, curr_mat->GetName(), curr_mat->GetA(), curr_mat->GetZ(), curr_mat->GetDensity(), curr_mat->GetRadLen(), curr_mat->GetIntLen());
+      }
       // TGeo medium params are stored in a flat array with the following convention
       // fParams[0] = isvol;
       // fParams[1] = ifield;
