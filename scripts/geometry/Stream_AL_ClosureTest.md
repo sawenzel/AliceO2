@@ -172,6 +172,20 @@ macro that must load outside O2 and warns that every such volume becomes its bou
 a factor 32.7. Fixing it cut the cascade's mean absolute difference 3.2x and its worst ray 6.8x
 (0.7007 -> 0.1027). That was this document's own open item 4.
 
+**Transport, all three worlds, 20 events of BoxGun pi+ x10, seed 424242, `trackSeed=true`.**
+Every run: exit 0, zero stuck tracks, zero G4Exceptions, zero navigation errors, zero aborts.
+
+| world | ITS hits | steps/event | secondaries/event | mean x/X0 vs baseline |
+| --- | --- | --- | --- | --- |
+| hand-written C++ TGeo | 1243 | 36 004 | 3347 | — |
+| CSG cascade | 1795 | 24 689 | 3437 | +0.002 % |
+| tessellated only (`O2Tessellated`) | 1714 | 24 695 | 3391 | **-0.002 %** |
+
+The hit counts differ from the baseline's for the §4 reason -- the external detector's built-in
+entrance/exit action is not ITS's `ProcessHits` -- and the two CAD worlds agree with each other to
+5 %, which is the like-for-like comparison. Step counts sit below the baseline's because the
+round-tripped tree is not identical (open item 4).
+
 **Cost.** 2000 rays take 1.47 s through the hand-written geometry, 1.66 s through the cascade and
 1.76 s through the tessellated-only world -- **+20 % wall, +17 % per boundary crossing** over
 hand-written CSG. `o2sim_geometry.root` grows 16.7 -> 38.6 MB, because `O2Tessellated` streams its
