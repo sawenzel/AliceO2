@@ -1235,6 +1235,59 @@ def shape_to_occ(sh, s=SCALE_TO_MM, depth=0):
 # the XCAF builder
 # --------------------------------------------------------------------------
 
+# --------------------------------------------------------------------------
+# media and materials
+#
+# The geometry a STEP file carries is shape and placement; the physics a
+# simulation needs is the tracking medium behind each shape.  The round trip
+# therefore dumps the medium and material of every emitted volume verbatim into
+# a sidecar keyed by the emitted STEP part name, and the reverse converter
+# rebuilds them from that record rather than matching names against a database.
+# Extraction, not re-derivation: a NIST match is a good user-facing route and a
+# bad oracle, because its own deviations would masquerade as geometry effects.
+#
+# The eight medium parameters are Geant's, in TGeoMedium's own order:
+#   0 isvol  1 ifield  2 fieldm  3 tmaxfd  4 stemax  5 deemax  6 epsil  7 stmin
+# ifield is what carries the in-field/out-field distinction -- ALICE builds a
+# `_NF` twin of a medium for field-free regions, identical but for that flag.
+# --------------------------------------------------------------------------
+
+MEDIUM_PARAM_NAMES = ("isvol", "ifield", "fieldm", "tmaxfd",
+                      "stemax", "deemax", "epsil", "stmin")
+
+
+def material_record(mat):
+    """Everything needed to rebuild one TGeoMaterial or TGeoMixture."""
+    rec = {
+        "name": str(mat.GetName()),
+        "class": str(mat.ClassName()),
+        "Z": float(mat.GetZ()),
+        "A": float(mat.GetA()),
+        "density": float(mat.GetDensity()),
+        "radLen": float(mat.GetRadLen()),
+        "intLen": float(mat.GetIntLen()),
+        "isMixture": bool(mat.IsMixture()),
+    }
+    if mat.IsMixture():
+        n = int(mat.GetNelements())
+        zs, as_, ws = mat.GetZmixt(), mat.GetAmixt(), mat.GetWmixt()
+        rec["nElements"] = n
+        rec["elements"] = [{"Z": float(zs[i]), "A": float(as_[i]),
+                            "W": float(ws[i])} for i in range(n)]
+    return rec
+
+
+def medium_record(med):
+    """Everything needed to rebuild one TGeoMedium, its material included."""
+    return {
+        "name": str(med.GetName()),
+        "id": int(med.GetId()),
+        "params": {k: float(med.GetParam(i))
+                   for i, k in enumerate(MEDIUM_PARAM_NAMES)},
+        "material": material_record(med.GetMaterial()),
+    }
+
+
 class TGeoToStep:
     def __init__(self, opts):
         self.opts = opts
@@ -1242,6 +1295,14 @@ class TGeoToStep:
         self.shape_tool = XCAFDoc_DocumentTool.ShapeTool(self.doc.Main())
         self.definitions = {}      # definition id -> (label, occ solid or None)
         self.records = {}          # definition id -> report record
+        self.media = {}            # medium name -> medium_record()
+        # Volumes to emit as pure assemblies: structure and daughters, no body.
+        # o2-sim always builds the experiment hall itself, so converting a module
+        # from `cave` downward would otherwise ship a second copy of cave/barrel/
+        # caveRB24 to sit coincident with the real ones -- no extra material, since
+        # they are all air, but four coincident boundaries for the navigator to
+        # resolve and a step count that no longer measures the geometry.
+        self.hollow = set(getattr(self.opts, 'hollow_volumes', None) or ())
         self._intern = {}          # definition key -> definition id
         self._byvol = {}           # (volume address, mirrored) -> definition id
         self._seen_vols = set()    # distinct TGeoVolume objects visited
@@ -1270,6 +1331,7 @@ class TGeoToStep:
         if not self.opts.quiet:
             print(*a, file=sys.stderr, flush=True)
 
+
     def _record(self, did, vol, emitted, **kw):
         rec = self.records.setdefault(did, {
             "name": str(vol.GetName()),
@@ -1286,6 +1348,12 @@ class TGeoToStep:
             "sharedByVolumes": 1,
         })
         rec.update(kw)
+        med = vol.GetMedium()
+        if med is not None:
+            name = str(med.GetName())
+            rec["medium"] = name
+            if name not in self.media:
+                self.media[name] = medium_record(med)
         return rec
 
     # ------------------------------------------------------------------
@@ -1503,7 +1571,8 @@ class TGeoToStep:
         # content agree, which is the dedup the name key used to claim.
         occ, reason = self._own_solid(vol, wanted, mirrored)
         emit_body = (occ is not None and self.opts.mother_bodies
-                     and not (depth == 0 and self.opts.skip_top_body))
+                     and not (depth == 0 and self.opts.skip_top_body)
+                     and str(vol.GetName()) not in self.hollow)
         plan = []
         for i in range(nd):
             node = vol.GetNode(i)
@@ -1801,6 +1870,36 @@ class TGeoToStep:
         if w.Write(path) != IFSelect_RetDone:
             raise RuntimeError(f"STEP write failed for {path}")
 
+    def media_sidecar(self, source):
+        """The media sidecar: every medium used, and which part wears which.
+
+        Keyed by the *emitted* STEP part name, because that is the only name the
+        reverse converter ever sees.  A part with no medium (a pure assembly,
+        or a volume declined by the writer) simply does not appear.
+        """
+        parts = {}
+        for r in self.records.values():
+            if not r.get("medium"):
+                continue
+            if r.get("emittedName"):
+                parts[r["emittedName"]] = r["medium"]
+            # A volume with daughters is written as an assembly label plus a
+            # separate leaf holding the mother's own solid, and only that leaf
+            # carries material.  Its name is the one the reverse converter reads
+            # back, so it has to be in the table too -- otherwise every mother in
+            # the geometry silently comes back transparent.
+            if r.get("bodyComponent"):
+                parts[r["bodyComponent"]] = r["medium"]
+        return {
+            "generator": "O2_TGeoToCAD.py",
+            "source": os.path.abspath(source),
+            "mediumParamOrder": list(MEDIUM_PARAM_NAMES),
+            "nMedia": len(self.media),
+            "nParts": len(parts),
+            "media": self.media,
+            "parts": parts,
+        }
+
     def report(self, source, out_step):
         by_class = {}
         npure = 0
@@ -1852,6 +1951,7 @@ class TGeoToStep:
             "nReflectedPlacements": len(self.reflected_nodes),
             "maxRelDev": max(devs) if devs else None,
             "medianRelDev": sorted(devs)[len(devs) // 2] if devs else None,
+            "hollowVolumes": sorted(self.hollow),
             "nameDisambiguation": disambiguated,
             "nDisambiguatedNames": len(disambiguated),
             "sharedDefinitionMaxRelDev": self.share_worst[0],
@@ -2613,6 +2713,101 @@ def self_test():
     total += len(r10)
     failures += _print_suite("TGeoPgon z-step and the collinear-face guard", r10)
 
+    # ---- the media sidecar -------------------------------------------------
+    # The sidecar is what makes the round trip a physics comparison rather than
+    # a shape comparison, so it is checked on the two things that can silently
+    # ruin one: a medium that loses a parameter, and a mixture that loses an
+    # element.  The in-field/out-field pair is the case that motivates the whole
+    # record -- two media identical in every field but `ifield`.
+    r11 = []
+    mgr11 = ROOT.TGeoManager("mediatest", "media sidecar")
+    mix11 = ROOT.TGeoMixture("Air", 4, 0.00120479)
+    mix11.AddElement(12.0107, 6.0, 0.000124)
+    mix11.AddElement(14.0067, 7.0, 0.755267)
+    mix11.AddElement(15.9994, 8.0, 0.231781)
+    mix11.AddElement(39.9480, 18.0, 0.012827)
+    fe11 = ROOT.TGeoMaterial("Fe", 55.85, 26.0, 7.87)
+    med_f = ROOT.TGeoMedium("Air_F", 1, mix11, ROOT.nullptr)
+    med_f.SetParam(1, 1.0)      # ifield: in field
+    med_f.SetParam(4, 0.75)     # stemax
+    med_n = ROOT.TGeoMedium("Air_NF", 2, mix11, ROOT.nullptr)
+    med_n.SetParam(1, 0.0)      # ifield: field free
+    med_n.SetParam(4, 0.75)
+    med_fe = ROOT.TGeoMedium("Fe", 3, fe11, ROOT.nullptr)
+
+    top11 = mgr11.MakeBox("top", med_f, 50, 50, 50)
+    mgr11.SetTopVolume(top11)
+    a11 = mgr11.MakeBox("a", med_n, 5, 5, 5)
+    b11 = mgr11.MakeBox("b", med_fe, 5, 5, 5)
+    top11.AddNode(a11, 1, ROOT.TGeoTranslation(10, 0, 0))
+    top11.AddNode(b11, 1, ROOT.TGeoTranslation(-10, 0, 0))
+    mgr11.CloseGeometry()
+
+    class _O11:
+        pass
+    o11 = _O11()
+    o11.quiet = True
+    o11.verify = False
+    o11.mother_bodies = True
+    o11.skip_top_body = False
+    o11.carve_mothers = False
+    o11.max_depth = None
+    o11.include_name = None
+    o11.dedup_world = False
+    o11.hollow_volumes = []
+    conv11 = TGeoToStep(o11)
+    conv11.build(top11)
+    side11 = conv11.media_sidecar("in-memory")
+
+    r11.append((f"every emitted part carries a medium ({side11['nParts']} parts)",
+                side11["nParts"] >= 3, None, None, None))
+    r11.append(("a mother's own body leaf is in the table, not just its assembly "
+                "label (else every mother comes back transparent)",
+                side11["parts"].get("top__body") == "Air_F", None, None, None))
+    r11.append((f"the three media are collected once each ({side11['nMedia']})",
+                side11["nMedia"] == 3, None, None, None))
+    r11.append(("each part names its own medium",
+                side11["parts"].get("top") == "Air_F"
+                and side11["parts"].get("a") == "Air_NF"
+                and side11["parts"].get("b") == "Fe", None, None, None))
+    mf, mn = side11["media"]["Air_F"], side11["media"]["Air_NF"]
+    r11.append(("the in-field and field-free twins differ ONLY in ifield",
+                mf["params"]["ifield"] == 1.0 and mn["params"]["ifield"] == 0.0
+                and all(mf["params"][k] == mn["params"][k]
+                        for k in MEDIUM_PARAM_NAMES if k != "ifield"),
+                None, None, None))
+    r11.append(("all eight medium parameters are recorded, in Geant's order",
+                list(mf["params"]) == list(MEDIUM_PARAM_NAMES), None, None, None))
+    r11.append(("stemax survives (the parameter a medium loses most quietly)",
+                abs(mf["params"]["stemax"] - 0.75) < 1e-12, None, None, None))
+    r11.append(("a mixture keeps all four elements with their weights",
+                mf["material"]["isMixture"] and mf["material"]["nElements"] == 4
+                and abs(sum(e["W"] for e in mf["material"]["elements"]) - 1.0) < 1e-6,
+                None, None, None))
+    r11.append(("a plain material is not reported as a mixture, and keeps Z/A/rho",
+                not side11["media"]["Fe"]["material"]["isMixture"]
+                and side11["media"]["Fe"]["material"]["Z"] == 26.0
+                and abs(side11["media"]["Fe"]["material"]["density"] - 7.87) < 1e-9,
+                None, None, None))
+    r11.append(("radiation and interaction length are carried, not recomputed",
+                mf["material"]["radLen"] > 0.0 and mf["material"]["intLen"] > 0.0,
+                None, None, None))
+    # --hollow-volume: the hall is structure the CAD run already has.
+    o11.hollow_volumes = ["top"]
+    conv11h = TGeoToStep(o11)
+    conv11h.build(top11)
+    side11h = conv11h.media_sidecar("in-memory")
+    r11.append(("a hollow volume emits no body of its own",
+                "top__body" not in side11h["parts"], None, None, None))
+    r11.append(("its daughters are still emitted, with their media",
+                side11h["parts"].get("a") == "Air_NF"
+                and side11h["parts"].get("b") == "Fe", None, None, None))
+    r11.append(("hollowing is opt-in: the same build without it keeps the body "
+                "(negative control)",
+                side11["parts"].get("top__body") == "Air_F", None, None, None))
+    total += len(r11)
+    failures += _print_suite("the media/material sidecar", r11)
+
     print(f"\n{total} checks, {failures} failures")
     sys.stdout.flush()
     sys.stderr.flush()
@@ -2640,6 +2835,17 @@ def main(argv=None):
     ap.add_argument("input", nargs="?", help="ROOT geometry file")
     ap.add_argument("output", nargs="?", help="output .step file")
     ap.add_argument("--report", default=None)
+    ap.add_argument("--hollow-volume", dest="hollow_volumes", action="append",
+                    default=[], metavar="NAME",
+                    help="emit this volume as a pure assembly: its daughters at their "
+                         "own transforms, but no body of its own. Repeatable. Meant for "
+                         "the experiment hall (cave, barrel, caveRB24), which o2-sim "
+                         "builds natively whatever module list is asked for.")
+    ap.add_argument("--media-json", default=None,
+                    help="write the media/material sidecar here (default: "
+                         "<output>_media.json). The reverse converter reads it "
+                         "with its own --media-json and rebuilds the media "
+                         "verbatim instead of using a placeholder.")
     ap.add_argument("--top", default=None)
     ap.add_argument("--max-depth", type=int, default=None)
     ap.add_argument("--include-name", default=None)
@@ -2685,6 +2891,11 @@ def main(argv=None):
     with open(rpath, "w") as f:
         json.dump(rep, f, indent=1)
 
+    media = conv.media_sidecar(opts.input)
+    mpath = opts.media_json or (os.path.splitext(opts.output)[0] + "_media.json")
+    with open(mpath, "w") as f:
+        json.dump(media, f, indent=1)
+
     print(f"{rep['definitions']} solids, {rep['assemblies']} volumes with daughters, "
           f"{rep['pureAssemblies']} pure assemblies, {rep['components']} components, "
           f"{rep['declined']} volumes declined")
@@ -2721,6 +2932,7 @@ def main(argv=None):
     size = (f"{os.path.getsize(opts.output) / 1e6:.2f} MB"
             if opts.write_step else "no STEP written (--no-step)")
     print(f"report: {rpath}   ({rep['wallSeconds']} s, {size})")
+    print(f"media:  {mpath}   ({media['nMedia']} media over {media['nParts']} parts)")
     return 0
 
 

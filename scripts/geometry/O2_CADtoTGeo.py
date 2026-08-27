@@ -3635,6 +3635,69 @@ static void LoadSurfaces(const std::string& file, o2::base::O2BVHSurfaceSolid* s
     return prelude
 
 
+def emit_media_sidecar_cpp(sidecar: dict) -> Tuple[str, Dict[str, str]]:
+    """Emit the media of a TGeo -> STEP writer sidecar verbatim.
+
+    The BOM/NIST route below matches a material *name* against a database, which
+    is the right thing for genuinely CAD-authored geometry and the wrong thing
+    for a closure test: its matching deviations would show up in the transport
+    as if they were geometry differences.  When the geometry came out of TGeo in
+    the first place the media are known exactly, so they are rebuilt field for
+    field -- Z, A, density, radiation and interaction length, every element of a
+    mixture with its weight, and all eight Geant medium parameters including
+    ifield, which is what distinguishes a field-free twin from its in-field
+    original.
+
+    Returns the C++ block and a map from medium name to its C++ variable.
+    """
+    cpp: List[str] = []
+    cpp.append("  // Media rebuilt verbatim from the TGeo -> STEP media sidecar.")
+    cpp.append("  // Default stays as the fallback for a part the sidecar does not name.")
+    cpp.append("  TGeoMaterial *mat_Default = new TGeoMaterial(\"Default\", 0., 0., 0.);")
+    cpp.append("  TGeoMedium   *med_Default = new TGeoMedium(\"Default\", 1, mat_Default);")
+    cpp.append("")
+
+    medium_var: Dict[str, str] = {"Default": "med_Default"}
+    order = list(sidecar.get("mediumParamOrder") or
+                 ("isvol", "ifield", "fieldm", "tmaxfd",
+                  "stemax", "deemax", "epsil", "stmin"))
+
+    for name in sorted(sidecar.get("media", {})):
+        rec = sidecar["media"][name]
+        mat = rec["material"]
+        safe = sanitize_cpp_name(name)
+        mvar, medvar = f"mat_{safe}", f"med_{safe}"
+
+        if mat.get("isMixture"):
+            els = mat.get("elements", [])
+            cpp.append(f"  TGeoMixture *{mvar} = new TGeoMixture(\"{mat['name']}\", "
+                       f"{len(els)}, {mat['density']:.17g});")
+            for el in els:
+                cpp.append(f"  {mvar}->AddElement({el['A']:.17g}, {el['Z']:.17g}, "
+                           f"{el['W']:.17g});")
+        else:
+            cpp.append(f"  TGeoMaterial *{mvar} = new TGeoMaterial(\"{mat['name']}\", "
+                       f"{mat['A']:.17g}, {mat['Z']:.17g}, {mat['density']:.17g});")
+
+        # No SetRadLen here, deliberately.  ROOT derives the radiation and
+        # interaction length from the recipe -- (A, Z, rho) for a material, the
+        # element weights for a mixture -- and TGeoMaterial::SetRadLen recomputes
+        # from that recipe rather than storing what it is handed, so calling it
+        # with the source's own values makes them WRONG (measured on MAG_WATER:
+        # 35.7585 cm from the recipe, 36.6601 cm after SetRadLen(35.7585)).  The
+        # recipe is carried exactly, so the derived lengths come back with it;
+        # check_media.py measures how exactly rather than assuming.
+        cpp.append(f"  TGeoMedium *{medvar} = new TGeoMedium(\"{name}\", {int(rec['id'])}, "
+                   f"{mvar});")
+        for i, key in enumerate(order):
+            cpp.append(f"  {medvar}->SetParam({i}, {float(rec['params'][key]):.17g});"
+                       f"   // {key}")
+        cpp.append("")
+        medium_var[name] = medvar
+
+    return "\n".join(cpp), medium_var
+
+
 def emit_materials_cpp(
     used_materials: Dict[str, ResolvedMaterial],
     # key: BOM material string as used in CSV after normalization
@@ -4521,6 +4584,7 @@ def emit_root_macro(
     clip_deduplicate: str = "intact",
     name_filter: Optional[NameFilter] = None,
     materials_csv: Optional[str] = None,
+    media_json: Optional[str] = None,
     bom_mass_unit: str = "kg",
     g4_nist_json: Optional[str] = None,
     mat_cfg: Optional[MatMatchConfig] = None,
@@ -4737,6 +4801,14 @@ def emit_root_macro(
     else:
         print("No --materials-csv provided: emitting Default medium for all logical volumes")
 
+    # --- media sidecar: the exact media of the geometry this STEP came from ---
+    media_sidecar: Optional[dict] = None
+    if media_json:
+        with open(media_json) as _fh:
+            media_sidecar = json.load(_fh)
+        print(f"Loaded media sidecar: {media_sidecar.get('nMedia')} media over "
+              f"{media_sidecar.get('nParts')} parts from {media_json}")
+
     # --- facet files ---
     facet_files = {}  # def_lid -> absolute path string
     for lid, tris in logical_volumes.items():
@@ -4785,7 +4857,10 @@ def emit_root_macro(
 
         used_materials[mat_name] = rm
 
-    materials_cpp, medium_var_map = emit_materials_cpp(used_materials)
+    if media_sidecar is not None:
+        materials_cpp, medium_var_map = emit_media_sidecar_cpp(media_sidecar)
+    else:
+        materials_cpp, medium_var_map = emit_materials_cpp(used_materials)
 
     # --- emit C++ macro ---
     surface_files = surface_files or {}
@@ -4800,6 +4875,8 @@ def emit_root_macro(
     cpp.append(emit_cpp_prelude(exact_surfaces=bool(surface_files), csg_shapes=bool(csg_files),
                                 flat_csg_shapes=bool(flat_files)))
 
+    _media_unresolved: List[Tuple[str, str]] = []   # part named a medium the sidecar lacks
+    _media_unnamed: List[str] = []                  # part the sidecar does not name at all
     cpp.append("TGeoVolume* build(bool check=true) {")
     cpp.append('  if (!gGeoManager) { throw std::runtime_error("gGeoManager is null. Call build_and_export() or create a TGeoManager first."); }')
     cpp.append(materials_cpp)
@@ -4809,7 +4886,18 @@ def emit_root_macro(
 
         # choose medium for this volume
         med = "med_Default"
-        if lid in lid_to_bom:
+        if media_sidecar is not None:
+            # The sidecar keys on the emitted STEP part name, which is exactly the
+            # display name the reader recovered for this definition.
+            part = def_names.get(lid, "")
+            medname = media_sidecar.get("parts", {}).get(part)
+            if medname:
+                med = medium_var_map.get(medname, "med_Default")
+                if med == "med_Default":
+                    _media_unresolved.append((part, medname))
+            else:
+                _media_unnamed.append(part)
+        elif lid in lid_to_bom:
             mat_name = normalize_material_name(lid_to_bom[lid].material)
             med = medium_var_map.get(mat_name, "med_Default")
 
@@ -4827,6 +4915,17 @@ def emit_root_macro(
             cpp.append(emit_surface_solid_cpp(lid, def_names.get(lid, ""), sidecar, med))
         else:
             cpp.append(emit_tessellated_cpp(lid, def_names.get(lid, ""), facet_files[lid], ntriangles, med))
+
+    if media_sidecar is not None:
+        nvol = len(logical_volumes)
+        nresolved = nvol - len(_media_unnamed) - len(_media_unresolved)
+        print(f"Media from sidecar: {nresolved}/{nvol} volumes carry their source medium")
+        if _media_unnamed:
+            print(f"  [WARN] {len(_media_unnamed)} volume(s) are not named by the sidecar "
+                  f"and fall back to Default (transparent): {_media_unnamed[:5]}")
+        if _media_unresolved:
+            print(f"  [WARN] {len(_media_unresolved)} volume(s) name a medium the sidecar "
+                  f"does not define: {_media_unresolved[:5]}")
 
     for lid in sorted(assemblies):
         cpp.append(emit_assembly_cpp(lid, def_names.get(lid, "")))
@@ -4948,6 +5047,11 @@ def main():
 
     # NEW: BOM / material support
     ap.add_argument("--materials-csv", default=None, help="BOM CSV file providing material + mass per part (optional)")
+    ap.add_argument("--media-json", default=None,
+                    help="media/material sidecar written by O2_TGeoToCAD.py --media-json. "
+                         "Rebuilds the source geometry's media verbatim instead of "
+                         "matching names against the NIST database; takes precedence "
+                         "over --materials-csv for the medium of every part it names.")
     ap.add_argument("--bom-mass-unit", default="kg", choices=["kg", "g"], help="Unit of the BOM mass column (default: kg)")
     ap.add_argument("--g4-nist-json", default=None, help="Path to Geant4 NIST DB JSON dump (from nist_export_all). Enables TGeoMixture emission + RadLen/IntLen.")
 
@@ -5024,6 +5128,7 @@ def main():
         clip_deduplicate=args.clip_deduplicate,
         name_filter=name_filter,
         materials_csv=args.materials_csv,
+        media_json=args.media_json,
         bom_mass_unit=args.bom_mass_unit,
         g4_nist_json=args.g4_nist_json,
         mat_cfg=mat_cfg,

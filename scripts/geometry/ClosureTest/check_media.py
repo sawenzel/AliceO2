@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+"""Check that a round-tripped geometry carries the media of its source.
+
+The shapes of a TGeo -> STEP -> TGeo round trip are scored by
+checkKnownSource.py.  The *media* are what decides whether a particle loses the
+same energy in them, and they travel by a different route -- the sidecar written
+by O2_TGeoToCAD.py --media-json and rebuilt by O2_CADtoTGeo.py --media-json.
+This is the acceptance test for that route.
+
+For every volume of the converted geometry it finds the source volume of the
+same name (dropping the writer's `__body` and `__mirrored` suffixes) and
+compares, exactly: the medium name, all eight Geant medium parameters, and the
+material's Z, A, density, radiation length, interaction length and -- for a
+mixture -- every element's Z, A and weight.
+
+A volume left on the `Default` placeholder is reported separately from a volume
+that disagrees, because the two mean different things: Default is transparent
+and silently removes material, a disagreement is a wrong medium.
+
+Usage:
+  check_media.py --original o2sim_geometry.root --macro conv/geom.C [--json out.json]
+"""
+
+import argparse
+import json
+import os
+import sys
+
+PARAMS = ("isvol", "ifield", "fieldm", "tmaxfd", "stemax", "deemax", "epsil", "stmin")
+
+
+def base_name(name):
+    """The source volume name behind a writer-emitted part name."""
+    for suffix in ("__mirrored", "__body"):
+        while name.endswith(suffix):
+            name = name[: -len(suffix)]
+    # `X#2` is the writer's disambiguation of one TGeo name over two definitions
+    return name.split("#", 1)[0]
+
+
+def describe(vol):
+    # A TGeoVolumeAssembly holds no material -- ROOT gives it a placeholder medium
+    # called "dummy" -- and the mother's real material lives in the separate
+    # `__body` leaf the writer emits beside it.  Comparing an assembly would score
+    # that placeholder against the source volume's real medium and report every
+    # mother in the geometry as a defect.
+    if vol.IsAssembly():
+        return None
+    med = vol.GetMedium()
+    if med is None:
+        return None
+    mat = med.GetMaterial()
+    d = {
+        "medium": str(med.GetName()),
+        "params": [float(med.GetParam(i)) for i in range(8)],
+        "material": str(mat.GetName()),
+        "Z": float(mat.GetZ()), "A": float(mat.GetA()),
+        "density": float(mat.GetDensity()),
+        "radLen": float(mat.GetRadLen()), "intLen": float(mat.GetIntLen()),
+        "isMixture": bool(mat.IsMixture()),
+    }
+    if mat.IsMixture():
+        n = int(mat.GetNelements())
+        zs, as_, ws = mat.GetZmixt(), mat.GetAmixt(), mat.GetWmixt()
+        d["elements"] = [[float(zs[i]), float(as_[i]), float(ws[i])] for i in range(n)]
+    return d
+
+
+def diff(a, b, rtol):
+    """Field names that disagree between two describe() dicts."""
+    bad = []
+    if a["medium"] != b["medium"]:
+        bad.append("mediumName")
+    for i, k in enumerate(PARAMS):
+        if a["params"][i] != b["params"][i]:
+            bad.append(k)
+    if a["material"] != b["material"]:
+        bad.append("materialName")
+    for k in ("Z", "A", "density", "radLen", "intLen"):
+        x, y = a[k], b[k]
+        if x != y and (abs(x - y) > rtol * max(abs(x), abs(y), 1e-300)):
+            bad.append(k)
+    if a["isMixture"] != b["isMixture"]:
+        bad.append("isMixture")
+    elif a["isMixture"]:
+        if len(a["elements"]) != len(b["elements"]):
+            bad.append("nElements")
+        else:
+            for (za, aa, wa), (zb, ab, wb) in zip(a["elements"], b["elements"]):
+                if za != zb or aa != ab or wa != wb:
+                    bad.append("elements")
+                    break
+    return bad
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--original", required=True, help="the source o2sim_geometry.root")
+    p.add_argument("--macro", required=True, help="the converted geom.C")
+    p.add_argument("--rtol", type=float, default=0.0,
+                   help="relative tolerance on the scalar material fields "
+                        "(default 0: require exact equality)")
+    p.add_argument("--json", help="write the full result here")
+    args = p.parse_args()
+
+    import ROOT
+    ROOT.gROOT.SetBatch(True)
+
+    # The source, read into its own manager and then set aside; the macro builds
+    # into a second one, and TGeo's globals do not tolerate the two overlapping.
+    src_mgr = ROOT.TGeoManager.Import(args.original)
+    source = {}
+    for vol in src_mgr.GetListOfVolumes():
+        d = describe(vol)
+        if d is not None:
+            source[str(vol.GetName())] = d
+    ROOT.gGeoManager = ROOT.nullptr
+
+    # Interpreted, not ACLiC-compiled: the macro carries only the includes it
+    # needs under cling, and ExternalModule JITs it the same way.
+    ROOT.gROOT.ProcessLine(f'.L {os.path.abspath(args.macro)}')
+    ROOT.gGeoManager = ROOT.TGeoManager("converted", "converted")
+    top = ROOT.build(False)
+    ROOT.gGeoManager.SetTopVolume(top)
+    ROOT.gGeoManager.CloseGeometry()
+
+    res = {"nConverted": 0, "matched": 0, "default": [], "missingInSource": [],
+           "disagreements": [], "fieldCounts": {}, "assembliesSkipped": 0,
+           "maxRelDevRadLen": 0.0, "maxRelDevIntLen": 0.0}
+    for vol in ROOT.gGeoManager.GetListOfVolumes():
+        name = str(vol.GetName())
+        if vol.IsAssembly():
+            res["assembliesSkipped"] += 1
+            continue
+        d = describe(vol)
+        if d is None:
+            continue
+        res["nConverted"] += 1
+        if d["medium"] == "Default":
+            res["default"].append(name)
+            continue
+        src = source.get(base_name(name))
+        if src is None:
+            res["missingInSource"].append(name)
+            continue
+        for key, slot in (("radLen", "maxRelDevRadLen"), ("intLen", "maxRelDevIntLen")):
+            x, y = src[key], d[key]
+            if max(abs(x), abs(y)) > 0:
+                res[slot] = max(res[slot], abs(x - y) / max(abs(x), abs(y)))
+        bad = diff(src, d, args.rtol)
+        if bad:
+            res["disagreements"].append({"volume": name, "fields": bad,
+                                         "source": src, "converted": d})
+            for f in bad:
+                res["fieldCounts"][f] = res["fieldCounts"].get(f, 0) + 1
+        else:
+            res["matched"] += 1
+
+    n = res["nConverted"]
+    print(f"converted volumes with a medium: {n}")
+    print(f"  media identical to the source: {res['matched']}")
+    print(f"  left on the Default placeholder (transparent): {len(res['default'])}"
+          + (f"  e.g. {res['default'][:5]}" if res["default"] else ""))
+    print(f"  no source volume of that name: {len(res['missingInSource'])}"
+          + (f"  e.g. {res['missingInSource'][:5]}" if res["missingInSource"] else ""))
+    print(f"  assemblies skipped (they hold no material): {res['assembliesSkipped']}")
+    print(f"  max relative deviation: radLen {res['maxRelDevRadLen']:.3e}, "
+          f"intLen {res['maxRelDevIntLen']:.3e}  (derived by ROOT from the recipe, "
+          f"not carried)")
+    print(f"  disagreeing with the source: {len(res['disagreements'])}"
+          + (f"  fields {res['fieldCounts']}" if res["fieldCounts"] else ""))
+    for d in res["disagreements"][:5]:
+        print(f"    {d['volume']}: {d['fields']}")
+
+    if args.json:
+        with open(args.json, "w") as fh:
+            json.dump(res, fh, indent=2)
+        print(f"wrote {args.json}")
+
+    ok = (n > 0 and res["matched"] == n)
+    print("VERDICT:", "every volume carries its source medium" if ok else "INCOMPLETE")
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
