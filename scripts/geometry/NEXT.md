@@ -118,12 +118,20 @@ Two separate confounders are now instrumented rather than silent: the two sides 
 the same way (1.2–2.7× multiplicity per layer), and a track index is not a shared name between two
 runs.
 
-**The tessellated-only variant does not close, and not because of chordal error.**
-`TGeoTessellated` has no notion of an internal cavity: a closed two-shell body reads as filled.
-Shown on the converted beam pipe (both shells present, `IsClosedBody()` true, `Contains(0,0,0)`
-true) and reproduced on a hand-built 24-facet cube with a cubic cavity. Every hollow volume becomes
-solid, so that world crosses 81.3 volumes per ray instead of 246.5 while carrying 3.3× the
-radiation length. **This is the first item on the open list below.**
+**The tessellated-only variant now closes too, after a defect worth knowing about.**
+ROOT's `TGeoTessellated` **does not navigate**: it derives from `TGeoBBox` and overrides none of
+`Contains`, `DistFromInside`, `DistFromOutside` or `Safety`, so every volume built on one is
+navigated as its filled **bounding box** — its class doc says so, and real navigation needs a
+VecGeom build and `TGeoVGShape`. Minimal reproducer: a tetrahedron, correct winding,
+`IsClosedBody()` true, `Contains(0.9,0.9,0.9)` true. This reached Geant4, not just the instruments,
+since O2 transports with `navmode = kTGeo`. The emitted meshes were never at fault. No gate caught
+it because the oracle gate, ray service and harness all score `o2::base::O2Tessellated` while
+`geom.C` emitted ROOT's class — the instrument and the product were different shapes.
+`O2_CADtoTGeo.py --mesh-solid {o2,tgeo}` now defaults to `o2`. Result: the tessellated-only world
+goes from 91.78 to **27.903700** mean x/X₀ (baseline 27.904215), median per-ray 1.9e-05, and it
+**simulates end to end** — 1714 ITS hits, 24 695 steps/event, zero robustness incidents. It also
+moved the cascade, whose one mesh-tier part (`ARB8`, a twisted `TGeoArb8`) had been navigated as a
+box 32.7× too large.
 
 Four defects real transport exposed that no per-solid gate could — mixtures flattened in
 `remapCADMedia`, one material registered per medium, the JIT namespace bug (old item 4), and the
@@ -180,12 +188,12 @@ distance, and returns `0.` for 78–100 % of interior points.
 
 ## Open, in the order I would take them
 
-1. **`TGeoTessellated` has no internal cavities** (`Stream_AL_ClosureTest.md` §5). Decide whether
-   to report it upstream; meanwhile the converter should **refuse** to emit a tessellated fallback
-   for a solid with an inner shell rather than emitting one that is silently wrong. This bounds the
-   tessellated fallback for every TGeo-derived geometry, and the standing bargain of
-   `Stream_R`/`Stream_U` — "absent an exact route the honest answer is tessellated" — has to be
-   re-read in that light.
+1. **Report `TGeoTessellated`'s missing navigation to ROOT** — a feature request, not a bug: ROOT
+   documents the limitation and simply does not shout when a `TGeoTessellated` goes into a
+   `TGeoVolume` without VecGeom, and that silence cost a factor 32.7 on a real part. ROOT master
+   already carries an implementation similar to `O2Tessellated`. Fix `FlipFacets()` in
+   `O2Tessellated` too — it iterates `for (auto facet : fFacets)` by value and is a no-op, copied
+   verbatim from ROOT.
 2. **The `one_way` sampling box in `checkKnownSource.py`** — a one-way containment comparison
    samples the *source's* bounding box, so a body that is parts-per-million of a multi-body label
    is never hit and the part reports as a failure it cannot be scored for. Nine MFT parts, proven
