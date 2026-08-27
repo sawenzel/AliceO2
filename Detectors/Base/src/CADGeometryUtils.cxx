@@ -107,7 +107,12 @@ void remapCADMedia(TGeoVolume* top, const char* modulename)
 {
   std::unordered_map<TGeoMedium*, TGeoMedium*> medium_ptr_mapping;
   std::unordered_set<TGeoVolume*> volumes_already_treated;
+  // One material may back several media -- ALICE builds a field-free `_NF` twin of a
+  // medium that shares its material -- and MaterialManager asserts that a material name
+  // is registered once. So materials are counted and deduplicated separately from media.
+  std::unordered_map<std::string, int> material_index;
   int counter = 1;
+  int matcounter = 1;
 
   // The transformer function
   auto transform_media = [&](TGeoVolume* vol_) {
@@ -140,24 +145,34 @@ void remapCADMedia(TGeoVolume* top, const char* modulename)
       auto curr_mat = medium->GetMaterial();
       auto& matmgr = o2::base::MaterialManager::Instance();
 
-      // A TGeoMixture must go through Mixture(), not Material(): flattening a
-      // compound to its effective A and Z keeps the radiation length but loses
-      // the element composition Geant needs for ionisation, bremsstrahlung and
-      // every hadronic cross section. Most media of a real detector are mixtures
-      // -- 55 of the 90 in PIPE, ITS, TPC and MAG -- so the flattened path is the
-      // normal case, not an edge case.
-      if (auto* mix = dynamic_cast<TGeoMixture*>(curr_mat)) {
-        const Int_t nel = mix->GetNelements();
-        std::vector<Float_t> a(nel), z(nel), w(nel);
-        for (Int_t i = 0; i < nel; ++i) {
-          a[i] = mix->GetAmixt()[i];
-          z[i] = mix->GetZmixt()[i];
-          w[i] = mix->GetWmixt()[i];
-        }
-        matmgr.Mixture(modulename, counter, curr_mat->GetName(), a.data(), z.data(),
-                       curr_mat->GetDensity(), nel, w.data());
+      // Register the material once, however many media wear it.
+      const std::string matname(curr_mat->GetName());
+      auto itmat = material_index.find(matname);
+      int imat;
+      if (itmat != material_index.end()) {
+        imat = itmat->second;
       } else {
-        matmgr.Material(modulename, counter, curr_mat->GetName(), curr_mat->GetA(), curr_mat->GetZ(), curr_mat->GetDensity(), curr_mat->GetRadLen(), curr_mat->GetIntLen());
+        imat = matcounter++;
+        // A TGeoMixture must go through Mixture(), not Material(): flattening a
+        // compound to its effective A and Z keeps the radiation length but loses
+        // the element composition Geant needs for ionisation, bremsstrahlung and
+        // every hadronic cross section. Most media of a real detector are mixtures
+        // -- 55 of the 90 in PIPE, ITS, TPC and MAG -- so the flattened path is the
+        // normal case, not an edge case.
+        if (auto* mix = dynamic_cast<TGeoMixture*>(curr_mat)) {
+          const Int_t nel = mix->GetNelements();
+          std::vector<Float_t> a(nel), z(nel), w(nel);
+          for (Int_t i = 0; i < nel; ++i) {
+            a[i] = mix->GetAmixt()[i];
+            z[i] = mix->GetZmixt()[i];
+            w[i] = mix->GetWmixt()[i];
+          }
+          matmgr.Mixture(modulename, imat, curr_mat->GetName(), a.data(), z.data(),
+                         curr_mat->GetDensity(), nel, w.data());
+        } else {
+          matmgr.Material(modulename, imat, curr_mat->GetName(), curr_mat->GetA(), curr_mat->GetZ(), curr_mat->GetDensity(), curr_mat->GetRadLen(), curr_mat->GetIntLen());
+        }
+        material_index[matname] = imat;
       }
       // TGeo medium params are stored in a flat array with the following convention
       // fParams[0] = isvol;
@@ -177,7 +192,7 @@ void remapCADMedia(TGeoVolume* top, const char* modulename)
       const auto epsil = medium->GetParam(6);
       const auto stmin = medium->GetParam(7);
 
-      matmgr.Medium(modulename, counter, medium->GetName(), counter, isvol, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
+      matmgr.Medium(modulename, counter, medium->GetName(), imat, isvol, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
       // there will be new Material and Medium objects; fetch them
       auto new_med = matmgr.getTGeoMedium(modulename, counter);
