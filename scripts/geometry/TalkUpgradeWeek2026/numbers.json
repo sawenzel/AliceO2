@@ -1,0 +1,268 @@
+{
+  "_note": "every value below is recomputed from that file",
+  "_source": "/home/swenzel/roundtrip_report/alice_roundtrip.json",
+  "alice3IrisConversion": {
+    "beamPipeParts": [
+      "ST1782525_01 BEAM PIPE C SIDE-DOUBLE VACUUM",
+      "ST2487736_01 EXTERNAL BP SECONDARY VACUUM",
+      "ST2487721_01 CENTRAL PIPE-IRIS-2ND VACUUM"
+    ],
+    "bomEntries": 21,
+    "date": "2026-08-28",
+    "declinesByReason": {
+      "boundaryGap": 1,
+      "freeFormFaces": 13,
+      "partialTorus": 15,
+      "planarFaceNotCapOrWedge": 1,
+      "sphereOutOfScope": 14,
+      "tooManyAxisClusters": 12
+    },
+    "defaultVolumeName": "SOLID (an unnamed STEP body, no BOM row exists)",
+    "distinctMediaEmitted": 9,
+    "exactNameMatches": 20,
+    "facetBytesTotalMB": 49,
+    "gateBlocker": "makeTestPartDB.py hard-codes --mesh with no --mesh-prec passthrough, so the gate would mesh IRIS at the default 0.1 (~480 MB of facets, extrapolated and cross-checked against IRIS/TGeoOutput5_high)",
+    "gateRun": false,
+    "largestFacetFileMB": 30,
+    "leafSolids": 62,
+    "leafVolumesOnDefault": 1,
+    "leafVolumesWithRealMedium": 61,
+    "mediaFromOneBomRowBySubstring": 28,
+    "meshPrec": 0.25,
+    "model": "scripts/geometry/IRIS/ST2487728_01-03032026.stp",
+    "modelContainsBeamPipe": true,
+    "source": "artefacts/alice3/csg_report.json",
+    "stepProducts": 26,
+    "tessellationExact": "0/62 (0 %)",
+    "tiers": {
+      "csg": 6,
+      "exactSurfaces": 26,
+      "tessellated": 30
+    },
+    "unresolvedMaterials": 0
+  },
+  "bySourceClass": {
+    "TGeoArb8": {
+      "csg": 9
+    },
+    "TGeoBBox": {
+      "csg": 18069
+    },
+    "TGeoCompositeShape": {
+      "csg": 2969,
+      "flatcsg": 18,
+      "mesh": 15,
+      "surface": 123
+    },
+    "TGeoCone": {
+      "csg": 41,
+      "surface": 1
+    },
+    "TGeoCtub": {
+      "csg": 8
+    },
+    "TGeoEltu": {
+      "csg": 26
+    },
+    "TGeoPcon": {
+      "csg": 123
+    },
+    "TGeoPgon": {
+      "csg": 31,
+      "flatcsg": 2
+    },
+    "TGeoTorus": {
+      "csg": 302,
+      "surface": 6
+    },
+    "TGeoTrap": {
+      "csg": 126
+    },
+    "TGeoTrd1": {
+      "csg": 133
+    },
+    "TGeoTube": {
+      "csg": 754
+    },
+    "TGeoTubeSeg": {
+      "csg": 100
+    },
+    "TGeoXtru": {
+      "csg": 45
+    }
+  },
+  "compositeSourced": {
+    "csg": 2969,
+    "distinctSourceVolumes": 1963,
+    "flatcsg": 18,
+    "mesh": 15,
+    "parts": 3125,
+    "recognisedPercent": 95.58,
+    "surface": 123
+  },
+  "converterDeclines": {
+    "a partial torus is not a whole torus": 33,
+    "a planar face is neither a cap nor a wedge of any axis cluster": 10,
+    "a sphere with extra faces is out of scope": 1,
+    "free-form faces (outside plane/cylinder/cone/sphere/torus)": 1,
+    "symmetric difference exceeds the acceptance band": 6,
+    "the emitted shape disagrees with its own loop twin": 28,
+    "too many axis clusters for the cell matcher": 57,
+    "too many planar faces for the cell matcher": 2
+  },
+  "corpus": {
+    "csgPercent": 99.37,
+    "exactSurfaces": 130,
+    "flatCSG": 20,
+    "knownSourceFailed": 9,
+    "knownSourceScored": 22756,
+    "leafSolids": 22901,
+    "modules": 17,
+    "nativeCSG": 22736,
+    "tessellated": 15,
+    "writerDeclinedVolumes": 31
+  },
+  "demonstrator": {
+    "date": "2026-08-28",
+    "degenerateFacetsDropped": 117,
+    "detID": "TRK",
+    "events": 3,
+    "fieldm": 15,
+    "fieldmSeedInMacro": 10,
+    "generator": "boxgen pi+ 1-2 GeV, 20/event, seed 42",
+    "hitsPerEvent": [
+      59,
+      60,
+      59
+    ],
+    "ifield": 2,
+    "illegalOverlaps": 18,
+    "irisHitsTotal": 178,
+    "mediaAtIfieldZero": 0,
+    "mediaWithFieldMode": 9,
+    "proof": "fieldm=15 differs from the compiled seed 10, so the live-field query really ran",
+    "sensitiveStepsPerEvent": [
+      118,
+      124,
+      118
+    ],
+    "sensitiveVolume": "ST2513437_01",
+    "source": "artefacts/demo/sim.log"
+  },
+  "demonstratorTwoDetector": {
+    "date": "2026-08-28",
+    "events": 3,
+    "externalMediaAtIfieldZero": 0,
+    "externalMediaInField": 10,
+    "generator": "boxgen pi+ 2-5 GeV, 20/event, seed 42",
+    "iris": {
+      "detID": "TRK",
+      "hitRadiusCm": [
+        0.5,
+        2.52
+      ],
+      "hits": 177,
+      "perEvent": [
+        59,
+        58,
+        60
+      ]
+    },
+    "otof": {
+      "check": "hit radius 91.98-92.50 cm matches the model name R92cm, and radius was not an input to the transform",
+      "detID": "TF3",
+      "hitRadiusCm": [
+        91.98,
+        92.5
+      ],
+      "hitZCm": [
+        -101.62,
+        103.36
+      ],
+      "hits": 70,
+      "perEvent": [
+        22,
+        24,
+        24
+      ],
+      "placement": {
+        "rotation_deg": [
+          0,
+          90,
+          0
+        ],
+        "translation": [
+          0,
+          -55.33,
+          167.46
+        ]
+      }
+    },
+    "source": "artefacts/demo/sim_two.log"
+  },
+  "irisGate": {
+    "date": "2026-08-28",
+    "note": "identical verdicts at both precisions; 0.25 costs 53 MB and ~15 min, 0.10 costs 472 MB and ~75 min",
+    "runs": [
+      {
+        "capacityOnlyFailures": [
+          "ST1A38495_01_0_1_1_8",
+          "ST2487455_01_0_1_1_7_b1",
+          "ST2487462_01_0_1_1_21"
+        ],
+        "csgPass": "5/5",
+        "meshPrec": "0.25",
+        "partsScored": 31,
+        "source": "artefacts/alice3/gate_prec0.25.json",
+        "surfacePass": "8/26"
+      },
+      {
+        "capacityOnlyFailures": [
+          "ST1A38495_01_0_1_1_8",
+          "ST2487455_01_0_1_1_7_b1",
+          "ST2487462_01_0_1_1_21"
+        ],
+        "csgPass": "5/5",
+        "meshPrec": "0.10",
+        "partsScored": 31,
+        "source": "artefacts/alice3/gate_prec0.10.json",
+        "surfacePass": "8/26"
+      }
+    ],
+    "verdictsChangedWithMeshPrecision": 0
+  },
+  "otofGate": {
+    "date": "2026-08-28",
+    "partsScored": 20,
+    "shapeZeroDisagreementParts": "19/19",
+    "shippedRepresentationPass": 20,
+    "source": "artefacts/otof/gate.json",
+    "surfaceZeroDisagreementParts": "20/20",
+    "tessellationExact": "20/20 (100 %)",
+    "tiers": {
+      "csg": 19,
+      "mesh": 0,
+      "surface": 1
+    }
+  },
+  "otofMaterials": {
+    "bomEntries": 206,
+    "leafVolumesOnDefault": 0,
+    "leafVolumesOnSilicon": 20,
+    "logicalVolumesMatched": 226,
+    "resolvedTo": "G4_Si (rho 2.33 g/cm3, X0 9.3661 cm, Z 14, A 28.0854)",
+    "source": "artefacts/otof/geom.C"
+  },
+  "tessellationExact": {
+    "parts": 19622,
+    "percent": 85.7
+  },
+  "writerDeclines": {
+    "byClass": {
+      "TGeoCompositeShape": 12,
+      "TGeoPara": 13,
+      "TGeoTorus": 6
+    },
+    "total": 31
+  }
+}
