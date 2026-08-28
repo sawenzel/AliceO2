@@ -249,6 +249,113 @@ every validation instrument this branch built applies directly; the parked
 and set aside per Sandro, 2026-08-22.) Acceptance is
 the round trip: TGeo → STEP → converter → gate, scored against the source TGeo itself.
 
+## Raised by Sandro, 2026-08-27
+
+Grew out of a practical question — FreeCAD stalling on `ITS.step`/`TPC.step` while
+CAD Assistant opened them fine — that turned into a design conversation about what
+mother/daughter overlap in the exported STEP actually costs, and what it implies the
+other direction. Recorded close to the discussion, with the measurements made along
+the way.
+
+### (a) Carve out, for visualization only
+
+**Measured and acted on, 2026-08-27 → [`Stream_AM_CarveOut.md`](Stream_AM_CarveOut.md).**
+Carving is now safe to use for the round trip as well, because the writer reports per
+mother whether the carve finished and the converter nests exactly the ones it could not.
+
+> *Could we carve mothers against their daughters when the STEP file is meant to be
+> looked at or handed to CAD tooling, without carrying that into the TGeo round trip?*
+
+`--carve-mothers` already exists in `O2_TGeoToCAD.py` and is covered by the self-test
+suite, but the closure test's own conversion command does not pass it — mothers ship
+uncarved by default. Measured on ITS (2026-08-27): with carving on, `ADVANCED_FACE`
+goes 3332 → 10080 and the file 16 → 42 MB, because a carved body becomes a genuine
+boolean-cut solid instead of a plain TGeo primitive or composite. Solid *definitions*
+stay disciplined regardless — 261 → 298 for 1997 placed components — because the
+writer's definition-cache key already includes a mother's full children plan, not
+just its shape signature, so genuinely-shared mother/daughter configurations keep
+sharing one body and only configurations that really differ (same shape, different
+daughters — the `BiasBusBottom`/`BiasBusBottom#2` pattern already visible in the
+disambiguation log) get distinct carved bodies. That is correct, not wasteful: "A
+minus B and C" and "A minus B" are different material and must not share a solid.
+Two things stay open even with the flag on: four `SpaceFrameVolumeLay3`–`6` mothers
+fail to carve outright ("OCCT result contains no solid" — their daughters fully
+consume the mother, worth a second look on its own), and an assembly daughter has no
+single solid to subtract (`ITSUWrapVol0` is the writer's own named example, in the
+`media_sidecar` comment), so full non-overlap needs `_carve()` extended to flatten and
+fuse an assembly daughter's placed leaves recursively as the cutter — not done today.
+
+**Not the fix for the FreeCAD stall, and diagnosed separately.** `NEXT_ASSEMBLY_
+USAGE_OCCURRENCE` is 1997 for ITS and 3302 for TPC against 193/365 for MAG/PIPE — an
+order of magnitude more assembly instances, which is what a healing-and-tree-building
+importer chokes on. Carving does not touch instance count and roughly triples face
+count, so it would not have helped and might have made the stall worse; importing as
+a Compound in FreeCAD (skipping the per-instance tree build and shape-healing pass)
+is what actually fixed it, with no writer change needed.
+
+### (b) A different navigation strategy for CAD-native geometry — flagged, unmeasured
+
+> *A design built from genuinely disjoint CAD solids no longer needs mother/daughter
+> material precedence at all. Could that change how navigation itself should work —
+> would we already know what's "behind" a surface, rather than having to search for
+> it?*
+
+Checked against the actual `TGeoNavigator` source (`ROOT_git/geom/geom/src/
+TGeoNavigator.cxx`, 2026-08-27) before writing this down, since it is a claim about
+ROOT internals: TGeo is not navigating blind today. `CrossBoundaryAndLocate` uses
+`fNextDaughterIndex`, cached from the distance-to-boundary computation at the current
+level, to step directly into the daughter about to be entered (`CdDown`) without a
+full `SearchNode` relocation, in the common single-level-crossing case. What a
+CAD-native tree changes is narrower than "TGeo currently searches and now won't have
+to": the search it already does becomes unambiguous — a crossing always means
+entering exactly one sibling, never resolving which of several possibly-overlapping
+candidates wins, which is the expensive case the safety/distance machinery exists
+for — and the tree itself can plausibly be shallower, since depth in a hand-built
+TGeo tree today does double duty (grouping *and* precedence) while a CAD tree only
+needs the first. ITS's converted tree runs 10 levels deep; how much of that is
+precedence-only nesting that a CAD design would not have is not measured.
+
+The more radical version — a precomputed face-to-neighbour lookup, O(1), replacing
+the per-step distance comparison among siblings rather than caching it — is not
+something `TGeoNavigator` does (`fNextDaughterIndex` is recomputed every step, not a
+persistent graph), and CAD is the one input positioned to supply it for free: two
+adjacent CAD parts share an explicit topological face by construction, which a
+hand-modelled TGeo geometry has no equivalent bookkeeping for. It sits naturally on
+top of, but is a further step than, item (j)'s `O2BVHAssembly` and the existing
+`BVHSurfaceSolid` work — those make the *search* fast; this would replace the
+*search* with a *lookup*. Unmeasured, and the annotation-not-commitment rule at the
+top of this file applies especially here.
+
+### (c) Carve-*in* — the actual CAD → TGeo direction, not the round trip
+
+**The open question at the end of this section is answered, 2026-08-27 →
+[`Stream_AM_CarveOut.md`](Stream_AM_CarveOut.md).** The converter does *not* invent
+material precedence: genuine CAD input carries no sidecar, so nothing is nested and
+disjoint solids land as assembly peers. What it does cost is navigation — a flatter tree
+is slower in TGeo, not faster, and `O2BVHAssembly` does not recover that because point
+location inside an assembly never goes through the shape.
+
+> *The real goal was CAD → TGeo, so real designs can be Geant-simulated — not the
+> TGeo → STEP → TGeo demonstration. Real CAD input arrives already carved: no
+> overlapping solids to begin with, so there is no material precedence to preserve,
+> and the converter's job going this direction is different in kind from (a).*
+
+For the round trip, carving is optional. A carved mother's own solid now has a
+genuine internal cavity where each daughter sits, and if that pushes the shape past
+CSG recognition it falls back to the tessellated tier — `O2Tessellated`/
+`TGeoTessellated` navigate the facets properly (BVH-based `Contains`/`DistFrom*`/
+`Safety`, landed both in `O2Tessellated` and, by Sandro, on ROOT master), so a
+cavity there is represented correctly, not a correctness risk. Falling back to that
+tier is a performance/representation-tier question, not a material-correctness one.
+That distinction does not matter for genuinely CAD-authored input anyway, because
+there is no uncarved TGeo original to reconstruct — the disjoint solids are the
+ground truth. The open question is the reconstruction side of `O2_CADtoTGeo.py`: does it already
+place genuinely disjoint sibling solids as flat peers, or can CAD assembly nesting
+get turned into artificial TGeo mother/daughter containment that carries no material
+meaning — which would silently reintroduce the precedence machinery, and the
+navigation depth cost with it, that a CAD-native design does not need. Not checked
+yet (2026-08-27); the natural next step before touching (b) is finding out.
+
 ### (j) O2BVHAssembly: a high-performance wrapper for many-part assemblies
 
 > *"Assemblies in TGeo are not good CPU + mem wise for many parts (same as TGeoNavigator). I

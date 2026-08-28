@@ -140,6 +140,29 @@ PIPE attaches at 10 places, ITS at 33. And STEP cannot express a solid containin
 the converter has to put the mother/daughter nesting back or the mother's body swallows everything
 inside it.
 
+## Carving mothers out is DONE (2026-08-27) → [`Stream_AM_CarveOut.md`](Stream_AM_CarveOut.md)
+
+Roadmap (a) and (c) answered on MAG and ITS. **Carving and nesting are not two independent
+switches — each mother needs exactly one of them**, and only the writer knows which. Applied
+blindly, either one is catastrophic: ITS loses **53.7 %** of its material carved *and* nested (a
+daughter in the cavity carved for it is outside its mother and is never entered — minimal
+reproducer in `carve-study/cavity_probe.py`) and **35.0 %** carved and flat (`_carve` cannot
+subtract an assembly daughter, and every ITS mother in that position is an `ITS_AIR$` envelope
+that then swallows what it contains). The structure is never lost — all seven ITS sensor-layer
+placement counts are exact in every variant — only the navigation.
+
+`_carve` now reports whether it subtracted *every* daughter, the sidecar carries `carvedComplete`,
+a partial carve is discarded rather than shipped, and the converter nests exactly the mothers the
+writer could not finish. On ITS that is **47 complete, 7 incomplete** (`ITSUWrapVol0/1/2`,
+`SpaceFrameVolumeLay3–6`), and the result is **−0.137 %** on 2000 rays with the same 198.7
+volumes crossed, at mean leaf depth 10.46 against the nested route's 12.25. Completing the carve
+instead is not an option: `ITSUWrapVol2` would need **211 422** leaf solids fused.
+
+**A flatter tree is slower in TGeo, not faster** — MAG transport 1.55 → 14.89 µs per crossing
+from nested to fully flat on *identical* solids — and **`O2BVHAssembly` does not recover it**,
+because `TGeoNavigator::SearchNode` enumerates an assembly's daughters through the voxel finder and
+not through the shape (Stream AE §6). That makes Stream AE §8's option 2 the decisive one.
+
 **The flat-CSG programme's R1–R5 are DONE** (2026-08-24/25).
 → [`Stream_AK_FlatCSG.md`](Stream_AK_FlatCSG.md) is the record and is where every R5 number lives;
 [`Design_FlatCSGSolid.md`](Design_FlatCSGSolid.md) is the spec of the class;
@@ -163,7 +186,7 @@ deep review with the verification appendix; [`INDEX.md`](INDEX.md) orders every 
 | `csg/emit.py --self-test` | **353** (16 acceptance + 337 recognise/emit, incl. six candidate-digest tables — all six must stay green) |
 | `O2_CADtoTGeo.py --self-test` | **54 checks** = 18+8+10+12+6 — never quote the last line alone |
 | `checkKnownSource.py --self-test` | **17/17** — the third acceptance test: emitted shape vs the source `TGeoShape` |
-| `O2_TGeoToCAD.py --self-test` | **107** |
+| `O2_TGeoToCAD.py --self-test` | **129** — four are the carve-completeness contract (Stream_AM) |
 | `runOracleGate.py --self-test` / xray `--self-test` | 17/17 · clean |
 | Bagger gate | **13/13, CSG 7 / surfaces 6 / tessellated 0, exit 0**, bit-identical through every rung |
 | fixtures gate | **exit 0, 10/10 csg**; the two sliver rays remain only in the side-by-side surface columns |

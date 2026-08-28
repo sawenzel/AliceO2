@@ -1635,7 +1635,9 @@ class TGeoToStep:
         if emit_body:
             body = occ
             if self.opts.carve_mothers:
-                body = self._carve(occ, placed_children, name) or occ
+                carved, complete = self._carve(occ, placed_children, name)
+                body = carved or occ
+                rec["carveComplete"] = bool(complete and carved is not None)
             blab = self.shape_tool.AddShape(body, False)
             TDataStd_Name.Set(blab, f"{base}__body{mir}")
             comp = self.shape_tool.AddComponent(asm, blab, TopLoc_Location(gp_Trsf()))
@@ -1854,17 +1856,42 @@ class TGeoToStep:
     # ------------------------------------------------------------------
 
     def _carve(self, mother, placed, name):
+        """Subtract the placed daughters from the mother, and say whether that was all
+        of them.
+
+        A daughter that is an assembly has no solid of its own -- `placed` carries
+        `None` for it -- so there is nothing to subtract and the mother keeps that
+        daughter's whole volume. Flattening the assembly into its leaves and fusing
+        those instead is not a fix at ALICE scale: ITSUWrapVol2 would need 211 422
+        leaf solids fused. So the honest thing is to carve what can be carved and
+        report the rest, which is what the second return value is for -- the reverse
+        converter nests exactly the mothers this could not finish, and nothing else.
+        """
+        missing = sum(1 for (sh, _t) in placed if sh is None)
         cutters = [_moved(sh, t) for (sh, t) in placed if sh is not None]
         if not cutters:
-            return mother
+            if missing:
+                self.log(f"  [WARN] {name}: {missing} daughter(s) are assemblies and have "
+                         f"no solid to subtract; the mother stays uncarved")
+            return mother, not missing
         try:
             tool = cutters[0]
             for c in cutters[1:]:
                 tool = _boolean(BRepAlgoAPI_Fuse, tool, c, "carve fuse")
-            return _boolean(BRepAlgoAPI_Cut, mother, tool, "carve cut")
+            carved = _boolean(BRepAlgoAPI_Cut, mother, tool, "carve cut")
         except ShapeDeclined as e:
             self.log(f"  [WARN] {name}: carving failed ({e}); keeping the uncarved mother")
-            return mother
+            return mother, False
+        if missing:
+            # A partial carve is the worst of both: the daughters that WERE subtracted
+            # now sit in cavities, and the mother still has to be nested for the ones
+            # that were not -- which puts the subtracted daughters outside their mother,
+            # where the navigator never enters them. Either carve every daughter or none.
+            self.log(f"  [WARN] {name}: {missing} of {len(placed)} daughter(s) are "
+                     f"assemblies and have no solid to subtract; discarding the partial "
+                     f"carve and keeping the mother whole, to be nested instead")
+            return mother, False
+        return carved, True
 
     # ------------------------------------------------------------------
 
@@ -1919,15 +1946,25 @@ class TGeoToStep:
         # an assembly daughter has no solid to subtract, and ITSUWrapVol0's only
         # daughter is one.
         bodies = {}
+        carved_complete = {}
         for r in self.records.values():
             if r.get("bodyComponent") and r.get("emittedName"):
                 bodies[r["bodyComponent"]] = r["emittedName"]
+                if "carveComplete" in r:
+                    carved_complete[r["emittedName"]] = bool(r["carveComplete"])
 
         return {
             "generator": "O2_TGeoToCAD.py",
             "source": os.path.abspath(source),
             "mediumParamOrder": list(MEDIUM_PARAM_NAMES),
             "bodyOfAssembly": bodies,
+            # Present only when --carve-mothers ran. True means every daughter was
+            # subtracted, so the mother's solid and its daughters are disjoint and
+            # the reverse converter must NOT nest them -- nesting a daughter into the
+            # cavity carved for it puts it outside its mother, where the navigator
+            # never finds it. False means carving could not finish and nesting is
+            # still the thing that keeps the material right.
+            "carvedComplete": carved_complete,
             "nBodies": len(bodies),
             "nMedia": len(self.media),
             "nParts": len(parts),
@@ -2876,6 +2913,69 @@ def self_test():
                 "hall" not in side11b["parts"], None, None, None))
     r11.append(("its daughterless sibling still is (negative control)",
                 side11b["parts"].get("keepme") == "Fe2", None, None, None))
+
+    # --carve-mothers: whether the carve finished decides, per mother, which of
+    # carving and nesting the reverse converter must use. Both is wrong -- a daughter
+    # nested into the cavity carved for it is outside its mother and never entered.
+    # These build their own managers, so they come last: gGeoManager follows the most
+    # recently created one and every check above works on top11's.
+    mgr11c = ROOT.TGeoManager("carvetest", "all-solid daughters")
+    fe11c = ROOT.TGeoMaterial("Fe3", 55.85, 26.0, 7.87)
+    med11c = ROOT.TGeoMedium("Fe3", 1, fe11c, ROOT.nullptr)
+    top11c = mgr11c.MakeBox("cw", med11c, 50, 50, 50)
+    mgr11c.SetTopVolume(top11c)
+    solid11c = mgr11c.MakeBox("csolid", med11c, 5, 5, 5)
+    top11c.AddNode(solid11c, 1)
+    mgr11c.CloseGeometry()
+    o11.hollow_volumes = []
+    o11.hollow_tag = None
+    o11.carve_mothers = True
+    conv11c = TGeoToStep(o11)
+    conv11c.build(top11c)
+    side11c = conv11c.media_sidecar("in-memory")
+    r11.append(("--carve-mothers reports a mother whose daughters are all solids as "
+                "completely carved, so the converter leaves it flat",
+                side11c["carvedComplete"].get("cw") is True, None, None, None))
+    r11.append(("carving is opt-in: without it the sidecar makes no claim "
+                "(negative control)",
+                side11["carvedComplete"] == {}, None, None, None))
+
+    # A mother whose daughter is an ASSEMBLY has nothing to subtract for it -- an
+    # assembly carries no solid -- so it must report an incomplete carve, or the
+    # converter would leave it flat and let the mother's body swallow the assembly.
+    mgr11d = ROOT.TGeoManager("carvetest2", "assembly daughter")
+    fe11d = ROOT.TGeoMaterial("Fe4", 55.85, 26.0, 7.87)
+    med11d = ROOT.TGeoMedium("Fe4", 1, fe11d, ROOT.nullptr)
+    top11d = mgr11d.MakeBox("dw", med11d, 50, 50, 50)
+    mgr11d.SetTopVolume(top11d)
+    mother11d = mgr11d.MakeBox("dmother", med11d, 20, 20, 20)
+    asm11d = ROOT.TGeoVolumeAssembly("dasm")
+    inner11d = mgr11d.MakeBox("dinner", med11d, 2, 2, 2)
+    asm11d.AddNode(inner11d, 1)
+    mother11d.AddNode(asm11d, 1)
+    top11d.AddNode(mother11d, 1)
+    mgr11d.CloseGeometry()
+    conv11d = TGeoToStep(o11)
+    conv11d.build(top11d)
+    side11d = conv11d.media_sidecar("in-memory")
+    r11.append(("a mother whose daughter is an assembly reports an INCOMPLETE carve, "
+                "so the converter keeps nesting it",
+                side11d["carvedComplete"].get("dmother") is False, None, None, None))
+
+    # And an incomplete carve must be discarded, not shipped half done: a mother that
+    # still has to be nested for its assembly daughter would otherwise put its already
+    # subtracted solid daughters into cavities, outside the mother, unreachable. This
+    # asks _carve directly, because the verdict is about which shape comes back.
+    _cbox = BRepPrimAPI_MakeBox(10.0, 10.0, 10.0).Shape()
+    _ccut = _moved(BRepPrimAPI_MakeBox(2.0, 2.0, 2.0).Shape(), gp_Trsf())
+    _full = conv11d._carve(_cbox, [(_ccut, gp_Trsf())], "all-solid")
+    _part = conv11d._carve(_cbox, [(_ccut, gp_Trsf()), (None, gp_Trsf())], "mixed")
+    r11.append(("a carve with every daughter subtracted returns a new, smaller body",
+                _full[1] is True and _full[0] is not _cbox, None, None, None))
+    r11.append(("a carve that cannot subtract every daughter returns the mother "
+                "WHOLE, so nesting stays correct",
+                _part[1] is False and _part[0] is _cbox, None, None, None))
+    o11.carve_mothers = False
     total += len(r11)
     failures += _print_suite("the media/material sidecar", r11)
 

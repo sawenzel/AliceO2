@@ -81,6 +81,8 @@ done), **historical** (kept for the reasoning, no longer steering anything).
 | `Stream_AI_WriterFixes.md` | record | the three writer fixes |
 | `Stream_AJ_Recognition.md` | record | the recognition programme: every primitive class the writer emits, recognised |
 | `Stream_AK_FlatCSG.md` | record | `O2FlatCSG`: ten new parts, the measured crossover, the split knobs, the emission policy |
+| `Stream_AL_ClosureTest.md` | record | the closure test: real `o2-sim` physics through the round-tripped PIPE/ITS/TPC/MAG |
+| `Stream_AM_CarveOut.md` | record | carving mothers out: why carve and nest are alternatives per mother, and what a flat tree costs to navigate |
 
 ## The instruments that produce documents
 

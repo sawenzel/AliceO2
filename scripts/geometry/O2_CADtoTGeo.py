@@ -5032,7 +5032,16 @@ def emit_root_macro(
         for _lid, _nm in def_names.items():
             if _nm:
                 name_to_lid.setdefault(_nm, []).append(_lid)
+        # A mother the writer carved completely is disjoint from its daughters and must
+        # NOT be nested: the daughter would sit in the cavity carved for it, which is
+        # outside its mother, and the navigator would never enter it. One of carving
+        # and nesting per mother, never both, never neither.
+        carved_complete = media_sidecar.get("carvedComplete") or {}
+        _skipped_carved = 0
         for bodyname, asmname in (media_sidecar.get("bodyOfAssembly") or {}).items():
+            if carved_complete.get(asmname):
+                _skipped_carved += 1
+                continue
             blids, alids = name_to_lid.get(bodyname, []), name_to_lid.get(asmname, [])
             if len(blids) == 1 and len(alids) == 1:
                 body_of[alids[0]] = blids[0]
@@ -5042,6 +5051,9 @@ def emit_root_macro(
                 print(f"  [WARN] not nesting {asmname}: {len(alids)} definition(s) "
                       f"of that name and {len(blids)} of {bodyname}")
 
+    if media_sidecar is not None and (media_sidecar.get("carvedComplete") or {}):
+        print(f"Carving: {_skipped_carved} mother(s) were carved completely and are left "
+              f"flat; {len(body_of)} were not and keep their nesting")
     _nested = 0
     for idx, (parent, child, trsf) in enumerate(placements, start=1):
         body = body_of.get(parent)
