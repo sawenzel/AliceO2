@@ -180,7 +180,8 @@ def rebase_manifest(manifest: dict, db_dir: Path, manifest_path: Path) -> dict:
     return manifest
 
 
-def build_part_db(models, workdir: Path, skip_convert: bool, csg_mode: str = "auto") -> dict:
+def build_part_db(models, workdir: Path, skip_convert: bool, csg_mode: str = "auto",
+                  mesh_prec=None) -> dict:
     db_dir = workdir / "db"
     manifest_path = db_dir / "manifest.json"
     if skip_convert:
@@ -189,8 +190,11 @@ def build_part_db(models, workdir: Path, skip_convert: bool, csg_mode: str = "au
         print(f"[1/4] reusing part DB {db_dir}")
         return rebase_manifest(json.loads(manifest_path.read_text()), db_dir, manifest_path)
     print(f"[1/4] converting {len(models)} model(s) into {db_dir} (--csg {csg_mode})")
-    run([_OCC_PYTHON, _HERE / "makeTestPartDB.py", "--output", db_dir, "--force",
-         "--csg", csg_mode, "--models", *models], env=occ_env())
+    db_cmd = [_OCC_PYTHON, _HERE / "makeTestPartDB.py", "--output", db_dir, "--force",
+              "--csg", csg_mode]
+    if mesh_prec is not None:
+        db_cmd += ["--mesh-prec", str(mesh_prec)]
+    run(db_cmd + ["--models", *models], env=occ_env())
     return rebase_manifest(json.loads(manifest_path.read_text()), db_dir, manifest_path)
 
 
@@ -764,6 +768,13 @@ def main():
     parser.add_argument("--self-test", action="store_true",
                         help="run the verdict rule's own positive/negative checks and exit; needs "
                              "no build, no model and no oracle")
+    parser.add_argument("--mesh-prec", default=None,
+                        help="meshing precision handed to the converter through "
+                             "makeTestPartDB.py. Unset (default) means the converter's own 0.1, "
+                             "which every gate result on record was produced with, so leaving it "
+                             "alone reproduces them exactly. Set it for a model 0.1 is not safe "
+                             "on: ALICE3 IRIS meshes to ~480 MB of facets at 0.1 and 49 MB at "
+                             "0.25 (TalkUpgradeWeek2026/notes/W7_alice3_conversions.md).")
     parser.add_argument("--points", type=int, default=2000)
     parser.add_argument("--rays", type=int, default=2000)
     parser.add_argument("--seed", type=int, default=1)
@@ -802,7 +813,8 @@ def main():
         parser.error("give --model and/or --fixtures, or --skip-convert to reuse a DB")
 
     harness = find_harness()
-    manifest = build_part_db(models, args.workdir, args.skip_convert, args.csg)
+    manifest = build_part_db(models, args.workdir, args.skip_convert, args.csg,
+                             args.mesh_prec)
     db_dir = args.workdir / "db"
     sample_dir = args.workdir / "oracle"
 

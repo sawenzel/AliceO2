@@ -21,3 +21,7 @@ log
 
 # parked stale script variants and scratch, moved 2026-08-22; nothing here is live
 attic/
+
+# talk artefacts: gate reports, emitted macros and sim logs, all regenerable from the
+# commands recorded in TalkUpgradeWeek2026/notes/. Text and provenance are committed; bulk is not.
+TalkUpgradeWeek2026/artefacts/

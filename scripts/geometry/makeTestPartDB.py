@@ -47,6 +47,7 @@ import shutil
 import struct
 import subprocess
 import sys
+from typing import Optional
 from pathlib import Path
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -112,7 +113,7 @@ def _read_facets_summary(path: Path):
 
 
 def _convert_model(model_path: Path, out_dir: Path, skip_existing: bool, force: bool,
-                   csg_mode: str = "auto"):
+                   csg_mode: str = "auto", mesh_prec: Optional[str] = None):
     report_path = out_dir / "surface_report.json"
 
     if out_dir.exists() and any(out_dir.iterdir()):
@@ -146,6 +147,13 @@ def _convert_model(model_path: Path, out_dir: Path, skip_existing: bool, force: 
     # reproduces the pre-cascade database exactly.
     if csg_mode != "off":
         cmd += ["--csg", csg_mode]
+    # The converter's own default is 0.1, and that is what every database built before this
+    # argument existed used -- so leaving it unset must keep producing the identical command
+    # line. It is exposed because 0.1 is not safe on every model: the ALICE3 IRIS assembly's
+    # bellows part alone reaches ~275 MB of facets there
+    # (TalkUpgradeWeek2026/notes/W7_alice3_conversions.md).
+    if mesh_prec is not None:
+        cmd += ["--mesh-prec", str(mesh_prec)]
     print(f"  running: {' '.join(cmd)}")
     subprocess.run(cmd, check=True)
 
@@ -346,13 +354,15 @@ def _index_parts(model_name: str, slug: str, out_dir: Path, report: dict):
     return parts, warnings, unscored, cascade_meta
 
 
-def build_db(models, output: Path, skip_existing: bool, force: bool, csg_mode: str = "auto"):
+def build_db(models, output: Path, skip_existing: bool, force: bool, csg_mode: str = "auto",
+             mesh_prec: Optional[str] = None):
     output.mkdir(parents=True, exist_ok=True)
     manifest = {
         "version": 1,
         "generated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "output_dir": str(output.resolve()),
         "csg_mode": csg_mode,
+        "mesh_prec": mesh_prec,
         "models": [],
         "parts": [],
         # Leaf solids the model has that this database cannot hold, with the representation they
@@ -370,7 +380,8 @@ def build_db(models, output: Path, skip_existing: bool, force: bool, csg_mode: s
         out_dir = output / slug
         print(f"[{slug}] {model_path}")
 
-        report, cmd = _convert_model(model_path, out_dir, skip_existing, force, csg_mode)
+        report, cmd = _convert_model(model_path, out_dir, skip_existing, force, csg_mode,
+                                     mesh_prec)
         parts, warnings, unscored, cascade_meta = _index_parts(
             model_path.name, slug, out_dir, report)
         for w in warnings:
@@ -430,9 +441,15 @@ def main():
                          "choice in csg_report.json, which is what the gate reads to decide which "
                          "representation each part's verdict is computed on. 'off' reproduces the "
                          "pre-cascade database.")
+    ap.add_argument("--mesh-prec", default=None,
+                    help="Meshing precision handed to the converter. Unset (default) means the "
+                         "converter's own 0.1, which is what every database built before this "
+                         "argument existed used, so an existing gate result does not move. Set it "
+                         "for a model 0.1 is not safe on -- ALICE3 IRIS needs 0.25.")
     args = ap.parse_args()
 
-    build_db(args.models, Path(args.output), args.skip_existing, args.force, args.csg)
+    build_db(args.models, Path(args.output), args.skip_existing, args.force, args.csg,
+             args.mesh_prec)
 
 
 if __name__ == "__main__":

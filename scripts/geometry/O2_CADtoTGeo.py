@@ -2601,6 +2601,89 @@ def run_duplicate_placement_self_test() -> int:
     return failures
 
 
+def run_in_field_media_self_test() -> int:
+    """Assert what `--in-field` writes, and what its absence writes.
+
+    `TalkUpgradeWeek2026/notes/media_gap.md`. ROOT's three-argument TGeoMedium constructor
+    zeroes all twenty parameter slots, so a CAD-authored medium reaches Geant with ifield = 0
+    -- no field tracking -- and nothing warns. The flag is the assertion the CAD file cannot
+    make. The negative control matters as much as the positive one: without the flag the
+    emitter must keep writing no SetParam at all, or every existing converted module silently
+    changes its transport.
+
+    Returns the number of failures; prints one line per check.
+    """
+    failures = 0
+    checks = 0
+
+    def report(ok: bool, label: str, detail: str = ""):
+        nonlocal failures, checks
+        checks += 1
+        if not ok:
+            failures += 1
+        print(f"  [{'ok ' if ok else 'FAIL'}] {label}{(' -- ' + detail) if detail else ''}")
+
+    print("\nMedium parameters under --in-field (media_gap.md)")
+
+    mat = ResolvedMaterial(
+        bom_name="Silicon", nist_name="G4_Si", score=1.0, note="self-test",
+        rho_used_g_cm3=2.33,
+        elements=[{"symbol": "Si", "Z": 14, "A_g_mol": 28.0853614555, "mass_fraction": 1.0}],
+        radlen_cm=9.3660702922, intlen_cm=45.6603073704)
+    used = {"Silicon": mat}
+
+    off, _ = emit_materials_cpp(used, in_field=None)
+    report("SetParam" not in off,
+           "without --in-field no SetParam is written (the negative control)",
+           "" if "SetParam" not in off else "emitter changed behaviour for existing modules")
+
+    on, _ = emit_materials_cpp(used, in_field=(2.0, 10.0))
+    report("cadFieldTrackingParams(cad_ifield, cad_fieldm);" in on,
+           "--in-field queries the LIVE field instead of asserting a pair")
+    report("med_Silicon->SetParam(1, cad_ifield);" in on,
+           "ifield is the queried variable, not a literal")
+    report("med_Silicon->SetParam(2, cad_fieldm);" in on,
+           "fieldm is the queried variable, not a literal")
+    report("int   cad_ifield = 2;" in on and "float cad_fieldm = 10;" in on,
+           "the seed is only what applies when no field is loaded")
+    report("med_Default->SetParam(1, cad_ifield);" in on,
+           "the Default medium is not left field-free either")
+    for slot, key in enumerate(MEDIUM_PARAM_ORDER):
+        if key in ("ifield", "fieldm"):
+            continue
+        report(f"med_Silicon->SetParam({slot}, 0);" in on,
+               f"step control {key} stays 0 (the transport default)")
+    report(on.count("SetParam") == 2 * len(MEDIUM_PARAM_ORDER),
+           "all eight parameters are written for each of the two media",
+           f"found {on.count('SetParam')}")
+    _pre_on, _pre_off = emit_cpp_prelude(in_field=True), emit_cpp_prelude(in_field=False)
+    report('#include "Field/MagneticField.h"' in _pre_on and "#include \"TVirtualMC.h\"" in _pre_on,
+           "the prelude pulls the two headers Cling parses standalone")
+    report("static void cadFieldTrackingParams(int& mode, float& maxfield)" in _pre_on,
+           "and defines the query helper")
+    report("DetectorsBase/Detector.h" not in _pre_on,
+           "and NOT Detector.h, whose FairDetector payload segfaults a bare root -l session")
+    report("cadFieldTrackingParams" not in _pre_off,
+           "none of it appears without --in-field (the negative control)")
+
+    # The exported driver: CheckOverlaps must be opt-in. Emitting the whole macro needs a CAD
+    # model, so this asserts on the emitter's own source, which is where the default lives.
+    import inspect as _inspect
+    _src = _inspect.getsource(emit_root_macro)
+    if True:
+        report("if (checkOverlaps) { gGeoManager->CheckOverlaps(); }" in _src,
+               "the emitted build_and_export runs CheckOverlaps only on request")
+        report("bool checkOverlaps=false" in _src,
+               "and its default is off -- it cost ~15 min on oTOF's 62 628 placements")
+
+    custom, _ = emit_materials_cpp(used, in_field=(1.0, 5.5))
+    report("int   cad_ifield = 1;" in custom and "float cad_fieldm = 5.5;" in custom,
+           "IFIELD,FIELDM overrides seed the query")
+
+    print(f"\n{checks - failures}/{checks} in-field media checks passed")
+    return failures
+
+
 def run_multibody_leaf_self_test() -> int:
     """Assert that one XCAF leaf label carrying several solid bodies becomes several volumes.
 
@@ -3561,7 +3644,8 @@ def trsf_to_tgeo(trsf: gp_Trsf, name: str, scale_to_cm: float) -> str:
 
 
 def emit_cpp_prelude(exact_surfaces: bool = False, csg_shapes: bool = False,
-                     flat_csg_shapes: bool = False, o2_tessellated: bool = False) -> str:
+                     flat_csg_shapes: bool = False, o2_tessellated: bool = False,
+                     in_field: bool = False) -> str:
     prelude = """#include <TGeoManager.h>
 #include <TFile.h>
 #include <fstream>
@@ -3590,6 +3674,38 @@ static void LoadFacets(const std::string& file, TGeoTessellated* solid, bool che
   solid->CloseShape(check, true);
 }
 """
+    if in_field:
+        # `--in-field` asks the LIVE field for its tracking parameters rather than asserting a
+        # pair. The obvious way is o2::base::Detector::initFieldTrackingParams, which is public
+        # and static -- but including DetectorsBase/Detector.h drags in FairDetector, and Cling
+        # cannot parse that payload in a plain `root -l geom.C` session: it dies with
+        # "'FairDetector' is an incomplete type" and then segfaults. That route works only once
+        # libO2DetectorsBase is already loaded, which is true inside o2-sim and false for the
+        # bare-ROOT build_and_export() route the README documents.
+        #
+        # So the macro asks the field object directly, through headers Cling parses standalone.
+        # The body below mirrors Detector::initFieldTrackingParams
+        # (Detectors/Base/src/Detector.cxx) -- same source of truth, same fallback -- and if
+        # MagneticField's API ever moves, this fails loudly at JIT time rather than silently.
+        prelude += """#include "Field/MagneticField.h"
+#include "TVirtualMC.h"
+
+// The live field's integration mode and maximum, exactly as
+// o2::base::Detector::initFieldTrackingParams computes them. Values passed in are the fallback
+// used when no field is loaded.
+static void cadFieldTrackingParams(int& mode, float& maxfield)
+{
+  auto vmc = TVirtualMC::GetMC();
+  if (!vmc) {
+    return;
+  }
+  if (auto* fld = dynamic_cast<o2::field::MagneticField*>(vmc->GetMagField())) {
+    mode = fld->Integral();
+    maxfield = fld->Max();
+  }
+}
+"""
+
     if csg_shapes:
         # TGeoHMatrix comes in through TGeoManager.h today, but the CSG loader names it directly
         # and must not depend on that.
@@ -3717,8 +3833,40 @@ def emit_media_sidecar_cpp(sidecar: dict) -> Tuple[str, Dict[str, str]]:
     return "\n".join(cpp), medium_var
 
 
+# The eight Geant medium parameters, in the order TGeoMedium stores them.
+MEDIUM_PARAM_ORDER = ("isvol", "ifield", "fieldm", "tmaxfd",
+                      "stemax", "deemax", "epsil", "stmin")
+
+# What `--in-field` writes. ifield/fieldm are exactly the fallback
+# `o2::base::Detector::initFieldTrackingParams` uses when it cannot query a live
+# o2::field::MagneticField (Detectors/Base/src/Detector.cxx). The four step-control
+# parameters stay 0, which is the "use the transport default" convention -- picking
+# values for them is a per-detector physics choice a CAD file cannot carry.
+IN_FIELD_SEED = (2, 10.0)
+
+
+def _in_field_setparams(medvar: str) -> List[str]:
+    """The eight SetParam lines for one medium under `--in-field`.
+
+    ifield and fieldm come from the variables the live-field query filled; the four step-control
+    parameters stay 0, which means "use the transport default". Choosing stemax or deemax is a
+    per-detector physics decision and a CAD file carries no such statement, so the converter
+    does not invent one.
+    """
+    out: List[str] = []
+    for i, key in enumerate(MEDIUM_PARAM_ORDER):
+        if key == "ifield":
+            out.append(f"  {medvar}->SetParam({i}, cad_ifield);   // ifield, from the live field")
+        elif key == "fieldm":
+            out.append(f"  {medvar}->SetParam({i}, cad_fieldm);   // fieldm, from the live field")
+        else:
+            out.append(f"  {medvar}->SetParam({i}, 0);   // {key} (transport default)")
+    return out
+
+
 def emit_materials_cpp(
     used_materials: Dict[str, ResolvedMaterial],
+    in_field: Optional[Tuple[float, float]] = None,
     # key: BOM material string as used in CSV after normalization
 ) -> Tuple[str, Dict[str, str]]:
     """
@@ -3727,11 +3875,31 @@ def emit_materials_cpp(
     - If a material resolved to a Geant4 NIST entry, emit a physically correct mixture
       (element mass fractions) and set RadLen/IntLen (from Geant4) when available.
     - If unresolved/ambiguous, emit a dummy material and annotate with FIXME comments.
+    - If `in_field` is given, write the eight Geant medium parameters explicitly, taking
+      ifield and fieldm from the LIVE field: the macro calls the same public static
+      `o2::base::Detector::initFieldTrackingParams` every hand-written detector calls from its
+      own createMaterials(), so a CAD module gets whatever integration mode and maximum field
+      the loaded o2::field::MagneticField reports. The (ifield, fieldm) pair passed here is only
+      the seed those variables carry into the call, which is what the function itself falls back
+      to when no field is loaded. Without `in_field` every medium keeps ROOT's three-argument
+      TGeoMedium defaults, which zero all of them (TGeoMedium.cxx) -- so the module is
+      transported with no field tracking at all, silently.
     """
     cpp: List[str] = []
     cpp.append("  // Default material/medium (placeholder; can be replaced later)")
     cpp.append("  TGeoMaterial *mat_Default = new TGeoMaterial(\"Default\", 0., 0., 0.);")
     cpp.append("  TGeoMedium   *med_Default = new TGeoMedium(\"Default\", 1, mat_Default);")
+    if in_field is not None:
+        cpp.append("")
+        cpp.append("  // Field tracking parameters, taken from the LIVE field: the same query")
+        cpp.append("  // o2::base::Detector::initFieldTrackingParams makes, so a CAD module is not")
+        cpp.append("  // treated differently from a hand-written detector. The seeds below are what")
+        cpp.append("  // that function itself falls back to when no field is loaded.")
+        cpp.append(f"  int   cad_ifield = {int(in_field[0])};")
+        cpp.append(f"  float cad_fieldm = {float(in_field[1]):.17g};")
+        cpp.append("  cadFieldTrackingParams(cad_ifield, cad_fieldm);")
+        cpp.append("")
+        cpp.extend(_in_field_setparams("med_Default"))
     cpp.append("")
 
     emitted_el: Dict[str, str] = {}
@@ -3788,6 +3956,8 @@ def emit_materials_cpp(
             cpp.append(f"  TGeoMaterial *mat_{safe} = new TGeoMaterial(\"{bom_mat}\", 0., 0., {rho:.10g});")
 
         cpp.append(f"  TGeoMedium   *med_{safe} = new TGeoMedium(\"{bom_mat}\", {next_id}, mat_{safe});")
+        if in_field is not None:
+            cpp.extend(_in_field_setparams(f"med_{safe}"))
         cpp.append("")
         medium_var[bom_mat] = f"med_{safe}"
         next_id += 1
@@ -4653,6 +4823,7 @@ def emit_root_macro(
     name_filter: Optional[NameFilter] = None,
     materials_csv: Optional[str] = None,
     media_json: Optional[str] = None,
+    in_field: Optional[Tuple[float, float]] = None,
     bom_mass_unit: str = "kg",
     g4_nist_json: Optional[str] = None,
     mat_cfg: Optional[MatMatchConfig] = None,
@@ -4929,7 +5100,7 @@ def emit_root_macro(
     if media_sidecar is not None:
         materials_cpp, medium_var_map = emit_media_sidecar_cpp(media_sidecar)
     else:
-        materials_cpp, medium_var_map = emit_materials_cpp(used_materials)
+        materials_cpp, medium_var_map = emit_materials_cpp(used_materials, in_field=in_field)
 
     # --- emit C++ macro ---
     surface_files = surface_files or {}
@@ -4964,12 +5135,13 @@ def emit_root_macro(
     cpp: List[str] = []
     cpp.append(emit_cpp_prelude(exact_surfaces=bool(surface_files), csg_shapes=bool(csg_files),
                                 flat_csg_shapes=bool(flat_files),
-                                o2_tessellated=bool(tess_lids) and mesh_solid == "o2"))
+                                o2_tessellated=bool(tess_lids) and mesh_solid == "o2",
+                                in_field=in_field is not None))
 
     _media_unresolved: List[Tuple[str, str]] = []   # part named a medium the sidecar lacks
     _media_unnamed: List[str] = []                  # part the sidecar does not name at all
     cpp.append("TGeoVolume* build(bool check=true) {")
-    cpp.append('  if (!gGeoManager) { throw std::runtime_error("gGeoManager is null. Call build_and_export() or create a TGeoManager first."); }')
+    cpp.append('  if (!gGeoManager) { throw std::runtime_error("gGeoManager is null. Call build_and_export(), or create a TGeoManager yourself before calling build() directly: new TGeoManager(\\"geom\\",\\"geom\\");"); }')
     cpp.append(materials_cpp)
 
     for lid in logical_volumes.keys():
@@ -5087,12 +5259,18 @@ def emit_root_macro(
     cpp.append("}")
 
     # exports a function allowing to export the geometry to TGeo file
-    cpp.append('void build_and_export(const char* out_root = "geom.root", bool check=true) {')
+    # CheckOverlaps is opt-in, not automatic. It costs O(placements^2)-ish work with no bearing
+    # on the exported geometry: on oTOF's 62 628 placements it added ~15 minutes to a build that
+    # otherwise takes seconds. It is also the wrong instrument here -- the source CAD models are
+    # known not to be legal worlds (Stream_T_AssemblyOracle.md), so it reports overlaps that are
+    # a property of the model, every time, for everyone. Pass checkOverlaps=true to run it.
+    cpp.append('void build_and_export(const char* out_root = "geom.root", bool check=true,')
+    cpp.append('                      bool checkOverlaps=false) {')
     cpp.append('  if (!gGeoManager) { new TGeoManager("geom","geom"); }')
     cpp.append('  TGeoVolume* top = build(check);')
     cpp.append('  gGeoManager->SetTopVolume(top);')
     cpp.append('  gGeoManager->CloseGeometry();')
-    cpp.append('  gGeoManager->CheckOverlaps();')
+    cpp.append('  if (checkOverlaps) { gGeoManager->CheckOverlaps(); }')
     cpp.append('  gGeoManager->Export(out_root);')
     cpp.append('}')
 
@@ -5164,6 +5342,17 @@ def main():
     ap.add_argument("--mesh", action="store_true", help="Use full BRepMesh triangulation instead of bounding boxes")
     ap.add_argument("--print-tree", action="store_true", help="Just prints the geometry tree")
     ap.add_argument("--mesh-prec", default=0.1, help="meshing precision. lower --> slower")
+    ap.add_argument("--in-field", nargs="?", const="2,10", default=None, metavar="IFIELD,FIELDM",
+                    help="Treat this module as sitting in the magnetic field: write the eight Geant "
+                         "medium parameters explicitly instead of leaving ROOT's TGeoMedium "
+                         "defaults, which zero all of them. ifield and fieldm are taken from the "
+                         "LIVE field -- the macro calls o2::base::Detector::initFieldTrackingParams "
+                         "exactly as a hand-written detector does -- so nothing is baked in. "
+                         "IFIELD,FIELDM only seeds that call, i.e. it is what applies when no "
+                         "field is loaded; the default seed 2,10 is the function's own fallback. "
+                         "Step control (tmaxfd, stemax, deemax, epsil, stmin) stays 0, meaning the "
+                         "transport default. Only affects the BOM/NIST material route -- the media "
+                         "sidecar route already carries the source's own parameters verbatim.")
     ap.add_argument("--step-unit", default="auto", choices=["auto", "mm", "cm", "m", "in", "ft"], help="STEP length unit override (default: auto-detect); TGeo expects cm")
     ap.add_argument("--clip-box", nargs=6, type=float, metavar=("XMIN", "YMIN", "ZMIN", "XMAX", "YMAX", "ZMAX"), default=None, help="Clip CAD geometry to this axis-aligned bounding box before meshing (coordinates in STEP file units, before conversion to cm)")
     ap.add_argument("--clip-deduplicate", default="intact", choices=["none", "intact"], help="When clipping, reuse original logical definitions for subtrees fully inside the clip box (default: intact); use 'none' for one volume per surviving occurrence")
@@ -5205,7 +5394,8 @@ def main():
         sys.exit(1 if (run_recognition_self_test() + run_placement_self_test()
                        + run_planar_trim_self_test()
                        + run_duplicate_placement_self_test()
-                       + run_multibody_leaf_self_test()) else 0)
+                       + run_multibody_leaf_self_test()
+                       + run_in_field_media_self_test()) else 0)
     if args.step is None:
         ap.error("the following arguments are required: step (or pass --self-test)")
 
@@ -5224,6 +5414,19 @@ def main():
             clip_box = ClipBox.from_values(args.clip_box)
         except ValueError as exc:
             ap.error(str(exc))
+
+    in_field = None
+    if args.in_field is not None:
+        try:
+            parts = [float(x) for x in str(args.in_field).split(",")]
+        except ValueError:
+            parts = []
+        if len(parts) != 2:
+            ap.error("--in-field takes IFIELD,FIELDM (e.g. --in-field 2,10) or no value at all")
+        in_field = (parts[0], parts[1])
+        print(f"--in-field: media take ifield/fieldm from the live field at build time "
+              f"(seed {in_field[0]:g},{in_field[1]:g} if none is loaded); "
+              "step control left at the transport default")
 
     name_filter = None
     if args.include_name or args.exclude_name:
@@ -5262,6 +5465,7 @@ def main():
         name_filter=name_filter,
         materials_csv=args.materials_csv,
         media_json=args.media_json,
+        in_field=in_field,
         bom_mass_unit=args.bom_mass_unit,
         g4_nist_json=args.g4_nist_json,
         mat_cfg=mat_cfg,
