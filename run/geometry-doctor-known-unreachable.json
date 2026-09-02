@@ -1,0 +1,15 @@
+{
+	"comment": "Placements of the ALICE Run 3 geometry that the navigator already cannot reach, so that o2-sim-geometry-doctor --reachability-only can be used as a build gate on new ones while these are still open. Each is a daughter that lies in a part of its mother the mother does not occupy: the beam-pipe vacuum sits in the hole of the thin shell it was placed inside, and the MCH quadrant volumes sit outside SQM1/SQM2. Remove an entry once its placement is fixed; the gate will then keep it fixed.",
+	"known_unreachable": [
+		{"path": "/cave_1/barrel_1/aluSideA_1/aluSideAVac_1",
+		 "why": "PIPE: the A-side beam-pipe vacuum is placed inside the aluSideA shell, which is hollow between its own Rmin and Rmax, so the vacuum lies in the hole"},
+		{"path": "/cave_1/YOUT1_1/SC01I_0/Quadrant (chamber 1)_100/SQM1_1/SQ03_1",
+		 "why": "MCH: outside its SQM1 mother"},
+		{"path": "/cave_1/YOUT1_1/SC01I_0/Quadrant (chamber 1)_100/SQM1_1/SQ05toSQ07_1",
+		 "why": "MCH: outside its SQM1 mother"},
+		{"path": "/cave_1/YOUT1_1/SC02I_2/Quadrant (chamber 2)_200/SQM2_1/SQ03_1",
+		 "why": "MCH: outside its SQM2 mother"},
+		{"path": "/cave_1/YOUT1_1/SC02I_2/Quadrant (chamber 2)_200/SQM2_1/SQ05toSQ07_1",
+		 "why": "MCH: outside its SQM2 mother"}
+	]
+}

@@ -826,8 +826,40 @@ void ReachAudit::walk(TGeoNode* node, const TGeoHMatrix& parent, const std::stri
 }
 
 
-/// Prints the audit and returns how many placements the navigator cannot reach at all.
-long reportReachability(int samples, Report& report)
+/// The placements a geometry is already known to leave unreachable. Keeping them in
+/// a file rather than in the code is what lets this run as a build gate today: the
+/// gate fires on a *new* unreachable placement, while the backlog stays visible and
+/// each entry carries the reason it is still there.
+std::set<std::string> readKnownUnreachable(const std::string& path, Report& report)
+{
+  std::set<std::string> known;
+  if (path.empty()) {
+    return known;
+  }
+  std::ifstream in(path);
+  if (!in) {
+    report("  known-unreachable: cannot open " + path + ", treating every placement as new");
+    return known;
+  }
+  json doc;
+  try {
+    in >> doc;
+  } catch (const std::exception& e) {
+    report(std::string("  known-unreachable: cannot parse ") + path + ": " + e.what());
+    return known;
+  }
+  for (const auto& entry : doc.value("known_unreachable", json::array())) {
+    if (entry.contains("path")) {
+      known.insert(entry["path"].get<std::string>());
+    }
+  }
+  report(form("  known-unreachable: %zu placements listed in %s", known.size(), path.c_str()));
+  return known;
+}
+
+/// Prints the audit and returns how many placements the navigator cannot reach that
+/// are not already listed as known.
+long reportReachability(int samples, Report& report, const std::set<std::string>& known)
 {
   if (samples <= 0) {
     return 0;
@@ -840,10 +872,23 @@ long reportReachability(int samples, Report& report)
               audit.nodesVisited(), audit.nodesSampled(), audit.nodesUnsampleable()));
   report(form("  %ld placements the navigator never reaches, %zu it reaches only in part",
               (long)audit.dead().size(), audit.partial().size()));
-  if (!audit.dead().empty()) {
+
+  std::vector<Reach> fresh;
+  long alreadyKnown = 0;
+  for (const auto& entry : audit.dead()) {
+    if (known.count(entry.worstPath) != 0u) {
+      ++alreadyKnown;
+    } else {
+      fresh.push_back(entry);
+    }
+  }
+  if (alreadyKnown != 0) {
+    report(form("  %ld of them are listed as known and are not reported as findings", alreadyKnown));
+  }
+  if (!fresh.empty()) {
     report("  unreachable -- these carry no material and produce no hits:");
     report(form("    %-12s %-18s %10s  %s", "mother", "medium", "sampled", "path"));
-    for (const auto& entry : audit.dead()) {
+    for (const auto& entry : fresh) {
       report(form("    %-12s %-18s %10ld  %s", entry.mother.c_str(), entry.medium.c_str(), entry.sampled,
                   entry.worstPath.c_str()));
     }
@@ -861,7 +906,7 @@ long reportReachability(int samples, Report& report)
     report(form("    ... and %zu more", audit.partial().size() - 20));
   }
   report("");
-  return (long)audit.dead().size();
+  return (long)fresh.size();
 }
 
 // ---------------------------------------------------------------------------
@@ -1682,6 +1727,7 @@ struct Options {
   double margin = 5.0;
   int reachSamples = 32;
   bool reachabilityOnly = false;
+  std::string knownUnreachableFile;
   std::string outputPrefix = "geometry-doctor";
 };
 
@@ -1714,7 +1760,9 @@ int main(int argc, char** argv)
     ("reachability-samples", bpo::value<int>(&options.reachSamples)->default_value(32),                 //
      "points drawn inside each placement for the reachability audit; 0 disables it")                    //
     ("reachability-only", bpo::bool_switch(&options.reachabilityOnly),                                  //
-     "run only the reachability audit, which needs no magnetic field");
+     "run only the reachability audit, which needs no magnetic field")                                  //
+    ("known-unreachable", bpo::value<std::string>(&options.knownUnreachableFile),                       //
+     "JSON list of placements already known to be unreachable; only new ones are reported as findings");
 
   bpo::variables_map arguments;
   try {
@@ -1748,7 +1796,8 @@ int main(int argc, char** argv)
     report(form("  volumes       : %d, media %d", gGeoManager->GetListOfVolumes()->GetEntries(),
                 gGeoManager->GetListOfMedia()->GetEntries()));
     report("");
-    const long dead = reportReachability(options.reachSamples, report);
+    const auto known = readKnownUnreachable(options.knownUnreachableFile, report);
+    const long dead = reportReachability(options.reachSamples, report, known);
     const std::string reportPath = options.outputPrefix + "-report.txt";
     report("wrote " + reportPath);
     report.write(reportPath);
@@ -1865,7 +1914,8 @@ int main(int argc, char** argv)
   report(form("  volumes       : %d, media %d", gGeoManager->GetListOfVolumes()->GetEntries(),
               gGeoManager->GetListOfMedia()->GetEntries()));
   report("");
-  reportReachability(options.reachSamples, report);
+  reportReachability(options.reachSamples, report,
+                     readKnownUnreachable(options.knownUnreachableFile, report));
 
   Doctor doctor(field, support);
   doctor.walk(gGeoManager->GetTopNode());

@@ -162,6 +162,7 @@ o2_add_dpl_workflow(mctracks-to-aod-simple-task
 o2_data_file(COPY o2simtopology_template.json DESTINATION config)
 
 o2_data_file(COPY o2simdefaultdetectorlist.json DESTINATION config)
+o2_data_file(COPY geometry-doctor-known-unreachable.json DESTINATION config)
 
 # * # add a complex simulation as a unit test (if simulation was enabled)
 #   perform
@@ -326,6 +327,27 @@ set_tests_properties(o2sim_hepmc
 set_property(TEST o2sim_hepmc APPEND PROPERTY ENVIRONMENT ${G4ENV})
 
 # somewhat analyse the logfiles as another means to detect problems
+# Every placement should occupy the space it was built in. One the navigator never
+# reaches contributes no material to transport and produces no hits, and nothing
+# in the geometry code says so. The audit covers the whole geometry in a few
+# seconds, so it can run on the geometry the G3 test has already produced; the
+# JSON lists the placements that are known to be unreachable today, so this fires
+# on a new one.
+o2_add_test_command(NAME o2sim_G3_reachability
+                    WORKING_DIRECTORY ${SIMTESTDIR}
+                    COMMAND $<TARGET_FILE:O2exe-sim-geometry-doctor>
+                    COMMAND_LINE_ARGS --geometry-file
+                                      o2simG3_geometry.root
+                                      --reachability-only
+                                      --known-unreachable
+                                      ${CMAKE_SOURCE_DIR}/run/geometry-doctor-known-unreachable.json
+                                      --output-prefix
+                                      o2simG3_reachability
+                    LABELS long sim)
+
+set_tests_properties(o2sim_G3_reachability
+                     PROPERTIES FIXTURES_REQUIRED G3)
+
 o2_add_test_command(NAME o2sim_G3_checklogs
                     WORKING_DIRECTORY ${SIMTESTDIR}
                     COMMAND ${CMAKE_SOURCE_DIR}/run/simlogcheck.sh
