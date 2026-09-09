@@ -113,7 +113,8 @@ def _read_facets_summary(path: Path):
 
 
 def _convert_model(model_path: Path, out_dir: Path, skip_existing: bool, force: bool,
-                   csg_mode: str = "auto", mesh_prec: Optional[str] = None):
+                   csg_mode: str = "auto", mesh_prec: Optional[str] = None,
+                   include_name: Optional[list] = None):
     report_path = out_dir / "surface_report.json"
 
     if out_dir.exists() and any(out_dir.iterdir()):
@@ -154,6 +155,11 @@ def _convert_model(model_path: Path, out_dir: Path, skip_existing: bool, force: 
     # (TalkUpgradeWeek2026/notes/W7_alice3_conversions.md).
     if mesh_prec is not None:
         cmd += ["--mesh-prec", str(mesh_prec)]
+    # Passed straight through to the converter, so a database can be built for one part of a
+    # large module instead of the whole thing. The converter owns the matching rule (it matches
+    # against "<name> <lid>"), and this script does not second-guess it.
+    for pat in (include_name or []):
+        cmd += ["--include-name", pat]
     print(f"  running: {' '.join(cmd)}")
     subprocess.run(cmd, check=True)
 
@@ -355,7 +361,7 @@ def _index_parts(model_name: str, slug: str, out_dir: Path, report: dict):
 
 
 def build_db(models, output: Path, skip_existing: bool, force: bool, csg_mode: str = "auto",
-             mesh_prec: Optional[str] = None):
+             mesh_prec: Optional[str] = None, include_name: Optional[list] = None):
     output.mkdir(parents=True, exist_ok=True)
     manifest = {
         "version": 1,
@@ -363,6 +369,7 @@ def build_db(models, output: Path, skip_existing: bool, force: bool, csg_mode: s
         "output_dir": str(output.resolve()),
         "csg_mode": csg_mode,
         "mesh_prec": mesh_prec,
+        "include_name": include_name,
         "models": [],
         "parts": [],
         # Leaf solids the model has that this database cannot hold, with the representation they
@@ -381,7 +388,7 @@ def build_db(models, output: Path, skip_existing: bool, force: bool, csg_mode: s
         print(f"[{slug}] {model_path}")
 
         report, cmd = _convert_model(model_path, out_dir, skip_existing, force, csg_mode,
-                                     mesh_prec)
+                                     mesh_prec, include_name)
         parts, warnings, unscored, cascade_meta = _index_parts(
             model_path.name, slug, out_dir, report)
         for w in warnings:
@@ -441,6 +448,9 @@ def main():
                          "choice in csg_report.json, which is what the gate reads to decide which "
                          "representation each part's verdict is computed on. 'off' reproduces the "
                          "pre-cascade database.")
+    ap.add_argument("--include-name", action="append", default=None,
+                    help="Passed to the converter: only convert CAD labels matching this regex. "
+                         "May be repeated. Lets a database be built for one part of a module.")
     ap.add_argument("--mesh-prec", default=None,
                     help="Meshing precision handed to the converter. Unset (default) means the "
                          "converter's own 0.1, which is what every database built before this "
@@ -449,7 +459,7 @@ def main():
     args = ap.parse_args()
 
     build_db(args.models, Path(args.output), args.skip_existing, args.force, args.csg,
-             args.mesh_prec)
+             args.mesh_prec, args.include_name)
 
 
 if __name__ == "__main__":

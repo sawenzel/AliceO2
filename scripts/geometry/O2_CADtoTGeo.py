@@ -4834,6 +4834,9 @@ def emit_root_macro(
     dump_brep: bool = False,
     csg: str = "off",
     csg_report: Optional[str] = None,
+    max_cells: Optional[int] = None,
+    max_splits: Optional[int] = None,
+    decompose_timeout: Optional[float] = None,
     mesh_solid: str = "o2",
 ):
     # surface_files: def_lid -> absolute path of an exact-surface sidecar (surfaces_*.bin).
@@ -5010,6 +5013,20 @@ def emit_root_macro(
     flat_files: Dict[str, str] = {}
     if csg_mode != "off":
         hook = import_csg_hook()
+        # The budgets live as module constants in csg/decompose.py and are read at call time by
+        # csg/recognise.py, so setting them here is enough and nothing has to be threaded.
+        if any(v is not None for v in (max_cells, max_splits, decompose_timeout)):
+            from csg import decompose as _decomp
+            if max_cells is not None:
+                print(f"  cell budget raised: {_decomp.PART_MAX_CELLS} -> {max_cells}")
+                _decomp.PART_MAX_CELLS = max_cells
+            if max_splits is not None:
+                print(f"  split budget raised: {_decomp.MAX_SPLITS} -> {max_splits}")
+                _decomp.MAX_SPLITS = max_splits
+            if decompose_timeout is not None:
+                print(f"  decomposition timeout raised: {_decomp.TIMEOUT_S} -> "
+                      f"{decompose_timeout} s")
+                _decomp.TIMEOUT_S = decompose_timeout
         csg_files, flat_files, csg_records = hook.recognise_and_emit(
             def_shapes, def_names, scale_to_cm, out_folder, sanitize_filename, mode=csg_mode)
         report_path = _Path(csg_report) if csg_report else (out_folder / "csg_report.json")
@@ -5364,6 +5381,17 @@ def main():
     ap.add_argument("--exact-surfaces", default="off", choices=["off", "auto", "required"], help="Emit exact O2BVHSurfaceSolid shapes instead of the tessellated fallback where possible. 'off' (default): tessellated only (see --mesh-solid). 'auto': exact for each leaf solid whose faces all extract exactly, tessellated fallback otherwise. 'required': fail with a report if any leaf solid cannot be represented exactly. Writes a surfaces_*.bin sidecar per exact volume.")
     ap.add_argument("--dump-brep", action="store_true", help="With --exact-surfaces auto|required, also write brep_<VOLNAME>_<LID>.brep (OCCT BREP of the leaf solid, scaled to cm like the sidecar and the mesh) next to each surfaces_*.bin. Input for the OCCT reference oracle; changes nothing else in the output.")
     ap.add_argument("--csg", default="off", choices=["off", "auto", "required"], help="Recognise leaf solids as native ROOT CSG shapes (TGeoBBox/TGeoTube/TGeoTubeSeg/TGeoCone/TGeoSphere, and the two-cluster TGeoTube-union of a barrel and a lug) and emit each accepted one as shape_<VOLNAME>_<LID>.root. 'off' (default): unchanged behaviour. 'auto': makes the per-part cascade CSG -> exact surfaces -> tessellated. 'required': fail with a report if any leaf solid is not CSG. A part is only converted this way when OCCT's symmetric-difference volume against the CAD solid is inside the model tolerance; the description and that evidence are written to csg_<VOLNAME>_<LID>.json and csg_report.json either way.")
+    ap.add_argument("--max-cells", type=int, default=None, metavar="N",
+                    help="Raise csg/decompose.py's per-part cell budget (default 64). The flat "
+                         "path declines a part whose decomposition needs more cells than this; "
+                         "raising it lets deep boolean parts ship as O2FlatCSG instead of as a "
+                         "tree. Design_FlatCSGSolid.md froze 64 for rung R5, so this is an "
+                         "explicit override, not a new default.")
+    ap.add_argument("--max-splits", type=int, default=None, metavar="N",
+                    help="Raise the decomposition's split budget (default 256). A raised cell "
+                         "budget usually needs this too, since every cell costs a split.")
+    ap.add_argument("--decompose-timeout", type=float, default=None, metavar="S",
+                    help="Raise the per-part decomposition timeout in seconds (default 60).")
     ap.add_argument("--csg-report", default=None, metavar="PATH", help="Where to write the per-part CSG cascade report (default: csg_report.json in the output folder).")
     ap.add_argument("--recognize-surfaces", default="exact", choices=["exact", "off"], help="Canonical-form recognition pre-pass: recover an exact plane/sphere/cylinder/cone hiding behind a stored bspline/bezier/revolution/extrusion face (the stored STEP surface type describes the exporter, not the geometry). 'exact' (default): only accept a fit at machine precision. 'off': disable, keeping such faces on the tessellated fallback. Applies to both --surface-report and --exact-surfaces auto|required.")
 
@@ -5475,6 +5503,9 @@ def main():
         dump_brep=args.dump_brep,
         csg=args.csg,
         csg_report=args.csg_report,
+        max_cells=args.max_cells,
+        max_splits=args.max_splits,
+        decompose_timeout=args.decompose_timeout,
         mesh_solid=args.mesh_solid,
     )
     out_macro.write_text(code)
