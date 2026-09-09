@@ -184,7 +184,7 @@ deep review with the verification appendix; [`INDEX.md`](INDEX.md) orders every 
 | --- | --- |
 | `ctest -R 'FlatCSG\|BVHSurfaceSolid\|BVHAssembly'` | **31 + 113 + 22 cases**, green — `FlatCSG` is new in R5 and is part of the floor |
 | `csg/emit.py --self-test` | **353** (16 acceptance + 337 recognise/emit, incl. six candidate-digest tables — all six must stay green) |
-| `O2_CADtoTGeo.py --self-test` | **54 checks** = 18+8+10+12+6 — never quote the last line alone |
+| `O2_CADtoTGeo.py --self-test` | **66 checks** = 18+8+10+12+6+20 — never quote the last line alone; the last block is the in-field media one, and the single `[FAIL]` outside the O2 environment is PyROOT being unimportable, not a defect |
 | `checkKnownSource.py --self-test` | **17/17** — the third acceptance test: emitted shape vs the source `TGeoShape` |
 | `O2_TGeoToCAD.py --self-test` | **129** — four are the carve-completeness contract (Stream_AM) |
 | `runOracleGate.py --self-test` / xray `--self-test` | 17/17 · clean |
@@ -211,6 +211,13 @@ distance, and returns `0.` for 78–100 % of interior points.
 
 ## Open, in the order I would take them
 
+0. **GPU-readiness of the two exact solids, and the cell budget** — raised by Sandro 2026-09-08,
+   written up as [`Roadmap.md`](Roadmap.md) "Raised by Sandro, 2026-09-08". `O2FlatCSG` is
+   structurally close to a device port (PODs, no virtuals, explicit-stack traversal); the raised
+   cell budget now lets MFT `Support_H0_D4`, the corpus's deepest boolean at 116 levels, ship flat
+   at all (`--max-cells`, default unchanged). `O2BVHSurfaceSolid` would need its `BoundedSurface`
+   hierarchy flattened first. **All timings there are preliminary — no optimisation pass has been
+   made on either class.**
 1. **Report `TGeoTessellated`'s missing navigation to ROOT** — a feature request, not a bug: ROOT
    documents the limitation and simply does not shout when a `TGeoTessellated` goes into a
    `TGeoVolume` without VecGeom, and that silence cost a factor 32.7 on a real part. ROOT master

@@ -372,3 +372,204 @@ applies to this layer too. Born test corpus: oTOF's 62 628 placements over 20 pr
 implementation: whether it presents as a `TGeoShape` (a solid whose Contains/DistFrom* delegate
 to children through the BVH) or hooks the navigator level, and how hit/sensitive-volume identity
 is reported through it.
+
+## Raised by Sandro, 2026-09-08
+
+Came out of preparing the Upgrade Week talk: a four-representation benchmark on one
+part, which turned into a question about which of the two exact solids could run on a
+GPU. **Every timing below is preliminary — no optimisation pass has been made on
+either class.** They are recorded because the *structural* conclusions do not depend
+on the timings, and those are what the ideas rest on.
+
+### (a) Raise the cell budget — DONE as an option, default unchanged
+
+> *Increase the cell budget! This will be important for GPU compute at some moment:
+> no stack space but rather complex BVH space.*
+
+`csg/decompose.py`'s `PART_MAX_CELLS = 64` is what declines MFT `Support_H0_D4`, the
+deepest boolean in the whole Run 3 corpus (**116 levels, 117 leaves** — 82 tubes, 30
+boxes, 4 arb8, 1 tubeseg). `Design_FlatCSGSolid.md` §8 froze 64 for rung R5, so the
+budget is now an explicit converter override rather than a changed default:
+`--max-cells`, `--max-splits` and `--decompose-timeout`. They set the module constants
+before the CSG hook runs; `csg/recognise.py` reads them at call time, so nothing had to
+be threaded through.
+
+At `--max-cells 256` the part decomposes into **100 cells over 808 halfspaces with
+`dV_sym = 0`** — exact, not approximate. Measured against the same part as the
+`TGeoCompositeShape` MFT ships today, one shared sample set, identical crossing and
+step counts: `Contains` **13x**, `Safety` **121x**, `DistanceToIn` 1.8x, transport
+4.7x. Structural memory 149 kB against the tree's 46 kB.
+
+**Open**: whether to move the default. What is measured is that a raised budget
+*works* on this part; what is not measured is what it costs — the conversion run was
+dominated by parsing the 536 MB `MFT.step`, so the decomposition time at 256 cells is
+unknown, and `Design_FlatCSGSolid.md` §9.12 already found the raise lands ITS
+`IBCYSSFlangeA` in the boundary-gap class. A census over the deep-boolean parts, with
+decomposition time recorded, is what would settle it.
+
+### (b) `O2FlatCSG` is close to GPU-ready, structurally
+
+Checked in the source, not inferred. `FlatCSGHalfspace` is `{int kind; double sign;
+double c[11];}`, `FlatCSGCell` is `{int first, count; double volume;}`, `FlatCSGBox`
+is `{double min[3], max[3]; int cell, firstActive, nActive;}` — PODs, no vtable, held
+in four contiguous vectors. `EvalHalfspace` is a **static** function and its only type
+decision is `if (kind == kTorus)`. `dynamic_cast`, `std::function` and `virtual` do not
+appear in `O2FlatCSG.cxx` at all; the only virtuals are the `TGeoShape` overrides at
+the entry point, which a device port would not have. The BVH traversal is an
+**explicit stack, not recursion** — which is the whole point, since it is a 116-deep
+boolean tree overflowing the CUDA stack (~2 kB per `Inside` frame) that blocks
+`Support_H0_D4` under AdePT today.
+
+Three things stand between it and a device, none structural:
+
+1. the scratch buffers are `thread_local std::vector` (the traversal stack, and
+   `pairBuffer`/`breakBuffer`/`boxPairs` in the distance kernels) and would become
+   fixed-capacity local arrays; the bounds are already known and documented in the
+   code. Point queries are allocation-free today, only the ray kernels are not;
+2. `fBVH` is a `void*` to a host `bvh::v2::Bvh`. Its nodes are PODs so the data
+   copies, but the traversal is host code — write a device counterpart, or reuse
+   VecGeom's BVH, which is already there;
+3. everything is `double`. Right on CPU, expensive on most GPUs. A float or
+   mixed-precision `EvalHalfspace` is worth measuring — the quadric form is a handful
+   of FMAs. Note the leaf test is already mixed: float against the node box, exact
+   double inside the leaf.
+
+### (c) `O2BVHSurfaceSolid` is not, and it is a representation change to make it so
+
+The runtime state is `std::vector<std::unique_ptr<BoundedSurface>>`, and
+`BoundedSurface` (`Detectors/Base/src/BoundedSurface.h`) is an abstract base with pure
+virtuals on the hot path — `containsPointOnSurface`, `appendIntersections`,
+`conservativeBounds` — over a family of six concrete kinds. Sixteen `virtual` in that
+header. So every patch the BVH returns costs an indirection.
+
+The data layout compounds it: `appendIntersections` reports hits by `push_back` into a
+`std::vector<RayHit>&` rather than a caller-owned buffer, and a patch's trimming is
+nested heap — `BVHSurfaceRecord` holds `polygonPoints`, `wireSizes`, `boundaryEdgeIds`
+and a `std::vector<BVHSurfaceCurveRecord> curves`, each curve carrying its own `poles`,
+`weights` and `knots`. Three or four levels of pointer chasing per trim test against
+FlatCSG's four flat arrays.
+
+A device port therefore means flattening the hierarchy into a tagged POD with a switch
+(the shape FlatCSG already has), pooling the trim curves into one array with offsets,
+and giving the intersection routine a fixed-capacity output. That is a rewrite of the
+representation, not a port, and it should not be started before (d).
+
+**Not claimed**: that the virtual dispatch costs anything measurable on CPU today. The
+`_Loop` twins isolate BVH pruning, not devirtualisation, so the indirection's CPU cost
+is unmeasured and no optimisation pass has been made.
+
+### (d) The benchmark says the cascade is right, and that is the awkward part
+
+Four representations of MFT `Support_H0_D4`, one sample set, ns per call
+(`TalkUpgradeWeek2026/artefacts/bench_mft/perf4.json`, **preliminary**):
+
+| | Contains | DistanceToIn | Safety | transport | memory |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| composite, 117 leaves | 860 | 5 089 | 53 408 | 15 342 ns/ray | 46 kB |
+| `O2FlatCSG`, 100 cells | **66** | 2 886 | **441** | 3 254 | 149 kB |
+| `O2BVHSurfaceSolid`, 310 patches | 788 | 1 134 | 2 637 | **2 397** | 92 kB |
+| mesh, 42 076 triangles | 91 | **755** | 804 | **947** | 2 300 kB |
+
+**No representation wins every kernel, and the winner changes with the part.** The
+flat solid owns the point queries; the surface solid owns the ray work and is the
+better exact representation for transport on this part; the mesh is fastest on rays
+and pays 50x the memory for it while being the only approximation. On ITS
+`IBCYSSFlangeC` (36 leaves, depth 35) the surface solid is instead the *slowest* on
+`Contains` (1 243 ns) because 66 patches at ~400 ns per candidate beat 12 cells of
+halfspaces — so patch count does not predict cost, BVH pruning does (2.1 candidates
+per `DistanceToIn` call on the MFT part, of 310 patches).
+
+The awkward consequence for (b) and (c): the representation that is nearly GPU-ready
+is not the one that is fastest for transport on CPU. Any device plan should say which
+kernel mix it is optimising, and the honest answer today is that the per-part cascade
+is what survives both.
+
+### (e) Fixed along the way, worth keeping
+
+`csg/census.py`, `csg/decompose.py` and `analyze_surface_geometry.py` all did
+`list(amap.FindFromIndex(i))`, which raises `TypeError` on **pythonOCC 7.9.0** —
+`TopTools_ListOfShape` has no `__iter__` there — so the recogniser aborted on any part
+reaching `_match_single_cell`. All three now use a `shape_list()` helper in
+`csg/census.py` with the iterator idiom `probes/trimEdgeCensus.py` already used. The
+R6 census must have been run on an older pythonOCC; anything reproducing it on 7.9
+needs this fix.
+
+`makeTestPartDB.py` gained `--include-name`, passed through to the converter, so a
+test-part database can be built for one part of a module instead of converting all of
+ITS or MFT.
+
+### (f) A direct `TGeoShape` → `O2FlatCSG` emitter, for AdePT
+
+> *With this shape we can have a generic representation on the GPU (virtual free).*
+
+Raised by Sandro 2026-09-08 with the AdePT work in mind, and it is the strongest reason
+to care about (b). Today a shape reaches `O2FlatCSG` only through the CAD round trip:
+TGeo → STEP → OCCT → decomposition at trusted concave edges → acceptance → sidecar.
+Every decline in the corpus is a property of that path — axis clusters beyond the
+matcher's scope, boundary gaps, the cell budget — and **none of them is about what the
+representation can express**. A direct emitter would skip all of it.
+
+**Coverage, checked against the shape list.** Every ordinary TGeo primitive has faces
+that are quadrics or tori, so all of them are expressible: planes alone for `TGeoBBox`,
+`TGeoPara`, `TGeoTrd1/2`, `TGeoTrap`, `TGeoPgon`, `TGeoXtru` and `TGeoHalfSpace`; plus a
+cylinder for `TGeoTube`, `TGeoTubeSeg`, `TGeoCtub` and `TGeoEltu` (an elliptic cylinder
+is a quadric); plus a cone for `TGeoCone`, `TGeoConeSeg` and `TGeoPcon`; `TGeoSphere`'s
+theta cuts are cones and its phi cuts planes; `TGeoTorus` has the torus slot. Because a
+halfspace carries a sign, a *cell* may be complemented and so non-convex — a hollow tube
+is one cell, and a segment costs only two more planes. What costs cells is concavity:
+roughly one per z-section of a `TGeoPcon`, one per convex piece of a concave `TGeoXtru`.
+The two exceptions are `TGeoTessellated`, which is not a CSG solid at all, and a
+non-uniformly scaled torus — an affine image of a quadric is still a quadric, so
+`TGeoScaledShape` over any quadric is fine, but the same transform turns a torus into a
+quartic that is not a torus of revolution and there is no slot for it.
+
+**Why it is attractive for a device.** AdePT converts the Geant4 geometry to VecGeom via
+`g4vg`, which means a zoo of solid types and, for a boolean, a recursion that overflows
+the CUDA stack at ~2 kB per `Inside` frame — that is what blocks MFT `Support_H0_D4`
+today (`swenzel_projects/Adept/Deep_booleans_and_stack.md`; the workaround is
+`/adept/setCUDAStackLimit 32768`, which is a stack size, not a fix). One flat
+representation replaces the zoo with a single kernel over four POD arrays: no virtual
+dispatch, no per-shape specialisation, no recursion. The whole ALICE geometry in one
+device structure is the prize.
+
+**Two routes, and the second is the hard one.**
+
+1. **Primitives, by template.** A box is six planes; a tube is a cylinder, its
+   complement and two planes; a cone, sphere, torus and their segments likewise. A
+   `TGeoPcon`/`TGeoPgon` is one cell per z-section, a concave `TGeoXtru` one per convex
+   piece of its polygon. This is a few lines each and needs no geometry kernel at all.
+   Note the class stores a *general* quadric, so `TGeoHype`, `TGeoParaboloid` and the
+   twisted faces of `TGeoArb8`/`TGeoGtra` (hyperbolic paraboloids) are all expressible
+   even though no recogniser emits them today.
+2. **`TGeoCompositeShape`, by distributing the tree into DNF.** Algebraic, not
+   geometric: `A - B = A ∩ ¬B`, and De Morgan pushes complements down to the leaves.
+   **The naive expansion blows up** and this is the whole difficulty: the complement of
+   a *cell* is a union of complemented halfspaces, so subtracting one k-halfspace tool
+   multiplies the cell count by k, and a 116-deep tree of tube subtractions is 3^82 in
+   the worst case. Two mitigations, both worth trying before anything else:
+   - **Drop redundant bounding halfspaces on a tool.** If a subtracted tube's end
+     planes do not cut the body, the tool is effectively an infinite cylinder, `¬tool`
+     is then a *single* halfspace, and the subtraction costs one halfspace instead of a
+     union. Drilled holes — the dominant ALICE pattern, and 82 of `Support_H0_D4`'s 117
+     leaves are tubes — collapse to this case. **Unverified**: this is the conjecture
+     that would explain why the OCCT decomposition of that part lands at 100 cells
+     rather than exploding, and it should be checked before the emitter is designed
+     around it.
+   - **Prune empty cells with the range bound the class already has.**
+     `HalfspaceRange` gives a rigorous enclosure of `sign*Q` over a box; a candidate
+     cell whose halfspaces cannot be simultaneously satisfied anywhere in the part's
+     bounding box is empty and can be dropped during the distribution rather than
+     after. That is the same machinery `CloseShape` runs, reused one level up.
+
+**What else the emitter needs.** `SetCellBBox` per cell, because an intersection of
+halfspaces can be unbounded and the class does not derive the box itself — for a TGeo
+source the part's own `ComputeBBox` bounds every cell, and a tighter per-cell box can
+come from the tool extents. And validation against the source shape directly:
+`checkKnownSource.py` already scores an emitted shape against the `TGeoShape` it was
+made from over sampled points and rays, which is exactly the oracle this route wants,
+and it needs no OCCT.
+
+**Where it does not help.** A primitive should still ship as itself on CPU — a
+`TGeoTube` beats any cell decomposition of a tube — so this is a device-side
+representation, not a replacement for the cascade. Whether it is also worth using on
+CPU for deep booleans is (d)'s question and depends on the kernel mix.
