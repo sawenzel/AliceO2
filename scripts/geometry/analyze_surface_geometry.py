@@ -94,6 +94,7 @@ from OCC.Core.TopExp import TopExp_Explorer, topexp
 from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_SOLID, TopAbs_EDGE
 from OCC.Core.TopoDS import topods
 from OCC.Core.TopTools import TopTools_IndexedDataMapOfShapeListOfShape
+from csg.census import shape_list
 from OCC.Core.BRep import BRep_Tool
 from OCC.Core.BRepAdaptor import BRepAdaptor_Surface, BRepAdaptor_Curve
 from OCC.Core.Geom2dAdaptor import Geom2dAdaptor_Curve
@@ -486,7 +487,7 @@ def analyze_trim_curves(shape, convertible_surfaces_only=True):
         edge = topods.Edge(edge_to_faces.FindKey(index))
         if BRep_Tool.Degenerated(edge):
             continue
-        adjacent = [topods.Face(f) for f in edge_to_faces.FindFromIndex(index)]
+        adjacent = [topods.Face(f) for f in shape_list(edge_to_faces.FindFromIndex(index))]
         adjacent = [f for f in adjacent if hash(f) in kept_hashes]
         if len(adjacent) != 2:
             continue

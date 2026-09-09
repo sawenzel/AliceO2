@@ -108,6 +108,7 @@ def first_trusted_concave_edge(solid):
     from OCC.Core.TopAbs import TopAbs_EDGE, TopAbs_FACE
     from OCC.Core.TopExp import topexp
     from OCC.Core.TopTools import TopTools_IndexedDataMapOfShapeListOfShape
+    from csg.census import shape_list
     from OCC.Core.TopoDS import topods
 
     amap = TopTools_IndexedDataMapOfShapeListOfShape()
@@ -118,7 +119,7 @@ def first_trusted_concave_edge(solid):
         edge = topods.Edge(amap.FindKey(i))
         if BRep_Tool.Degenerated(edge):
             continue
-        faces = list(amap.FindFromIndex(i))
+        faces = shape_list(amap.FindFromIndex(i))
         distinct = []
         for f in faces:
             if not any(f.IsSame(g) for g in distinct):

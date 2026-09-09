@@ -75,7 +75,8 @@ from OCC.Core.TopAbs import (TopAbs_EDGE, TopAbs_FACE, TopAbs_REVERSED,  # noqa:
                              TopAbs_SOLID)
 from OCC.Core.TopExp import TopExp_Explorer, topexp  # noqa: E402
 from OCC.Core.TopTools import (TopTools_IndexedDataMapOfShapeListOfShape,  # noqa: E402
-                               TopTools_IndexedMapOfShape)
+                               TopTools_IndexedMapOfShape,
+                               TopTools_ListIteratorOfListOfShape)
 from OCC.Core.TopoDS import topods  # noqa: E402
 from OCC.Core.XCAFDoc import XCAFDoc_DocumentTool  # noqa: E402
 from OCC.Core.gp import gp_Dir, gp_Pnt, gp_Vec  # noqa: E402
@@ -466,6 +467,22 @@ def edge_dihedral(edge, f1, f2, orients, samples=3):
     return "mixed", max_sin
 
 
+
+def shape_list(lst):
+    """The shapes in a TopTools_ListOfShape, as a Python list.
+
+    `list(lst)` works on some pythonOCC builds and raises TypeError on others
+    (7.9.0 does not expose __iter__), so go through the iterator the OCCT API
+    documents. Same idiom as probes/trimEdgeCensus.py.
+    """
+    out = []
+    it = TopTools_ListIteratorOfListOfShape(lst)
+    while it.More():
+        out.append(it.Value())
+        it.Next()
+    return out
+
+
 def edge_census(solid):
     amap = TopTools_IndexedDataMapOfShapeListOfShape()
     topexp.MapShapesAndAncestors(solid, TopAbs_EDGE, TopAbs_FACE, amap)
@@ -483,7 +500,7 @@ def edge_census(solid):
         if BRep_Tool.Degenerated(edge):
             counts["degenerate"] += 1          # a pole of a sphere/cone: no dihedral exists
             continue
-        faces = list(amap.FindFromIndex(i))
+        faces = shape_list(amap.FindFromIndex(i))
         distinct = []
         for f in faces:
             if not any(f.IsSame(g) for g in distinct):
