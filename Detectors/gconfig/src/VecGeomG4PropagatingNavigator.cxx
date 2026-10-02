@@ -194,7 +194,7 @@ void VecGeomG4PropagatingNavigator::LocateGlobalPointWithinVolume(const G4ThreeV
 }
 
 G4double VecGeomG4PropagatingNavigator::ComputeSafety(const G4ThreeVector& globalPoint, const G4double proposedMaxLength,
-                                                     const G4bool)
+                                                      const G4bool)
 {
   if (mZeroSafety || mOnBoundary || mCrossed || fEnteredDaughter || fExitedMother || mWouldEnter || mWouldExit) {
     return 0.;
