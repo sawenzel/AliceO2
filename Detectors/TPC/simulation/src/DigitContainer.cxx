@@ -43,12 +43,13 @@ void DigitContainer::fillOutputContainer(std::vector<Digit>& output,
   // Without this we might get crashes in the clusterization step.
   static const int maxTimeBinForTimeFrame = o2::conf::DigiParams::Instance().maxOrbitsToDigitize != -1 ? ((o2::conf::DigiParams::Instance().maxOrbitsToDigitize * 3564 + 2 * 8 - 2) / 8) : -1;
 
-  auto& sampaProcessing = mSAMPAProcessing ? *mSAMPAProcessing : SAMPAProcessing::instance();
-
   if (!mCalibrationsUpdated) {
     LOG(debug) << "TPC DigitContainer: calibrations not set up before the first flush, fetching them now";
     updateCalibrations();
   }
+
+  // after updateCalibrations, which may reload the FEE parameters that SAMPAProcessing picks up
+  auto& sampaProcessing = mSAMPAProcessing ? *mSAMPAProcessing : SAMPAProcessing::instance();
 
   const bool needsPrevDigArray = eleParam.doIonTail || eleParam.doIonTailPerPad || eleParam.doSaturationTail;
   const bool needsEmptyTimeBins = needsPrevDigArray || eleParam.doNoiseEmptyPads;
