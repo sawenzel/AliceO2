@@ -118,10 +118,10 @@ class Digitizer
   /// \param nRBins number of grid points in r, must be (2**N)+1
   void setUseSCDistortions(const SCDistortionType& distortionType, const TH3* hisInitialSCDensity);
   /// Enable the use of space-charge distortions and provide SpaceCharge object as input
-  /// \param spaceCharge unique pointer to spaceCharge object
+  /// \param spaceCharge spaceCharge object, not owned: the caller (e.g. the DPL CCDB cache) keeps it alive
   void setUseSCDistortions(SC* spaceCharge);
 
-  /// \param spaceCharge unique pointer to spaceCharge object
+  /// \param spaceCharge spaceCharge object of the derivative map, not owned: the caller keeps it alive
   void setSCDistortionsDerivative(SC* spaceCharge);
 
   /// Enable the use of space-charge distortions by providing global distortions and global corrections stored in a ROOT file
@@ -142,9 +142,10 @@ class Digitizer
   void recalculateDistortions();
 
  private:
-  DigitContainer mDigitContainer;      ///< Container for the Digits
-  std::unique_ptr<SC> mSpaceCharge;    ///< Handler of full distortions (static + IR dependant)
-  std::unique_ptr<SC> mSpaceChargeDer; ///< Handler of reference static distortions
+  DigitContainer mDigitContainer;        ///< Container for the Digits
+  std::unique_ptr<SC> mSpaceChargeOwned; ///< Distortions created by the digitizer itself
+  SC* mSpaceCharge = nullptr;            ///< Handler of full distortions (static + IR dependant), owned by mSpaceChargeOwned or by the caller
+  SC* mSpaceChargeDer = nullptr;         ///< Handler of reference static distortions, owned by the caller
   Sector mSector = -1;                 ///< ID of the currently processed sector
   double mEventTime = 0.f;             ///< Time of the currently processed event
   double mOutputDigitTimeOffset = 0;   ///< Time of the first IR sampled in the digitizer
