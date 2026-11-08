@@ -195,7 +195,9 @@ void Digitizer::setUseSCDistortions(const SCDistortionType& distortionType, cons
 void Digitizer::setUseSCDistortions(SC* spaceCharge)
 {
   mUseSCDistortions = true;
-  mSpaceChargeOwned.reset();
+  if (spaceCharge != mSpaceChargeOwned.get()) {
+    mSpaceChargeOwned.reset();
+  }
   mSpaceCharge = spaceCharge;
   mSpaceCharge->initAfterReadingFromFile();
   mSpaceCharge->printMetaData();
