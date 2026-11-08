@@ -46,8 +46,9 @@ void Digitizer::init()
   auto& electronTransport = ElectronTransport::instance();
   electronTransport.updateParameters(mVDrift);
   auto& sampaProcessing = SAMPAProcessing::instance();
-  sampaProcessing.updateParameters(mVDrift);
+  // the calibration update may reload FEE parameters from file, so SAMPAProcessing picks up its pointers afterwards
   mDigitContainer.updateCalibrations();
+  sampaProcessing.updateParameters(mVDrift);
 }
 
 void Digitizer::process(const std::vector<o2::tpc::HitGroup>& hits,

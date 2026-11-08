@@ -44,6 +44,7 @@ void DigitContainer::fillOutputContainer(std::vector<Digit>& output,
   static const int maxTimeBinForTimeFrame = o2::conf::DigiParams::Instance().maxOrbitsToDigitize != -1 ? ((o2::conf::DigiParams::Instance().maxOrbitsToDigitize * 3564 + 2 * 8 - 2) / 8) : -1;
 
   if (!mCalibrationsUpdated) {
+    LOG(debug) << "TPC DigitContainer: calibrations not set up before the first flush, fetching them now";
     updateCalibrations();
   }
 

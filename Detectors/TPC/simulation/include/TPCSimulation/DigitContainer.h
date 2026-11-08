@@ -21,6 +21,7 @@
 #include "TPCBase/CRU.h"
 #include "DataFormatsTPC/Defs.h"
 #include "TPCSimulation/DigitTime.h"
+#include "TPCBase/CalDet.h"
 #include "CommonUtils/DebugStreamer.h"
 #include "TPCBase/ParameterDetector.h"
 #include "TPCBase/ParameterElectronics.h"
@@ -79,6 +80,7 @@ class DigitContainer
   size_t size() const { return mTimeBins.size(); }
 
   /// Fetch the calibration objects used by fillOutputContainer from the CDBInterface
+  /// Must be called after the CDBInterface is configured; fillOutputContainer calls it lazily otherwise
   void updateCalibrations();
 
  private:
@@ -89,10 +91,10 @@ class DigitContainer
   std::deque<DigitTime*> mTimeBins;                           ///< Time bin Container for the ADC value
   std::unique_ptr<DigitTime::PrevDigitInfoArray> mPrevDigArr; ///< Keep track of ToT and ion tail cumul from last time bin
   o2::utils::DebugStreamer mStreamer;                         ///< Debug streamer
-  const CalPad* mPadParams[3] = {nullptr, nullptr, nullptr};  ///< Ion tail fraction, ion tail slope and common mode k-values per pad
-  const CalDet<bool>* mDeadMap = nullptr;                     ///< Dead channel map
-  bool mCMCEnabled = false;                                   ///< Common mode correction enabled in the FEE config (DigiMode Auto)
-  bool mCalibrationsUpdated = false;                          ///< Whether updateCalibrations was called
+  const CalPad* mPadParams[3] = {nullptr, nullptr, nullptr};  //!< Ion tail fraction, ion tail slope and common mode k-values per pad
+  const CalDet<bool>* mDeadMap = nullptr;                     //!< Dead channel map
+  bool mCMCEnabled = false;                                   //!< Common mode correction enabled in the FEE config (DigiMode Auto)
+  bool mCalibrationsUpdated = false;                          //!< Whether updateCalibrations was called
 
   void reportSettings();
 };
