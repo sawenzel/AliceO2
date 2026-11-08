@@ -43,6 +43,8 @@ void DigitContainer::fillOutputContainer(std::vector<Digit>& output,
   // Without this we might get crashes in the clusterization step.
   static const int maxTimeBinForTimeFrame = o2::conf::DigiParams::Instance().maxOrbitsToDigitize != -1 ? ((o2::conf::DigiParams::Instance().maxOrbitsToDigitize * 3564 + 2 * 8 - 2) / 8) : -1;
 
+  auto& sampaProcessing = mSAMPAProcessing ? *mSAMPAProcessing : SAMPAProcessing::instance();
+
   if (!mCalibrationsUpdated) {
     LOG(debug) << "TPC DigitContainer: calibrations not set up before the first flush, fetching them now";
     updateCalibrations();
@@ -91,34 +93,34 @@ void DigitContainer::fillOutputContainer(std::vector<Digit>& output,
     if (time) {
       switch (digitizationMode) {
         case DigitzationMode::FullMode: {
-          time->fillOutputContainer<DigitzationMode::FullMode>(output, mcTruth, commonModeOutput, sector, timeBin, mPrevDigArr.get(), debugStream, mPadParams, mDeadMap);
+          time->fillOutputContainer<DigitzationMode::FullMode>(output, mcTruth, commonModeOutput, sector, timeBin, sampaProcessing, mLabelCollector, mPrevDigArr.get(), debugStream, mPadParams, mDeadMap);
           break;
         }
         case DigitzationMode::ZeroSuppression: {
-          time->fillOutputContainer<DigitzationMode::ZeroSuppression>(output, mcTruth, commonModeOutput, sector, timeBin, mPrevDigArr.get(), debugStream, mPadParams, mDeadMap);
+          time->fillOutputContainer<DigitzationMode::ZeroSuppression>(output, mcTruth, commonModeOutput, sector, timeBin, sampaProcessing, mLabelCollector, mPrevDigArr.get(), debugStream, mPadParams, mDeadMap);
           break;
         }
         case DigitzationMode::ZeroSuppressionCMCorr: {
-          time->fillOutputContainer<DigitzationMode::ZeroSuppressionCMCorr>(output, mcTruth, commonModeOutput, sector, timeBin, mPrevDigArr.get(), debugStream, mPadParams, mDeadMap);
+          time->fillOutputContainer<DigitzationMode::ZeroSuppressionCMCorr>(output, mcTruth, commonModeOutput, sector, timeBin, sampaProcessing, mLabelCollector, mPrevDigArr.get(), debugStream, mPadParams, mDeadMap);
           break;
         }
         case DigitzationMode::SubtractPedestal: {
-          time->fillOutputContainer<DigitzationMode::SubtractPedestal>(output, mcTruth, commonModeOutput, sector, timeBin, mPrevDigArr.get(), debugStream, mPadParams, mDeadMap);
+          time->fillOutputContainer<DigitzationMode::SubtractPedestal>(output, mcTruth, commonModeOutput, sector, timeBin, sampaProcessing, mLabelCollector, mPrevDigArr.get(), debugStream, mPadParams, mDeadMap);
           break;
         }
         case DigitzationMode::NoSaturation: {
-          time->fillOutputContainer<DigitzationMode::NoSaturation>(output, mcTruth, commonModeOutput, sector, timeBin, mPrevDigArr.get(), debugStream, mPadParams, mDeadMap);
+          time->fillOutputContainer<DigitzationMode::NoSaturation>(output, mcTruth, commonModeOutput, sector, timeBin, sampaProcessing, mLabelCollector, mPrevDigArr.get(), debugStream, mPadParams, mDeadMap);
           break;
         }
         case DigitzationMode::PropagateADC: {
-          time->fillOutputContainer<DigitzationMode::PropagateADC>(output, mcTruth, commonModeOutput, sector, timeBin, mPrevDigArr.get(), debugStream, mPadParams, mDeadMap);
+          time->fillOutputContainer<DigitzationMode::PropagateADC>(output, mcTruth, commonModeOutput, sector, timeBin, sampaProcessing, mLabelCollector, mPrevDigArr.get(), debugStream, mPadParams, mDeadMap);
           break;
         }
         case DigitzationMode::Auto: {
           if (mCMCEnabled) {
-            time->fillOutputContainer<DigitzationMode::ZeroSuppressionCMCorr>(output, mcTruth, commonModeOutput, sector, timeBin, mPrevDigArr.get(), debugStream, mPadParams, mDeadMap);
+            time->fillOutputContainer<DigitzationMode::ZeroSuppressionCMCorr>(output, mcTruth, commonModeOutput, sector, timeBin, sampaProcessing, mLabelCollector, mPrevDigArr.get(), debugStream, mPadParams, mDeadMap);
           } else {
-            time->fillOutputContainer<DigitzationMode::ZeroSuppression>(output, mcTruth, commonModeOutput, sector, timeBin, mPrevDigArr.get(), debugStream, mPadParams, mDeadMap);
+            time->fillOutputContainer<DigitzationMode::ZeroSuppression>(output, mcTruth, commonModeOutput, sector, timeBin, sampaProcessing, mLabelCollector, mPrevDigArr.get(), debugStream, mPadParams, mDeadMap);
           }
           break;
         }
