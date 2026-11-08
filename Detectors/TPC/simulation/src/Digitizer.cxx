@@ -47,6 +47,7 @@ void Digitizer::init()
   electronTransport.updateParameters(mVDrift);
   auto& sampaProcessing = SAMPAProcessing::instance();
   sampaProcessing.updateParameters(mVDrift);
+  mDigitContainer.updateCalibrations();
 }
 
 void Digitizer::process(const std::vector<o2::tpc::HitGroup>& hits,
