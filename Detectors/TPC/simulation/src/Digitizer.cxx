@@ -91,7 +91,8 @@ void Digitizer::init()
       mSAMPAProcessing = std::make_unique<SAMPAProcessing>(&rng);
       mDigitContainer.setSAMPAProcessing(mSAMPAProcessing.get());
     }
-    TRandom3 rng(toTRandom3Seed(mixSeed(mSeed ^ mixSeed(static_cast<ULong64_t>(mSector) + 1))));
+    const ULong64_t sectorSeed = mixSeed(mSeed ^ mixSeed(static_cast<ULong64_t>(mSector) + 1));
+    TRandom3 rng(toTRandom3Seed(mixSeed(sectorSeed ^ mixSeed(mSeedingTimeframe))));
     mGEMAmplification->setRandomRingPositions(rng);
     mElectronTransport->setRandomRingPositions(rng);
     mSAMPAProcessing->setRandomRingPositions(rng);

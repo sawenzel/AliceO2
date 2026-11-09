@@ -113,9 +113,9 @@ class RandomRing
   /// @return position in the ring buffer
   unsigned int getRingPosition() const { return mRingPosition; }
 
-  /// set the position in the ring buffer
-  /// @param [in] position new position, taken modulo the ring size
-  void setRingPosition(size_t position) { mRingPosition = position % N; }
+  /// move to a random position in the ring buffer; not for rings read with getNextValueVc()
+  /// @param [in] rng random generator to draw the position from
+  void setRandomPosition(TRandom& rng) { mRingPosition = rng.Integer(N); }
 
  private:
   // =========================================================================
@@ -177,7 +177,7 @@ inline void RandomRing<N>::initialize(TF1& function, TRandom* rng)
 {
   mRandomType = RandomType::CustomTF1;
   for (auto& v : mRandomNumbers) {
-    v = rng ? function.GetRandom(rng) : function.GetRandom();
+    v = function.GetRandom(rng);
   }
 }
 

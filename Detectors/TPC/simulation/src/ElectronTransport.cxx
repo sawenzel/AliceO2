@@ -28,8 +28,8 @@ ElectronTransport::ElectronTransport(TRandom* rng) : mRandomGaus(RandomRing<>::R
 
 void ElectronTransport::setRandomRingPositions(TRandom& rng)
 {
-  mRandomGaus.setRingPosition(rng.Integer(kMaxUInt));
-  mRandomFlat.setRingPosition(rng.Integer(kMaxUInt));
+  mRandomGaus.setRandomPosition(rng);
+  mRandomFlat.setRandomPosition(rng);
 }
 
 void ElectronTransport::updateParameters(float vdrift)

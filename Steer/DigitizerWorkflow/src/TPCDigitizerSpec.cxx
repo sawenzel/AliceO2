@@ -392,6 +392,7 @@ class TPCDPLDigitizerTask : public BaseDPLDigitizer
     }
 
     mDigitizer.setSector(sector);
+    mDigitizer.setSeedingTimeframe(dh->tfCounter);
     mDigitizer.init();
 
     auto& eventParts = context->getEventParts();

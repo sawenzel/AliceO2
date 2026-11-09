@@ -109,12 +109,12 @@ GEMAmplification::GEMAmplification(TRandom* rng)
 
 void GEMAmplification::setRandomRingPositions(TRandom& rng)
 {
-  mRandomGaus.setRingPosition(rng.Integer(kMaxUInt));
-  mRandomFlat.setRingPosition(rng.Integer(kMaxUInt));
+  mRandomGaus.setRandomPosition(rng);
+  mRandomFlat.setRandomPosition(rng);
   for (auto& gain : mGain) {
-    gain.setRingPosition(rng.Integer(kMaxUInt));
+    gain.setRandomPosition(rng);
   }
-  mGainFullStack.setRingPosition(rng.Integer(kMaxUInt));
+  mGainFullStack.setRandomPosition(rng);
 }
 
 void GEMAmplification::updateParameters()

@@ -53,7 +53,7 @@ class SAMPAProcessing
   ~SAMPAProcessing() = default;
 
   /// Move the random ring to a new position drawn from rng
-  void setRandomRingPositions(TRandom& rng) { mRandomNoiseRing.setRingPosition(rng.Integer(kMaxUInt)); }
+  void setRandomRingPositions(TRandom& rng) { mRandomNoiseRing.setRandomPosition(rng); }
 
   /// Update the OCDB parameters cached in the class. To be called once per event
   void updateParameters(float vdrift = 0);
