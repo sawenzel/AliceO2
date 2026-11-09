@@ -13,6 +13,7 @@
 /// \brief A single TPC digitizer device that digitizes the sectors with several threads
 
 #include "TPCDigitizerSpec.h"
+#include "TPCDistortionMapFile.h"
 #include "TPCSectorDigitization.h"
 #include "Framework/ConfigParamRegistry.h"
 #include "Framework/DataProcessorSpec.h"
@@ -126,6 +127,13 @@ class TPCDPLDigitizerMTTask : public o2::base::BaseDPLDigitizer
     mUseCalibrationsFromCCDB = ic.options().get<bool>("TPCuseCCDB");
     mMeanLumiDistortions = ic.options().get<float>("meanLumiDistortions");
     mMeanLumiDistortionsDerivative = ic.options().get<float>("meanLumiDistortionsDerivative");
+    if (const auto file = ic.options().get<std::string>("tpc-distortion-file"); !file.empty()) {
+      if (mDistortionType == 2 && mRecalcDistortions) {
+        mDistortionMapFile = std::make_unique<TPCDistortionMapFile>(file);
+      } else {
+        LOG(info) << "TPC: --tpc-distortion-file is only used for distortion type 2 with recalculation";
+      }
+    }
     LOG(info) << "TPC calibrations from CCDB: " << mUseCalibrationsFromCCDB;
 
     // the workers share no random numbers: each digitizer seeds every sector from DigiParams.seed
@@ -198,14 +206,21 @@ class TPCDPLDigitizerMTTask : public o2::base::BaseDPLDigitizer
     pc.inputs().get<ParameterGEM*>("gemparam");
     auto& primary = mWorkers[0]->digitizer;
     if (mDistortionType) {
-      pc.inputs().get<SC*>("tpcdistortions");
-      if (mDistortionType == 2) {
-        pc.inputs().get<SC*>("tpcdistortionsderiv");
-        primary.setLumiScaleFactor();
-        if (mRecalcDistortions) {
-          // done once, with the threads of SpaceCharge, for all workers
-          primary.recalculateDistortions();
+      auto computeDistortions = [&]() {
+        pc.inputs().get<SC*>("tpcdistortions");
+        if (mDistortionType == 2) {
+          pc.inputs().get<SC*>("tpcdistortionsderiv");
+          primary.setLumiScaleFactor();
+          if (mRecalcDistortions) {
+            // done once, with the threads of SpaceCharge, for all workers
+            primary.recalculateDistortions();
+          }
         }
+      };
+      if (mDistortionMapFile) {
+        mDistortionMapFile->prepare(pc, primary, mMeanLumiDistortions, mMeanLumiDistortionsDerivative, computeDistortions);
+      } else {
+        computeDistortions();
       }
       for (size_t i = 1; i < mWorkers.size(); ++i) {
         mWorkers[i]->digitizer.setSCDistortionsFrom(primary);
@@ -319,6 +334,7 @@ class TPCDPLDigitizerMTTask : public o2::base::BaseDPLDigitizer
   bool mRecalcDistortions = false;
   float mMeanLumiDistortions = -1;
   float mMeanLumiDistortionsDerivative = -1;
+  std::unique_ptr<TPCDistortionMapFile> mDistortionMapFile; ///< file sharing the scaled distortions between digitizers
 };
 
 o2::framework::DataProcessorSpec getTPCDigitizerMTSpec(int nThreads, std::vector<int> const& sectors, int distortionType)
@@ -351,6 +367,7 @@ o2::framework::DataProcessorSpec getTPCDigitizerMTSpec(int nThreads, std::vector
       {"meanLumiDistortionsDerivative", VariantType::Float, -1.f, {"override lumi of derivative distortion object if >=0"}},
       {"do-not-recalculate-distortions", VariantType::Bool, false, {"Do not recalculate the distortions"}},
       {"n-threads-distortions", VariantType::Int, 4, {"Number of threads used for the calculation of the distortions"}},
+      {"tpc-distortion-file", VariantType::String, "", {"File in which the digitizers of one job share the scaled distortions (distortion type 2 with recalculation), computed once; keep it in the job directory"}},
     }};
 }
 

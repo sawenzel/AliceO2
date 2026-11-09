@@ -146,6 +146,12 @@ class Digitizer
   /// Use the distortion maps and scaling of another digitizer, which keeps ownership of the maps
   void setSCDistortionsFrom(const Digitizer& other);
 
+  /// Use distortions that are already scaled to the instantaneous luminosity, owned by the digitizer
+  void setScaledSCDistortions(std::unique_ptr<SC> spaceCharge);
+
+  /// \return the space-charge object holding the distortions, or nullptr
+  const SC* getSCDistortions() const { return mSpaceCharge; }
+
   /// Use digitizer-owned random rings filled from seed and positioned per sector and timeframe in init(),
   /// so that the digits of a sector do not depend on which sectors were processed before
   /// \param seed base seed, typically DigiParams.seed

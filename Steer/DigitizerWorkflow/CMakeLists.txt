@@ -27,6 +27,7 @@ o2_add_executable(digitizer-workflow
                           src/TPCDigitizerSpec.cxx
                           src/TPCSectorDigitization.cxx
                           src/TPCDigitizerMTSpec.cxx
+                          src/TPCDistortionMapFile.cxx
                           src/ZDCDigitizerSpec.cxx
                           src/TOFDigitizerSpec.cxx
                           $<$<BOOL:${ENABLE_UPGRADES}>:src/ITS3DigitizerSpec.cxx>
