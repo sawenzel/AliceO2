@@ -279,6 +279,7 @@ class TPCDPLDigitizerMTTask : public o2::base::BaseDPLDigitizer
     }
 
     std::atomic<size_t> nextSector{0};
+    // serialises CDBInterface access; the CCDB timestamp must not change while the workers run
     std::mutex cdbMutex;
     std::vector<std::thread> threads;
     for (size_t i = 0; i < nWorkers; ++i) {

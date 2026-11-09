@@ -155,6 +155,7 @@ void DigitContainer::updateCalibrations()
 
   // dead channel map
   mDeadMap = nullptr;
+  mDeadMapCopy.reset();
   if (eleParam.applyDeadMap) {
     mDeadMapCopy = std::make_unique<CalDet<bool>>(cdb.getDeadChannelMap());
     mDeadMap = mDeadMapCopy.get();
