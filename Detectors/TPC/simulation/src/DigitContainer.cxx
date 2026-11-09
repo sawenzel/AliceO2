@@ -60,14 +60,6 @@ void DigitContainer::fillOutputContainer(std::vector<Digit>& output,
     mPrevDigArr = std::make_unique<DigitTime::PrevDigitInfoArray>();
   }
 
-  static std::atomic<bool> reportedSettings{false};
-  if (!reportedSettings.exchange(true)) {
-    reportSettings();
-    if (mDeadMap) {
-      LOGP(info, "Using dead map with {} masked pads", mDeadMap->getSum<int>());
-    }
-  }
-
   for (auto& time : mTimeBins) {
     /// the time bins between the last event and the timing of this event are uncorrelated and can be written out
     /// OR the readout is triggered (i.e. not continuous) and we can dump everything in any case, as long it is within one drift time interval
@@ -162,12 +154,24 @@ void DigitContainer::updateCalibrations()
   }
 
   // dead channel map
-  mDeadMap = eleParam.applyDeadMap ? &cdb.getDeadChannelMap() : nullptr;
+  mDeadMap = nullptr;
+  if (eleParam.applyDeadMap) {
+    mDeadMapCopy = std::make_unique<CalDet<bool>>(cdb.getDeadChannelMap());
+    mDeadMap = mDeadMapCopy.get();
+  }
 
   // common mode correction in the FEE, needed to resolve DigiMode Auto
   mCMCEnabled = (eleParam.DigiMode == DigitzationMode::Auto) && cdb.getFEEConfig().isCMCEnabled();
 
   mCalibrationsUpdated = true;
+
+  static std::atomic<bool> reportedSettings{false};
+  if (!reportedSettings.exchange(true)) {
+    reportSettings();
+    if (mDeadMap) {
+      LOGP(info, "Using dead map with {} masked pads", mDeadMap->getSum<int>());
+    }
+  }
 }
 
 void DigitContainer::reportSettings()
