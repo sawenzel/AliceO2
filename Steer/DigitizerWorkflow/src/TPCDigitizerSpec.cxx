@@ -413,7 +413,7 @@ class TPCDPLDigitizerTask : public BaseDPLDigitizer
   o2::tpc::VDriftHelper mTPCVDriftHelper{};
   std::vector<TChain*> mSimChains;
   SectorFlushBuffers mFlushBuffers; // output of the latest flush
-  std::vector<int> mListOfSectors; //  a list of sectors treated by this task
+  std::vector<int> mListOfSectors;  //  a list of sectors treated by this task
   TFile* mInternalROOTFlushFile = nullptr;
   TTree* mInternalROOTFlushTTree = nullptr;
   size_t mFlushCounter = 0;
