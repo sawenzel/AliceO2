@@ -16,7 +16,8 @@
 #include "DetectorsRaw/HBFUtils.h"
 #include "Framework/Logger.h"
 #include "SimulationDataFormat/DigitizationContext.h"
-#include "TPCSimulation/Detector.h"
+#include "TPCBase/Sector.h"
+#include "TPCSimulation/Point.h"
 #include "TPCSimulation/Digitizer.h"
 
 namespace o2::tpc

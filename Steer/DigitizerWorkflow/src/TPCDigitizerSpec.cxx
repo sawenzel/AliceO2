@@ -23,7 +23,6 @@
 #include "Framework/DataRefUtils.h"
 #include "Framework/Lifetime.h"
 #include "Framework/DeviceSpec.h"
-#include "DetectorsRaw/HBFUtils.h"
 #include "Headers/DataHeader.h"
 #include "TStopwatch.h"
 #include "Steer/HitProcessingManager.h" // for DigitizationContext

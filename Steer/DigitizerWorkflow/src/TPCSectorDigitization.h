@@ -41,7 +41,9 @@ struct SectorFlushBuffers {
 };
 
 /// Digitize all collisions of one sector of a timeframe.
-/// After each flush the new output is in buffers and onFlush is called.
+/// After each flush the new output is in buffers and onFlush is called on the calling thread.
+/// The function makes no DPL calls. Concurrent calls need one Digitizer with sector seeding and one set of chains
+/// per thread; Digitizer::init() is called here and is not thread-safe across Digitizer instances.
 /// \return the digit groups, one per collision part in triggered mode, one for the timeframe in continuous mode
 std::vector<dataformats::RangeReference<int, int>> digitizeSector(Digitizer& digitizer, const steer::DigitizationContext& context,
                                                                   const std::vector<TChain*>& simChains, int sector, ULong64_t timeframe,
