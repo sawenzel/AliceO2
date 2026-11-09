@@ -14,6 +14,7 @@
 /// \author Andi Mathis, TU München, andreas.mathis@ph.tum.de
 
 #include "TPCSimulation/DigitContainer.h"
+#include <atomic>
 #include <memory>
 #include <fairlogger/Logger.h>
 #include "TPCBase/Mapper.h"
@@ -59,13 +60,12 @@ void DigitContainer::fillOutputContainer(std::vector<Digit>& output,
     mPrevDigArr = std::make_unique<DigitTime::PrevDigitInfoArray>();
   }
 
-  static bool reportedSettings = false;
-  if (!reportedSettings) {
+  static std::atomic<bool> reportedSettings{false};
+  if (!reportedSettings.exchange(true)) {
     reportSettings();
     if (mDeadMap) {
       LOGP(info, "Using dead map with {} masked pads", mDeadMap->getSum<int>());
     }
-    reportedSettings = true;
   }
 
   for (auto& time : mTimeBins) {
