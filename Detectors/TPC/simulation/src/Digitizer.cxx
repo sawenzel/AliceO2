@@ -305,6 +305,17 @@ void Digitizer::setSCDistortionsFrom(const Digitizer& other)
   mUseScaledDistortions = other.mUseScaledDistortions;
 }
 
+void Digitizer::setScaledSCDistortions(std::unique_ptr<SC> spaceCharge)
+{
+  mUseSCDistortions = true;
+  mSpaceChargeOwned = std::move(spaceCharge);
+  mSpaceCharge = mSpaceChargeOwned.get();
+  mSpaceCharge->initAfterReadingFromFile();
+  mSpaceCharge->printMetaData();
+  mSpaceChargeDer = nullptr;
+  mUseScaledDistortions = true;
+}
+
 void Digitizer::setLumiScaleFactor()
 {
   mLumiScaleFactor = (CorrMapParam::Instance().lumiInst - mSpaceCharge->getMeanLumi()) / mSpaceChargeDer->getMeanLumi();
