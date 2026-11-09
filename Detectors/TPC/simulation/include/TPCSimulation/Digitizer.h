@@ -143,6 +143,7 @@ class Digitizer
 
  private:
   DigitContainer mDigitContainer;      ///< Container for the Digits
+  std::vector<float> mSignalArray;     //!< Workspace for the shaped signal of one electron
   std::unique_ptr<SC> mSpaceCharge;    ///< Handler of full distortions (static + IR dependant)
   std::unique_ptr<SC> mSpaceChargeDer; ///< Handler of reference static distortions
   Sector mSector = -1;                 ///< ID of the currently processed sector
