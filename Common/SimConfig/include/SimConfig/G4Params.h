@@ -55,6 +55,7 @@ struct G4Params : public o2::conf::ConfigurableParamHelper<G4Params> {
   std::string configMacroFile = ""; // a user provided g4Config.in file (otherwise standard one fill be taken)
   std::string userPhysicsList = ""; // possibility to directly give physics list as string
   bool useG4HepEm = false;          // transport e-, e+ and gamma with G4HepEm (needs geant4_vmc built with G4HepEm)
+  float hepEmMscSafetyFactor = 0.6; // G4HepEm msc safety factor in the regions with SpecialUrbanMsc (EMCAL)
 
   EG4Nav navmode = EG4Nav::kTGeo; // geometry navigation mode (default TGeo)
 

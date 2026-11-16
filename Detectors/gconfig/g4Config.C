@@ -253,6 +253,10 @@ void Config()
       geant4->ProcessGeantMacro((configm + "/Detectors/gconfig/g4config_trd_pai.in").Data());
     }
   }
+  if (g4Params.useG4HepEm) {
+    // G4HepEm msc safety factor in the regions with SpecialUrbanMsc (EMCAL)
+    geant4->ProcessGeantCommand(("/mcRegions/setG4HepEmMscSafetyFactor " + std::to_string(g4Params.hepEmMscSafetyFactor)).c_str());
+  }
   if (!mtMode) {
     geant4->ProcessGeantCommand(kSkipUnknownParticles);
   }
