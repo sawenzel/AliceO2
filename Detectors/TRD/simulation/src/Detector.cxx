@@ -19,6 +19,7 @@
 
 #include "CommonUtils/ShmAllocator.h"
 #include "DetectorsBase/MaterialManager.h"
+#include "SimConfig/G4Params.h"
 #include "DetectorsBase/Stack.h"
 #include "FairVolume.h"
 #include "FairRootManager.h"
@@ -124,15 +125,16 @@ void Detector::InitializeParams()
   mMaxMCStepDef = TRDSimParams::Instance().maxMCStepSize;
 
   const auto& simParams = TRDSimParams::Instance();
-  if (simParams.ionisationModel == 1) {
+  const int ionisationModel = simParams.activeIonisationModel(o2::conf::G4Params::Instance().useG4HepEm);
+  if (ionisationModel == 1) {
     mIonisation = std::make_unique<IonisationModel>(simParams.gas);
     // the tables start at minBetaGamma; below it the energy deposit is used
     mIonMinBetaGamma = std::max<double>(simParams.ionisationMinBetaGamma, IonisationModel::minBetaGamma());
     mIonMinEkin = simParams.ionisationMinEkin;
     LOG(info) << "TRD: ionisation from collision tables, energy deposit below beta*gamma " << mIonMinBetaGamma
               << " or kinetic energy " << mIonMinEkin << " eV";
-  } else if (simParams.ionisationModel != 0) {
-    LOG(fatal) << "TRD: unknown ionisationModel " << simParams.ionisationModel;
+  } else if (ionisationModel != 0) {
+    LOG(fatal) << "TRD: unknown ionisationModel " << ionisationModel;
   }
 }
 
