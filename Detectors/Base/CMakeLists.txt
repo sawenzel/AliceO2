@@ -62,6 +62,10 @@ o2_add_library(DetectorsBase
 if(TGeo2VecGeom_FOUND)
   target_compile_definitions(${targetDetectorsBase} PRIVATE O2_WITH_VECGEOM)
   target_link_libraries(${targetDetectorsBase} PRIVATE TGeo2VecGeom::TGeo2VecGeom)
+  # CUDA's vector types must come before GPUCommonDefAPI.h, which then skips its own copies.
+  if(VecGeom_ENABLE_CUDA)
+    target_compile_options(${targetDetectorsBase} PRIVATE "SHELL:-include vector_types.h")
+  endif()
   # A CUDA-enabled VecGeom keeps its device link in vecgeom_final, which the final consumer must link.
   if(TARGET VecGeom::vecgeom_final)
     target_link_libraries(${targetDetectorsBase} PRIVATE VecGeom::vecgeom_final)

@@ -27,14 +27,6 @@
 #include <cstddef> // for NULL
 #include <numeric>
 
-#ifdef O2_WITH_VECGEOM
-// A CUDA-enabled VecGeom brings the CUDA vector types; they must precede GPUCommonDefAPI.h, which then skips its own.
-#include <VecGeom/base/Config.h>
-#ifdef VECGEOM_ENABLE_CUDA
-#include <vector_types.h>
-#endif
-#endif
-
 #include "DetectorsBase/GeometryManager.h"
 #include "DetectorsBase/GeometryManagerParam.h"
 #include "DetectorsCommonDataFormats/AlignParam.h"
