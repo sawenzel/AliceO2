@@ -62,6 +62,10 @@ o2_add_library(DetectorsBase
 if(TGeo2VecGeom_FOUND)
   target_compile_definitions(${targetDetectorsBase} PRIVATE O2_WITH_VECGEOM)
   target_link_libraries(${targetDetectorsBase} PRIVATE TGeo2VecGeom::TGeo2VecGeom)
+  # A CUDA-enabled VecGeom keeps its device link in vecgeom_final, which the final consumer must link.
+  if(TARGET VecGeom::vecgeom_final)
+    target_link_libraries(${targetDetectorsBase} PRIVATE VecGeom::vecgeom_final)
+  endif()
 else()
   message(STATUS "TGeo2VecGeom not found: DetectorsBase built without the optional VecGeom material-budget backend")
 endif()
